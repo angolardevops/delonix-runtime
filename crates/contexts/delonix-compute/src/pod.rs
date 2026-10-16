@@ -456,15 +456,16 @@ pub fn container_to_run_opts(
     detach: bool,
     notices: &mut Vec<Notice>,
 ) -> Result<RunOpts> {
-    // command (k8s) → entrypoint + leading args; args (k8s) → trailing args.
+    // `command` (k8s) IS the entrypoint override and `args` (k8s) ARE its
+    // arguments — the same split this engine's own two fields make, so each maps
+    // straight across. This used to peel `command[0]` off as the entrypoint and
+    // push the remainder in front of `args`, because the entrypoint could hold
+    // only one element; it composed to the same argv, but by reassembling what
+    // the manifest had already separated.
     let (entrypoint, command) = if c.command.is_empty() {
         (None, c.args)
     } else {
-        let mut it = c.command.into_iter();
-        let ep = it.next();
-        let mut cmd: Vec<String> = it.collect();
-        cmd.extend(c.args);
-        (ep, cmd)
+        (Some(c.command), c.args)
     };
 
     // ports: publish only those declaring a hostPort (a bare containerPort is

@@ -1331,11 +1331,27 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         .ok_or_else(|| Error::Invalid("container config: 'Image' is required".into()))?
         .to_string();
     let command: Vec<String> = json_str_array(&cfg["Cmd"]);
-    let entrypoint = cfg["Entrypoint"]
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+    // Docker's `Entrypoint` is a `StrSlice`: either an ARRAY, every element of
+    // which is one argv element, or a bare STRING meaning a one-element argv —
+    // its Go `UnmarshalJSON` appends the string whole, it does NOT split it on
+    // spaces, so neither do we. Absent/`null` is no override; an explicit `[]`
+    // clears the image's ENTRYPOINT.
+    //
+    // This kept `.first()` only until 2026-10-16, and the string form not at
+    // all. The routine `["/bin/sh","-c","exec sleep 300"]` therefore reached the
+    // engine as a bare `/bin/sh`, which ran `/bin/sh sleep 300` and exited 2 on
+    // `can't open 'sleep'` — behind a `201 Created` with an empty `Warnings[]`,
+    // since `unconsumed_config_warnings` counts the field as consumed. The argv now
+    // survives whole; see `RunOpts::entrypoint`.
+    let entrypoint = match &cfg["Entrypoint"] {
+        serde_json::Value::Array(a) => Some(
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect(),
+        ),
+        serde_json::Value::String(s) => Some(vec![s.clone()]),
+        _ => None,
+    };
     let env = json_str_array(&cfg["Env"]);
     let labels: Vec<String> = cfg["Labels"]
         .as_object()
@@ -2099,6 +2115,83 @@ mod images_create_tests {
         assert_eq!(parse_registry_auth("not-base64-at-all!!"), None);
         assert_eq!(parse_registry_auth(&encode("not json")), None);
         assert_eq!(parse_registry_auth(&encode("{}")), None);
+    }
+}
+
+#[cfg(test)]
+mod create_config_tests {
+    use super::{docker_config_to_run_opts, unconsumed_config_warnings};
+
+    fn opts_for(cfg: serde_json::Value) -> super::RunOpts {
+        docker_config_to_run_opts("c1".to_string(), &cfg).expect("a config with an Image is valid")
+    }
+
+    /// Docker's `Entrypoint` is an argv and every element of it must arrive.
+    /// Measured at `86d6a085`: this exact config produced the command
+    /// `/bin/sh sleep 300`, which exited 2 with `can't open 'sleep'` — behind a
+    /// `201 Created` and an empty `Warnings[]`, because only element 0 was read.
+    #[test]
+    fn a_multi_element_entrypoint_array_arrives_whole() {
+        let opts = opts_for(serde_json::json!({
+            "Image": "busybox",
+            "Entrypoint": ["/bin/sh", "-c", "exec sleep 300"],
+            "Cmd": ["sleep", "300"],
+        }));
+        assert_eq!(
+            opts.entrypoint.as_deref(),
+            Some(
+                [
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "exec sleep 300".to_string()
+                ]
+                .as_slice()
+            )
+        );
+        // `Cmd` stays the entrypoint's arguments, as Docker composes them.
+        assert_eq!(opts.command, ["sleep", "300"]);
+    }
+
+    /// Docker's field is a `StrSlice`: a bare string is a ONE-element argv, not a
+    /// shell line to split (its `UnmarshalJSON` appends the string whole). This
+    /// shape used to be dropped entirely — only `as_array` was tried.
+    #[test]
+    fn a_string_entrypoint_is_one_argv_element_not_a_split() {
+        let opts = opts_for(serde_json::json!({
+            "Image": "busybox",
+            "Entrypoint": "/usr/local/bin/my entrypoint",
+        }));
+        assert_eq!(
+            opts.entrypoint.as_deref(),
+            Some(["/usr/local/bin/my entrypoint".to_string()].as_slice())
+        );
+    }
+
+    /// The three states have to stay distinguishable: absent is no override,
+    /// while an explicit `[]` is "clear the image's ENTRYPOINT".
+    #[test]
+    fn an_absent_entrypoint_differs_from_an_empty_one() {
+        let absent = opts_for(serde_json::json!({ "Image": "busybox" }));
+        assert_eq!(absent.entrypoint, None);
+
+        let null = opts_for(serde_json::json!({ "Image": "busybox", "Entrypoint": null }));
+        assert_eq!(null.entrypoint, None);
+
+        let cleared = opts_for(serde_json::json!({ "Image": "busybox", "Entrypoint": [] }));
+        assert_eq!(cleared.entrypoint.as_deref(), Some([].as_slice()));
+    }
+
+    /// `Entrypoint` is on the "consumed" list that keeps `Warnings[]` honest, so
+    /// that claim must be true of the multi-element form too — a client gets
+    /// either the whole argv or a warning, never silence. Before the fix it got
+    /// silence.
+    #[test]
+    fn a_consumed_entrypoint_raises_no_warning() {
+        let cfg = serde_json::json!({
+            "Image": "busybox",
+            "Entrypoint": ["/bin/sh", "-c", "exec sleep 300"],
+        });
+        assert_eq!(unconsumed_config_warnings(&cfg), Vec::<String>::new());
     }
 }
 

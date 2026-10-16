@@ -1887,7 +1887,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 volumes,
                 ports: publish,
                 privileged,
-                entrypoint,
+                entrypoint: entrypoint_argv(entrypoint),
                 workdir,
                 rm,
                 restart,
@@ -2126,7 +2126,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 volumes: spec.volumes,
                 ports: spec.ports,
                 privileged: spec.privileged,
-                entrypoint: spec.entrypoint,
+                entrypoint: entrypoint_argv(spec.entrypoint),
                 rm: false,
                 restart: spec.restart.clone(),
                 devices: spec.devices,
@@ -2272,6 +2272,20 @@ pub(crate) fn compose_io_max(
         }
     }
     Ok((!parts.is_empty()).then(|| parts.join(" ")))
+}
+
+/// The argv a single-string entrypoint override denotes. `--entrypoint` takes
+/// ONE string, exactly as `docker run --entrypoint` does — neither splits it on
+/// spaces, so a program whose path contains a space still works and the extra
+/// argv elements are the COMMAND. That one string is therefore a one-element
+/// argv, and the empty string is the documented "clear the image's ENTRYPOINT",
+/// i.e. an argv of nothing.
+///
+/// Callers that genuinely have an argv (the Docker API's `Entrypoint` array,
+/// compose's `entrypoint:`) build `RunOpts.entrypoint` directly and must NOT
+/// come through here. PURE.
+fn entrypoint_argv(flag: Option<String>) -> Option<Vec<String>> {
+    flag.map(|e| if e.is_empty() { Vec::new() } else { vec![e] })
 }
 
 /// Reads `--env-file0` files (NUL-separated `KEY=VAL`, the `/proc/<pid>/environ`
@@ -8460,8 +8474,23 @@ restartPolicy: OnFailure
         let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
         let opts = super::pod_to_run_opts("web", None, pod).unwrap();
         assert_eq!(opts.image, "nginx:latest");
-        assert_eq!(opts.entrypoint.as_deref(), Some("/bin/sh"));
-        assert_eq!(opts.command, vec!["-c", "nginx -g 'daemon off;'"]);
+        // k8s `command:`/`args:` land as the entrypoint argv and its arguments,
+        // each side whole — the manifest's own split, no longer reassembled with
+        // `command[1..]` pushed in front of `args`.
+        assert_eq!(
+            opts.entrypoint.as_deref(),
+            Some(["/bin/sh".to_string(), "-c".to_string()].as_slice())
+        );
+        assert_eq!(opts.command, vec!["nginx -g 'daemon off;'"]);
+        // What actually gets exec'd is unchanged by that re-split.
+        assert_eq!(
+            delonix_compute::run::compose_command(
+                opts.entrypoint.as_deref().unwrap(),
+                &[],
+                &opts.command
+            ),
+            ["/bin/sh", "-c", "nginx -g 'daemon off;'"]
+        );
         assert_eq!(opts.workdir.as_deref(), Some("/srv/app"));
         assert_eq!(opts.ports, vec!["8080:80/tcp"]);
         assert_eq!(opts.env, vec!["FOO=bar"]);

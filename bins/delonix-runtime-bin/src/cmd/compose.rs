@@ -1416,6 +1416,17 @@ pub(crate) fn shlex_split(s: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// The argv a compose `command:`/`entrypoint:` denotes, in either of the two
+/// forms compose accepts: exec form is already an argv and is taken as is, shell
+/// form is one string and gets tokenized. Both keys mean the same thing by the
+/// same shapes, so both read them through here. PURE.
+fn compose_cmd_argv(shape: &ComposeCmdShape) -> Result<Vec<String>> {
+    match shape {
+        ComposeCmdShape::Shell(s) => shlex_split(s),
+        ComposeCmdShape::Exec(v) => Ok(v.clone()),
+    }
+}
+
 /// A Go-duration-shaped string (`30s`, `1m30s`, `500ms`, `1h`) — the syntax
 /// Compose Spec uses for `healthcheck.{interval,timeout,start_period}`.
 fn parse_go_duration(s: &str) -> Result<Duration> {
@@ -2515,20 +2526,17 @@ fn service_to_run_opts(
     labels.push(format!("{COMPOSE_PROJECT_LABEL}={project}"));
     labels.push(format!("{COMPOSE_SERVICE_LABEL}={service}"));
 
-    let command = match &svc.command {
-        Some(ComposeCmdShape::Shell(s)) => shlex_split(s)?,
-        Some(ComposeCmdShape::Exec(v)) => v.clone(),
-        None => Vec::new(),
-    };
-    // Only the first token of a shell-form `entrypoint:` is used — same
-    // documented simplification `dockerapi::docker_config_to_run_opts` already
-    // makes for Docker's own `Entrypoint` array (`RunOpts.entrypoint` is a
-    // single program name, not an argv vector).
-    let entrypoint = match &svc.entrypoint {
-        Some(ComposeCmdShape::Shell(s)) => shlex_split(s)?.into_iter().next(),
-        Some(ComposeCmdShape::Exec(v)) => v.first().cloned(),
-        None => None,
-    };
+    let command = svc
+        .command
+        .as_ref()
+        .map(compose_cmd_argv)
+        .transpose()?
+        .unwrap_or_default();
+    // `entrypoint:` is read in full, exactly like `command:` — both forms used to
+    // lose everything after the first token, because `RunOpts.entrypoint` could
+    // hold a program name and nothing else. An absent `entrypoint:` is no
+    // override; an explicit empty one clears the image's.
+    let entrypoint = svc.entrypoint.as_ref().map(compose_cmd_argv).transpose()?;
 
     let restart = svc.restart.clone().unwrap_or_else(|| "no".to_string());
     let (memory, cpus) = resolve_limits(svc, service)?;
@@ -4046,6 +4054,57 @@ services:
         // the first (and only) entry is the one they mean.
         let (opts, _) = &t.containers["web"][0];
         assert_eq!(opts.ip.as_deref(), Some("10.210.5.5"));
+    }
+
+    /// Both forms of `entrypoint:` keep every token. Until 2026-10-16 each kept
+    /// only the first, so `["/bin/sh","-c","<script>"]` came up as a bare
+    /// `/bin/sh` running the command as a filename. Asserted per form, because
+    /// the exec form (`.first()`) and the shell form (tokenize, take 1) truncated
+    /// through two different expressions.
+    #[test]
+    fn both_forms_of_entrypoint_keep_every_token() {
+        // Exec form: the list IS the argv.
+        let yaml = "services:\n  web:\n    image: x\n    entrypoint: ['/bin/sh', '-c', 'exec sleep 300']\n    command: ['sleep', '300']\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"][0];
+        assert_eq!(
+            opts.entrypoint.as_deref(),
+            Some(
+                [
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "exec sleep 300".to_string()
+                ]
+                .as_slice()
+            )
+        );
+        assert_eq!(opts.command, ["sleep", "300"]);
+
+        // Shell form: one string, tokenized — the quoted script stays ONE token.
+        let yaml =
+            "services:\n  web:\n    image: x\n    entrypoint: \"/bin/sh -c 'exec sleep 300'\"\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"][0];
+        assert_eq!(
+            opts.entrypoint.as_deref(),
+            Some(
+                [
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "exec sleep 300".to_string()
+                ]
+                .as_slice()
+            )
+        );
+
+        // No `entrypoint:` is no override — the image's own must still apply.
+        let yaml = "services:\n  web:\n    image: x\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"][0];
+        assert_eq!(opts.entrypoint, None);
     }
 
     /// A service with no `ipv4_address` at all keeps letting the engine pick

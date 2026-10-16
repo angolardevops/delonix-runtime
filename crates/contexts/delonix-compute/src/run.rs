@@ -322,13 +322,13 @@ pub fn kube_default_limits(
 /// The container record the specification describes. PURE.
 pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
     let cmd = match o.entrypoint.as_deref() {
-        // `--entrypoint ""` clears the image's ENTRYPOINT: the user's command runs as is.
-        Some("") => o.command.clone(),
-        Some(e) => {
-            let mut v = vec![e.to_string()];
-            v.extend(o.command.iter().cloned());
-            v
-        }
+        // An override replaces the image's ENTRYPOINT and keeps the command as its
+        // arguments — the same fold `compose_command` does for the image, with no
+        // image CMD to fall back on (an override's arguments are the user's or
+        // none). The cleared case needs no arm of its own: `--entrypoint ""` and
+        // an explicit `Entrypoint: []` both arrive as an empty argv, and
+        // prepending nothing to the command is precisely what clearing means.
+        Some(argv) => compose_command(argv, &[], &o.command),
         None => r.image_command,
     };
     if cmd.is_empty() {
@@ -557,18 +557,44 @@ mod tests {
     fn the_entrypoint_flag_composes_or_clears() {
         let mut o = opts();
         o.command = vec!["-c".into(), "true".into()];
-        o.entrypoint = Some("/bin/ash".into());
+        o.entrypoint = Some(vec!["/bin/ash".into()]);
         assert_eq!(
             build_record(&o, resolved()).unwrap().command,
             ["/bin/ash", "-c", "true"]
         );
-        o.entrypoint = Some(String::new());
+        // An empty argv is what `--entrypoint ""` and `Entrypoint: []` both mean:
+        // the image's ENTRYPOINT is gone and only the command runs.
+        o.entrypoint = Some(Vec::new());
         assert_eq!(
             build_record(&o, resolved()).unwrap().command,
             ["-c", "true"]
         );
         o.command.clear();
         assert!(build_record(&o, resolved()).is_err());
+    }
+
+    /// A MULTI-element entrypoint keeps every element, in order, ahead of the
+    /// command. The `["/bin/sh","-c","<script>"]` shape is the one that matters:
+    /// while the override could hold a single program name, this reached the
+    /// engine as a bare `/bin/sh` and the container died running the command as
+    /// if it were a file to open.
+    #[test]
+    fn a_multi_element_entrypoint_keeps_every_element() {
+        let mut o = opts();
+        o.entrypoint = Some(vec!["/bin/sh".into(), "-c".into(), "exec sleep 300".into()]);
+        o.command = vec!["sleep".into(), "300".into()];
+        assert_eq!(
+            build_record(&o, resolved()).unwrap().command,
+            ["/bin/sh", "-c", "exec sleep 300", "sleep", "300"]
+        );
+
+        // With no command, the entrypoint alone is the argv — and the image's CMD
+        // does NOT come back as its arguments, because the override replaced it.
+        o.command.clear();
+        assert_eq!(
+            build_record(&o, resolved()).unwrap().command,
+            ["/bin/sh", "-c", "exec sleep 300"]
+        );
     }
 
     #[test]
