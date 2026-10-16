@@ -6195,7 +6195,28 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
                     m.target, m.target
                 )));
             }
-            runtime::mount_live(&c, &m)?;
+            // The guard above only knows the mounts this engine RECORDED. The
+            // ones `setup_rootfs` makes itself — a privileged container's
+            // `/sys` and the `cgroup2` under it — are not in that list, so a
+            // `--volume-add /sys/fs/bpf:/sys/fs/bpf` reaches `mount_live` with
+            // the engine's own bpffs already at the target. It says which of
+            // the two happened; nothing is recorded when nothing was stacked,
+            // or the matching `--volume-rm` would detach the ENGINE's mount
+            // and leave the container without a path it never asked to lose.
+            if runtime::mount_live(&c, &m)? == runtime::LiveMount::AlreadyPresent {
+                println!(
+                    "{}: {} is already mounted at {} by the engine — nothing to stack{}",
+                    c.name,
+                    m.source,
+                    m.target,
+                    if m.readonly || m.propagation.is_some() {
+                        " (the requested flags were applied to it)"
+                    } else {
+                        ""
+                    }
+                );
+                continue;
+            }
             let mm = m.clone();
             c = store.update(&c.id, |cur| {
                 cur.mounts.push(mm.clone());
