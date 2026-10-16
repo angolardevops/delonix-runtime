@@ -874,7 +874,7 @@ fn mount_run_secrets(
             .target
             .clone()
             .unwrap_or_else(|| format!("/run/secrets/{}", m.id));
-        if let Err(e) = runtime::mount_live(
+        match runtime::mount_live(
             container,
             &delonix_compute::Mount {
                 source: src.to_string_lossy().into_owned(),
@@ -884,12 +884,22 @@ fn mount_run_secrets(
                 optional: false,
             },
         ) {
-            for t in &mounted {
-                let _ = runtime::unmount_live(container, t);
+            // Only a mount that was actually STACKED goes on the teardown
+            // list — `unmount_run_mounts` detaches whatever is on it, and a
+            // target that already carried this exact object was left alone.
+            // A secret's target (`/run/secrets/<id>`) is not a path the engine
+            // mounts, so this arm is not expected to fire; it is handled
+            // because the alternative is a silent unmount of someone else's
+            // mount if it ever does.
+            Ok(runtime::LiveMount::Attached) => mounted.push(target),
+            Ok(runtime::LiveMount::AlreadyPresent) => {}
+            Err(e) => {
+                for t in &mounted {
+                    let _ = runtime::unmount_live(container, t);
+                }
+                return Err(e.into());
             }
-            return Err(e.into());
         }
-        mounted.push(target);
     }
     Ok(mounted)
 }
@@ -925,7 +935,7 @@ fn mount_run_caches(container: &Container, run_step: &RunStep) -> Result<Vec<Str
             }
             return Err(e.into());
         }
-        if let Err(e) = runtime::mount_live(
+        match runtime::mount_live(
             container,
             &delonix_compute::Mount {
                 source: dir.to_string_lossy().into_owned(),
@@ -935,12 +945,20 @@ fn mount_run_caches(container: &Container, run_step: &RunStep) -> Result<Vec<Str
                 optional: false,
             },
         ) {
-            for t in &mounted {
-                let _ = runtime::unmount_live(container, t);
+            // Same teardown rule as `mount_run_secrets`. A cache mount's
+            // `target` comes from the Dockerfile, so unlike a secret's it CAN
+            // name a path the engine mounts — and its source is always
+            // `cache_mount_dir`, never the same object as such a target, so in
+            // practice it stacks and is torn down normally.
+            Ok(runtime::LiveMount::Attached) => mounted.push(m.target.clone()),
+            Ok(runtime::LiveMount::AlreadyPresent) => {}
+            Err(e) => {
+                for t in &mounted {
+                    let _ = runtime::unmount_live(container, t);
+                }
+                return Err(e.into());
             }
-            return Err(e.into());
         }
-        mounted.push(m.target.clone());
     }
     Ok(mounted)
 }

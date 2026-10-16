@@ -3769,6 +3769,30 @@ else
   skip "$BPFFS_PROP" "este host não tem bpffs montado em /sys/fs/bpf"
 fi
 
+# --- the same invariant for the HOT-PLUG path -----------------------------
+# The check above orders `setup_rootfs`; this one covers `mount_live`, which
+# reaches the same mount point on a container that is ALREADY running. The
+# only collision guard on that path compares against the mounts the engine
+# RECORDED, and a privileged container's `/sys` (plus the `cgroup2` under it)
+# is not among them — so `--volume-add /sys/fs/bpf:/sys/fs/bpf` used to stack a
+# second mount on the bpffs the engine had already delivered, rebuilding the
+# exact condition the Cilium agent refuses to start on, after start-up.
+# Measured before the fix: 2 entries at the point; after: 1.
+HOTPLUG_ONE="hot-plug: --volume-add onto the engine's own /sys/fs/bpf stays ONE mount"
+if awk '$5=="/sys/fs/bpf"' /proc/self/mountinfo | grep -q .; then
+  _hp="dlx-e2e-hotplug-$$"
+  "$BIN" container run -d --privileged --name "$_hp" "$IMG" sleep 60 >/dev/null 2>&1
+  "$BIN" container update "$_hp" --volume-add /sys/fs/bpf:/sys/fs/bpf >/dev/null 2>&1
+  # Counted here, not in the container, for the reason the block above gives.
+  _hpn=$("$BIN" container exec "$_hp" cat /proc/self/mountinfo 2>/dev/null |
+    awk '$5=="/sys/fs/bpf"{n++} END{print n+0}')
+  "$BIN" container rm -f "$_hp" >/dev/null 2>&1 || true
+  check "$HOTPLUG_ONE" ok bash -c \
+    '[ "$1" = 1 ] || { printf "mountinfo listed %s mounts at /sys/fs/bpf\n" "$1"; exit 1; }' _ "$_hpn"
+else
+  skip "$HOTPLUG_ONE" "this host has no bpffs mounted at /sys/fs/bpf"
+fi
+
 # --- a state root written by the previous release opens unchanged ----------
 # Plan 65 F0.6. DELONIX_UPGRADE_FROM names a directory with the PUBLISHED
 # binaries of the previous release (checked against SHA256SUMS and the

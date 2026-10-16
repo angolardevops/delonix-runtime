@@ -1488,6 +1488,61 @@ fn target_under_sys(target: &str) -> bool {
         && matches!(parts.next(), Some(std::path::Component::Normal(n)) if n == "sys")
 }
 
+// WHY THERE IS NO `target_under_proc`, measured rather than assumed.
+//
+// `/proc` has the same shape as `/sys` — `setup_rootfs` injects the caller's
+// volumes and only then mounts `/proc`, as a fresh `procfs` or (under
+// `--host-pid`) a RECURSIVE bind of `/.delonix_old/proc` — and it produces both
+// of the same symptoms. Measured on this host, which mounts `/proc/fs/nfsd`
+// and `/proc/sys/fs/binfmt_misc`:
+//
+//     # run --privileged --host-pid -v /proc/fs/nfsd:/proc/fs/nfsd
+//     4938 4937 / /proc/fs/nfsd nfsd rw   <- the caller's bind, buried
+//     4939 4937 / /proc         proc rw   <- the engine's, on top of it
+//     4942 4939 / /proc/fs/nfsd nfsd rw   <- the copy the rbind carried
+//
+// Two entries at one point, the `/sys` defect exactly. And a target the host
+// does NOT mount is simply lost: `-v /tmp/x:/proc/x` leaves one buried entry
+// and the container cannot read the volume at all — with OR without
+// `--host-pid`, since a fresh `procfs` covers it just the same.
+//
+// Deferring these the way `bind_sys_mounts` defers `/sys` was NOT done, for a
+// reason that only showed up when measured: `mask_proc_paths` runs right after
+// the `/proc` mount and binds `/dev/null` over `/proc/kcore` and
+// `/proc/sysrq-trigger`, and `apply_sysctls`/`mask_proc_paths` bind over
+// `/proc/sys`. A caller mount deferred past those lands ON TOP of the mask. It
+// is the current burying that ENFORCES it:
+//
+//     # run -v /proc/kcore:/proc/kcore   (non-privileged)
+//     kcore dev=7 ino=5 character special file      <- /dev/null, masked
+//
+// Defer that mount and the same command yields `ino=4026532028`, the host's
+// real kernel-memory image, in an unprivileged container. So the mechanical
+// reuse of the `/sys` fix here would trade a shadowed volume for a sandbox
+// escape, and a correct version has to decide precedence per masked path
+// rather than just "the caller last".
+//
+// Weighed against that: no workload is known to want a mount AT a `/proc`
+// subpath. The ones that read the host's `/proc` (node-exporter, cAdvisor,
+// Cilium) mount it at `/host/proc`, an ordinary target nothing of the
+// engine's touches. So the cost of leaving it is a `-v` that is silently
+// ignored in a shape nobody asks for, and the cost of the quick fix is a
+// measured privilege boundary. It stays shadowed, and stays NAMED — see the
+// `warn_mount` call in `setup_rootfs`, which is how the user now finds out
+// instead of guessing.
+
+/// Does this mount target land under the `/proc` the engine mounts later, so a
+/// bind placed before `pivot_root` ends up underneath it?
+///
+/// The `/proc` counterpart of [`target_under_sys`], and the same lexical test —
+/// but used only to WARN, never to reorder. The long note above says why, and
+/// what it would take to do more.
+fn target_under_proc(target: &str) -> bool {
+    let mut parts = std::path::Path::new(target).components();
+    matches!(parts.next(), Some(std::path::Component::RootDir))
+        && matches!(parts.next(), Some(std::path::Component::Normal(n)) if n == "proc")
+}
+
 /// How many mounts `mountinfo` lists at EXACTLY `path`.
 ///
 /// Split from the mounting so the rule the fix rests on — one mount point, one
@@ -1515,6 +1570,27 @@ fn mount_entries_at_path(path: &str) -> usize {
     }
 }
 
+/// [`mount_entries_at`] against the mount table of the namespace `pid` lives
+/// in, with `path` as a path INSIDE that namespace's root.
+///
+/// Read from the host, which is the only place it can be read from for a
+/// RUNNING container: a process that enters the container's mnt ns without
+/// also entering its pid ns cannot resolve `/proc/self` there — the container's
+/// procfs only lists its own pid namespace, so the obvious
+/// [`mount_entries_at_path`] silently returns 0 (measured: the first version of
+/// the [`mount_live`] check never fired because of exactly this).
+///
+/// `/proc/<pid>/mountinfo` does not have that problem and renders each mount
+/// point relative to `pid`'s own root, so the paths are the container's:
+/// reading the probe container's gave `/`, `/sys/fs/cgroup` and `/sys/fs/bpf`,
+/// not the host paths its overlay lives at.
+fn mount_entries_at_pid(pid: i32, path: &str) -> usize {
+    match std::fs::read_to_string(format!("/proc/{pid}/mountinfo")) {
+        Ok(text) => mount_entries_at(&text, path),
+        Err(_) => 0,
+    }
+}
+
 /// Are `a` and `b` the very same directory (same device AND same inode)?
 ///
 /// Used to tell "the caller asked for a mount the engine's `/sys` already
@@ -1528,6 +1604,19 @@ fn same_mount_object(a: &str, b: &str) -> bool {
         (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
         _ => false,
     }
+}
+
+/// [`same_mount_object`] when the two paths cannot be stat'd by the same
+/// process: `path` here, against a `(dev, ino)` taken elsewhere.
+///
+/// That is the hot-plug case ([`mount_live`]): the source only exists in the
+/// HOST's mount namespace and the target only in the CONTAINER's, so one side
+/// is measured before the `setns` and carried in. `dev`+`ino` are properties of
+/// the inode and its superblock, not of the namespace that is looking, so the
+/// comparison holds across the two.
+fn same_object_as(path: &str, id: (u64, u64)) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).is_ok_and(|m| (m.dev(), m.ino()) == id)
 }
 
 /// Applies a mount's `readonly` and `propagation` to a mount that is ALREADY at
@@ -2079,6 +2168,20 @@ fn setup_rootfs(
     let (sys_mounts, early_mounts): (Vec<&Mount>, Vec<&Mount>) =
         mounts.iter().partition(|m| target_under_sys(&m.target));
     for m in early_mounts {
+        // A target under `/proc` is mounted here and then COVERED by the
+        // `/proc` the engine mounts further down — measured, and deliberately
+        // not reordered: see the note above `mount_entries_at` for why
+        // deferring it the way `/sys` is deferred would defeat
+        // `mask_proc_paths`. Saying so is the whole remedy that is available
+        // cheaply, and it goes through the same one sentence every other
+        // did-not-land mount uses, so no new print site appears.
+        if target_under_proc(&m.target) {
+            warn_mount(
+                m,
+                "shadowed by the engine's own /proc and not visible in the container \
+                 (mount it at a path outside /proc, e.g. /host/proc/...)",
+            );
+        }
         match bind_volume(rootfs, m) {
             Ok(()) => {}
             // An engine-injected mount that does not fit this image degrades
@@ -8744,9 +8847,62 @@ fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
     Ok(Some(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
+/// What [`mount_live`] actually did — which decides whether there is anything
+/// for [`unmount_live`] to undo.
+///
+/// Without this distinction a caller records a volume it never stacked, and the
+/// matching hot-UNPLUG then detaches the mount the ENGINE put there: a
+/// `--volume-add /sys/fs/bpf:/sys/fs/bpf` followed by `--volume-rm` would leave
+/// a privileged container with no `/sys/fs/bpf` at all, destroying something
+/// the caller never added. So the outcome is returned rather than swallowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveMount {
+    /// A new mount was attached at the target. `unmount_live` undoes exactly it.
+    Attached,
+    /// The target ALREADY carried this exact object, so nothing was stacked —
+    /// only the caller's `readonly`/`propagation` were applied. There is
+    /// nothing for `unmount_live` to undo, and the caller must not record it.
+    AlreadyPresent,
+}
+
+/// The child's `_exit` code for [`LiveMount::AlreadyPresent`]. Outside the
+/// band the failure codes use (120–125), so a new failure cannot collide with
+/// it by accident.
+const MOUNT_LIVE_ALREADY_PRESENT: i32 = 10;
+
 /// Mounts a bind-volume in a RUNNING container, without stopping it (hot-plug). See the
 /// module comment for the setns/unshare/open_tree/move_mount sequence.
-pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
+///
+/// Like [`bind_sys_mounts`] on the start-up path, this REFUSES to stack a
+/// second mount on a point that already carries the very same object — and for
+/// the same measured reason. `setup_rootfs` hands a privileged container its
+/// `/sys` (a recursive bind of the host's, when the user ns does not own the
+/// netns) and its own `cgroup2`, and neither is in `container.mounts`; the only
+/// collision check on the way here is `container update`'s, which compares
+/// against that RECORDED list and so never sees them. Measured on this host,
+/// hot-plugging onto what the engine itself delivered:
+///
+/// ```text
+/// $ delonix container update <c> --volume-add /sys/fs/bpf:/sys/fs/bpf
+/// 4944 4939 / /sys/fs/bpf bpf rw,mode=700     <- the engine's, via /sys
+/// 4960 4944 / /sys/fs/bpf bpf                 <- the hot-plug, stacked on it
+/// => 2 entries at /sys/fs/bpf
+/// ```
+///
+/// Two entries at one point: exactly the condition the Cilium agent refuses to
+/// start on (`multiple mount points detected at /sys/fs/bpf`) and exactly what
+/// the `/sys` fix exists to prevent — reachable again through a shipped CLI
+/// surface, because that fix only ordered the START-UP path. `/sys/fs/cgroup`
+/// measured the same way, and there the stacked mount also arrives WITHOUT the
+/// `nsdelegate` the engine set, so the delegation a privileged container's
+/// systemd depends on ends up shadowed by a plainer mount.
+///
+/// A caller asking for a DIFFERENT source at such a path still gets their mount
+/// stacked on top — authoritative for every lookup, which is what they asked
+/// for, and the documented limit `bind_sys_mounts` already carries: `umount2`
+/// of a mount inherited from another namespace is `EINVAL` (measured), so there
+/// is no detach-then-bind available for the inherited ones.
+pub fn mount_live(container: &Container, m: &Mount) -> Result<LiveMount> {
     if !mount_target_safe(&m.target) {
         return Err(Error::UnsafeMountPath(format!(
             "unsafe mount target: {}",
@@ -8758,11 +8914,22 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     require_mounted(container)?;
-    let src_is_dir = std::fs::metadata(&m.source)
-        .map_err(|_| {
-            Error::MountSourceMissing(format!("mount source does not exist: {}", m.source))
-        })?
-        .is_dir();
+    let src_meta = std::fs::metadata(&m.source).map_err(|_| {
+        Error::MountSourceMissing(format!("mount source does not exist: {}", m.source))
+    })?;
+    let src_is_dir = src_meta.is_dir();
+    // Taken HERE, in the host context, to be compared against the target as
+    // the CONTAINER sees it (by the child, once it is in the container's mnt
+    // ns). `dev`+`ino` identify an inode across mount namespaces, so the two
+    // stats are comparable even though no single process sees both paths.
+    let src_id = {
+        use std::os::unix::fs::MetadataExt;
+        (src_meta.dev(), src_meta.ino())
+    };
+    // Whether anything is mounted at the target ALREADY, in the container's own
+    // mount table — read here, in the parent, because the child cannot (see
+    // `mount_entries_at_pid`). Inherited by the fork.
+    let target_is_mounted = mount_entries_at_pid(pid, &m.target) > 0;
 
     // namespace fds (opened in the PARENT, in the host context; inherited by the fork).
     //
@@ -8787,6 +8954,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     }
     let source = m.source.clone();
     let target = m.target.clone();
+    // The child applies the caller's flags itself in the already-mounted case,
+    // and `reflag_existing_mount` works off the whole `Mount`.
+    let m_for_child = m.clone();
 
     // fork: the child stays single-threaded (requirement of setns(user)).
     // SAFETY: the child only does simple syscalls and `_exit`, without running destructors.
@@ -8828,7 +8998,30 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
             if setns(mnt_fd, CloneFlags::CLONE_NEWNS).is_err() {
                 fail(121, "setns(mnt)");
             }
-            // 5) create the mount point (resolves against the root = container root).
+            // 5) Is the engine's own mount already AT this point, delivering
+            // this very object? Both conditions are required: a mount must
+            // actually be at the point (established in the parent, inherited
+            // here) so an ordinary bind onto an empty directory is never
+            // mistaken for one, AND the target must be the same inode as the
+            // source — which can only be stat'd here, now that this process is
+            // in the container's mnt ns. `bind_sys_mounts` decides the
+            // identical case the identical way at start-up.
+            if target_is_mounted && same_object_as(&target, src_id) {
+                // Nothing to stack, but the caller's `readonly`/`propagation`
+                // must still take effect — a dropped `readonly` would be a
+                // silent loss and a dropped `rshared` is what made the mount
+                // measured in `bind_sys_mounts` useless.
+                if reflag_existing_mount(&m_for_child).is_err() {
+                    fail(
+                        119,
+                        "already mounted there, but its flags could not be applied",
+                    );
+                }
+                // SAFETY: `_exit` in the forked child: it must not run the parent's
+                // destructors or atexit handlers, and it never returns.
+                unsafe { libc::_exit(MOUNT_LIVE_ALREADY_PRESENT) }
+            }
+            // 6) create the mount point (resolves against the root = container root).
             if src_is_dir {
                 let _ = std::fs::create_dir_all(&target);
             } else {
@@ -8837,7 +9030,7 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
                 }
                 let _ = std::fs::File::create(&target);
             }
-            // 6) attach the detached mount at the target.
+            // 7) attach the detached mount at the target.
             if move_mount_to(dfd.as_raw_fd(), &target).is_err() {
                 fail(120, "move_mount");
             }
@@ -8848,7 +9041,8 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         ForkResult::Parent { child } => {
             let status = waitpid(child, None).map_err(syserr("waitpid"))?;
             match status {
-                WaitStatus::Exited(_, 0) => Ok(()),
+                WaitStatus::Exited(_, 0) => Ok(LiveMount::Attached),
+                WaitStatus::Exited(_, MOUNT_LIVE_ALREADY_PRESENT) => Ok(LiveMount::AlreadyPresent),
                 WaitStatus::Exited(_, code) => Err(Error::LiveMountFailed(format!(
                     "failed to mount {} → {} in the live container (code {code})",
                     m.source, m.target
@@ -12185,6 +12379,19 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         assert!(!target_under_sys("/"));
         assert!(!target_under_sys(""));
 
+        // The `/proc` sibling answers the same shape of question — it only
+        // drives a warning, never a reordering (see the note in the source).
+        assert!(target_under_proc("/proc"));
+        assert!(target_under_proc("/proc/fs/nfsd"));
+        assert!(target_under_proc("/proc//sys/fs/binfmt_misc"));
+        assert!(!target_under_proc("/process"));
+        assert!(!target_under_proc("/"));
+        assert!(!target_under_proc(""));
+        // The target every real workload actually uses for the host's `/proc`
+        // (node-exporter, cAdvisor, Cilium) is NOT under it, which is why
+        // leaving the shadowing in place costs nothing measured.
+        assert!(!target_under_proc("/host/proc"));
+
         // The split `setup_rootfs` makes, over the Cilium agent's own mount
         // list: only the two `/sys` host paths move to the late pass; the
         // kernel modules, the xtables lock and the CNI directories keep going
@@ -12224,6 +12431,84 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
                 "/host/etc/cni/net.d"
             ]
         );
+    }
+
+    /// The real `mountinfo` measured inside the probe container AFTER
+    /// `container update --volume-add /sys/fs/bpf:/sys/fs/bpf` and
+    /// `--volume-add /sys/fs/cgroup:/sys/fs/cgroup`, before `mount_live`
+    /// learned to check: `5052`/`5036` are the engine's own (children of the
+    /// `/sys` mount `5033`), `5068`/`5070` the hot-plugs stacked on top of
+    /// them. Note that `5070` arrives WITHOUT the `nsdelegate` the engine set.
+    const MI_HOTPLUG_STACKED: &str = "\
+5031 4885 0:93 / / rw,relatime - overlay none rw,lowerdir=/l,upperdir=/u,workdir=/w
+5033 5031 0:25 / /sys rw,nosuid,nodev,noexec,relatime master:7 - sysfs sysfs rw
+5036 5033 0:31 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw,nsdelegate,memory_recursiveprot
+5052 5033 0:34 / /sys/fs/bpf rw,nosuid,nodev,noexec,relatime master:12 - bpf bpf rw,mode=700
+5068 5052 0:34 / /sys/fs/bpf rw,nosuid,nodev,relatime - bpf bpf rw,mode=700
+5070 5036 0:31 / /sys/fs/cgroup rw,nosuid,nodev,relatime - cgroup2 cgroup2 rw";
+
+    #[test]
+    fn a_hot_plug_onto_an_engine_mount_is_the_same_duplication() {
+        // The defect, in the shape `container update --volume-add` produced it:
+        // the count Cilium refuses to start on, built AFTER the container was
+        // already running — which is why ordering `setup_rootfs` alone did not
+        // close it.
+        assert_eq!(mount_entries_at(MI_HOTPLUG_STACKED, "/sys/fs/bpf"), 2);
+        assert_eq!(mount_entries_at(MI_HOTPLUG_STACKED, "/sys/fs/cgroup"), 2);
+        // `/sys` itself was never the point the caller named, and stays single.
+        assert_eq!(mount_entries_at(MI_HOTPLUG_STACKED, "/sys"), 1);
+        // Fixed shape: nothing is stacked, so each point keeps the ENGINE's
+        // mount — the one that still carries `nsdelegate`.
+        let fixed: String = MI_HOTPLUG_STACKED
+            .lines()
+            .filter(|l| !l.starts_with("5068 ") && !l.starts_with("5070 "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(mount_entries_at(&fixed, "/sys/fs/bpf"), 1);
+        assert_eq!(mount_entries_at(&fixed, "/sys/fs/cgroup"), 1);
+        assert!(
+            fixed
+                .lines()
+                .any(|l| l.starts_with("5036 ") && l.contains("nsdelegate")),
+            "the surviving cgroup2 must be the engine's, with its delegation"
+        );
+    }
+
+    #[test]
+    fn a_containers_mount_table_is_readable_by_pid() {
+        // `mount_live` rests on this: the container's mount table has to be
+        // read from the HOST, by pid, because a process that enters the
+        // container's mnt ns without its pid ns cannot resolve `/proc/self`
+        // there. Measured against this very process, which always has exactly
+        // one mount at `/`.
+        let me = std::process::id() as i32;
+        assert_eq!(mount_entries_at_pid(me, "/"), 1);
+        // A path nothing can be mounted at, and a pid that cannot exist: both
+        // answer 0 rather than panicking, which is what makes the check in
+        // `mount_live` safe to run before the fork.
+        assert_eq!(mount_entries_at_pid(me, "/nonexistent-delonix-probe"), 0);
+        assert_eq!(mount_entries_at_pid(-1, "/"), 0);
+    }
+
+    #[test]
+    fn same_object_identifies_one_inode_across_namespaces() {
+        use std::os::unix::fs::MetadataExt;
+        // The identity test `mount_live` uses, where the two stats are taken by
+        // different processes in different mount namespaces.
+        let dir = std::env::temp_dir();
+        let md = std::fs::metadata(&dir).expect("temp dir");
+        let id = (md.dev(), md.ino());
+        assert!(same_object_as(dir.to_str().unwrap(), id));
+        // A different inode on the same device is NOT the same object — this is
+        // the case that must keep stacking (a caller's own source at a path the
+        // engine mounts), so a false positive here would silently drop it.
+        let other = std::fs::metadata("/").expect("root");
+        assert!(!same_object_as(
+            dir.to_str().unwrap(),
+            (other.dev(), other.ino())
+        ));
+        // A path that does not resolve is never "the same object".
+        assert!(!same_object_as("/nonexistent-delonix-probe", id));
     }
 
     #[test]
