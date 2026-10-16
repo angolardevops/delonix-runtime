@@ -911,10 +911,10 @@ fn cmd_network_status(name: Option<String>) -> Result<()> {
             println!("  pod CIDR    {}", r.pod_subnet);
             println!("  artefact    sha256:{}", r.artefact_sha256);
             if r.multus {
-                println!("  {:<12}{}", "multus", "installed");
+                println!("  {:<12}installed", "multus");
             }
             if r.hubble {
-                println!("  {:<12}{}", "hubble", "installed");
+                println!("  {:<12}installed", "hubble");
             }
         }
         None => println!(
