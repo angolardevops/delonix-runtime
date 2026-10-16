@@ -1,10 +1,10 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: 2026-10-11, kaeso-sys-01, isolated root OUT=/tmp/dlxn30c, scripts/e2e.sh (f9110526) on the main tip b5e153b3 release build with the five binaries side by side, DELONIX_UPGRADE_FROM=v5.0.2: PASS=1345 FAIL=0 SKIP=13 XFAIL=0 XPASS=0; the 13 SKIP are host properties (no OPNsense/Proxmox credentials, rootless without NFS, virt-customize and wg present so their failure paths are not reachable, no VM images in the isolated store, boot units outside the root, CRI root/CNI path)
-# commit: f9110526
-# executed: 258
-# leaves: 270
+# recorded: 2026-10-16, this host, isolated root DELONIX_ROOT=/tmp/e2e-868b/root DELONIX_NET_RUNTIME_DIR=/tmp/e2e-868b/run, scripts/e2e.sh invoked with target/release/delonix so the five binaries are side by side: PASS=1324 FAIL=0 SKIP=18; the 18 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg absent, no VM images in the isolated store, boot units outside the root, CRI root/CNI path)
+# commit: e5be0903
+# executed: 254
+# leaves: 273
 api-resources
 apply
 backup create
@@ -24,6 +24,9 @@ cluster kube generate
 cluster kubeconfig
 cluster load
 cluster ls
+cluster network fetch
+cluster network profiles
+cluster network status
 cluster prune
 cluster restore
 cluster start
@@ -125,14 +128,9 @@ net ingress rm
 net ingress unpublish
 net l4guard status
 net netns attach
-net netns detach
 net netns down
-net netns exec
-net netns firewall
 net netns gc
-net netns publish
 net netns status
-net netns unpublish
 net netns up
 net tunnel apply
 net tunnel expose
@@ -231,7 +229,6 @@ vm init
 vm ls
 vm migrate
 vm move
-vm pause
 vm prune
 vm reach
 vm resize
@@ -244,7 +241,6 @@ vm ssh
 vm start
 vm stop
 vm unbridge
-vm unpause
 vm update
 vm vnc
 volume apply

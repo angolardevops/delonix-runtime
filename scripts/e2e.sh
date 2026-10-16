@@ -6719,6 +6719,34 @@ check "cluster kube generate: a kind: Pod with the container's image and command
   grep -q 'sleep' <<<\"\$out\" || { echo 'the command is missing'; exit 1; }"
 check "cluster kube generate: a name that is neither container nor pod is 4" 4 "$BIN" cluster kube generate "nao-existe-$PFX"
 
+# --- `cluster network`: the three leaves the profile work added --------------
+# Chosen so the battery EXERCISES them without a cluster and without reaching
+# the network: `profiles` is pure, and the other two are asserted on their
+# refusal paths. The alternative — a real two-node bootstrap — is the live-lab
+# procedure in docs/network-compatibility.md, not something a battery run on an
+# isolated root can do.
+#
+# `profiles` prints what THIS binary would install, so the assertions are
+# against the table in `cmd::net_profiles`, not against a web page: every
+# profile name the CLI accepts has a row, and an experimental one carries the
+# reason it is experimental.
+check "cluster network profiles: a row per profile the CLI accepts" ok bash -c "
+  out=\$('$BIN' cluster network profiles 2>&1) || exit 1
+  for p in cilium calico flannel; do
+    grep -qw \"\$p\" <<<\"\$out\" || { echo \"profile \$p is missing from the table\"; exit 1; }
+  done
+  grep -qiE 'experimental' <<<\"\$out\" || { echo 'no support level is reported'; exit 1; }"
+# The divergence contract: a status over a cluster that does not exist cannot
+# report 0. `status` returning success with nothing to look at is exactly the
+# dishonest reporting its own --help promises not to do.
+check "cluster network status: a cluster that does not exist refuses" fail \
+  "$BIN" cluster network status "nao-existe-$PFX"
+# `fetch` verifies every artefact against the digest this release pins. An
+# unknown profile has no pin, so it is refused BEFORE anything is downloaded —
+# which is what makes this check cheap and offline.
+check "cluster network fetch: an unknown profile refuses before downloading" fail \
+  "$BIN" cluster network fetch --cni "nao-existe-$PFX"
+
 # --- image: export, sbom, scan --sbom, remove ---------------------------------
 check "image export: an OCI runtime bundle — config.json with the process, and the rootfs" ok bash -c "
   d='$L3/bundle'; rm -rf \"\$d\"
