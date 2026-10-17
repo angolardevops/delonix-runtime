@@ -3971,6 +3971,15 @@ fn run_node_preflight(
 /// A full semver is passed through untouched: an operator who pinned a patch
 /// meant it, and `valid_version` already restricts the alphabet to digits and
 /// dots so nothing here can reach a shell as anything else.
+///
+/// **Why the RAW spec field and not the resolved one.** The apt repo needs a
+/// concrete version, so it goes through `resolve_k8s_version` — that is #848's
+/// point and it stays. kubeadm is different: it must be pinned only when the
+/// OPERATOR pinned it. Feeding it the engine's default would mean "the caller
+/// did not choose" silently becomes "the engine chose for kubeadm", and the day
+/// `DEFAULT_K8S_VERSION` carries a patch, that is a node asking for images it
+/// does not have. So the two consumers deliberately read different things: the
+/// repo path the resolved version, this one `spec.k8sVersion` as written.
 pub(crate) fn kubeadm_version_arg(spec_version: Option<&str>) -> Option<String> {
     let v = spec_version?;
     // Three dot-separated numeric components = a full semver kubeadm accepts.
@@ -6344,6 +6353,33 @@ workers:
             Some("v1.34.12".into())
         );
         assert_eq!(kubeadm_version_arg(None), None);
+    }
+
+    /// One resolver, two consumers, opposite shapes — the invariant #848 left
+    /// implicit. The apt repo path only exists at minor level, so it truncates;
+    /// kubeadm demands a full semver, so it keeps one; and when the operator
+    /// pinned nothing, kubeadm is told nothing rather than handed the engine's
+    /// default. Asserting the two directions together is what keeps a future
+    /// change from "fixing" one of them back into the other's bug.
+    #[test]
+    fn the_resolver_still_owns_the_repo_path_while_kubeadm_opts_out() {
+        use super::super::k8s_recipes::{k8s_repo_version, resolve_k8s_version};
+        // No version asked: the repo gets the engine's default, concrete.
+        let resolved = resolve_k8s_version(None);
+        assert_eq!(
+            k8s_repo_version(&resolved),
+            format!("stable:/v{}", super::super::vmimage::DEFAULT_K8S_VERSION)
+        );
+        // …and kubeadm gets nothing, so it uses the version the golden
+        // installed instead of a number the engine invented for it.
+        assert_eq!(kubeadm_version_arg(None), None);
+        // A patch version: the repo truncates (it only exists at minor level),
+        // kubeadm keeps it whole. Same input, opposite shapes, one resolver.
+        assert_eq!(k8s_repo_version("1.34.12"), "stable:/v1.34");
+        assert_eq!(
+            kubeadm_version_arg(Some("1.34.12")),
+            Some("v1.34.12".into())
+        );
     }
 
     /// The generated `--config` carried the identical bug, because it took the
