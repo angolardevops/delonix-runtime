@@ -136,7 +136,7 @@ fn spawn_run_via_reexec(opts: &RunOpts) -> Result<()> {
         // would turn every engine failure into an opaque exit code.
         Ok(o) => Err(child_error(
             o.status.code(),
-            &String::from_utf8_lossy(&o.stderr),
+            &o.stderr,
             format!(
                 "container start failed (exit {})",
                 o.status.code().unwrap_or(-1)
@@ -166,7 +166,7 @@ fn cli_verb_via_reexec(args: &[&str]) -> Result<()> {
     }
     Err(child_error(
         out.status.code(),
-        &String::from_utf8_lossy(&out.stderr),
+        &out.stderr,
         format!("`container {}` failed", args.join(" ")),
     ))
 }
@@ -339,23 +339,125 @@ fn claimed_pid(pid: i32) -> bool {
         .unwrap_or(false)
 }
 
+/// What a claimed child reported: its exit status and its stderr text.
+///
+/// Deliberately not a `std::process::Output`: `run_claimed` sends stdout to
+/// `/dev/null`, so an `Output` here would carry a permanently empty `stdout`
+/// field for some future caller to read and believe.
+struct ClaimedOutput {
+    status: std::process::ExitStatus,
+    stderr: String,
+}
+
+/// How much of a child's stderr is read back. `last_error_line` wants only the
+/// LAST line, so this bounds the read without bounding what the child may say:
+/// a child — or a descendant that inherited the capture — writing without end
+/// cannot make this allocate without end.
+const STDERR_TAIL_CAP: u64 = 64 * 1024;
+
 /// Runs a child to completion with its exit status and stderr intact, claiming
 /// it against the reaper for the duration.
-fn run_claimed(mut cmd: std::process::Command) -> Result<std::process::Output> {
-    let child = cmd
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+///
+/// **The child's stdio is never a pipe, and that is the whole point.** This
+/// used to spawn with `Stdio::piped()` and call `wait_with_output()`, which
+/// does not return when the child exits — it returns when BOTH pipes reach
+/// EOF, and EOF only arrives once every process holding a write end has closed
+/// it. Any descendant that inherits the child's stdout or stderr and outlives
+/// it therefore held the HTTP answer to `POST /containers/create` and `POST
+/// /containers/{id}/start` for its entire life. That stayed latent only
+/// because the engine redirects a container's stdio away from the inherited
+/// descriptors, and because the detached supervisor `dup2`s `/dev/null` over
+/// fds 0-2 after its handshake (`supervise.rs:178-186`) — a property every
+/// future start path would have to remember. This codebase has already paid
+/// for the same class of bug once, in the handshake pipe that had to become
+/// `pipe2(O_CLOEXEC)` because the container's command and its `slirp4netns`
+/// inherited a plain `pipe()` and the parent's read waited on an EOF only they
+/// could give.
+///
+/// With `/dev/null` on stdout and an anonymous file on stderr there is no EOF
+/// left to wait for: `wait()` returns when the direct child exits, whatever its
+/// descendants still hold open. Who waits on the child is unchanged — the claim
+/// against `spawn_zombie_reaper` is taken before the wait and dropped after it,
+/// exactly as before, so the `ECHILD` race that `WNOWAIT` fixed stays fixed.
+fn run_claimed(mut cmd: std::process::Command) -> Result<ClaimedOutput> {
+    let mut capture = stderr_capture()?;
+    let mut child = cmd
+        // Not pipes: nothing a descendant inherits can delay the `wait` below.
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(
+            capture.try_clone().map_err(Error::Io)?,
+        ))
         .spawn()
         .map_err(Error::Io)?;
     let pid = child.id() as i32;
     if let Ok(mut v) = CLAIMED_PIDS.lock() {
         v.push(pid);
     }
-    let out = child.wait_with_output().map_err(Error::Io);
+    let status = child.wait().map_err(Error::Io);
     if let Ok(mut v) = CLAIMED_PIDS.lock() {
         v.retain(|p| *p != pid);
     }
-    out
+    Ok(ClaimedOutput {
+        status: status?,
+        stderr: read_tail(&mut capture),
+    })
+}
+
+/// An anonymous in-memory file to hold one child's stderr.
+///
+/// A `memfd` rather than a path under the state root: there is no name for
+/// anything else to open, nothing to unlink on any error path, and nothing
+/// written to a disk this host keeps near full. `MFD_CLOEXEC` keeps it out of
+/// every OTHER child this server spawns; the explicit `stderr` redirection
+/// still reaches this one, because that is a `dup2` onto fd 2 and `dup2`
+/// clears the flag on the new descriptor.
+///
+/// A descendant that inherits this and outlives the child keeps it alive, and
+/// what it writes after `read_tail` is charged to memory with nobody left to
+/// read it — bounded by that descendant's own lifetime, not by us. That is a
+/// deliberate trade for the retention this replaces: the pipe it used to be
+/// bounded the same writer by BLOCKING it once 64 KiB went unread, wedging the
+/// container while the HTTP answer waited on the same EOF. No live start path
+/// inherits either one — the detached supervisor `dup2`s `/dev/null` over fds
+/// 0-2 (`supervise.rs:178-186`) — but only one of the two failure modes keeps
+/// a `POST /containers/create` hanging when some future path forgets.
+fn stderr_capture() -> Result<std::fs::File> {
+    use std::os::fd::FromRawFd;
+    // SAFETY: a NUL-terminated name (the kernel only uses it for
+    // `/proc/self/fd` display) and a known flag; returns a fresh fd or -1.
+    let fd = unsafe { libc::memfd_create(c"delonix-child-stderr".as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err(Error::Io(std::io::Error::last_os_error()));
+    }
+    // SAFETY: `fd` is a fresh, owned descriptor that nothing else holds, so
+    // handing ownership to `File` is sound.
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+/// The last `STDERR_TAIL_CAP` bytes of `f`, lossily decoded.
+///
+/// The tail and not the head: `last_error_line` wants the final line, and the
+/// lines before it are the child's own tracing, which can be long. A cut can
+/// land mid-character or mid-line, but only the FIRST line of the result can be
+/// damaged by it — never the one `last_error_line` returns.
+fn read_tail(f: &mut std::fs::File) -> String {
+    use std::io::{Read, Seek};
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    if f.seek(std::io::SeekFrom::Start(
+        len.saturating_sub(STDERR_TAIL_CAP),
+    ))
+    .is_err()
+    {
+        return String::new();
+    }
+    let mut buf = Vec::new();
+    if Read::take(f, STDERR_TAIL_CAP)
+        .read_to_end(&mut buf)
+        .is_err()
+    {
+        return String::new();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 pub fn run(addr: Option<String>) -> Result<()> {
@@ -2287,6 +2389,114 @@ mod last_error_line_tests {
         assert_eq!(
             last_error_line("delonix: conflict: x").as_deref(),
             Some("conflict: x")
+        );
+    }
+}
+
+#[cfg(test)]
+mod run_claimed_tests {
+    use super::{child_error, last_error_line, run_claimed};
+
+    /// Is `pid` still in the process table and not yet reaped?
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 performs the permission and existence checks and
+        // delivers nothing.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    /// `run_claimed` must return when the DIRECT child exits, not when the last
+    /// descendant holding its stdio lets go.
+    ///
+    /// The shell below backgrounds a `sleep` that inherits both of the child's
+    /// standard descriptors and then exits immediately. Verified against the
+    /// old `Stdio::piped()` + `wait_with_output()`: it blocked for the sleep's
+    /// full duration, because EOF on the pipes needed the grandchild to close
+    /// its write ends too — which is how a `POST /containers/create` came to be
+    /// held for the lifetime of the container it had just started.
+    ///
+    /// The grandchild is asserted to be STILL RUNNING at the moment of return:
+    /// that is the property itself, where a bare stopwatch would only be
+    /// evidence for it.
+    ///
+    /// `GRANDCHILD_SECS` is kept finite, and well above `MUST_RETURN_WITHIN`,
+    /// so a regression fails this assertion in bounded time instead of hanging
+    /// the whole test binary until CI's own timeout kills it.
+    #[test]
+    fn a_long_lived_grandchild_does_not_delay_the_return() {
+        const GRANDCHILD_SECS: u64 = 30;
+        const MUST_RETURN_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg("-c").arg(format!(
+            "sleep {GRANDCHILD_SECS} & echo grandchild=$! >&2; \
+             echo 'delonix: invalid argument: s1 is already running' >&2; exit 1"
+        ));
+
+        let began = std::time::Instant::now();
+        let out = run_claimed(cmd).expect("the child was spawned and waited on");
+        let elapsed = began.elapsed();
+
+        let grandchild: i32 = out
+            .stderr
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("grandchild="))
+            .expect("the child reported the pid it backgrounded")
+            .parse()
+            .expect("a pid");
+        // Read liveness BEFORE any assertion can unwind, then clean up, so a
+        // failing run never leaves the sleep behind.
+        let held_on = alive(grandchild);
+        // SAFETY: killing a pid this test created and has not reaped.
+        unsafe { libc::kill(grandchild, libc::SIGKILL) };
+
+        // The property first, so a regression reports the thing that broke.
+        assert!(
+            elapsed < MUST_RETURN_WITHIN,
+            "returned only after {elapsed:?} — it waited on the grandchild's stdio"
+        );
+        // Then the guard against a vacuous pass: if the sleep had already died,
+        // a fast return would prove nothing about who is being waited on.
+        assert!(
+            held_on,
+            "the grandchild was gone by the time this returned, so the test \
+             never exercised a descendant outliving its parent"
+        );
+        // The stderr text still arrives — and still rebuilds into the error
+        // `handle_start` keys its idempotent 304 off, which is the thing a
+        // capture that dropped or truncated stderr would silently break.
+        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(
+            last_error_line(&out.stderr).as_deref(),
+            Some("invalid argument: s1 is already running")
+        );
+        let rebuilt = child_error(out.status.code(), &out.stderr, "fallback".into());
+        assert!(
+            rebuilt.to_string().contains("already running"),
+            "handle_start would answer 500 instead of 304 for: {rebuilt}"
+        );
+    }
+
+    /// Only the tail is read back, and the error line survives the cut.
+    #[test]
+    fn a_child_that_floods_stderr_still_yields_its_last_line() {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg("-c").arg(concat!(
+            // Comfortably past STDERR_TAIL_CAP: 4000 lines of ~40 bytes.
+            "i=0; while [ $i -lt 4000 ]; do ",
+            "echo 'tracing: some noisy progress line here' >&2; i=$((i+1)); done; ",
+            "echo 'error no such container: zz' >&2; exit 4"
+        ));
+
+        let out = run_claimed(cmd).expect("the child was spawned and waited on");
+
+        assert!(
+            out.stderr.len() as u64 <= super::STDERR_TAIL_CAP,
+            "read back {} bytes, more than the cap",
+            out.stderr.len()
+        );
+        assert_eq!(
+            last_error_line(&out.stderr).as_deref(),
+            Some("no such container: zz")
         );
     }
 }
