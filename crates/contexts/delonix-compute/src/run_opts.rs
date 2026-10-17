@@ -39,7 +39,25 @@ pub struct RunOpts {
     pub volumes: Vec<String>,
     pub ports: Vec<String>,
     pub privileged: bool,
-    pub entrypoint: Option<String>,
+    /// Override for the image's ENTRYPOINT, as a full argv — the same shape the
+    /// image config itself uses. Three distinct states, and the difference
+    /// between the last two is the whole reason this is an `Option<Vec<_>>` and
+    /// not a `Vec<_>`:
+    ///
+    /// - `None` — no override; the image's own ENTRYPOINT applies.
+    /// - `Some([])` — override to NOTHING, i.e. clear the image's ENTRYPOINT so
+    ///   only the command runs. This is `--entrypoint ""`.
+    /// - `Some(argv)` — run `argv`, with the command as its arguments.
+    ///
+    /// It was an `Option<String>` until 2026-10-16, which could carry only a
+    /// program name. Every producer handed an argv had to throw the rest away:
+    /// the Docker API's `Entrypoint` array kept element 0 and compose's
+    /// `entrypoint:` kept token 0, so the overwhelmingly common
+    /// `["/bin/sh","-c","<script>"]` reached the engine as a bare `/bin/sh` and
+    /// the container died on a command nobody wrote. The CLI's `--entrypoint`
+    /// is still ONE string (Docker's flag is too) — it just arrives here as a
+    /// one-element argv rather than defining the type.
+    pub entrypoint: Option<Vec<String>>,
     /// Working directory the process starts in. `None` = the image's own
     /// configured workdir, or `/`.
     #[serde(default)]
