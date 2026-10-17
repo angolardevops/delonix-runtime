@@ -142,8 +142,9 @@ pub(crate) const FEATURES: &[Feature] = &[
         name: "Docker Engine API",
         level: Level::Experimental,
         evidence: "`serve docker-api --matrix` publishes served/refused/missing with the \
-                   version; of the 21 routes real tooling calls, 8 are refused — including \
-                   the pull",
+                   version; of the 21 routes real tooling calls, 7 are refused — the pull \
+                   is served since M02, and `create` answers with the id while the \
+                   container runs (measured 2026-10-16: 0.055-0.494 s for a `sleep 300`)",
     },
     Feature {
         name: "Proxmox VM backend",
