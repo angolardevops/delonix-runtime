@@ -1432,28 +1432,26 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         .as_str()
         .ok_or_else(|| Error::Invalid("container config: 'Image' is required".into()))?
         .to_string();
-    let command: Vec<String> = json_str_array(&cfg["Cmd"]);
-    // Docker's `Entrypoint` is a `StrSlice`: either an ARRAY, every element of
-    // which is one argv element, or a bare STRING meaning a one-element argv —
-    // its Go `UnmarshalJSON` appends the string whole, it does NOT split it on
-    // spaces, so neither do we. Absent/`null` is no override; an explicit `[]`
-    // clears the image's ENTRYPOINT.
+    // `Cmd` and `Entrypoint` are both `StrSlice` — see `json_str_slice` for the
+    // two shapes and why a bare string is never split.
     //
-    // This kept `.first()` only until 2026-10-16, and the string form not at
-    // all. The routine `["/bin/sh","-c","exec sleep 300"]` therefore reached the
-    // engine as a bare `/bin/sh`, which ran `/bin/sh sleep 300` and exited 2 on
-    // `can't open 'sleep'` — behind a `201 Created` with an empty `Warnings[]`,
-    // since `unconsumed_config_warnings` counts the field as consumed. The argv now
-    // survives whole; see `RunOpts::entrypoint`.
-    let entrypoint = match &cfg["Entrypoint"] {
-        serde_json::Value::Array(a) => Some(
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect(),
-        ),
-        serde_json::Value::String(s) => Some(vec![s.clone()]),
-        _ => None,
-    };
+    // `Cmd` read only the array form until 2026-10-16, so the legal body
+    // `{"Image":"busybox","Cmd":"sleep 300"}` arrived as NO command at all: the
+    // container ran the image's CMD instead, or failed for want of one. Behind a
+    // `201 Created` with an empty `Warnings[]`, since `unconsumed_config_warnings`
+    // counts `Cmd` as consumed — the client had no way to know.
+    //
+    // An absent `Cmd` is the empty vec, which is what the consumer side already
+    // means by «no override, use the image's». `Entrypoint` keeps the `Option`,
+    // because there an explicit `[]` must stay distinguishable from absent: it
+    // CLEARS the image's ENTRYPOINT.
+    let command: Vec<String> = json_str_slice(&cfg["Cmd"]).unwrap_or_default();
+    // `Entrypoint` kept `.first()` until that same day, and the string form not
+    // at all. The routine `["/bin/sh","-c","exec sleep 300"]` therefore reached
+    // the engine as a bare `/bin/sh`, which ran `/bin/sh sleep 300` and exited 2
+    // on `can't open 'sleep'`, equally silently. The argv now survives whole;
+    // see `RunOpts::entrypoint`.
+    let entrypoint = json_str_slice(&cfg["Entrypoint"]);
     let env = json_str_array(&cfg["Env"]);
     let labels: Vec<String> = cfg["Labels"]
         .as_object()
@@ -1518,8 +1516,12 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         .filter(|n| *n > 0)
         .map(|n| format!("{:.3}", n as f64 / 1_000_000_000.0));
     let privileged = host["Privileged"].as_bool().unwrap_or(false);
-    let cap_add = json_str_array(&host["CapAdd"]);
-    let cap_drop = json_str_array(&host["CapDrop"]);
+    // `CapAdd`/`CapDrop` are the `HostConfig`'s only two `StrSlice` fields, so
+    // they take both shapes as well. A dropped `CapDrop: "NET_RAW"` is the
+    // dangerous direction of this bug: the client asked for a capability to be
+    // taken away and the container kept it, with nothing in `Warnings[]`.
+    let cap_add = json_str_slice(&host["CapAdd"]).unwrap_or_default();
+    let cap_drop = json_str_slice(&host["CapDrop"]).unwrap_or_default();
     // Cinco mapeamentos de uma linha cada, sobre campos que o `RunOpts` já tinha.
     // O `User` é o mais caro dos cinco em silêncio: um `docker create -u 1000`
     // subia o container como ROOT da imagem, e num servidor cujo público declarado
@@ -1700,6 +1702,13 @@ fn unconsumed_config_warnings(cfg: &serde_json::Value) -> Vec<String> {
     out
 }
 
+/// For a field whose Go type is a plain `[]string`, which accepts the ARRAY
+/// shape and nothing else. The fields this translator reads that are really
+/// `[]string` are `Config.Env`, `HostConfig.Binds` and `HostConfig.ExtraHosts`.
+///
+/// A field declared `strslice.StrSlice` takes a second shape and needs
+/// `json_str_slice` instead — reaching for this one there is exactly how `Cmd`
+/// came to drop its string form.
 fn json_str_array(v: &serde_json::Value) -> Vec<String> {
     v.as_array()
         .map(|a| {
@@ -1708,6 +1717,39 @@ fn json_str_array(v: &serde_json::Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// For a field whose Go type is `strslice.StrSlice`, which accepts TWO JSON
+/// shapes and a client may send either:
+///
+/// - an ARRAY, every element of which is one element of the result;
+/// - a bare STRING, which is a ONE-element result. Go's `UnmarshalJSON` tries
+///   `[]string` first and, failing that, appends the string WHOLE. It does not
+///   split on whitespace, so neither does this — `"sleep 300"` is one element,
+///   not two.
+///
+/// `None` is absent or `null`, which is what lets a caller distinguish «not
+/// set» from an explicit `[]`; `Entrypoint` needs that distinction, the rest
+/// flatten it with `unwrap_or_default`.
+///
+/// At the API version this engine advertises (`API_VERSION`, Docker's `v24.0.0`
+/// era) the `StrSlice` fields are `Config.Cmd`, `Config.Entrypoint`,
+/// `Config.Shell`, `HostConfig.CapAdd` and `HostConfig.CapDrop`. Four of the
+/// five are mapped here; `Shell` is not mapped at all and so already reaches the
+/// client through `unconsumed_config_warnings`, which is the honest answer until
+/// it has a meaning. The other four were on the consumed lists while silently
+/// dropping this shape, which is the failure mode to watch: a field is only
+/// «consumed» if BOTH its shapes arrive.
+fn json_str_slice(v: &serde_json::Value) -> Option<Vec<String>> {
+    match v {
+        serde_json::Value::Array(a) => Some(
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect(),
+        ),
+        serde_json::Value::String(s) => Some(vec![s.clone()]),
+        _ => None,
+    }
 }
 
 /// Docker's `HostConfig.PortBindings` is a map keyed `"<containerPort>/<proto>"`
@@ -2294,6 +2336,81 @@ mod create_config_tests {
             "Entrypoint": ["/bin/sh", "-c", "exec sleep 300"],
         });
         assert_eq!(unconsumed_config_warnings(&cfg), Vec::<String>::new());
+    }
+
+    /// `Cmd` is a `StrSlice` exactly like `Entrypoint`, so the string form is a
+    /// legal create body — and it read only the array form until 2026-10-16,
+    /// which made this config a container with NO command: it ran the image's
+    /// CMD instead, or failed for want of one. One element, because Go appends
+    /// the string whole; splitting it would give `["sleep", "300"]` and be a
+    /// different bug.
+    #[test]
+    fn a_string_cmd_is_one_argv_element_not_a_split() {
+        let opts = opts_for(serde_json::json!({
+            "Image": "busybox",
+            "Cmd": "sleep 300",
+        }));
+        assert_eq!(opts.command, ["sleep 300"]);
+    }
+
+    /// The array form is the common one and must not regress while the string
+    /// form is being added. An absent `Cmd` stays empty — «use the image's».
+    #[test]
+    fn an_array_cmd_arrives_whole_and_an_absent_one_is_empty() {
+        let opts = opts_for(serde_json::json!({
+            "Image": "busybox",
+            "Cmd": ["sh", "-c", "echo hi"],
+        }));
+        assert_eq!(opts.command, ["sh", "-c", "echo hi"]);
+
+        let absent = opts_for(serde_json::json!({ "Image": "busybox" }));
+        assert_eq!(absent.command, Vec::<String>::new());
+    }
+
+    /// `HostConfig.CapAdd`/`CapDrop` are the `HostConfig`'s two `StrSlice`
+    /// fields, dropped in the same way by the same helper. `CapDrop` is the
+    /// direction that matters: the client asked for a capability to be taken
+    /// away, and silently kept it.
+    #[test]
+    fn a_string_capability_arrives_on_both_lists() {
+        let opts = opts_for(serde_json::json!({
+            "Image": "busybox",
+            "HostConfig": { "CapAdd": "NET_ADMIN", "CapDrop": "NET_RAW" },
+        }));
+        assert_eq!(opts.cap_add, ["NET_ADMIN"]);
+        assert_eq!(opts.cap_drop, ["NET_RAW"]);
+
+        let arrays = opts_for(serde_json::json!({
+            "Image": "busybox",
+            "HostConfig": { "CapAdd": ["NET_ADMIN", "SYS_TIME"], "CapDrop": ["NET_RAW"] },
+        }));
+        assert_eq!(arrays.cap_add, ["NET_ADMIN", "SYS_TIME"]);
+        assert_eq!(arrays.cap_drop, ["NET_RAW"]);
+    }
+
+    /// A field is only «consumed» if BOTH its shapes arrive. All four mapped
+    /// `StrSlice` fields are on the consumed lists, so this body must produce an
+    /// empty `Warnings[]` AND a fully populated `RunOpts` — before the fix it
+    /// produced the empty `Warnings[]` with three of the four fields thrown away,
+    /// which is the silence this guards.
+    #[test]
+    fn the_string_shape_is_consumed_not_just_unwarned() {
+        let cfg = serde_json::json!({
+            "Image": "busybox",
+            "Cmd": "sleep 300",
+            "Entrypoint": "/bin/sh",
+            "HostConfig": { "CapAdd": "NET_ADMIN", "CapDrop": "NET_RAW" },
+        });
+        assert_eq!(unconsumed_config_warnings(&cfg), Vec::<String>::new());
+
+        let opts = opts_for(cfg);
+        assert_eq!(opts.command, ["sleep 300"]);
+        assert_eq!(
+            opts.entrypoint.as_deref(),
+            Some(["/bin/sh".to_string()].as_slice())
+        );
+        assert_eq!(opts.cap_add, ["NET_ADMIN"]);
+        assert_eq!(opts.cap_drop, ["NET_RAW"]);
     }
 }
 
