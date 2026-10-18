@@ -30,20 +30,42 @@
 
 ## Contagens — superfície × classe
 
+<!-- folhas:counts:begin — verificado contra docs/testing/folhas.tsv pelo scripts/folhas_gate.py -->
+
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| CLI | **273** | 254 | 7 | 0 | 0 | 12 | `cli-tree.sh --leaves` (gate `rc=0`) |
-| Node API (gRPC) | **59** | 0 | 0 | 30 | 29 | 0 | `proto/delonix/node/v1/*.proto` |
-| Node API (REST) | **57** | 15 | 0 | 13 | 29 | 0 | `google.api.http` → 57 rotas geradas |
-| Mgmt API | **40** | 1 | 7 | 25 | 7 | 0 | `delonix-mgmt/src/lib.rs:router` |
-| MCP | **15** | 0 | 5 | 10 | 0 | 0 | `#[tool(` em `delonix-mcp/src/lib.rs` |
-| CRI | **34** | 22 | 5 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` |
-| Kinds (kind × verbo) | **125** | ver §6 | ver §6 | — | 4 | — | `kinds.rs` `FACTS` — 25 kinds × 5 verbos |
-| Providers (ops) | **~430** | ~196 | ~200 | ~34 | 0 | ~0 | ports + clientes dos 9 crates |
+| cli | **273** | 254 | 9 | 0 | 0 | 10 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
+| mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
+| mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
+| cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
+| kinds | **125** | 38 | 48 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 25 kinds × 5 verbos |
+| **total** | **538** | **332** | **71** | **57** | **60** | **18** | — |
 
-> As colunas do Node API somam mais que 59 porque gRPC e REST contam como folhas
-> separadas (regra do âmbito). As 29 `D` são as **mesmas** RPCs nas duas
-> codificações.
+<!-- folhas:counts:end -->
+
+> **Estes números são os do `folhas.tsv`, e o `scripts/folhas_gate.py` chumba se
+> esta tabela deixar de lhes bater.** Escreveram-se à mão uma vez e divergiram
+> à primeira revisão — a CLI dizia 7 `B` e 12 `E` onde a medição diz 9 e 10 —,
+> que é precisamente o defeito de uma linha cujo estado vive em dois ficheiros
+> sem ninguém a comparar.
+
+Três notas de denominador, porque a contagem acima é a do **gate** e há leituras
+legítimas diferentes:
+
+- **Node API: 59 RPCs, não 116.** O âmbito conta gRPC e REST como folhas
+  separadas, e por essa regra seriam 59 + 57 mapeadas. O gate conta a **RPC**,
+  uma vez, porque é essa a unidade que o `proto` define e a que o
+  `contract_gate.py` já guarda. A lacuna da codificação gRPC não desaparece por
+  isso — está registada como trabalho **E1** no `plano-folhas.md`, e vale 57
+  folhas.
+- **Mgmt API: 32 caminhos, 40 operações.** O `.route()` dá o caminho; alguns
+  carregam mais que um método (`/v1/volumes` serve `GET` e `POST`). 40 é a
+  contagem por operação, e é a que o ADR-0042 e o `55_API_UNICA.md` publicam.
+- **Providers ficam fora do gate.** ~430 operações nos nove crates, das quais
+  ~196 com prova live. O denominador deles é um schema HTTP publicado ou um
+  `virsh help` de versão nomeada, e já tem instrumento próprio (ADR-0049); um
+  segundo extractor pior produziria um segundo número discordante. Ver §7.
 
 ---
 

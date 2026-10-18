@@ -95,6 +95,7 @@ MGMT_SRC = REPO / "crates" / "interfaces" / "delonix-mgmt" / "src" / "lib.rs"
 MCP_SRC = REPO / "crates" / "interfaces" / "delonix-mcp" / "src" / "lib.rs"
 CRI_PROTO = REPO / "crates" / "interfaces" / "delonix-cri" / "proto" / "api.proto"
 KINDS_SRC = REPO / "crates" / "contexts" / "delonix-stack" / "src" / "kinds.rs"
+INVENTORY = REPO / "docs" / "testing" / "folhas-inventario.md"
 
 CLASSES = ("A", "B", "C", "D", "E")
 
@@ -200,6 +201,47 @@ SURFACES: dict[str, callable] = {
 }
 
 
+def inventory_counts() -> dict[str, dict[str, int]]:
+    """The counts table published in `docs/testing/folhas-inventario.md`.
+
+    Exists because that table was written by hand once and had drifted by the
+    first revision: it claimed the CLI had 7 class `B` and 12 class `E` where
+    the measurement says 9 and 10. A surface's state living in two files with
+    nothing comparing them is the defect this repository keeps paying for — the
+    published CRI number disagreeing with the one that has raw logs (G-025) is
+    the same shape.
+
+    Returns `{surface: {"A": n, ..., "leaves": n}}` for the rows between the
+    `folhas:counts` markers. A missing marker pair is itself a failure: the
+    check cannot silently cover nothing.
+    """
+    text = _read(INVENTORY)
+    try:
+        block = text.split("<!-- folhas:counts:begin", 1)[1].split("<!-- folhas:counts:end", 1)[0]
+    except IndexError:
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for line in block.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 7:
+            continue
+        surface = cells[0].strip("*` ")
+        if surface not in SURFACES:
+            continue
+        nums = []
+        for c in cells[1:7]:
+            digits = re.sub(r"[^0-9]", "", c)
+            if not digits:
+                break
+            nums.append(int(digits))
+        if len(nums) != 6:
+            continue
+        out[surface] = dict(zip(("leaves", "A", "B", "C", "D", "E"), nums))
+    return out
+
+
 def read_table() -> tuple[dict[tuple[str, str], tuple[str, str]], list[str]]:
     """`(surface, leaf) -> (class, evidence)`, plus the malformed lines."""
     rows: dict[tuple[str, str], tuple[str, str]] = {}
@@ -251,11 +293,13 @@ def evaluate() -> tuple[dict[str, dict], list[str]]:
             )
 
         proved = 0
+        by_class = dict.fromkeys(CLASSES, 0)
         for leaf in leaves:
             got = rows.get((surface, leaf))
             if got is None:
                 continue  # already reported above
             cls, evidence = got
+            by_class[cls] += 1
 
             # The CLI's class A is not a claim in the table: it is derived from
             # the committed trace, so the table cannot promote a leaf by itself.
@@ -282,6 +326,36 @@ def evaluate() -> tuple[dict[str, dict], list[str]]:
                 proved += 1
 
         per_surface[surface] = {"proved": proved, "leaves": len(leaves)}
+        per_surface[surface].update(by_class)
+
+    # The published counts table has to agree with what was just measured.
+    published = inventory_counts()
+    if not published:
+        failures.append(
+            "docs/testing/folhas-inventario.md has no folhas:counts block — the "
+            "published table cannot be checked against docs/testing/folhas.tsv"
+        )
+    else:
+        for surface in SURFACES:
+            said = published.get(surface)
+            if said is None:
+                failures.append(
+                    f"{surface}: absent from the counts table in "
+                    f"docs/testing/folhas-inventario.md"
+                )
+                continue
+            measured = per_surface[surface]
+            if said["leaves"] != measured["leaves"]:
+                failures.append(
+                    f"{surface}: the inventario table says {said['leaves']} leaves, "
+                    f"folhas.tsv has {measured['leaves']}"
+                )
+            for cls in CLASSES:
+                if said[cls] != measured[cls]:
+                    failures.append(
+                        f"{surface}: the inventario table says {said[cls]} of class "
+                        f"{cls}, folhas.tsv has {measured[cls]}"
+                    )
 
     return per_surface, failures
 

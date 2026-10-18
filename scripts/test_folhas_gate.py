@@ -37,6 +37,7 @@ def load(root: Path):
     mod.BASELINE = root / "folhas_baseline.json"
     mod.CLI_BASELINE = root / "cli_baseline.tsv"
     mod.CLI_TRACE = root / "cli_exec_trace.tsv"
+    mod.INVENTORY = root / "folhas-inventario.md"
 
     # Only two surfaces in the fixture: enough to prove every rule, and a
     # fixture that mirrored all six would be a second copy of the real tree.
@@ -47,10 +48,23 @@ def load(root: Path):
     return mod
 
 
-def write(root: Path, *, table: str, trace: str = "container run\n", baseline=None):
+# The counts the GOOD table below measures: cli 2 leaves (1 A, 1 E), mcp 2 (1 B, 1 C).
+INVENTORY_OK = """\
+<!-- folhas:counts:begin -->
+| superficie | folhas | A | B | C | D | E | fonte |
+|---|---|---|---|---|---|---|---|
+| cli | **2** | 1 | 0 | 0 | 0 | 1 | x |
+| mcp | **2** | 0 | 1 | 1 | 0 | 0 | x |
+<!-- folhas:counts:end -->
+"""
+
+
+def write(root: Path, *, table: str, trace: str = "container run\n", baseline=None,
+          inventory: str = INVENTORY_OK):
     (root / "cli_baseline.tsv").write_text("=\tcontainer run\n~\tvm pause\n", encoding="utf-8")
     (root / "cli_exec_trace.tsv").write_text("# provenance\n" + trace, encoding="utf-8")
     (root / "folhas.tsv").write_text(table, encoding="utf-8")
+    (root / "folhas-inventario.md").write_text(inventory, encoding="utf-8")
     if baseline is not None:
         (root / "folhas_baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
 
@@ -66,20 +80,64 @@ BASE_OK = {"surfaces": {"cli": {"proved": 1, "leaves": 2}, "mcp": {"proved": 0, 
 
 
 class FolhasGate(unittest.TestCase):
-    def check(self, *, table, trace="container run\n", baseline=BASE_OK):
+    def check(self, *, table, trace="container run\n", baseline=BASE_OK,
+              inventory=INVENTORY_OK):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            write(root, table=table, trace=trace, baseline=baseline)
+            write(root, table=table, trace=trace, baseline=baseline, inventory=inventory)
             mod = load(root)
             per_surface, failures = mod.evaluate()
             return per_surface, failures
+
+    def test_the_published_counts_must_match_the_measured_table(self):
+        """The defect this check exists for, reproduced.
+
+        The inventario said the CLI had 7 class B and 12 class E where
+        folhas.tsv measured 9 and 10. Nothing compared them, so both shipped.
+        """
+        drifted = INVENTORY_OK.replace(
+            "| cli | **2** | 1 | 0 | 0 | 0 | 1 | x |",
+            "| cli | **2** | 1 | 1 | 0 | 0 | 0 | x |",
+        )
+        _, failures = self.check(table=GOOD, inventory=drifted)
+        self.assertTrue(
+            any("inventario table says" in f and "class B" in f for f in failures),
+            f"expected the drifted class count to be named, got {failures}",
+        )
+
+    def test_a_drifted_leaf_total_is_named(self):
+        drifted = INVENTORY_OK.replace("| mcp | **2** |", "| mcp | **9** |")
+        _, failures = self.check(table=GOOD, inventory=drifted)
+        self.assertTrue(
+            any("says 9 leaves" in f for f in failures),
+            f"expected the drifted total to be named, got {failures}",
+        )
+
+    def test_a_missing_counts_block_fails_instead_of_covering_nothing(self):
+        _, failures = self.check(table=GOOD, inventory="# no markers here\n")
+        self.assertTrue(
+            any("no folhas:counts block" in f for f in failures),
+            f"expected the absent block to fail, got {failures}",
+        )
+
+    def test_a_surface_missing_from_the_counts_table_is_named(self):
+        partial = INVENTORY_OK.replace("| mcp | **2** | 0 | 1 | 1 | 0 | 0 | x |\n", "")
+        _, failures = self.check(table=GOOD, inventory=partial)
+        self.assertTrue(
+            any("absent from the counts table" in f for f in failures),
+            f"expected the missing surface to be named, got {failures}",
+        )
 
     def test_the_fixture_itself_is_clean(self):
         """Without this, every assertion below could pass for the wrong reason."""
         per_surface, failures = self.check(table=GOOD)
         self.assertEqual(failures, [])
-        self.assertEqual(per_surface["cli"], {"proved": 1, "leaves": 2})
-        self.assertEqual(per_surface["mcp"], {"proved": 0, "leaves": 2})
+        self.assertEqual(
+            per_surface["cli"], {"proved": 1, "leaves": 2, "A": 1, "B": 0, "C": 0, "D": 0, "E": 1}
+        )
+        self.assertEqual(
+            per_surface["mcp"], {"proved": 0, "leaves": 2, "A": 0, "B": 1, "C": 1, "D": 0, "E": 0}
+        )
 
     def test_a_leaf_the_code_has_and_the_table_lacks_fails(self):
         """The fail-closed property: a new tool cannot land unclassified."""
