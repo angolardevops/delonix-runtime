@@ -3848,8 +3848,12 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
                                         // container's own) and before `drop_capabilities` (they are mounts, and need
                                         // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
                                         // masks the host's path or silently fails with EPERM.
-    apply_masked_paths(masked_paths);
-    apply_readonly_paths(readonly_paths);
+    if let Err(e) = apply_masked_paths(masked_paths) {
+        return setup_abort(&e);
+    }
+    if let Err(e) = apply_readonly_paths(readonly_paths) {
+        return setup_abort(&e);
+    }
     // READY: the last mount is in. Everything that shapes this mount namespace —
     // pivot_root, the volumes, /dev, the tmpfs, the secret files, the read-only
     // remount, the masked/read-only paths — has happened, so from here on an
@@ -4070,7 +4074,7 @@ pub const DEFAULT_READONLY_PATHS: &[&str] = &[
     "/proc/sysrq-trigger",
 ];
 
-fn apply_masked_paths(paths: &[String]) {
+fn apply_masked_paths(paths: &[String]) -> std::result::Result<(), String> {
     for p in paths {
         let Ok(md) = std::fs::metadata(p) else {
             // Not present = nothing to mask. `/proc/kcore` on a kernel without it
@@ -4094,10 +4098,14 @@ fn apply_masked_paths(paths: &[String]) {
                 None::<&str>,
             )
         };
+        // Fail-closed: the path EXISTS and the caller named it on the command
+        // line, so a failure here means they believe something is masked that is
+        // not. Reported by `setup_abort` at the call site, before the READY byte.
         if let Err(e) = r {
-            eprintln!("delonix: could not mask '{p}': {e}");
+            return Err(format!("could not mask '{p}' (requested explicitly): {e}"));
         }
     }
+    Ok(())
 }
 
 /// Remounts each path read-only inside the container.
@@ -4106,11 +4114,15 @@ fn apply_masked_paths(paths: &[String]) {
 /// mount to modify, then a `MS_REMOUNT|MS_RDONLY|MS_BIND` on it. Passing
 /// `MS_RDONLY` on the first bind is silently ignored by the kernel — the classic
 /// mistake, and it produces a path that reports success and stays writable.
-fn apply_readonly_paths(paths: &[String]) {
+fn apply_readonly_paths(paths: &[String]) -> std::result::Result<(), String> {
     for p in paths {
         if std::fs::metadata(p).is_err() {
             continue;
         }
+        // Fail-closed, both steps. The second one especially: a failed remount
+        // leaves the bind from the first step in place, so the path looks
+        // mounted and stays WRITABLE — the caller asked for read-only by name
+        // and would get the opposite, silently.
         if let Err(e) = mount(
             Some(p.as_str()),
             p.as_str(),
@@ -4118,8 +4130,9 @@ fn apply_readonly_paths(paths: &[String]) {
             MsFlags::MS_BIND | MsFlags::MS_REC,
             None::<&str>,
         ) {
-            eprintln!("delonix: could not bind '{p}' for read-only: {e}");
-            continue;
+            return Err(format!(
+                "could not bind '{p}' for read-only (requested explicitly): {e}"
+            ));
         }
         if let Err(e) = mount(
             Some(p.as_str()),
@@ -4128,9 +4141,12 @@ fn apply_readonly_paths(paths: &[String]) {
             MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_REC,
             None::<&str>,
         ) {
-            eprintln!("delonix: could not remount '{p}' read-only: {e}");
+            return Err(format!(
+                "could not remount '{p}' read-only (requested explicitly): {e}"
+            ));
         }
     }
+    Ok(())
 }
 
 /// `chown -R <uid>:<gid>` of `root` using **`lchown`** (never follows symlinks — a
