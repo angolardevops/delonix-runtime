@@ -2243,8 +2243,15 @@ fn setup_rootfs(
             None::<&str>,
         )?;
     }
-    apply_sysctls(sysctls, has_own_netns); // --sysctl: BEFORE /proc/sys becomes read-only (B13)
-    mask_proc_paths(privileged);
+    // --sysctl: BEFORE /proc/sys becomes read-only (B13).
+    apply_sysctls(sysctls, has_own_netns);
+    // `mask_proc_paths` used to run HERE; it moved to `container_init`, beside
+    // `apply_masked_paths`/`apply_readonly_paths` — the place this file already
+    // documents for mask work — so a failure can NAME the path it could not
+    // mask: this function returns `nix::Result`, and an `Errno` has no room for
+    // one. The order that matters is unchanged: `apply_sysctls` above still runs
+    // before anything makes `/proc/sys` read-only.
+    //
     // `/sys` READ-ONLY (B13): prevents writing to kernel/device controls
     // from the container. nosuid/nodev/noexec for defense. (Skips if there is no /sys.)
     // --privileged EXCEPTION: `/sys` RW + `cgroup2` RW delegated, so the systemd inside
@@ -2316,41 +2323,64 @@ fn setup_rootfs(
 ///
 /// `/proc/sys` is made read-only only when [`proc_sys_read_only`] says so —
 /// see there for why a privileged container keeps it writable.
-fn mask_proc_paths(privileged: bool) {
+///
+/// **Fail-closed, and every one of these used to be `let _ =`.** These are the
+/// engine's OWN defaults rather than something the caller named, so the bar is
+/// different from `apply_masked_paths`: a path that is NOT PRESENT is skipped,
+/// because `/proc/kcore` is absent on plenty of kernels and refusing there would
+/// trade a silence gap for an availability gap. A path that EXISTS and cannot be
+/// masked refuses the container — the caller would otherwise get `sysrq-trigger`
+/// writable, kernel RAM readable, or (worst, because the first bind succeeds and
+/// the remount is what fails) a `/proc/sys` that looks mounted and still writes
+/// the HOST's sysctls.
+fn mask_proc_paths(privileged: bool) -> std::result::Result<(), String> {
     // bind /dev/null over sysrq-trigger -> writes go to the void.
-    let _ = mount(
-        Some("/dev/null"),
-        "/proc/sysrq-trigger",
-        None::<&str>,
-        MsFlags::MS_BIND,
-        None::<&str>,
-    );
-    // /proc/kcore (image of the kernel RAM): make it inaccessible.
-    let _ = mount(
-        Some("/dev/null"),
-        "/proc/kcore",
-        None::<&str>,
-        MsFlags::MS_BIND,
-        None::<&str>,
-    );
-    if !proc_sys_read_only(privileged) {
-        return;
+    if std::fs::metadata("/proc/sysrq-trigger").is_ok() {
+        mount(
+            Some("/dev/null"),
+            "/proc/sysrq-trigger",
+            None::<&str>,
+            MsFlags::MS_BIND,
+            None::<&str>,
+        )
+        .map_err(|e| format!("could not mask '/proc/sysrq-trigger': {e}"))?;
     }
-    // /proc/sys read-only (prevents changing host sysctls).
-    let _ = mount(
-        Some("/proc/sys"),
-        "/proc/sys",
-        None::<&str>,
-        MsFlags::MS_BIND,
-        None::<&str>,
-    );
-    let _ = mount(
-        None::<&str>,
-        "/proc/sys",
-        None::<&str>,
-        MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
-        None::<&str>,
-    );
+    // /proc/kcore (image of the kernel RAM): make it inaccessible.
+    if std::fs::metadata("/proc/kcore").is_ok() {
+        mount(
+            Some("/dev/null"),
+            "/proc/kcore",
+            None::<&str>,
+            MsFlags::MS_BIND,
+            None::<&str>,
+        )
+        .map_err(|e| format!("could not mask '/proc/kcore': {e}"))?;
+    }
+    if !proc_sys_read_only(privileged) {
+        return Ok(());
+    }
+    // /proc/sys read-only (prevents changing host sysctls). Two steps, and the
+    // SECOND is the one that must not be ignored: without it the bind above
+    // leaves `/proc/sys` writable behind a mount that looks right.
+    if std::fs::metadata("/proc/sys").is_ok() {
+        mount(
+            Some("/proc/sys"),
+            "/proc/sys",
+            None::<&str>,
+            MsFlags::MS_BIND,
+            None::<&str>,
+        )
+        .map_err(|e| format!("could not bind '/proc/sys' for read-only: {e}"))?;
+        mount(
+            None::<&str>,
+            "/proc/sys",
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
+            None::<&str>,
+        )
+        .map_err(|e| format!("could not remount '/proc/sys' read-only: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Whether the engine itself remounts `/proc/sys` read-only.
@@ -3848,6 +3878,12 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
                                         // container's own) and before `drop_capabilities` (they are mounts, and need
                                         // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
                                         // masks the host's path or silently fails with EPERM.
+
+    // The engine's own `/proc` defaults, moved here from `setup_rootfs` so the
+    // refusal can name the path (see the note there).
+    if let Err(e) = mask_proc_paths(privileged) {
+        return setup_abort(&e);
+    }
     if let Err(e) = apply_masked_paths(masked_paths) {
         return setup_abort(&e);
     }
@@ -4108,6 +4144,18 @@ fn apply_masked_paths(paths: &[String]) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Whether `p` is already covered by a bind of `/dev/null` — i.e. masked.
+///
+/// Compared by device number against `/dev/null` itself rather than the literal
+/// `1:3`, so this keeps telling the truth on a kernel that numbers it otherwise.
+fn is_masked_with_dev_null(p: &str) -> bool {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let (Ok(md), Ok(null)) = (std::fs::metadata(p), std::fs::metadata("/dev/null")) else {
+        return false;
+    };
+    md.rdev() == null.rdev() && md.file_type().is_char_device()
+}
+
 /// Remounts each path read-only inside the container.
 ///
 /// Two steps, and both are required: a bind of the path onto ITSELF to get a
@@ -4117,6 +4165,17 @@ fn apply_masked_paths(paths: &[String]) -> std::result::Result<(), String> {
 fn apply_readonly_paths(paths: &[String]) -> std::result::Result<(), String> {
     for p in paths {
         if std::fs::metadata(p).is_err() {
+            continue;
+        }
+        // MASKED WINS, and this skip is load-bearing. A path covered by a
+        // `/dev/null` bind (`mask_proc_paths` for the engine's own defaults,
+        // `apply_masked_paths` for the caller's) is already stronger than
+        // read-only: writes go to the void. Remounting THAT read-only is both
+        // pointless and refused by the kernel with EPERM — and since both lists
+        // became fail-closed, the refusal would take the whole container down.
+        // Measured: `/proc/sysrq-trigger` is in the default list of BOTH, so
+        // without this skip every container is refused.
+        if is_masked_with_dev_null(p) {
             continue;
         }
         // Fail-closed, both steps. The second one especially: a failed remount
