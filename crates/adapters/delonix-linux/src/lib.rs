@@ -3819,14 +3819,25 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     }
     // `--read-only`: remounts the rootfs (`/`) read-only. Volumes/dev/proc are
     // separate mounts and stay writable; the rest becomes immutable.
+    //
+    // Fail-closed, and it used to be `let _ =`. The flag is a security barrier
+    // the caller asked for by name; a failed remount left the container running
+    // with a WRITABLE rootfs and said nothing, so the only way to find out was
+    // to write to it. Aborting here is safe and cheap: this is before the READY
+    // byte below, so `spawn` reports `MountWait::InitExited` with the init's own
+    // words and the container never counts as running.
     if read_only {
-        let _ = mount(
+        if let Err(e) = mount(
             None::<&str>,
             "/",
             None::<&str>,
             MsFlags::MS_REMOUNT | MsFlags::MS_BIND | MsFlags::MS_RDONLY,
             None::<&str>,
-        );
+        ) {
+            return setup_abort(&format!(
+                "--read-only was requested, but remounting the rootfs read-only failed: {e}"
+            ));
+        }
     }
     // --ulimit (before dropping CAP_SYS_RESOURCE). Fail-closed: see `apply_ulimits`.
     if let Err(e) = apply_ulimits(ulimits) {
