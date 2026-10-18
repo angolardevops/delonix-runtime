@@ -4840,18 +4840,26 @@ fn nft_check(script: &str) -> bool {
 /// its own bucket → it's not self-DoS). `counter drop` makes the excesses OBSERVABLE
 /// (detection). best-effort + `nft -c` pre-flight: if the kernel doesn't support `meter`,
 /// it DEGRADES (doesn't apply, doesn't break the ruleset). Idempotent (clears first).
-fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
-    clear_l4guard();
+/// The nft script that installs the guard's two meter rules. Split out of
+/// `do_l4guard` so the chain it writes to is readable by a test without a
+/// kernel: `clear_l4guard` has to scrub the SAME chain, and for four months it
+/// did not (see `l4guard_scrub_argv`).
+fn l4guard_add_script(conn_rate: u32, conn_max: u32) -> String {
     let rate = conn_rate.clamp(1, 100_000);
     let burst = rate.saturating_mul(2).max(1);
     let max = conn_max.clamp(1, 1_000_000);
-    let script = format!(
+    format!(
         "add rule ip {t} forward iifname \"tap0\" ct state new meter dlx_conn_rate \
             {{ ip saddr limit rate over {rate}/second burst {burst} packets }} counter drop\n\
          add rule ip {t} forward iifname \"tap0\" ct state new meter dlx_conn_count \
             {{ ip saddr ct count over {max} }} counter drop\n",
         t = INGRESS_TABLE,
-    );
+    )
+}
+
+fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
+    clear_l4guard();
+    let script = l4guard_add_script(conn_rate, conn_max);
     // GOLDEN RULE: only applies if the kernel accepts the syntax (otherwise degrades).
     if !nft_check(&script) {
         return Ok(());
@@ -4862,12 +4870,22 @@ fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
 
 /// Removes the L4 guard rules from the `forward` (and, with them, the dynamic meters —
 /// a meter with no rules referencing it is freed). Idempotent.
+/// The `nft` argv `clear_l4guard` reads the guard's rules back from. Split out
+/// for the same reason as `l4guard_add_script`: these two chains have to match,
+/// and nothing but a test says so. c07990ec moved every chain-listing helper in
+/// this file from `forward` to `fwdeny` when the default-DENY chain was split
+/// out, and left the guard's WRITER on `forward` — so `clear` deleted handles
+/// from a chain the meter rules were never in. It exited 0, printed
+/// "l4guard: cleared", and the guard stayed up, dropping traffic with no
+/// documented way to turn it off.
+fn l4guard_scrub_argv() -> [&'static str; 6] {
+    ["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]
+}
+
 fn clear_l4guard() {
-    let listed = crate::capture(
-        "nft",
-        &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"],
-    )
-    .unwrap_or_default();
+    let argv = l4guard_scrub_argv();
+    let chain = argv[5];
+    let listed = crate::capture("nft", &argv).unwrap_or_default();
     for line in listed.lines() {
         if line.contains("dlx_conn_rate") || line.contains("dlx_conn_count") {
             if let Some(h) = line
@@ -4882,7 +4900,7 @@ fn clear_l4guard() {
                         "rule",
                         "ip",
                         INGRESS_TABLE,
-                        "fwdeny",
+                        chain,
                         "handle",
                         &h.to_string(),
                     ],
@@ -13319,5 +13337,49 @@ mod holder_input_fuzz {
             parts.extend(rest.iter().map(String::as_str));
             let _ = validate_control_tokens(&parts);
         }
+    }
+}
+
+/// Acceptance for the L4 guard's chain: `net l4guard clear` has to scrub the
+/// chain `net l4guard set` wrote to. Both sides name their own chain, and until
+/// this test nothing compared them — which is how c07990ec (2026-06-22) left
+/// `clear` reading `fwdeny` while the writer kept adding to `forward`. The
+/// symptom is invisible from the exit code: `clear` finds nothing to delete,
+/// returns 0, prints "l4guard: cleared", and the meter rules stay live.
+#[cfg(test)]
+mod tests_l4guard_chain {
+    use super::*;
+
+    /// The chain each `add rule` in the install script targets, read positionally
+    /// out of `add rule ip <table> <chain> ...`.
+    fn chains_written() -> Vec<String> {
+        l4guard_add_script(50, 200)
+            .lines()
+            .filter(|l| l.contains("dlx_conn_rate") || l.contains("dlx_conn_count"))
+            .map(|l| l.split_whitespace().nth(4).unwrap_or_default().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn clear_scrubs_the_chain_set_writes_to() {
+        let written = chains_written();
+        assert_eq!(written.len(), 2, "two meter rules: {written:?}");
+        let scrubbed = l4guard_scrub_argv()[5];
+        for chain in &written {
+            assert_eq!(
+                chain, scrubbed,
+                "`set` installs the meter rule in `{chain}` but `clear` deletes handles \
+                 from `{scrubbed}`: clearing the guard is a silent no-op"
+            );
+        }
+    }
+
+    /// The scrub reads the chain with handles (`-a`), or there is no `# handle N`
+    /// to parse and the delete loop never fires even on the right chain.
+    #[test]
+    fn scrub_lists_handles() {
+        let argv = l4guard_scrub_argv();
+        assert!(argv.contains(&"-a"), "no handles requested: {argv:?}");
+        assert_eq!(argv[4], INGRESS_TABLE, "wrong table: {argv:?}");
     }
 }
