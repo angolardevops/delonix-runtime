@@ -287,7 +287,16 @@ pub struct OwnersWritten {
 ///
 /// Per entry, and it does NOT stop at the first refusal — a caller reporting
 /// the loss wants the whole list, not the first name in it.
+///
+/// The mode is read BEFORE the chown and put back after one that succeeded:
+/// the kernel clears setuid/setgid on a chown of an executable, and an image's
+/// setgid binary (`unix_chkpwd`, group `shadow`) must keep the bit the image
+/// gave it. `delonix_linux::apply_image_owners` does the same for a container's
+/// rootfs; without it here, the bundle `image export` writes as real root — the
+/// path that is meant to agree with what `container run` gives — ships
+/// `su`/`passwd` that no longer work.
 pub fn apply_owners(rootfs: &Path, owners: &[delonix_compute::owners::Owner]) -> OwnersWritten {
+    use std::os::unix::fs::MetadataExt;
     let mut out = OwnersWritten::default();
     for owner in owners {
         let mut path = rootfs.to_path_buf();
@@ -302,12 +311,27 @@ pub fn apply_owners(rootfs: &Path, owners: &[delonix_compute::owners::Owner]) ->
                 break;
             }
         }
-        if crosses_link || std::fs::symlink_metadata(&path).is_err() {
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            out.absent += 1;
+            continue;
+        };
+        if crosses_link {
             out.absent += 1;
             continue;
         }
         match std::os::unix::fs::lchown(&path, Some(owner.uid), Some(owner.gid)) {
-            Ok(()) => out.applied += 1,
+            Ok(()) => {
+                out.applied += 1;
+                // Not for a symlink: it has no mode of its own, and `chmod`
+                // would follow it to the target.
+                if meta.mode() & 0o6000 != 0 && !meta.file_type().is_symlink() {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &path,
+                        std::fs::Permissions::from_mode(meta.mode() & 0o7777),
+                    );
+                }
+            }
             Err(_) => out.refused.push(owner.clone()),
         }
     }
@@ -836,6 +860,63 @@ mod tests {
             index.len(),
             "every entry accounted for"
         );
+    }
+
+    /// ADR-0062: a chown must not disarm the image's setuid/setgid binaries.
+    ///
+    /// The kernel clears `S_ISUID`/`S_ISGID` on a chown of an executable unless
+    /// the caller holds `CAP_FSETID` — and it does so even when the new owner
+    /// equals the old one, which is what lets this run unprivileged. Every
+    /// entry here asks for the caller's OWN id, so the chown succeeds and the
+    /// bits are the only thing under test. The bundle `image export` writes is
+    /// the case that matters: `unix_chkpwd` without `S_ISGID` makes `su` and
+    /// `passwd` fail under `runc`.
+    ///
+    /// As root the kernel keeps the bits on its own, so this discriminates for
+    /// a normal user — which is what CI and every rootless export are.
+    #[test]
+    fn a_chown_does_not_disarm_the_images_setuid_and_setgid_entries() {
+        use delonix_compute::owners::Owner;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = tmp.path().join("rootfs");
+        std::fs::create_dir_all(rootfs.join("usr/sbin")).unwrap();
+        std::fs::create_dir_all(rootfs.join("etc")).unwrap();
+        let me = std::fs::metadata(&rootfs).unwrap();
+
+        // `unix_chkpwd` is the real shape: setgid, group `shadow`.
+        let armed = [
+            ("usr/sbin/unix_chkpwd", 0o2755),
+            ("usr/sbin/sudo", 0o4755),
+            // Not executable: the kernel leaves this one alone either way, so
+            // it pins that the restore does not invent a mode of its own.
+            ("etc/keep", 0o2644),
+        ];
+        for (p, mode) in armed {
+            std::fs::write(rootfs.join(p), b"x").unwrap();
+            std::fs::set_permissions(rootfs.join(p), std::fs::Permissions::from_mode(mode))
+                .unwrap();
+        }
+
+        let index: Vec<Owner> = armed
+            .iter()
+            .map(|(p, _)| Owner {
+                path: (*p).into(),
+                uid: me.uid(),
+                gid: me.gid(),
+            })
+            .collect();
+        let written = apply_owners(&rootfs, &index);
+        assert_eq!(written.applied, armed.len(), "{written:?}");
+        assert!(written.refused.is_empty(), "{written:?}");
+
+        for (p, mode) in armed {
+            let got = std::fs::symlink_metadata(rootfs.join(p)).unwrap().mode() & 0o7777;
+            assert_eq!(
+                got, mode,
+                "{p}: the chown took the mode down to {got:o}, expected {mode:o}"
+            );
+        }
     }
 
     #[test]
