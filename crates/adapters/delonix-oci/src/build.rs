@@ -52,12 +52,20 @@ pub struct RunStep {
 pub enum Step {
     /// `RUN <cmd>` — executes a command (with the accumulated `ENV`/`WORKDIR`).
     Run(RunStep),
-    /// `COPY [--from=<stage>] <src> <dst>` — copies from the build *context* (or from
-    /// a previous stage, if `from` is present — multi-stage build).
+    /// `COPY [--from=<stage>] [--chmod=<octal>] [--chown=<user>[:<group>]] <src> <dst>`
+    /// — copies from the build *context* (or from a previous stage, if `from`
+    /// is present — multi-stage build).
     Copy {
         src: String,
         dst: String,
         from: Option<String>,
+        /// `--chmod=<octal>`, already parsed from base 8. Applied to every
+        /// file AND directory the copy writes, as BuildKit does.
+        chmod: Option<u32>,
+        /// `--chown=<user>[:<group>]`, verbatim. A name only has a meaning
+        /// against the TARGET rootfs's `/etc/passwd`/`/etc/group`, so it is
+        /// resolved at copy time and cannot be resolved here, at parse time.
+        chown: Option<String>,
     },
     /// `ENV K=V` (or `ENV K V`) — sets a variable (affects the following `RUN`s).
     Env { key: String, val: String },
@@ -376,19 +384,9 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                     .push(Step::Workdir(rest.to_string()));
             }
             "COPY" | "ADD" => {
-                // `COPY [--from=<stage>] <src> <dst>`
-                let mut from_stage: Option<String> = None;
-                let parts: Vec<&str> = rest
-                    .split_whitespace()
-                    .filter(|t| {
-                        if let Some(f) = t.strip_prefix("--from=") {
-                            from_stage = Some(f.to_string());
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .collect();
+                // `COPY [--from=<stage>] [--chmod=…] [--chown=…] [--link] <src> <dst>`
+                let (flags, rest) = parse_copy_flags(instr, n, rest)?;
+                let parts: Vec<&str> = rest.split_whitespace().collect();
                 if parts.len() < 2 {
                     return Err(Error::Dockerfile(format!(
                         "line {}: {instr} requires src and dst",
@@ -412,7 +410,9 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                     stages.last_mut().unwrap().steps.push(Step::Copy {
                         src: src.to_string(),
                         dst: dst.to_string(),
-                        from: from_stage.clone(),
+                        from: flags.from.clone(),
+                        chmod: flags.chmod,
+                        chown: flags.chown.clone(),
                     });
                 }
             }
@@ -580,6 +580,88 @@ fn parse_run_flags(rest: &str) -> Result<(Vec<SecretMount>, Vec<CacheMount>, Str
         }
     }
     Ok((secret_mounts, cache_mounts, remaining.to_string()))
+}
+
+/// The flags of one `COPY`/`ADD`, as parsed off the front of the instruction.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CopyFlags {
+    /// `--from=<stage>` — copy out of a previous stage instead of the context.
+    pub from: Option<String>,
+    /// `--chmod=<octal>`, already parsed from base 8.
+    pub chmod: Option<u32>,
+    /// `--chown=<user>[:<group>]`, verbatim — resolved against the target rootfs.
+    pub chown: Option<String>,
+}
+
+/// Reads the leading `--flag` tokens of a `COPY`/`ADD` and returns them with
+/// the remainder of the line (the sources and the destination).
+///
+/// Flags are recognized ONLY at the front, before the first path, which is
+/// where Docker's own parser accepts them. That is not pedantry: it is what
+/// makes the unknown-flag error below safe. A positional scan would have to
+/// decide what `COPY ./--weird-dir out/` means, and would get it wrong.
+///
+/// The old code filtered out `--from=` and let every other token through as a
+/// path. A `COPY --chmod=755 a b` therefore arrived with TWO sources and was
+/// refused with "more than one source needs a destination directory ending in
+/// '/'"; worse, with a destination that did end in `/` the flag passed
+/// validation and was copied as if it were a file. Both of those were the
+/// parser reporting the user's correct Dockerfile as wrong.
+fn parse_copy_flags<'a>(instr: &str, n: usize, rest: &'a str) -> Result<(CopyFlags, &'a str)> {
+    let mut flags = CopyFlags::default();
+    let mut remaining = rest.trim_start();
+    while remaining.starts_with("--") {
+        let (tok, after) = match remaining.split_once(char::is_whitespace) {
+            Some((t, r)) => (t, r.trim_start()),
+            // A line that is nothing but a flag: let the arity check below
+            // produce "requires src and dst" rather than erroring here.
+            None => break,
+        };
+        let (name, value) = match tok.split_once('=') {
+            Some((n, v)) => (n, Some(v)),
+            None => (tok, None),
+        };
+        match (name, value) {
+            ("--from", Some(v)) => flags.from = Some(v.to_string()),
+            ("--chown", Some(v)) => flags.chown = Some(v.to_string()),
+            ("--chmod", Some(v)) => {
+                // Octal, as in `chmod(1)` — `--chmod=755` is 0o755, never 755
+                // decimal. Rejecting a bad value here rather than at copy time
+                // keeps a typo from being discovered halfway through a build.
+                let mode = u32::from_str_radix(v, 8).ok().filter(|m| *m <= 0o7777);
+                flags.chmod = Some(mode.ok_or_else(|| {
+                    Error::Dockerfile(format!(
+                        "line {}: {instr} --chmod={v}: expected an octal mode such as 755 or 0644",
+                        n + 1
+                    ))
+                })?);
+            }
+            // BuildKit's `--link` asks for the copy to become an INDEPENDENT
+            // layer, so that a change to the base image does not invalidate
+            // it. It describes layer structure and cache reuse, never the
+            // bytes or the modes that land in the rootfs — and this builder
+            // applies a stage's steps in sequence to one rootfs, where there
+            // is no separate layer to opt into. Accepting it as a no-op
+            // therefore produces exactly the filesystem BuildKit would; what
+            // is lost is cache granularity, not correctness. Erroring instead
+            // would reject Dockerfiles that are both correct and common.
+            ("--link", None | Some("true") | Some("false")) => {}
+            // Everything else — `--parents`, `--exclude=`, `--checksum=`, a
+            // typo. These used to slip through the filter and be counted as
+            // source paths, which surfaced either as the bogus multi-source
+            // error above or as "no such file or directory" naming a flag.
+            // Naming the flag is the one report that points at the real line.
+            _ => {
+                return Err(Error::Dockerfile(format!(
+                    "line {}: {instr} {name}: unsupported flag (only --from=<stage>, \
+                     --chmod=<octal>, --chown=<user>[:<group>] and --link are supported)",
+                    n + 1
+                )))
+            }
+        }
+        remaining = after;
+    }
+    Ok((flags, remaining))
 }
 
 /// One `--mount=...` flag, tagged by which of the two supported `type=`s it was.
@@ -1197,6 +1279,135 @@ mod tests {
         assert!(e.contains("ending in '/'"), "{e}");
         // One source keeps its old meaning: `dest` may be a file name.
         assert!(parse_dockerfile("FROM alpine:3.20\nCOPY a dest\n").is_ok());
+    }
+
+    /// One parsed `COPY`, flattened for comparison: src, dst, --from,
+    /// --chmod, --chown.
+    type ParsedCopy = (String, String, Option<String>, Option<u32>, Option<String>);
+
+    /// The copies of the final stage.
+    fn copies(text: &str) -> Vec<ParsedCopy> {
+        parse_dockerfile(text)
+            .unwrap()
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Copy {
+                    src,
+                    dst,
+                    from,
+                    chmod,
+                    chown,
+                } => Some((
+                    src.clone(),
+                    dst.clone(),
+                    from.clone(),
+                    *chmod,
+                    chown.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **A BuildKit flag is a flag, not a source path.**
+    ///
+    /// The parser filtered out `--from=` and let everything else through into
+    /// the source list. `COPY --chmod=755 <one file> <one file>` was therefore
+    /// read as TWO sources and refused with "more than one source needs a
+    /// destination directory ending in '/'" — a correct Dockerfile reported as
+    /// wrong. The shape below is a measured one: an entrypoint script that
+    /// CANNOT get its bit from a later `RUN chmod`, because the base image has
+    /// already dropped to an unprivileged `USER` and the chmod would fail with
+    /// "Operation not permitted". For those, the mode has to arrive on the
+    /// COPY itself — the flag is not cosmetic.
+    #[test]
+    fn a_copy_flag_is_not_counted_as_a_source() {
+        let c = copies(
+            "FROM alpine:3.20\nCOPY --chmod=755 deploy/entrypoint.sh /docker-entrypoint.d/40-cfg.sh\n",
+        );
+        assert_eq!(c.len(), 1, "one source, one destination: {c:?}");
+        assert_eq!(c[0].0, "deploy/entrypoint.sh");
+        assert_eq!(c[0].1, "/docker-entrypoint.d/40-cfg.sh");
+        assert_eq!(c[0].3, Some(0o755), "--chmod is octal, not decimal");
+    }
+
+    /// The worse half of the same bug: with a destination that DOES end in
+    /// `/`, the multi-source check never fires, so the flag was not reported
+    /// at all — it was copied, as if `--chmod=755` were a file in the context.
+    #[test]
+    fn a_flag_is_not_copied_when_the_destination_ends_in_a_slash() {
+        let c = copies("FROM alpine:3.20\nCOPY --chmod=644 a.conf /etc/nginx/\n");
+        assert_eq!(
+            c.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(),
+            vec!["a.conf"],
+            "the flag must not reach the source list"
+        );
+        assert_eq!(c[0].3, Some(0o644));
+    }
+
+    #[test]
+    fn chown_and_link_and_from_parse_together() {
+        let c = copies(
+            "FROM alpine:3.20\nCOPY --from=build --chown=nginx:nginx --link --chmod=0640 /out/app /srv/app\n",
+        );
+        assert_eq!(c.len(), 1);
+        assert_eq!(
+            c[0],
+            (
+                "/out/app".to_string(),
+                "/srv/app".to_string(),
+                Some("build".to_string()),
+                Some(0o640),
+                Some("nginx:nginx".to_string()),
+            )
+        );
+        // `--link` is accepted and leaves no trace: it asks for an independent
+        // layer, which says nothing about the bytes or the modes that land.
+        let plain = copies("FROM alpine:3.20\nCOPY --link a b\n");
+        assert_eq!(plain[0].3, None);
+        assert_eq!(plain[0].4, None);
+        // A bare `--chown=1000` with no group, and `ADD` taking the same flags.
+        let add = copies("FROM alpine:3.20\nADD --chown=1000 a /b\n");
+        assert_eq!(add[0].4.as_deref(), Some("1000"));
+    }
+
+    /// An unknown flag NAMES itself. It used to become a source path, which
+    /// surfaced either as the bogus multi-source error above or as a
+    /// "no such file" whose subject was a flag — neither pointing at the
+    /// real line.
+    #[test]
+    fn an_unsupported_copy_flag_names_itself() {
+        for (line, needle) in [
+            ("COPY --parents a/b c/", "--parents"),
+            ("COPY --exclude=*.md a b/", "--exclude"),
+            ("ADD --checksum=sha256:ab a b/", "--checksum"),
+        ] {
+            let e = parse_dockerfile(&format!("FROM alpine:3.20\n{line}\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(needle), "the flag must be named: {e}");
+            assert!(e.contains("line 2"), "and located: {e}");
+        }
+        // A mode that is not octal is refused at parse time, not mid-build.
+        let e = parse_dockerfile("FROM alpine:3.20\nCOPY --chmod=99x a b\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("octal"), "{e}");
+        // `8` is a digit but not an octal one — the check is a real parse.
+        assert!(parse_dockerfile("FROM alpine:3.20\nCOPY --chmod=778 a b\n").is_err());
+    }
+
+    /// Flags are read only at the FRONT. A path that merely begins with `--`
+    /// is still a path, which is what makes the unknown-flag error above safe
+    /// to raise at all.
+    #[test]
+    fn only_leading_tokens_are_read_as_flags() {
+        let c = copies("FROM alpine:3.20\nCOPY a.txt --weird-name.txt out/\n");
+        assert_eq!(
+            c.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(),
+            vec!["a.txt", "--weird-name.txt"]
+        );
     }
 
     #[test]
