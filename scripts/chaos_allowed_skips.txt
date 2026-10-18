@@ -5,7 +5,4 @@
 # stopped running and nobody said why, which is the one outcome that must never
 # read as green. Removing a line makes that verdict fail again — which is how
 # the gate itself is proved to bite.
-# TEMPORARY, reverted in the next commit: with no verdict declared, the same
-# hosted-runner skip must fail the workflow. This is the A/B that proves the
-# gate bites; without it the gate is only asserted.
-
+blocked	a hosted runner forbids unprivileged user namespaces (`unshare -r -n`), and a rootless engine cannot run without them; exercising the harness needs a self-hosted runner or a VM (docs/lab.md)
