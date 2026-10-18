@@ -95,3 +95,57 @@ pub fn lookup(root: &Path, host: &str) -> Option<(String, String)> {
     let (u, p) = pair.split_once(':')?;
     Some((u.to_string(), p.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn root() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    /// The distinction `image logout` reports to the operator (#808's sibling,
+    /// #805): a logout that removed nothing is not a successful logout. The CLI
+    /// used to discard this bool and print "removed" either way, so a mistyped
+    /// registry read as success while the real credentials stayed on disk.
+    #[test]
+    fn logout_says_whether_anything_was_stored() {
+        let dir = root();
+        assert!(
+            !logout(dir.path(), "ghcr.io").unwrap(),
+            "a registry that was never logged in to removed nothing"
+        );
+
+        login(dir.path(), "ghcr.io", "u", "p").unwrap();
+        assert!(
+            logout(dir.path(), "ghcr.io").unwrap(),
+            "the registry had credentials, so the removal happened"
+        );
+        assert!(
+            !logout(dir.path(), "ghcr.io").unwrap(),
+            "the second logout of the same registry removes nothing"
+        );
+    }
+
+    /// A logout that found nothing must not disturb what IS stored: the whole
+    /// point of refusing it is that the operator still has the credentials they
+    /// think they have.
+    #[test]
+    fn a_logout_that_removed_nothing_leaves_the_other_registries_alone() {
+        let dir = root();
+        login(dir.path(), "ghcr.io", "u", "p").unwrap();
+
+        assert!(!logout(dir.path(), "docker.io").unwrap());
+
+        assert_eq!(
+            lookup(dir.path(), "ghcr.io"),
+            Some(("u".to_string(), "p".to_string())),
+            "the untouched registry kept its credentials"
+        );
+        assert_eq!(
+            hosts(dir.path()),
+            vec!["ghcr.io".to_string()],
+            "and it is still the one `logout` would list as stored"
+        );
+    }
+}

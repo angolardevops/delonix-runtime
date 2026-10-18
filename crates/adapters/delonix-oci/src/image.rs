@@ -312,6 +312,21 @@ impl ImageStore {
         Ok(())
     }
 
+    /// Whether [`remove`](Self::remove) called with `name` would drop only a
+    /// NAME and leave the content — i.e. the image answers to another name too.
+    ///
+    /// The same predicate `remove` branches on, read from one place so the two
+    /// cannot disagree. `image rm` asks it before refusing an image in use
+    /// (#808): untagging a second name never takes away what a container needs
+    /// to be recreated, so refusing it was wrong, and so was telling the
+    /// operator that `--force` would make the image unusable — on this path
+    /// `--force` untags exactly like the plain call does.
+    pub fn removes_only_a_tag(&self, name: &str) -> Result<bool> {
+        let img = self.resolve(name)?;
+        let want = normalise_tag(name);
+        Ok(img.repo_tags.len() > 1 && img.repo_tags.contains(&want))
+    }
+
     /// Removes a tag; if it is the last one, deletes the image record.
     pub fn remove(&self, name: &str) -> Result<String> {
         let mut img = self.resolve(name)?;
@@ -357,6 +372,56 @@ mod tests {
             config: ImageConfig::default(),
             created_unix: created,
         }
+    }
+
+    /// `image rm` refuses an image a container still needs. It asks this first
+    /// (#805's sibling, #808), because dropping one of several names takes
+    /// nothing away — the content and the record stay, under the other name.
+    #[test]
+    fn removes_only_a_tag_is_true_for_a_second_name_and_false_for_the_last() {
+        let (s, _dir) = store();
+        s.save(&image("sha256:01", &["alpine:3.19", "l3x:v1"], 100))
+            .unwrap();
+
+        assert!(
+            s.removes_only_a_tag("l3x:v1").unwrap(),
+            "the image answers to another name, so this only untags"
+        );
+        assert!(
+            s.removes_only_a_tag("alpine:3.19").unwrap(),
+            "symmetric: either of the two names is just a name"
+        );
+
+        let (s2, _dir2) = store();
+        s2.save(&image("sha256:02", &["only:1"], 100)).unwrap();
+        assert!(
+            !s2.removes_only_a_tag("only:1").unwrap(),
+            "the last name going means the content goes with it"
+        );
+    }
+
+    /// The property that keeps the refusal honest as the code moves: whatever
+    /// `removes_only_a_tag` promises, `remove` must then do. They branch on the
+    /// same predicate, and this is what would catch them drifting apart.
+    #[test]
+    fn remove_does_what_removes_only_a_tag_predicted() {
+        let (s, _dir) = store();
+        s.save(&image("sha256:01", &["alpine:3.19", "l3x:v1"], 100))
+            .unwrap();
+
+        assert!(s.removes_only_a_tag("l3x:v1").unwrap());
+        assert_eq!(s.remove("l3x:v1").unwrap(), "untagged: l3x:v1");
+        assert!(
+            s.resolve("alpine:3.19").is_ok(),
+            "the content survived under the name that was left"
+        );
+
+        assert!(
+            !s.removes_only_a_tag("alpine:3.19").unwrap(),
+            "now it is the last name"
+        );
+        assert_eq!(s.remove("alpine:3.19").unwrap(), "deleted: 01");
+        assert!(s.resolve("alpine:3.19").is_err(), "and the record is gone");
     }
 
     /// A warm pull records the same image again with a new `created_unix`.
