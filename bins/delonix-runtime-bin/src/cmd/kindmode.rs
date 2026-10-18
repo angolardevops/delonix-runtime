@@ -2005,25 +2005,44 @@ pub(crate) fn start(images: &ImageStore, store: &Store, name: Option<&str>) -> R
             failed.push(format!("{}: {e}", n.name));
         }
     }
-    if !skipped.is_empty() {
-        super::output::info(&super::po::tf(
+    let (note, failure) = start_outcome(&skipped, &failed);
+    if let Some(note) = note {
+        super::output::info(&note);
+    }
+    match failure {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// What `start` reports once its loop is done: an optional note about the nodes
+/// it SKIPPED, and an optional failure naming the nodes that should have
+/// started and did not.
+///
+/// Pure, and separate from the loop, because the whole of #807 is in which of
+/// these two a given outcome is. Already-running nodes produce a note and
+/// success; only a real failure fails, and it names every one of them, since
+/// stopping at the first hides how many are really broken.
+fn start_outcome(skipped: &[&str], failed: &[String]) -> (Option<String>, Option<Error>) {
+    let note = (!skipped.is_empty()).then(|| {
+        super::po::tf(
             "{n} node(s) were already running and were left as they are: {list}",
             &[
                 ("n", &skipped.len().to_string()),
                 ("list", &skipped.join(", ")),
             ],
-        ));
-    }
-    if !failed.is_empty() {
-        return Err(Error::Invalid(super::po::tf(
+        )
+    });
+    let failure = (!failed.is_empty()).then(|| {
+        Error::Invalid(super::po::tf(
             "{n} node(s) failed to start:\n  {list}",
             &[
                 ("n", &failed.len().to_string()),
                 ("list", &failed.join("\n  ")),
             ],
-        )));
-    }
-    Ok(())
+        ))
+    });
+    (note, failure)
 }
 
 /// Whether `c` is a control-plane node, by the same label `list()` already
@@ -2681,6 +2700,70 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["lab-control-plane", "lab-worker", "lab-worker2"],
             "start order: control-plane first, workers after"
+        );
+    }
+
+    /// #807: the control-plane sorts FIRST, so a cluster where only it is up —
+    /// the shape left by a `cluster stop` that gave up on one node (DX-8101) —
+    /// hit the already-running refusal on the very first iteration. With
+    /// `cmd_start(...)?` that aborted the whole command and left every worker
+    /// stopped. A skip is a note, never a failure.
+    #[test]
+    fn nodes_that_were_already_running_are_a_note_and_not_a_failure() {
+        let (note, failure) = start_outcome(&["lab-control-plane"], &[]);
+        assert!(failure.is_none(), "a skip must not fail the command");
+        let note = note.expect("the operator is told which nodes were skipped");
+        assert!(note.contains("lab-control-plane"), "{note}");
+        assert!(note.contains("already running"), "{note}");
+    }
+
+    /// The success path: nothing skipped, nothing failed, and no note invented
+    /// for it — a cluster that was entirely stopped starts silently.
+    #[test]
+    fn a_cluster_that_was_entirely_stopped_reports_nothing() {
+        let (note, failure) = start_outcome(&[], &[]);
+        assert!(
+            note.is_none(),
+            "nothing was skipped, so there is nothing to say"
+        );
+        assert!(failure.is_none());
+    }
+
+    /// A node that should have started and did not still fails the command —
+    /// and names EVERY one, because stopping at the first hides how many are
+    /// really broken. That was the other half of the old `?`.
+    #[test]
+    fn every_node_that_failed_to_start_is_named_in_the_failure() {
+        let failed = vec![
+            "lab-worker: boom".to_string(),
+            "lab-worker2: also boom".to_string(),
+        ];
+        let (_, failure) = start_outcome(&[], &failed);
+        let msg = failure
+            .expect("real failures must fail the command")
+            .to_string();
+        assert!(msg.contains("lab-worker:"), "{msg}");
+        assert!(
+            msg.contains("lab-worker2:"),
+            "the second failure must not be swallowed: {msg}"
+        );
+        assert!(msg.contains('2'), "the count is the failures: {msg}");
+    }
+
+    /// Both at once: one node was already up, another genuinely failed. The
+    /// skip is still only a note, and the command still fails for the one that
+    /// deserves it.
+    #[test]
+    fn a_skip_and_a_failure_together_keep_their_separate_meanings() {
+        let (note, failure) =
+            start_outcome(&["lab-control-plane"], &["lab-worker: boom".to_string()]);
+        let note = note.expect("the skip is still reported");
+        assert!(note.contains("lab-control-plane"), "{note}");
+        let msg = failure.expect("the real failure still fails").to_string();
+        assert!(msg.contains("lab-worker"), "{msg}");
+        assert!(
+            !msg.contains("lab-control-plane"),
+            "a skipped node is not a failure: {msg}"
         );
     }
 
