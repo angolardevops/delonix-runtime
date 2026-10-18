@@ -582,6 +582,31 @@ impl ImageStore {
         Ok(crate::owners::merge(&layers))
     }
 
+    /// Records [`Self::OWNERS_FILE`] for a container that ALREADY exists, and
+    /// says whether it did.
+    ///
+    /// For the flat→overlay migration (`migrate_flat_to_overlay`), which is the
+    /// one moment a legacy container can acquire the index at all: its flat tree
+    /// was unpacked by `apply_layer_flat`, which applies no ownership, so the
+    /// image's non-root owners are neither in the tree nor on record — and the
+    /// container is stopped, so there is no init to race.
+    ///
+    /// `false` when `container_id` is not overlay-backed. The index is a sibling
+    /// of `merged/` and the init reads it beside whatever rootfs it was given,
+    /// so one left next to a FLAT `rootfs/` would be applied to the container's
+    /// own tree by the next start, whether or not the migration that wrote it
+    /// ever committed. Gating on [`Self::LOWERS_FILE`] — the migration's commit
+    /// point — makes that impossible here instead of trusting every caller to
+    /// check first.
+    pub fn record_container_owners(&self, image: &Image, container_id: &str) -> Result<bool> {
+        let base = self.container_dir(container_id);
+        if !base.join(Self::LOWERS_FILE).exists() {
+            return Ok(false);
+        }
+        write_owners(&base.join(Self::OWNERS_FILE), &self.image_owners(image)?)?;
+        Ok(true)
+    }
+
     /// One layer's owners: its sidecar, or — for a layer an older engine
     /// unpacked — the headers of its blob, written down for the next reader.
     fn layer_owners(&self, digest: &str, layers_dir: &Path) -> Result<Vec<Owner>> {
@@ -1249,6 +1274,53 @@ mod parallel_extract_tests {
         let bad_dir = root.join("layers").join(crate::cas::strip(&bad));
         assert!(!bad_dir.join(".extracted").exists());
         assert!(scratch_left(root).is_empty(), "{:?}", scratch_left(root));
+    }
+
+    /// A layer whose single file belongs to `uid:gid`.
+    fn layer_owned(name: &str, uid: u64, gid: u64) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_size(1);
+        h.set_mode(0o644);
+        h.set_uid(uid);
+        h.set_gid(gid);
+        b.append_data(&mut h, name, &b"x"[..]).unwrap();
+        b.into_inner().unwrap()
+    }
+
+    /// ADR-0062 for a container the flat→overlay migration converted: the index
+    /// is recorded for the COMMITTED overlay and refused for anything else.
+    ///
+    /// The migration is the only moment such a container can get one — its flat
+    /// tree never carried the owners and never had an index — and the gate is
+    /// what keeps a migration that declined, or one that reverted, from leaving
+    /// an index beside a flat `rootfs/` for the next start to apply to the
+    /// container's own tree.
+    #[test]
+    fn an_owners_index_is_recorded_only_once_the_migration_has_committed() {
+        let (s, tmp) = store();
+        let d = s
+            .cas()
+            .write(&layer_owned("srv/app.conf", 101, 102))
+            .unwrap();
+        let img = image(vec![d]);
+        let base = tmp.path().join("containers/legacy");
+        std::fs::create_dir_all(base.join("upper")).unwrap();
+
+        // Mid-migration, or a migration that gave up: still flat, no index.
+        assert!(!s.record_container_owners(&img, "legacy").unwrap());
+        assert!(!base.join(ImageStore::OWNERS_FILE).exists());
+
+        // The commit point, as `__ovlmigrate` renames it into place.
+        std::fs::write(base.join(ImageStore::LOWERS_FILE), b"/layers/x").unwrap();
+        assert!(s.record_container_owners(&img, "legacy").unwrap());
+        let bytes = std::fs::read(base.join(ImageStore::OWNERS_FILE)).unwrap();
+        let owners = delonix_compute::owners::decode(&bytes);
+        assert_eq!(owners.len(), 1, "{owners:?}");
+        assert_eq!(owners[0].path, std::path::Path::new("srv/app.conf"));
+        assert_eq!((owners[0].uid, owners[0].gid), (101, 102));
+        // Nothing marks them applied here: that is the init's to write, once.
+        assert!(!base.join("overlay-owners.applied").exists());
     }
 }
 
