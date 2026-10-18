@@ -296,3 +296,35 @@ jobs:
       - name: Limpeza
         if: always()
         run: bash scripts/chaos.sh --clean || true
+
+  # ---- G-003: a skip that nobody declared must not read as green ----
+  #
+  # The job above is gated on the probe, so on a hosted runner it reports
+  # `skipped`. GitHub renders that apart from `success`, but it does not fail the
+  # workflow and does not block a merge — so a run that measured NOTHING still
+  # reads as a green PR (observed on #872 and #877: 18 gates green, harness
+  # `skipping`).
+  #
+  # Failing whenever the harness does not run is the wrong fix: on hosted runners
+  # it never can, so every PR would go red every week, which is what the comment
+  # at the top of this file refuses. What must not exist is an UNATTRIBUTED skip.
+  # So this gate asks only whether something DECLARES why the harness did not
+  # run, and fails when nothing does — a step-level `if` that quietly stops
+  # exercising it, or a skip while the environment could have run it.
+  #
+  # `!cancelled()` is load-bearing: a job whose `needs` was skipped is skipped
+  # too by default, which would make this gate disappear exactly when it has
+  # something to say.
+  skip-gate:
+    name: skip gate (a skip must be declared)
+    needs: [userns, chaos]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: A harness that did not run must have a declared reason
+        run: |
+          python3 scripts/chaos_skip_gate.py \
+            --probe "${{ needs.userns.outputs.userns }}" \
+            --harness "${{ needs.chaos.result }}"

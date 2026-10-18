@@ -1,0 +1,8 @@
+# Probe verdicts that justify the chaos harness not running, one
+# `verdict<TAB>reason` per line (scripts/chaos_skip_gate.py).
+#
+# A skip whose verdict is NOT listed here fails the workflow: the harness
+# stopped running and nobody said why, which is the one outcome that must never
+# read as green. Removing a line makes that verdict fail again — which is how
+# the gate itself is proved to bite.
+blocked	a hosted runner forbids unprivileged user namespaces (`unshare -r -n`), and a rootless engine cannot run without them; exercising the harness needs a self-hosted runner or a VM (docs/lab.md)
