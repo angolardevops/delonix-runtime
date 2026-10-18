@@ -4531,6 +4531,23 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     started
 }
 
+/// Whether `id` is already in the state [`start_container`] refuses to act on,
+/// reconciled first — the record's own `status` is stale until it is.
+///
+/// Lives next to that refusal on purpose, reading the same two variants, so the
+/// two cannot drift apart. `cluster start` asks this before each node (#807):
+/// refusing is right for ONE container and wrong as a reason to leave the rest
+/// of a cluster stopped, and a caller that wants to skip must not have to match
+/// on the text of an error message to know what it is skipping.
+pub(crate) fn already_running(store: &Store, id: &str) -> Result<bool> {
+    let mut c = find(store, id)?;
+    reconcile_with_diagnostics(store, &mut c);
+    Ok(matches!(
+        c.status,
+        delonix_model::records::Status::Running | delonix_model::records::Status::Paused
+    ))
+}
+
 fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);

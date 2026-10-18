@@ -895,6 +895,18 @@ pub(crate) fn hosts_block_now() -> String {
     super::hosts_file::block(&super::hosts_file::root_id(), &all)
 }
 
+/// The names a document still asks for (`HTTPRoute.hosts:`), which are exactly
+/// the ones `hosts sync --off` does NOT remove: turning the flag off drops the
+/// AUTO-registered names, and `sync_hosts_now` rewrites the rest. `--off` used
+/// to announce the whole block was gone; it reports from this instead.
+pub(crate) fn declared_host_names() -> Vec<String> {
+    desired_hosts(None, false)
+        .0
+        .into_iter()
+        .map(|(host, _addr)| host)
+        .collect()
+}
+
 /// Writes the block now, LOUDLY: this is the command the operator ran on purpose.
 pub(crate) fn sync_hosts_now() -> Result<()> {
     let (strict, auto_names) = desired_hosts(None, false);

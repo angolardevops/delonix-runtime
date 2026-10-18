@@ -49,12 +49,56 @@ fn sync(print: bool, off: bool) -> Result<()> {
         return Ok(());
     }
     if off {
+        // What is published RIGHT NOW, read before the flag moves — afterwards
+        // the block is already the declared-only one and cannot answer this.
+        // Measured 2026-10-18 in an isolated root with nothing exposed: `--off`
+        // announced «service names removed from /etc/hosts» having written
+        // nothing at all, and not even holding write permission on the file.
+        // A removal of nothing is not a removal, and saying so is the same lie
+        // this command was fixed for, one branch over.
+        let published = p::hosts_block_now()
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .count();
         p::set_hosts_sync(false)?;
         p::sync_hosts_now()?;
-        println!(
-            "{}",
-            super::po::t("hosts: service names removed from /etc/hosts")
-        );
+        // `--off` stops the AUTO-registered names. A name an HTTPRoute declares
+        // (`hosts:`) is not auto-registered, so `sync_hosts_now` writes it back
+        // and the block survives — announcing a removal there was false. The
+        // file is named from `hosts_path()`, which honours `DELONIX_HOSTS_FILE`,
+        // because the literal `/etc/hosts` was wrong whenever it was set.
+        let path = super::hosts_file::hosts_path().display().to_string();
+        let declared = p::declared_host_names();
+        if declared.is_empty() && published == 0 {
+            println!(
+                "{}",
+                super::po::tf(
+                    "hosts: auto-publishing is off; no service names were published in {path}, so none were removed",
+                    &[("path", &path)]
+                )
+            );
+        } else if declared.is_empty() {
+            println!(
+                "{}",
+                super::po::tf(
+                    "hosts: {n} service name(s) removed from {path}",
+                    &[("n", &published.to_string()), ("path", &path)]
+                )
+            );
+        } else {
+            println!(
+                "{}",
+                super::po::tf(
+                    "hosts: auto-publishing is off, but {n} name(s) stay in {path} — a route \
+                     still declares them ({list}); remove the route's `hosts:` to drop them",
+                    &[
+                        ("n", &declared.len().to_string()),
+                        ("path", &path),
+                        ("list", &declared.join(", ")),
+                    ],
+                )
+            );
+        }
         return Ok(());
     }
     // Writing first: on a refusal (no root) the flag must NOT be left on, or the next

@@ -378,7 +378,23 @@ pub fn run(action: ImageCmd) -> Result<()> {
             return cmd_login(registry, username, *password_stdin);
         }
         ImageCmd::Logout { registry } => {
-            delonix_oci::auth::logout(&super::util::state_root(), registry)?;
+            let root = super::util::state_root();
+            // A logout that removed nothing used to print the removal line and
+            // exit 0, so a mistyped registry read as a success while the real
+            // credentials stayed on disk. `auth::logout` already answers whether
+            // they existed; the answer is what the caller is told.
+            if !delonix_oci::auth::logout(&root, registry)? {
+                let stored = delonix_oci::auth::hosts(&root);
+                let known = if stored.is_empty() {
+                    super::po::t("no registry has stored credentials").to_string()
+                } else {
+                    super::po::tf("stored for: {list}", &[("list", &stored.join(", "))])
+                };
+                return Err(Error::Invalid(super::po::tf(
+                    "no credentials stored for {registry} — nothing was removed ({known})",
+                    &[("registry", registry), ("known", &known)],
+                )));
+            }
             println!(
                 "{}",
                 super::po::tf(
@@ -1016,7 +1032,10 @@ fn cmd_rm(
     reference: &str,
     force: bool,
 ) -> Result<()> {
-    if !force {
+    // Only a call that would really DELETE the content can strand a container.
+    // Dropping one of several names leaves the image, and the record, exactly
+    // where they were (#808) — asking first is what keeps the refusal honest.
+    if !force && !images.removes_only_a_tag(reference)? {
         let img = images.resolve(reference)?;
         let mut users: Vec<String> = Vec::new();
         for c in store.list()? {

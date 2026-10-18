@@ -1988,8 +1988,40 @@ pub(crate) fn start(images: &ImageStore, store: &Store, name: Option<&str>) -> R
         "{} \"{resolved}\"",
         super::po::t("Starting cluster")
     ));
+    // A node that is ALREADY up is skipped, not fatal (#807): `cmd_start(...)?`
+    // here used to abort at the first one and leave every later node stopped —
+    // the common shape after a `cluster stop` that gave up on one node (DX-8101)
+    // and left the others running. The command fails only for a node that
+    // should have started and did not, and then it names all of them, because
+    // stopping at the first failure hides how many are really broken.
+    let mut skipped: Vec<&str> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
     for n in &nodes {
-        container::cmd_start(images, store, &n.id)?;
+        if container::already_running(store, &n.id)? {
+            skipped.push(&n.name);
+            continue;
+        }
+        if let Err(e) = container::cmd_start(images, store, &n.id) {
+            failed.push(format!("{}: {e}", n.name));
+        }
+    }
+    if !skipped.is_empty() {
+        super::output::info(&super::po::tf(
+            "{n} node(s) were already running and were left as they are: {list}",
+            &[
+                ("n", &skipped.len().to_string()),
+                ("list", &skipped.join(", ")),
+            ],
+        ));
+    }
+    if !failed.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "{n} node(s) failed to start:\n  {list}",
+            &[
+                ("n", &failed.len().to_string()),
+                ("list", &failed.join("\n  ")),
+            ],
+        )));
     }
     Ok(())
 }
