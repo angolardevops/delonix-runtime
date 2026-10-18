@@ -17,8 +17,10 @@ confirmar escrita de segredos no upper, sobe a P0.
 6. **G-036** (delonix-paas) usar `delonix_net::parse_publish` no reaper.
 7. **G-005** CRI: pull por digest e `Username` no image status (bugs); RunAsUserName; OOMKilled
    (verificar `4a4d029f` sobre a release candidata).
-8. **G-009** masked/readonly paths e rlimits pedidos explicitamente → fail-closed.
-9. **G-024** bateria rootful numa VM descartável.
+8. **G-024** bateria rootful numa VM descartável.
+
+**Saiu desta lista:** **G-009** (masked/readonly paths e rlimits → fail-closed) está feito e
+medido — ver a linha `G-009` da `gap-matrix.csv`, agora `PASS`.
 
 ## P2
 - G-011 Compose sub-chaves aninhadas desconhecidas → recusa.

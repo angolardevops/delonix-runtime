@@ -30,9 +30,9 @@ host) — os resultados abaixo são testes dirigidos, não conformidade certific
 |---|---|
 | lifecycle create/start/kill/delete | PASS via E2E (729 checks) |
 | namespaces / capabilities / seccomp / no_new_privs | PASS via E2E + caos |
-| masked/readonly paths | PARTIAL — falha de mount só avisa (G-009) |
+| masked/readonly paths | PASS — falha de mount num caminho que EXISTE recusa o container e nomeia-o; caminho ausente ignorado por decisão (G-009) |
 | mount propagation | PARTIAL — critest falha por ambiente, não exercitado no motor |
 | rro | UNSUPPORTED (G-010) |
 | hooks | UNSUPPORTED (G-019) |
-| rlimits | PARTIAL — nome desconhecido/erro ignorados (G-009) |
+| rlimits | PASS — nome desconhecido recusado com a lista dos aceites; erro de `setrlimit` propagado (G-009) |
 | exit status | PASS (E2E: wait, 137, códigos reais) |
