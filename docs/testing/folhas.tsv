@@ -1,0 +1,552 @@
+# As folhas das seis superficies com denominador derivavel do codigo, e a
+# classe de prova de cada uma. DERIVADO de uma medicao, nao escrito a mao:
+# ver docs/testing/folhas-inventario.md para a proveniencia de cada numero.
+#
+# Colunas: superficie <TAB> folha <TAB> classe (A-E) <TAB> evidencia/razao
+#
+# A classe A da CLI NAO e uma afirmacao desta tabela: o scripts/folhas_gate.py
+# deriva-a do scripts/cli_exec_trace.tsv e chumba se as duas discordarem.
+#
+# Os providers ficam de FORA: o denominador deles e um schema HTTP publicado
+# ou um 'virsh help' de uma versao nomeada, e ja tem instrumento proprio
+# (scripts/proxmox_api_inventory.py, ADR-0049).
+#
+# medido: 2026-10-18, commit a24731e3 (arvore identica a f49d3570), delonix 5.1.1
+cli	api-resources	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	backup create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	backup inspect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	backup ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	backup remove	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	backup restore	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	backup schedule	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	build	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster backup	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster create	E	imagem kindest/node; kind e kubeadm presentes, corre os nos no motor
+cli	cluster destroy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster drain	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster health	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster kube generate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster kubeadm	E	imagem golden + VMs reais
+cli	cluster kubeconfig	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster load	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster network fetch	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster network profiles	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster network status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster restore	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster start	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster stop	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster uncordon	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	cluster upgrade	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compatibility compose	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compatibility docker	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	completion editor	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	completion shell	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compose config	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compose down	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compose logs	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compose ps	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	compose up	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	config get	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	config set	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	config unset	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container commit	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container cp	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container diff	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container exec	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container healthcheck	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container inspect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container kill	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container logs	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container pause	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container port	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container ps	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container rename	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container restart	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container run	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container start	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container stats	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container stop	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container top	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container unpause	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container update	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	container wait	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	dashboard	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	delete	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	diff	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	drift	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	explain	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	get	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	hosts sync	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image export	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image history	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image load	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image login	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image logout	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image pull	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image push	E	registry OCI local
+cli	image remove	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image save	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image sbom	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image scan	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image sign	E	registry OCI local (a assinatura publica-se ao lado); NAO precisa de cosign
+cli	image tag	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	image verify	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	man	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	manifest render	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	manifest schema	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	manifest validate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	mcp capabilities	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	mcp doctor	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	mcp serve	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	migrate assess	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net capture	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress allow	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress clear	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress deny	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress host	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress net	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress policy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net egress show	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net flow	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net httproute apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net httproute rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress allow	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress clear	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress deny	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress policy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress publish	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net ingress unpublish	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net l4guard clear	B	nft presente; par de 'net l4guard set'
+cli	net l4guard set	B	nft presente; 'net l4guard status' ja e executado
+cli	net l4guard status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net netns attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net netns detach	B	netns ja ligada por 'net netns attach', que a bateria executa
+cli	net netns down	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net netns exec	B	netns ja ligada por 'net netns attach', que a bateria executa
+cli	net netns firewall	B	netns ligada + nft presente neste host
+cli	net netns gc	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net netns publish	B	netns ligada + hostfwd/DNAT; nft presente
+cli	net netns status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net netns unpublish	B	netns ligada; par de 'net netns publish'
+cli	net netns up	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net tunnel apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	net tunnel expose	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network connect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network diagnose	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network disconnect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network inspect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network ipam ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network ipam prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network node init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network node key	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network route	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network vlan	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	plan	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	pod attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	pod cp	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	pod create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	pod exec	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	pod logs	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	pod port-forward	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	policy unset	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	provider config schema	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	provider config show	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	provider config validate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	provider describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	provider ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	provider matrix	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret inspect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret rotate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret rotate-key	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret set	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	secret unset	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	serve api	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	serve cri	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	serve docker-api	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	serve node-api	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack destroy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack history	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack plan	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack rollback	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack validate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	stack wait	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system boot disable	B	par de 'system boot enable'; mesma precaucao de XDG
+cli	system boot enable	B	escreve units de utilizador + linger: exige XDG_CONFIG_HOME redirigido para nao sujar o host
+cli	system boot status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system df	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system doctor	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system events	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system features	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system info	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system metrics	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system monitor	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system namespace describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system namespace ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system regulate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system resources	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system setup	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system snapshot create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system snapshot restore	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system thermal	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	system virt	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	systemcontainer clone	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	systemcontainer move	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	systemcontainer snapshot create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	systemcontainer snapshot ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	systemcontainer snapshot restore	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	systemcontainer snapshot rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	version	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm bridge	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm cloud-init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm console	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm default-backend	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm destroy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm image build	E	virt-customize presente; falta a descarga da cloud image (rede)
+cli	vm image convert	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm image describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm image import	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm image init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm image ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm image ls-remote	E	registry OCI local (listagem de tags)
+cli	vm image pull	E	registry OCI local
+cli	vm image push	E	registry OCI local
+cli	vm image rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm migrate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm move	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm pause	E	imagem de VM arrancavel no store isolado; backend real nos tres providers
+cli	vm prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm reach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm resize	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm restart	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm snapshot create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm snapshot ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm snapshot restore	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm snapshot rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm ssh	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm start	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm stop	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm unbridge	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm unpause	E	imagem de VM arrancavel no store isolado; par de 'vm pause'
+cli	vm update	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	vm vnc	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume inspect	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume snapshot create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume snapshot ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume snapshot restore	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	volume snapshot rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	wait	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	workload describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	workload ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	workload rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	workload stop	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+node-api	ApplyStack	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	BuildImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	CancelOperation	C	implementada mas por desenho nunca cancela (DX-5002); so componente
+node-api	ConnectContainer	D	registada no router e devolve service.rs:unserved (UNIMPLEMENTED)
+node-api	Console	D	registada no router e devolve service.rs:unserved (UNIMPLEMENTED)
+node-api	CreateContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	CreateNetwork	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	CreatePod	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	CreateSnapshot	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	CreateVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	CreateVolume	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	DeleteContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	DeleteImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	DeleteNetwork	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	DeletePod	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	DeleteSnapshot	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	DeleteVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	DeleteVolume	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	DestroyStack	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	DisconnectContainer	D	registada no router e devolve service.rs:unserved (UNIMPLEMENTED)
+node-api	Exec	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	GetApiRoot	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	GetCapacity	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	GetContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	GetHealth	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	GetImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	GetNetwork	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	GetNodeInfo	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	GetOperation	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	GetPod	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	GetVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	GetVolume	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	KillContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	ListContainers	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	ListImages	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	ListNetworks	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	ListOperations	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	ListPods	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	ListProviders	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	ListSnapshots	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	ListVirtualMachines	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	ListVolumes	A	e2e.sh + e2e_node_network_ops.py sobre 'delonix serve node-api' (so REST; a perna gRPC falta)
+node-api	Logs	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	PauseVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	PlanStack	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	PullImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	PushImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	RestoreSnapshot	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	ResumeVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	ScanImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	StartContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	StartVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	Stats	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	StopContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	StopVirtualMachine	C	so testes de componente (tests/grpc_virtual_machine_service.rs); nunca na bateria real
+node-api	UpdateContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	WaitContainer	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
+node-api	WatchEvents	C	stream gRPC em componente; REST responde 501; recusa de namespace nao implementada
+node-api	WatchOperation	C	componente so no caminho negativo; REST 501 streams_over_grpc_only
+mgmt-api	/_ping	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/metrics	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/containers	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/containers/:id	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/containers/:id/action	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/containers/:id/exec	B	nenhum teste; a rota de MAIOR privilegio do motor (exec arbitrario)
+mgmt-api	/v1/containers/:id/logs	B	nenhum teste; shell-out para 'container logs'
+mgmt-api	/v1/containers/:id/rate	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/containers/:id/reconfig	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/dash	A	e2e.sh:4948-4960 'serve api responde 200 em /v1/dash' (a UNICA rota medida sobre HTTP real)
+mgmt-api	/v1/images	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/images/build	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/images/pull	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/images/sbom	B	nenhum teste; delonix_scanner::extract_sbom
+mgmt-api	/v1/images/scan	B	nenhum teste; shell-out para 'image scan'
+mgmt-api	/v1/net/attach-extra	D	retirada: 501 DX-6302 por desenho (lib.rs:1027 net_route_withdrawn)
+mgmt-api	/v1/net/attach-extra/:id/:idx/:ip	D	retirada: 501 DX-6302 por desenho (lib.rs:1027 net_route_withdrawn)
+mgmt-api	/v1/net/attach/:id/:ip	D	retirada: 501 DX-6302 por desenho (lib.rs:1027 net_route_withdrawn)
+mgmt-api	/v1/net/container-ip/:id	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/net/dhcp/:net/:mac	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/net/dhcp6/:net/:mac	B	nenhum teste
+mgmt-api	/v1/net/egress	D	retirada: 501 DX-6302 por desenho (lib.rs:1027 net_route_withdrawn)
+mgmt-api	/v1/net/egress/:bridge	D	retirada: 501 DX-6302 por desenho (lib.rs:1027 net_route_withdrawn)
+mgmt-api	/v1/net/firewall/:ip	D	retirada: 501 DX-6302 por desenho (lib.rs:1027 net_route_withdrawn)
+mgmt-api	/v1/net/publish	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/net/publish/:host_port	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/net/status	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/networks	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/networks/:name	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/vms/:name/action	B	nenhum teste; so 'vm stop|rm' encaminhados
+mgmt-api	/v1/volumes	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mgmt-api	/v1/volumes/:name	C	so componente via Router::oneshot com bin=/bin/false — nenhum caminho de sucesso de shell-out testado
+mcp	audit.query	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	container.restart	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	logs.query	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	metrics.query	B	nenhum teste de especie alguma; 0 invocacoes pelo protocolo (nao existe tools/call no repo)
+mcp	network.inspect	B	nenhum teste de especie alguma; 0 invocacoes pelo protocolo (nao existe tools/call no repo)
+mcp	resource.describe	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	resource.get	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	resource.list	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	resources.get	B	nenhum teste de especie alguma; 0 invocacoes pelo protocolo (nao existe tools/call no repo)
+mcp	runtime.health	B	nenhum teste de especie alguma; 0 invocacoes pelo protocolo (nao existe tools/call no repo)
+mcp	runtime.info	B	nenhum teste de especie alguma; 0 invocacoes pelo protocolo (nao existe tools/call no repo)
+mcp	storage.inspect	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	task.cancel	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	task.get	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+mcp	workload.usage	C	so unidade/componente in-process; nunca pelo protocolo (nao existe tools/call no repo)
+cri	Attach	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	CheckpointContainer	D	Status::unimplemented (runtime_svc.rs:498)
+cri	ContainerStats	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ContainerStatus	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	CreateContainer	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	Exec	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ExecSync	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	GetContainerEvents	D	Status::unimplemented (runtime_svc.rs:504); unico streaming do proto
+cri	ImageFsInfo	B	sem spec no critest v1.36.0; inodes_used fixo a 0 (lib.rs:197)
+cri	ImageStatus	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ListContainerStats	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ListContainers	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ListImages	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ListMetricDescriptors	C	teste do repo (grpc_status.rs) mas o critest v1.36.0 nao exercita
+cri	ListPodSandbox	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ListPodSandboxMetrics	C	teste do repo mas o critest v1.36.0 nao exercita
+cri	ListPodSandboxStats	B	sem cobertura; e descarta PodSandboxStatsFilter.label_selector (le so f.id)
+cri	PodSandboxStats	B	sem cobertura de critest nem do repo
+cri	PodSandboxStatus	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	PortForward	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	PullImage	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	RemoveContainer	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	RemoveImage	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	RemovePodSandbox	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	ReopenContainerLog	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	RunPodSandbox	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	RuntimeConfig	C	unidade so (the_kubelet_is_told_cgroupfs); sem spec no critest
+cri	StartContainer	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	Status	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	StopContainer	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	StopPodSandbox	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+cri	UpdateContainerResources	C	so helpers puros testados (merge_update); a RPC nunca e invocada, e o critest nao tem spec
+cri	UpdateRuntimeConfig	C	sempre Ok; o pod CIDR e registado e nunca aplicado (runtime_svc.rs:447-466)
+cri	Version	A	critest v1.36.0; baseline contraditoria: 79/24 publicado vs 82/21 com logs (G-025)
+kinds	apps apply	B	nenhuma corrida real conduz este verbo neste kind
+kinds	apps diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	apps plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	apps delete	D	recusado: o output e uma Image
+kinds	apps drift	D	last_applied: None — o drift nunca dispara
+kinds	containers apply	A	scripts/e2e.sh — o UNICO kind com os cinco verbos
+kinds	containers diff	A	scripts/e2e.sh — o UNICO kind com os cinco verbos
+kinds	containers plan	A	scripts/e2e.sh — o UNICO kind com os cinco verbos
+kinds	containers delete	A	scripts/e2e.sh — o UNICO kind com os cinco verbos
+kinds	containers drift	A	scripts/e2e.sh — o UNICO kind com os cinco verbos
+kinds	dependencies apply	B	lowers para NetworkPolicy; nenhuma corrida real o conduz
+kinds	dependencies diff	D	n/a: lowers
+kinds	dependencies plan	D	n/a: lowers
+kinds	dependencies delete	D	recusado com razao
+kinds	dependencies drift	D	n/a: lowers
+kinds	gateways apply	B	nenhuma corrida real conduz este verbo neste kind
+kinds	gateways diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	gateways plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	gateways delete	C	delete generico funciona; stack destroy/--prune recusa (sem labels)
+kinds	gateways drift	D	last_applied: None — o drift nunca dispara
+kinds	httproutes apply	A	scripts/e2e.sh:7164 via 'net httproute apply', nao via 'stack apply'
+kinds	httproutes diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	httproutes plan	A	scripts/e2e.sh
+kinds	httproutes delete	D	ausente de DELETE_ROUTES E de no_verb_reason: 'not wired yet' sem razao escrita
+kinds	httproutes drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	images apply	A	scripts/e2e.sh
+kinds	images diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	images plan	A	scripts/e2e.sh
+kinds	images delete	C	delete generico funciona; stack destroy/--prune recusa (CAS partilhado)
+kinds	images drift	D	actual() devolve last_applied: None — o drift nunca dispara
+kinds	ingresses apply	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ingresses diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ingresses plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ingresses delete	D	delete generico recusado por desenho (verbs.rs:245)
+kinds	ingresses drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ippools apply	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ippools diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ippools plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ippools delete	B	nenhuma corrida real conduz este verbo neste kind
+kinds	ippools drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	kubernetesclusters apply	B	'cluster apply' existe; nenhuma corrida real o conduz
+kinds	kubernetesclusters diff	D	nao implementado por desenho
+kinds	kubernetesclusters plan	D	nao implementado por desenho (stack_group_absent_reason)
+kinds	kubernetesclusters delete	B	delete generico existe; nenhuma corrida real o conduz
+kinds	kubernetesclusters drift	D	nao implementado por desenho
+kinds	networkaccessrules apply	A	scripts/chaos.sh:2094 — so no caos
+kinds	networkaccessrules diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkaccessrules plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkaccessrules delete	D	ausente de DELETE_ROUTES E de no_verb_reason: 'not wired yet' sem razao escrita
+kinds	networkaccessrules drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkgateways apply	E	appliance OPNsense; o ADR-0071 diz por escrito que a VM de lab nao arranca
+kinds	networkgateways diff	E	appliance OPNsense
+kinds	networkgateways plan	E	appliance OPNsense
+kinds	networkgateways delete	A	scripts/e2e.sh §5656 posse pela marca
+kinds	networkgateways drift	E	appliance OPNsense
+kinds	networkpolicies apply	A	scripts/e2e.sh
+kinds	networkpolicies diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkpolicies plan	A	scripts/e2e.sh
+kinds	networkpolicies delete	A	scripts/e2e.sh §6181
+kinds	networkpolicies drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkroutes apply	A	scripts/chaos.sh:1783 — so no caos, nunca no e2e.sh
+kinds	networkroutes diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkroutes plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkroutes delete	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networkroutes drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	networks apply	A	scripts/e2e.sh
+kinds	networks diff	C	co-ocorrencia na mesma seccao do e2e.sh, nao sujeito nomeado — nao determinado
+kinds	networks plan	A	scripts/e2e.sh
+kinds	networks delete	A	scripts/e2e.sh
+kinds	networks drift	C	co-ocorrencia na mesma seccao do e2e.sh, nao sujeito nomeado — nao determinado
+kinds	networkzones apply	E	nó Proxmox com SDN
+kinds	networkzones diff	E	nó Proxmox com SDN
+kinds	networkzones plan	E	nó Proxmox com SDN
+kinds	networkzones delete	A	scripts/e2e.sh §5656 posse pela marca
+kinds	networkzones drift	E	nó Proxmox com SDN
+kinds	pods apply	A	scripts/e2e.sh
+kinds	pods diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	pods plan	A	scripts/e2e.sh
+kinds	pods delete	A	scripts/e2e.sh
+kinds	pods drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	runtimepolicies apply	B	nenhuma corrida real conduz este verbo neste kind
+kinds	runtimepolicies diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	runtimepolicies plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	runtimepolicies delete	D	recusado por desenho (no_teardown_reason -> 'policy unset')
+kinds	runtimepolicies drift	D	last_applied: None — o drift nunca dispara
+kinds	secrets apply	A	scripts/e2e.sh
+kinds	secrets diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	secrets plan	A	scripts/e2e.sh
+kinds	secrets delete	D	recusado por desenho (no_teardown_reason -> 'secret rm')
+kinds	secrets drift	D	actual() devolve last_applied: None — o drift nunca dispara
+kinds	services apply	B	nenhuma corrida real conduz este verbo neste kind
+kinds	services diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	services plan	B	nenhuma corrida real conduz este verbo neste kind
+kinds	services delete	B	nenhuma corrida real conduz este verbo neste kind
+kinds	services drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	stacks apply	A	scripts/e2e.sh §2420
+kinds	stacks diff	A	scripts/e2e.sh
+kinds	stacks plan	A	scripts/e2e.sh
+kinds	stacks delete	A	scripts/e2e.sh stack destroy
+kinds	stacks drift	D	estruturalmente ausente: o Stack expande-se nos filhos
+kinds	storagepools apply	A	scripts/e2e.sh §972 (ADR-0067 P0)
+kinds	storagepools diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	storagepools plan	A	scripts/e2e.sh
+kinds	storagepools delete	A	scripts/e2e.sh
+kinds	storagepools drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	systemcontainers apply	C	scripts/e2e.sh §5879 so RECUSAS (DX-1540, falta DELONIX_PROXMOX_URL)
+kinds	systemcontainers diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	systemcontainers plan	C	so o caminho de recusa
+kinds	systemcontainers delete	A	scripts/e2e.sh
+kinds	systemcontainers drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	virtualmachines apply	A	scripts/e2e.sh §4156+ (saltado sem hipervisor)
+kinds	virtualmachines diff	B	nenhuma corrida real conduz este verbo neste kind
+kinds	virtualmachines plan	A	scripts/e2e.sh
+kinds	virtualmachines delete	A	scripts/e2e.sh
+kinds	virtualmachines drift	B	nenhuma corrida real conduz este verbo neste kind
+kinds	volumes apply	A	scripts/e2e.sh
+kinds	volumes diff	C	co-ocorrencia na mesma seccao do e2e.sh, nao sujeito nomeado — nao determinado
+kinds	volumes plan	A	scripts/e2e.sh
+kinds	volumes delete	A	scripts/e2e.sh
+kinds	volumes drift	C	co-ocorrencia na mesma seccao do e2e.sh, nao sujeito nomeado — nao determinado
+kinds	workloads apply	B	lowers para Container/Pod/VirtualMachine; nenhuma corrida real o conduz
+kinds	workloads diff	D	n/a: reporta o filho, nunca o Workload
+kinds	workloads plan	D	n/a: reporta o filho
+kinds	workloads delete	D	recusado com razao (verbs.rs:234)
+kinds	workloads drift	D	n/a: reporta o filho

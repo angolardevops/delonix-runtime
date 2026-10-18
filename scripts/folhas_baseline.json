@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "surfaces": {
+    "cli": {
+      "proved": 254,
+      "leaves": 273
+    },
+    "node-api": {
+      "proved": 15,
+      "leaves": 59
+    },
+    "mgmt-api": {
+      "proved": 1,
+      "leaves": 32
+    },
+    "mcp": {
+      "proved": 0,
+      "leaves": 15
+    },
+    "cri": {
+      "proved": 24,
+      "leaves": 34
+    },
+    "kinds": {
+      "proved": 38,
+      "leaves": 125
+    }
+  }
+}
