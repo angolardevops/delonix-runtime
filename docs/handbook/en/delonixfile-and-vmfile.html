@@ -300,7 +300,7 @@ in <code>\</code> are joined; lines starting with <code>#</code> are comments. I
 <td>Only <code>--mount=type=secret,...</code>/<code>--mount=type=cache,...</code> are accepted as a flag (below).</td>
 </tr>
 <tr>
-<td><code>COPY [--from=&lt;stage&gt;] &lt;src&gt; &lt;dst&gt;</code></td>
+<td><code>COPY [--from=&lt;stage&gt;] [--chmod=&lt;octal&gt;] [--chown=&lt;user&gt;[:&lt;group&gt;]] [--link] &lt;src&gt; &lt;dst&gt;</code></td>
 <td>Writes into the stage's rootfs on disk</td>
 <td>Confined to the context/rootfs (<code>safe_join</code>, <code>confine_to</code>): <code>..</code>, absolute escapes and symlinks that leave the base are refused.</td>
 </tr>
@@ -377,9 +377,13 @@ in <code>\</code> are joined; lines starting with <code>#</code> are comments. I
 (<code>container run -m/--cpus</code>, or <code>resources</code> in a manifest). If you wire them up, update this table.</p>
 <p>Parser behaviour worth knowing (read in the code, not a design promise):</p>
 <ul>
-<li><code>COPY a b c /dst</code> keeps only the <strong>first</strong> source and the <strong>last</strong> argument; middle sources are
-  dropped silently.</li>
-<li><code>COPY --chown=…</code>/<code>--chmod=…</code> are not recognized; the flag token would be taken as the source path.</li>
+<li><code>COPY a b c /dst/</code> copies <strong>every</strong> source. A multi-source <code>COPY</code> whose destination does not end
+  in <code>/</code> is refused (<code>DX-1407</code>) rather than dropping the middle sources silently.</li>
+<li><code>COPY</code>/<code>ADD</code> read <code>--from=</code>, <code>--chmod=</code>, <code>--chown=</code> and <code>--link</code> as <strong>leading</strong> flags. <code>--chmod</code>
+  (base 8) and <code>--chown</code> apply to what the copy writes, and a <code>--chown</code> name resolves in the
+  <strong>target</strong> rootfs, not on the builder's host. <code>--link</code> is accepted as a no-op. A <code>--…</code> token
+  after the first path is a path, not a flag; any other leading flag (<code>--parents</code>, <code>--exclude=</code>)
+  is refused with an error naming it.</li>
 <li><code>RUN --network=…</code>, <code>RUN --security=…</code> and any other <code>RUN --&lt;flag&gt;</code> are refused.</li>
 </ul>
 <h3 id="multi-stage-copy-from-and-target">Multi-stage, <code>COPY --from</code> and <code>--target</code><a class="hanchor" href="#multi-stage-copy-from-and-target" aria-label="#">#</a></h3>

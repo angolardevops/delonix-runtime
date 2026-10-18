@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a class="on" aria-current="page" href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Comment les noms atteignent /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">16</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Images et microVM</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/delonixfile-and-vmfile.html">Lire la page en anglais</a></span></div><h1 id="delonixfile-and-vmfile">Delonixfile et VMfile</h1>
+<h1 id="delonixfile-and-vmfile">Delonixfile et VMfile</h1>
 <p><strong>Avant de lire :</strong> <a href="build-and-test.html">Cloner, construire et tester</a> (un binaire et une racine d'état isolée) et <a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">Images OCI, stockage adressé par contenu et overlayfs</a> dans le manuel de cloud native.</p>
 <p>Delonix a deux fichiers de build, et ils se ressemblent volontairement : quiconque a écrit un
 Dockerfile peut lire les deux. Ce qu'ils construisent est différent.</p>
@@ -303,7 +303,7 @@ commentaires. Les noms d'instructions ne sont pas sensibles à la casse.</p>
 <td>Seuls <code>--mount=type=secret,...</code>/<code>--mount=type=cache,...</code> sont acceptés comme options (voir plus bas).</td>
 </tr>
 <tr>
-<td><code>COPY [--from=&lt;stage&gt;] &lt;src&gt; &lt;dst&gt;</code></td>
+<td><code>COPY [--from=&lt;stage&gt;] [--chmod=&lt;octal&gt;] [--chown=&lt;user&gt;[:&lt;group&gt;]] [--link] &lt;src&gt; &lt;dst&gt;</code></td>
 <td>Écrit dans le rootfs de l'étape sur disque</td>
 <td>Confiné au contexte/rootfs (<code>safe_join</code>, <code>confine_to</code>) : <code>..</code>, les évasions absolues et les liens symboliques qui sortent de la base sont refusés.</td>
 </tr>
@@ -381,10 +381,14 @@ limites à l'exécution (<code>container run -m/--cpus</code>, ou <code>resource
 câblez, mettez à jour ce tableau.</p>
 <p>Comportements du parseur bons à connaître (lus dans le code, pas une promesse de conception) :</p>
 <ul>
-<li><code>COPY a b c /dst</code> ne conserve que la <strong>première</strong> source et le <strong>dernier</strong> argument ; les sources
-  intermédiaires sont abandonnées silencieusement.</li>
-<li><code>COPY --chown=…</code>/<code>--chmod=…</code> ne sont pas reconnus ; le jeton de l'option serait pris comme chemin
-  source.</li>
+<li><code>COPY a b c /dst/</code> copie <strong>toutes</strong> les sources. Un <code>COPY</code> à plusieurs sources dont la destination
+  ne termine pas par <code>/</code> est refusé (<code>DX-1407</code>), au lieu d'abandonner silencieusement les sources
+  intermédiaires.</li>
+<li><code>COPY</code>/<code>ADD</code> lisent <code>--from=</code>, <code>--chmod=</code>, <code>--chown=</code> et <code>--link</code> comme des options <strong>de tête</strong>.
+  <code>--chmod</code> (base 8) et <code>--chown</code> s'appliquent à ce que la copie écrit, et un nom donné à <code>--chown</code>
+  est résolu dans le rootfs <strong>cible</strong>, pas sur l'hôte qui construit. <code>--link</code> est accepté comme un
+  no-op. Un jeton <code>--…</code> placé après le premier chemin est un chemin, pas une option ; toute autre
+  option de tête (<code>--parents</code>, <code>--exclude=</code>) est refusée avec une erreur qui la nomme.</li>
 <li><code>RUN --network=…</code>, <code>RUN --security=…</code> et toute autre option <code>RUN --&lt;flag&gt;</code> sont refusés.</li>
 </ul>
 <h3 id="multi-stage-copy-from-and-target">Multi-étapes, <code>COPY --from</code> et <code>--target</code><a class="hanchor" href="#multi-stage-copy-from-and-target" aria-label="#">#</a></h3>
