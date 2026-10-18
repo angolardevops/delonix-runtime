@@ -141,14 +141,14 @@ cli	net l4guard clear	B	nft presente; par de 'net l4guard set'
 cli	net l4guard set	B	nft presente; 'net l4guard status' ja e executado
 cli	net l4guard status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net netns attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns detach	B	netns ja ligada por 'net netns attach', que a bateria executa
+cli	net netns detach	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
 cli	net netns down	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns exec	B	netns ja ligada por 'net netns attach', que a bateria executa
-cli	net netns firewall	B	netns ligada + nft presente neste host
+cli	net netns exec	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
+cli	net netns firewall	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
 cli	net netns gc	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns publish	B	netns ligada + hostfwd/DNAT; nft presente
+cli	net netns publish	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
 cli	net netns status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns unpublish	B	netns ligada; par de 'net netns publish'
+cli	net netns unpublish	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
 cli	net netns up	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net tunnel apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net tunnel expose	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)

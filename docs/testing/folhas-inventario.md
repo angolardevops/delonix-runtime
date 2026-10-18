@@ -34,13 +34,13 @@
 
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| cli | **273** | 254 | 9 | 0 | 0 | 10 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| cli | **273** | 254 | 4 | 0 | 0 | 15 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
 | node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
 | mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
 | mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
 | cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
 | kinds | **125** | 38 | 48 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 25 kinds × 5 verbos |
-| **total** | **538** | **332** | **71** | **57** | **60** | **18** | — |
+| **total** | **538** | **332** | **66** | **57** | **60** | **23** | — |
 
 <!-- folhas:counts:end -->
 
@@ -86,11 +86,11 @@ presumido. Os irmãos de cada grupo já correm, e é isso que as torna baratas:
 
 | folha | precisa | classe |
 |---|---|---|
-| `net netns exec` | netns já ligada (`attach` **já corre**) | **B** |
-| `net netns detach` | idem | **B** |
-| `net netns firewall` | idem + `nft` (presente) | **B** |
-| `net netns publish` | idem + hostfwd/DNAT | **B** |
-| `net netns unpublish` | idem | **B** |
+| `net netns exec` | **`socat`** — o check já existe | **E** |
+| `net netns detach` | **`socat`** — o check já existe | **E** |
+| `net netns firewall` | **`socat`** — o check já existe | **E** |
+| `net netns publish` | **`socat`** — o check já existe | **E** |
+| `net netns unpublish` | **`socat`** — o check já existe | **E** |
 | `net l4guard set` | `nft` (presente); `status` **já corre** | **B** |
 | `net l4guard clear` | idem | **B** |
 | `system boot enable` | escreve units **de utilizador** e linger — fora do `DELONIX_ROOT`; exige redirigir `XDG_CONFIG_HOME` para não sujar o host | **B**, com cuidado |
@@ -105,6 +105,19 @@ presumido. Os irmãos de cada grupo já correm, e é isso que as torna baratas:
 | `vm image pull` | registry OCI | **E** |
 | `vm image push` | registry OCI | **E** |
 | `vm image ls-remote` | registry OCI (listagem de tags) | **E** |
+
+**Cinco das 19 não são lacuna de cobertura — são um pacote em falta.** Medido a
+2026-10-18: a bateria **já tem** checks para `net netns
+exec/detach/firewall/publish/unpublish`, em `scripts/e2e.sh` (~7200-7250), e são
+dos melhores que aqui existem — julgam no **fio**, com um token que A responde e
+B consome, porque «a listener de uma porta publicada aceita a ligação haja ou
+não alguém a responder atrás dela». O bloco inteiro salta num
+`command -v socat`, e **o `socat` não está neste host**. O bloco já existia
+(`5c62db13`, 2026-10-11) quando o trace foi gravado (`e5be0903`, 2026-10-16),
+logo contaram zero por terem saltado, não por não existirem.
+
+Instalar um pacote converte **cinco folhas sem uma linha de código**. É o item
+mais barato de todo o `lab-requisitos.md`.
 
 **Nenhuma das 19 é um stub.** `bins/delonix-runtime-bin/src/` não tem um
 `unimplemented!` nem um `todo!` — logo nenhuma é classe `D`. E `vm pause`/`vm

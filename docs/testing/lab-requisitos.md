@@ -30,6 +30,7 @@ de VM. O que falta é tudo externo ao nó, mais duas peças de cgroup.
 
 | # | peça que falta | folhas que desbloqueia | quem a pode pôr |
 |---|---|---:|---|
+| 0 | **`socat`** (um pacote) | **5** folhas da CLI, **sem uma linha de código** | dono (`apt install socat`) |
 | 1 | **Registry OCI local** | **5** folhas da CLI | eu, se autorizares |
 | 2 | **`docker` + `podman` numa VM de laboratório** | a **Fase 5 inteira** | dono (instalação) |
 | 3 | **Nó Proxmox VE** (API + credenciais) | **~10** | dono |
@@ -47,6 +48,28 @@ de VM. O que falta é tudo externo ao nó, mais duas peças de cgroup.
 | 15 | **2.º nó Proxmox + storage partilhado** | **4** casos live que nunca passaram | dono |
 
 ---
+
+## 0. `socat` — 5 folhas por um pacote, e é o melhor retorno de todos
+
+```bash
+sudo apt install socat
+```
+
+Isto não é uma lacuna de cobertura: a bateria **já tem** os cinco checks de
+`net netns exec/detach/firewall/publish/unpublish`
+(`scripts/e2e.sh` ~7200-7250), e julgam no **fio** — dois netns, A responde um
+token por `socat`, B consome-o com `nc`. O bloco salta num
+`command -v socat`, e o `socat` não está no host; o `nc` está.
+
+Medido a 2026-10-18: o bloco entrou em `5c62db13` (2026-10-11), **antes** do
+trace de `e5be0903` (2026-10-16). Logo as cinco folhas contaram zero por o
+bloco ter saltado, não por não haver checks. Instalado o pacote, uma corrida
+leva a CLI de 254 para **259** sem uma linha de código novo.
+
+A alternativa — reescrever o servidor do fixture com o `nc` que já existe —
+mexe num check que funciona para contornar uma falta do host, e trocaria um
+`socat` com `fork,reuseaddr` por um `nc -k` com semântica diferente. Não vale
+o risco por um `apt install`.
 
 ## 1. Registry OCI local — 5 folhas, e é o melhor retorno do conjunto
 
