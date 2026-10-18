@@ -4,6 +4,55 @@ Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em R
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
 [README.md](README.md) para a arquitectura dos 34 crates.
 
+## Arranque rápido (ler isto; o resto consulta-se por secção)
+
+Este ficheiro são 120 secções acumuladas por tema e por sprint: o **arquivo** das
+decisões e do seu porquê. Não se lê de uma ponta à outra — consulta-se a secção
+que interessa. O que uma sessão precisa de saber **antes** de editar é só isto:
+
+```bash
+make ci     # fmt + gates de script + clippy + testes — é o que a CI corre
+```
+
+**Definição de Pronto.** Uma mudança está pronta quando, observado e não presumido:
+`make ci` passa (ou os gates que ela toca passam, com o `rc=0` citado); existe um
+teste que falha sem ela e passa com ela; a documentação do mesmo comportamento
+acompanha-a (`scripts/dev_docs.py --check`, `scripts/dev_docs_site.py --check`);
+e não há `print!`/`eprintln!` novo em `crates/` — o ratchet `library_prints` só
+desce.
+
+**Armadilhas de medição** que já custaram rondas de CI inteiras:
+
+- `cargo test` quer um `TMPDIR` vazio e só seu — o `scripts/tmp_roots_gate.py`
+  julga o que lá ficou. Partilhá-lo com os `scripts/test_*.py` (que deixam ~7
+  directórios) acusa o `cargo test` de um leak que não é dele.
+- `docs_cli_gate.py` e `cli-tree.sh --gate` resolvem contra
+  `target/release/delonix`. Um binário velho **inventa** falhas: reconstrói
+  (`cargo build --release -p delonix-runtime-bin`) ou não acredites no resultado.
+- A `main` faz **squash-merge**: os commits de uma branch desaparecem da sua
+  história mas o conteúdo fica. Usa `git cherry main <branch>`, não `git log`,
+  para saber se algo já está lá.
+- Uma branch empurrada **não corre CI**: a `ci.yml` dispara em push para `main` ou
+  PR para `main`. "CI verde" exige sempre uma PR.
+
+**Commits**: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `wip:`),
+assunto em português, corpo com **Porquê** e **Como validar** (os comandos e o seu
+`rc`). Identificadores, comentários e texto ao utilizador em **inglês** (LANG-01,
+secção própria abaixo) — o ratchet conta, mesmo onde os vizinhos estão em português.
+
+**Git**: nunca `git push` nem `gh pr create` sem pedido explícito do dono, e nunca
+operar PRs sem ele. Antes de algo destrutivo, uma tag de segurança. `git branch -d`
+(nunca `-D`), `git worktree remove` (nunca `--force`).
+
+**Limite de WIP: no máximo 3 sessões/worktrees abertas ao mesmo tempo.** Abrir a
+quarta obriga a fechar ou estacionar uma, com handoff escrito. Há sempre outras
+sessões nesta máquina e **um só motor Delonix partilhado** — um worktree isola o
+código, não o estado do motor (ver "Método: um worktree por sessão").
+
+A configuração local de ferramentas de agente fica fora do repo por decisão
+registada (`cc6f9777`): `.claude/` e `CLAUDE.md` são ignorados, porque este
+repositório é público.
+
 ## Identidade e fronteira do motor (ler primeiro)
 
 Esta secção é a fonte canónica: agentes, skills, ADRs e revisões remetem para aqui, e uma
