@@ -42,6 +42,39 @@ pub fn run(cmd: HostsCmd) -> Result<()> {
     }
 }
 
+/// The single line `--off` writes, decided from the two numbers that actually
+/// determine what happened: how many names were published BEFORE the flag
+/// moved, and how many a route still declares (`sync_hosts_now` writes those
+/// back, so they stay).
+///
+/// Pure, and separate from the I/O, because all three outcomes are messages
+/// about state and the old code could only say one of them. `path` comes from
+/// `hosts_file::hosts_path()`, never the literal `/etc/hosts`.
+fn off_message(published: usize, declared: &[String], path: &str) -> String {
+    if !declared.is_empty() {
+        return super::po::tf(
+            "hosts: auto-publishing is off, but {n} name(s) stay in {path} — a route \
+             still declares them ({list}); remove the route's `hosts:` to drop them",
+            &[
+                ("n", &declared.len().to_string()),
+                ("path", path),
+                ("list", &declared.join(", ")),
+            ],
+        );
+    }
+    if published == 0 {
+        return super::po::tf(
+            "hosts: auto-publishing is off; no service names were published in {path}, \
+             so none were removed",
+            &[("path", path)],
+        );
+    }
+    super::po::tf(
+        "hosts: {n} service name(s) removed from {path}",
+        &[("n", &published.to_string()), ("path", path)],
+    )
+}
+
 fn sync(print: bool, off: bool) -> Result<()> {
     use super::ingress_proxy as p;
     if print {
@@ -68,37 +101,10 @@ fn sync(print: bool, off: bool) -> Result<()> {
         // file is named from `hosts_path()`, which honours `DELONIX_HOSTS_FILE`,
         // because the literal `/etc/hosts` was wrong whenever it was set.
         let path = super::hosts_file::hosts_path().display().to_string();
-        let declared = p::declared_host_names();
-        if declared.is_empty() && published == 0 {
-            println!(
-                "{}",
-                super::po::tf(
-                    "hosts: auto-publishing is off; no service names were published in {path}, so none were removed",
-                    &[("path", &path)]
-                )
-            );
-        } else if declared.is_empty() {
-            println!(
-                "{}",
-                super::po::tf(
-                    "hosts: {n} service name(s) removed from {path}",
-                    &[("n", &published.to_string()), ("path", &path)]
-                )
-            );
-        } else {
-            println!(
-                "{}",
-                super::po::tf(
-                    "hosts: auto-publishing is off, but {n} name(s) stay in {path} — a route \
-                     still declares them ({list}); remove the route's `hosts:` to drop them",
-                    &[
-                        ("n", &declared.len().to_string()),
-                        ("path", &path),
-                        ("list", &declared.join(", ")),
-                    ],
-                )
-            );
-        }
+        println!(
+            "{}",
+            off_message(published, &p::declared_host_names(), &path)
+        );
         return Ok(());
     }
     // Writing first: on a refusal (no root) the flag must NOT be left on, or the next
@@ -124,4 +130,65 @@ fn sync(print: bool, off: bool) -> Result<()> {
         )
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The case the fix was measured on (#806): a run that published nothing
+    /// announced a removal anyway. A removal of nothing is not a removal.
+    #[test]
+    fn nothing_published_says_so_instead_of_claiming_a_removal() {
+        let m = off_message(0, &[], "/etc/hosts");
+        assert!(
+            m.contains("no service names were published") && m.contains("none were removed"),
+            "must not claim a removal it did not make: {m}"
+        );
+    }
+
+    /// The success path `--off` always had, now carrying the count so the
+    /// operator can check it against the file.
+    #[test]
+    fn names_that_were_published_and_no_route_are_reported_as_removed() {
+        let m = off_message(3, &[], "/etc/hosts");
+        assert!(m.contains('3') && m.contains("removed"), "{m}");
+        assert!(
+            !m.contains("stay"),
+            "nothing declares these, so nothing stays: {m}"
+        );
+    }
+
+    /// The original #806: a name an HTTPRoute declares is written back by
+    /// `sync_hosts_now`, so the block SURVIVES `--off`. Announcing a removal
+    /// there was false; the names that stay are listed by name.
+    #[test]
+    fn names_a_route_declares_are_reported_as_staying_not_removed() {
+        let declared = vec!["a.example".to_string(), "b.example".to_string()];
+        let m = off_message(5, &declared, "/etc/hosts");
+        assert!(m.contains("stay"), "{m}");
+        assert!(m.contains("a.example") && m.contains("b.example"), "{m}");
+        assert!(
+            !m.contains("removed"),
+            "the block survives, so it must not say removed: {m}"
+        );
+        assert!(
+            m.contains('2') && !m.contains('5'),
+            "the count is the names that STAY, not what was published: {m}"
+        );
+    }
+
+    /// `DELONIX_HOSTS_FILE` moves the file; the message named the literal
+    /// `/etc/hosts` regardless, which was wrong whenever it was set.
+    #[test]
+    fn the_message_names_the_file_it_was_given() {
+        for m in [
+            off_message(0, &[], "/tmp/other-hosts"),
+            off_message(2, &[], "/tmp/other-hosts"),
+            off_message(1, &["x.example".to_string()], "/tmp/other-hosts"),
+        ] {
+            assert!(m.contains("/tmp/other-hosts"), "{m}");
+            assert!(!m.contains("/etc/hosts"), "{m}");
+        }
+    }
 }

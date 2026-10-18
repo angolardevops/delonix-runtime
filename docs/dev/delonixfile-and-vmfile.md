@@ -56,7 +56,7 @@ in `\` are joined; lines starting with `#` are comments. Instruction names are c
 | `ARG NAME[=default]` | Declares a build variable; `${NAME}`/`$NAME` is substituted in every later line | Allowed before `FROM` (to parameterize it). `--build-arg NAME=VALUE` overrides only a declared `ARG`. Simplification: args live in **one** scope for the whole file, not per stage. No `${NAME:-default}` forms (`substitute_vars`). |
 | `FROM <image> [AS <name>]` | Opens a stage | A later stage may also say `FROM <earlier-stage>` (see multi-stage). |
 | `RUN <shell>` | Runs in a working container via `exec` | Only `--mount=type=secret,...`/`--mount=type=cache,...` are accepted as a flag (below). |
-| `COPY [--from=<stage>] <src> <dst>` | Writes into the stage's rootfs on disk | Confined to the context/rootfs (`safe_join`, `confine_to`): `..`, absolute escapes and symlinks that leave the base are refused. |
+| `COPY [--from=<stage>] [--chmod=<octal>] [--chown=<user>[:<group>]] [--link] <src> <dst>` | Writes into the stage's rootfs on disk | Confined to the context/rootfs (`safe_join`, `confine_to`): `..`, absolute escapes and symlinks that leave the base are refused. |
 | `ADD` | **Same as `COPY`** | No URL download, no automatic archive extraction. |
 | `ENV K=V [K2="v 2" …]` or `ENV K V` | Affects later `RUN`s; final stage's `ENV` goes into the image config | Values are expanded against earlier `ENV`s (`expand_env_value`). |
 | `WORKDIR <dir>` | Working dir of later `RUN`s; final value goes into the image config | |
@@ -79,9 +79,13 @@ Treat `CPUS`/`MEMORY`/`SECURITY` as *recorded intent*; set real limits at run ti
 
 Parser behaviour worth knowing (read in the code, not a design promise):
 
-- `COPY a b c /dst` keeps only the **first** source and the **last** argument; middle sources are
-  dropped silently.
-- `COPY --chown=…`/`--chmod=…` are not recognized; the flag token would be taken as the source path.
+- `COPY a b c /dst/` copies **every** source. A multi-source `COPY` whose destination does not end
+  in `/` is refused (`DX-1407`) rather than dropping the middle sources silently.
+- `COPY`/`ADD` read `--from=`, `--chmod=`, `--chown=` and `--link` as **leading** flags. `--chmod`
+  (base 8) and `--chown` apply to what the copy writes, and a `--chown` name resolves in the
+  **target** rootfs, not on the builder's host. `--link` is accepted as a no-op. A `--…` token
+  after the first path is a path, not a flag; any other leading flag (`--parents`, `--exclude=`)
+  is refused with an error naming it.
 - `RUN --network=…`, `RUN --security=…` and any other `RUN --<flag>` are refused.
 
 ### Multi-stage, `COPY --from` and `--target`

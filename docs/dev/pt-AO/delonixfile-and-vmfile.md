@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:6f5d44ef1d7d75962027fe64967cfba35f970ea114637b5c570bd74fb528b750 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:8653fbf306da763384dfccafa74b31cc0a15a30667f42181d687019a20393916 -->
 # Delonixfile e VMfile
 
 **Antes de leres:** [Clonar, construir e testar](build-and-test.md) (um binário e um state root
@@ -62,7 +62,7 @@ instruções não distinguem maiúsculas de minúsculas.
 | `ARG NAME[=default]` | Declara uma variável de build; `${NAME}`/`$NAME` é substituído em todas as linhas seguintes | Permitido antes de `FROM` (para o parametrizar). `--build-arg NAME=VALUE` só sobrepõe um `ARG` declarado. Simplificação: os args vivem num **único** âmbito para o ficheiro inteiro, não por estágio. Sem formas `${NAME:-default}` (`substitute_vars`). |
 | `FROM <image> [AS <name>]` | Abre um estágio | Um estágio posterior também pode dizer `FROM <earlier-stage>` (ver multi-stage). |
 | `RUN <shell>` | Corre num container de trabalho via `exec` | Só `--mount=type=secret,...`/`--mount=type=cache,...` são aceites como flag (abaixo). |
-| `COPY [--from=<stage>] <src> <dst>` | Escreve no rootfs do estágio em disco | Confinado ao contexto/rootfs (`safe_join`, `confine_to`): `..`, fugas absolutas e symlinks que saem da base são recusados. |
+| `COPY [--from=<stage>] [--chmod=<octal>] [--chown=<user>[:<group>]] [--link] <src> <dst>` | Escreve no rootfs do estágio em disco | Confinado ao contexto/rootfs (`safe_join`, `confine_to`): `..`, fugas absolutas e symlinks que saem da base são recusados. |
 | `ADD` | **Igual a `COPY`** | Sem download de URL, sem extracção automática de arquivos. |
 | `ENV K=V [K2="v 2" …]` ou `ENV K V` | Afecta os `RUN`s seguintes; o `ENV` do estágio final vai para a config da imagem | Os valores são expandidos contra `ENV`s anteriores (`expand_env_value`). |
 | `WORKDIR <dir>` | Directório de trabalho dos `RUN`s seguintes; o valor final vai para a config da imagem | |
@@ -85,10 +85,13 @@ Trata `CPUS`/`MEMORY`/`SECURITY` como *intenção registada*; define os limites 
 
 Comportamento do parser que convém conhecer (lido no código, não uma promessa de desenho):
 
-- `COPY a b c /dst` mantém só a **primeira** origem e o **último** argumento; as origens do meio são
-  descartadas em silêncio.
-- `COPY --chown=…`/`--chmod=…` não são reconhecidas; o token da flag seria tomado como caminho de
-  origem.
+- `COPY a b c /dst/` copia **todas** as origens. Um `COPY` com várias origens cujo destino não
+  termina em `/` é recusado (`DX-1407`), em vez de descartar as origens do meio em silêncio.
+- `COPY`/`ADD` leem `--from=`, `--chmod=`, `--chown=` e `--link` como flags **iniciais**. `--chmod`
+  (base 8) e `--chown` aplicam-se ao que a cópia escreve, e um nome em `--chown` resolve-se no
+  rootfs de **destino**, não no host que constrói. `--link` é aceite como no-op. Um token `--…`
+  depois do primeiro caminho é um caminho, não uma flag; qualquer outra flag inicial
+  (`--parents`, `--exclude=`) é recusada com um erro que a nomeia.
 - `RUN --network=…`, `RUN --security=…` e qualquer outro `RUN --<flag>` são recusados.
 
 ### Multi-stage, `COPY --from` e `--target`

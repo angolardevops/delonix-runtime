@@ -338,6 +338,35 @@ fn write_owners(path: &Path, owners: &[Owner]) -> Result<()> {
     Ok(())
 }
 
+/// Whether a migrated container's write layer still holds `path` exactly as the
+/// flat unpack left it, so recording the image's owner for it takes nothing
+/// away. `path` is the entry under `upper/`.
+///
+/// Three answers, and only the first one adds an entry the container could
+/// object to:
+///
+/// - present and owned `0:0` — what `apply_layer_flat` writes, since it applies
+///   no ownership at all. Nobody has claimed it; the image's owner is the only
+///   one it ever had a right to.
+/// - absent — the lower serves it, and a lower layer is root-owned too (rootless
+///   cannot chown a layer to a foreign uid, which is the whole reason the index
+///   exists). Nothing of the container's is at stake.
+/// - present and owned by anyone else — the container wrote it as a mapped
+///   subuid, or the operator chowned it. Either way somebody chose that owner
+///   and the index must not name the path.
+///
+/// Any other `stat` failure (a directory the container `chmod 700`d as a subuid,
+/// which the invoking uid cannot traverse) is read as "claimed", not as absent:
+/// the entry is dropped. Dropping one costs the container an owner it already
+/// did not have; keeping one wrongly costs it an owner it does.
+fn untouched_by_the_container(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::symlink_metadata(path) {
+        Ok(m) => m.uid() == 0 && m.gid() == 0,
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 fn publish_layer_dir(tmp: &Path, dir: &Path) -> Result<()> {
     let Some(parent) = dir.parent() else {
         std::fs::rename(tmp, dir)?;
@@ -580,6 +609,48 @@ impl ImageStore {
             layers.push((dir, self.layer_owners(digest, &layers_dir)?));
         }
         Ok(crate::owners::merge(&layers))
+    }
+
+    /// Records [`Self::OWNERS_FILE`] for a container that ALREADY exists, and
+    /// says whether it did.
+    ///
+    /// For the flat→overlay migration (`migrate_flat_to_overlay`), which is the
+    /// one moment a legacy container can acquire the index at all: its flat tree
+    /// was unpacked by `apply_layer_flat`, which applies no ownership, so the
+    /// image's non-root owners are neither in the tree nor on record — and the
+    /// container is stopped, so there is no init to race.
+    ///
+    /// `false` when `container_id` is not overlay-backed. The index is a sibling
+    /// of `merged/` and the init reads it beside whatever rootfs it was given,
+    /// so one left next to a FLAT `rootfs/` would be applied to the container's
+    /// own tree by the next start, whether or not the migration that wrote it
+    /// ever committed. Gating on [`Self::LOWERS_FILE`] — the migration's commit
+    /// point — makes that impossible here instead of trusting every caller to
+    /// check first.
+    ///
+    /// Only the entries the flat unpack LEFT UNTOUCHED are recorded, and that
+    /// is what separates this from `prepare_overlay`'s index. A container made
+    /// by the current binary gets its index before it has run once, so applying
+    /// it cannot overwrite anything of its own. This one is handed to a
+    /// container that has already lived: `apply_image_owners` chowns every path
+    /// the index names, and since PR #886 it does so whatever uid the first
+    /// process has, so an `overlay-owners` naming a path the operator chowned
+    /// INSIDE the container would revert it on the next start — once, because
+    /// the init then marks the index applied. `untouched_by_the_container`
+    /// keeps those paths out.
+    pub fn record_container_owners(&self, image: &Image, container_id: &str) -> Result<bool> {
+        let base = self.container_dir(container_id);
+        if !base.join(Self::LOWERS_FILE).exists() {
+            return Ok(false);
+        }
+        let upper = base.join("upper");
+        let owners: Vec<Owner> = self
+            .image_owners(image)?
+            .into_iter()
+            .filter(|o| untouched_by_the_container(&upper.join(&o.path)))
+            .collect();
+        write_owners(&base.join(Self::OWNERS_FILE), &owners)?;
+        Ok(true)
     }
 
     /// One layer's owners: its sidecar, or — for a layer an older engine
@@ -1249,6 +1320,111 @@ mod parallel_extract_tests {
         let bad_dir = root.join("layers").join(crate::cas::strip(&bad));
         assert!(!bad_dir.join(".extracted").exists());
         assert!(scratch_left(root).is_empty(), "{:?}", scratch_left(root));
+    }
+
+    /// A layer whose single file belongs to `uid:gid`.
+    fn layer_owned(name: &str, uid: u64, gid: u64) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_size(1);
+        h.set_mode(0o644);
+        h.set_uid(uid);
+        h.set_gid(gid);
+        b.append_data(&mut h, name, &b"x"[..]).unwrap();
+        b.into_inner().unwrap()
+    }
+
+    /// ADR-0062 for a container the flat→overlay migration converted: the index
+    /// is recorded for the COMMITTED overlay and refused for anything else.
+    ///
+    /// The migration is the only moment such a container can get one — its flat
+    /// tree never carried the owners and never had an index — and the gate is
+    /// what keeps a migration that declined, or one that reverted, from leaving
+    /// an index beside a flat `rootfs/` for the next start to apply to the
+    /// container's own tree.
+    #[test]
+    fn an_owners_index_is_recorded_only_once_the_migration_has_committed() {
+        let (s, tmp) = store();
+        let d = s
+            .cas()
+            .write(&layer_owned("srv/app.conf", 101, 102))
+            .unwrap();
+        let img = image(vec![d]);
+        let base = tmp.path().join("containers/legacy");
+        std::fs::create_dir_all(base.join("upper")).unwrap();
+
+        // Mid-migration, or a migration that gave up: still flat, no index.
+        assert!(!s.record_container_owners(&img, "legacy").unwrap());
+        assert!(!base.join(ImageStore::OWNERS_FILE).exists());
+
+        // The commit point, as `__ovlmigrate` renames it into place.
+        std::fs::write(base.join(ImageStore::LOWERS_FILE), b"/layers/x").unwrap();
+        assert!(s.record_container_owners(&img, "legacy").unwrap());
+        let bytes = std::fs::read(base.join(ImageStore::OWNERS_FILE)).unwrap();
+        let owners = delonix_compute::owners::decode(&bytes);
+        assert_eq!(owners.len(), 1, "{owners:?}");
+        assert_eq!(owners[0].path, std::path::Path::new("srv/app.conf"));
+        assert_eq!((owners[0].uid, owners[0].gid), (101, 102));
+        // Nothing marks them applied here: that is the init's to write, once.
+        assert!(!base.join("overlay-owners.applied").exists());
+    }
+
+    /// The index handed to a container that has ALREADY LIVED names only what
+    /// the flat unpack left untouched.
+    ///
+    /// Since PR #886 the init applies the index whatever uid the container's
+    /// first process has, so every path named here is chowned to the image's
+    /// ids on the next start — and the init then marks it applied, which makes
+    /// the overwrite permanent and unrepeatable. A path the operator chowned
+    /// inside the container must therefore never reach the index, while a path
+    /// the container never touched still must, or the migration loses the gain
+    /// it exists for.
+    ///
+    /// `var/lib/app/data` stands for the operator's `chown`: as root the test
+    /// sets it to `201:202`, and as a normal user creating it is already enough
+    /// — either way its owner is not `0:0`, which is the whole signal.
+    #[test]
+    fn a_path_the_container_owns_is_left_out_of_the_recorded_index() {
+        use std::os::unix::fs::MetadataExt;
+        let (s, tmp) = store();
+        let untouched = s
+            .cas()
+            .write(&layer_owned("srv/app.conf", 101, 102))
+            .unwrap();
+        let claimed = s
+            .cas()
+            .write(&layer_owned("var/lib/app/data", 201, 202))
+            .unwrap();
+        let img = image(vec![untouched, claimed]);
+        let base = tmp.path().join("containers/legacy");
+        std::fs::create_dir_all(base.join("upper/var/lib/app")).unwrap();
+        std::fs::write(base.join(ImageStore::LOWERS_FILE), b"/layers/x").unwrap();
+
+        // The operator's chown, surviving in the write layer. `srv/app.conf` is
+        // deliberately NOT in `upper/`: the lower serves it, root-owned, and it
+        // is the entry the migration must still record.
+        let claimed_path = base.join("upper/var/lib/app/data");
+        std::fs::write(&claimed_path, b"operator data").unwrap();
+        let _ = std::os::unix::fs::lchown(&claimed_path, Some(201), Some(202));
+        let m = std::fs::symlink_metadata(&claimed_path).unwrap();
+        assert!(
+            m.uid() != 0 || m.gid() != 0,
+            "the fixture must be owned by somebody, or this test proves nothing"
+        );
+
+        assert!(s.record_container_owners(&img, "legacy").unwrap());
+        let bytes = std::fs::read(base.join(ImageStore::OWNERS_FILE)).unwrap();
+        let owners = delonix_compute::owners::decode(&bytes);
+        let paths: Vec<_> = owners
+            .iter()
+            .map(|o| o.path.display().to_string())
+            .collect();
+        assert_eq!(
+            paths,
+            vec!["srv/app.conf".to_string()],
+            "the claimed path must not be in the index"
+        );
+        assert_eq!((owners[0].uid, owners[0].gid), (101, 102));
     }
 }
 

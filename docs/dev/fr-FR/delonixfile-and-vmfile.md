@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:6f5d44ef1d7d75962027fe64967cfba35f970ea114637b5c570bd74fb528b750 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:8653fbf306da763384dfccafa74b31cc0a15a30667f42181d687019a20393916 -->
 # Delonixfile et VMfile
 
 **Avant de lire :** [Cloner, construire et tester](build-and-test.md) (un binaire et une racine d'état isolée) et [Images OCI, stockage adressé par contenu et overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs) dans le manuel de cloud native.
@@ -60,7 +60,7 @@ commentaires. Les noms d'instructions ne sont pas sensibles à la casse.
 | `ARG NAME[=default]` | Déclare une variable de build ; `${NAME}`/`$NAME` est substitué dans toutes les lignes suivantes | Autorisé avant `FROM` (pour le paramétrer). `--build-arg NAME=VALUE` ne surcharge qu'un `ARG` déclaré. Simplification : les arguments vivent dans **une seule** portée pour tout le fichier, et non par étape. Pas de formes `${NAME:-default}` (`substitute_vars`). |
 | `FROM <image> [AS <name>]` | Ouvre une étape | Une étape ultérieure peut aussi écrire `FROM <earlier-stage>` (voir multi-étapes). |
 | `RUN <shell>` | S'exécute dans un container de travail via `exec` | Seuls `--mount=type=secret,...`/`--mount=type=cache,...` sont acceptés comme options (voir plus bas). |
-| `COPY [--from=<stage>] <src> <dst>` | Écrit dans le rootfs de l'étape sur disque | Confiné au contexte/rootfs (`safe_join`, `confine_to`) : `..`, les évasions absolues et les liens symboliques qui sortent de la base sont refusés. |
+| `COPY [--from=<stage>] [--chmod=<octal>] [--chown=<user>[:<group>]] [--link] <src> <dst>` | Écrit dans le rootfs de l'étape sur disque | Confiné au contexte/rootfs (`safe_join`, `confine_to`) : `..`, les évasions absolues et les liens symboliques qui sortent de la base sont refusés. |
 | `ADD` | **Identique à `COPY`** | Pas de téléchargement d'URL, pas d'extraction automatique d'archive. |
 | `ENV K=V [K2="v 2" …]` ou `ENV K V` | Affecte les `RUN` suivants ; l'`ENV` de l'étape finale va dans la configuration de l'image | Les valeurs sont développées à partir des `ENV` précédents (`expand_env_value`). |
 | `WORKDIR <dir>` | Répertoire de travail des `RUN` suivants ; la valeur finale va dans la configuration de l'image | |
@@ -84,10 +84,14 @@ câblez, mettez à jour ce tableau.
 
 Comportements du parseur bons à connaître (lus dans le code, pas une promesse de conception) :
 
-- `COPY a b c /dst` ne conserve que la **première** source et le **dernier** argument ; les sources
-  intermédiaires sont abandonnées silencieusement.
-- `COPY --chown=…`/`--chmod=…` ne sont pas reconnus ; le jeton de l'option serait pris comme chemin
-  source.
+- `COPY a b c /dst/` copie **toutes** les sources. Un `COPY` à plusieurs sources dont la destination
+  ne termine pas par `/` est refusé (`DX-1407`), au lieu d'abandonner silencieusement les sources
+  intermédiaires.
+- `COPY`/`ADD` lisent `--from=`, `--chmod=`, `--chown=` et `--link` comme des options **de tête**.
+  `--chmod` (base 8) et `--chown` s'appliquent à ce que la copie écrit, et un nom donné à `--chown`
+  est résolu dans le rootfs **cible**, pas sur l'hôte qui construit. `--link` est accepté comme un
+  no-op. Un jeton `--…` placé après le premier chemin est un chemin, pas une option ; toute autre
+  option de tête (`--parents`, `--exclude=`) est refusée avec une erreur qui la nomme.
 - `RUN --network=…`, `RUN --security=…` et toute autre option `RUN --<flag>` sont refusés.
 
 ### Multi-étapes, `COPY --from` et `--target`

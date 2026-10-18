@@ -292,7 +292,22 @@ pub(crate) fn migrate_flat_to_overlay(images: &ImageStore, id: &str, image: &str
         // The helper reverts its own half; this only clears the marker it read,
         // so a later start finds the same clean starting point.
         let _ = std::fs::remove_file(&pending);
+        return;
     }
+    // The image's non-root owners, which this container has NEVER had: its flat
+    // tree came from `apply_layer_flat`, which applies no ownership, and the
+    // `chown_tree(…, USERNS_UID_BASE)` that followed the copy never did anything
+    // (see `prepare_container_rootfs`) — so they are neither in the tree nor on
+    // record, and without this a migrated container keeps starting with the
+    // root-owned rootfs the flat copy gave it.
+    //
+    // AFTER the commit, and `let _` on purpose: this is step 5 of the order in
+    // `ovlmigrate`, pure gain that may fail freely. A start must never fail for
+    // it — a container with no index is exactly the container we had before.
+    // `record_container_owners` refuses unless the commit actually happened, so
+    // a helper that legitimately declined (nothing to migrate, or an incomplete
+    // flat tree) and still exited 0 leaves its flat `rootfs/` without one.
+    let _ = images.record_container_owners(&img, id);
 }
 
 /// Silences the engine's cgroup-delegation warning in every process spawned

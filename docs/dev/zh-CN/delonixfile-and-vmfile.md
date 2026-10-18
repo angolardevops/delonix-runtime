@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:6f5d44ef1d7d75962027fe64967cfba35f970ea114637b5c570bd74fb528b750 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:8653fbf306da763384dfccafa74b31cc0a15a30667f42181d687019a20393916 -->
 # Delonixfile 与 VMfile
 
 **阅读之前：**[克隆、构建与测试](build-and-test.md)（一个二进制程序和一个隔离的状态根目录），以及云原生入门里的[OCI 镜像、按内容寻址的存储与 overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs)一节。
@@ -57,7 +57,7 @@ delonix build -t myapp:dev -f build/Other .  # explicit file
 | `ARG NAME[=default]` | 声明一个构建变量；之后每一行里的 `${NAME}`/`$NAME` 都会被替换 | 允许出现在 `FROM` 之前（用来给它传参）。`--build-arg NAME=VALUE` 只能覆盖一个已声明的 `ARG`。简化之处：变量的作用域是**整个文件**，而不是按阶段划分。不支持 `${NAME:-default}` 这种形式（`substitute_vars`）。 |
 | `FROM <image> [AS <name>]` | 打开一个阶段 | 更靠后的阶段也可以写 `FROM <earlier-stage>`（见多阶段构建）。 |
 | `RUN <shell>` | 通过 `exec` 在一个工作容器里运行 | 作为参数只接受 `--mount=type=secret,...`/`--mount=type=cache,...`（见下文）。 |
-| `COPY [--from=<stage>] <src> <dst>` | 写入该阶段磁盘上的根文件系统 | 被限制在 context/rootfs 之内（`safe_join`、`confine_to`）：`..`、绝对路径的逃逸，以及离开 base 的符号链接都会被拒绝。 |
+| `COPY [--from=<stage>] [--chmod=<octal>] [--chown=<user>[:<group>]] [--link] <src> <dst>` | 写入该阶段磁盘上的根文件系统 | 被限制在 context/rootfs 之内（`safe_join`、`confine_to`）：`..`、绝对路径的逃逸，以及离开 base 的符号链接都会被拒绝。 |
 | `ADD` | **和 `COPY` 一样** | 不支持 URL 下载，也不会自动解压归档。 |
 | `ENV K=V [K2="v 2" …]` 或 `ENV K V` | 影响之后的各个 `RUN`；最后一个阶段的 `ENV` 会写进镜像配置 | 值会针对更早的 `ENV` 做展开（`expand_env_value`）。 |
 | `WORKDIR <dir>` | 之后各个 `RUN` 的工作目录；最终的值会写进镜像配置 | |
@@ -81,8 +81,8 @@ delonix build -t myapp:dev -f build/Other .  # explicit file
 
 值得了解的解析器行为（是从代码里读出来的，不是一个设计上的承诺）：
 
-- `COPY a b c /dst` 只保留**第一个**源和**最后一个**参数；中间的源会被悄悄丢掉。
-- `COPY --chown=…`/`--chmod=…` 不被识别；那个参数 token 会被当成源路径来处理。
+- `COPY a b c /dst/` 会复制**每一个**源。多源的 `COPY` 如果目标不以 `/` 结尾，会被拒绝（`DX-1407`），而不是悄悄丢掉中间的源。
+- `COPY`/`ADD` 把 `--from=`、`--chmod=`、`--chown=` 和 `--link` 当作**前置**参数来读。`--chmod`（八进制）和 `--chown` 作用于这次复制所写入的内容，其中 `--chown` 的名字是在**目标** rootfs 里解析的，不是在构建用的主机上。`--link` 被接受但不做任何事。第一个路径之后的 `--…` token 是路径，不是参数；任何其他前置参数（`--parents`、`--exclude=`）都会被拒绝，错误信息里会指出是哪一个。
 - `RUN --network=…`、`RUN --security=…`，以及其他任何 `RUN --<flag>` 都会被拒绝。
 
 ### 多阶段构建、`COPY --from` 与 `--target`
