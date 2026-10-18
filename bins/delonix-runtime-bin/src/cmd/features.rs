@@ -141,10 +141,14 @@ pub(crate) const FEATURES: &[Feature] = &[
     Feature {
         name: "Docker Engine API",
         level: Level::Experimental,
-        evidence: "`serve docker-api --matrix` publishes served/refused/missing with the \
-                   version; of the 21 routes real tooling calls, 7 are refused — the pull \
-                   is served since M02, and `create` answers with the id while the \
-                   container runs (measured 2026-10-16: 0.055-0.494 s for a `sleep 300`)",
+        evidence: "`delonix compatibility docker` publishes served/refused/missing with the \
+                   version: 15 of the 26 published routes are served and 11 are refused \
+                   with a reason; of the 21 routes real tooling calls, 7 are refused — \
+                   `logs` and `exec` among them, so kind and Testcontainers cannot finish a \
+                   run, which is why this stays experimental. The pull is served since M02, \
+                   and `create` answers with the id while the container runs (2026-10-18, \
+                   docker-py 7.2.0 driving tests/compat/docker_api_smoke.py: 19/19 checks, \
+                   0.109 s against a 60 s workload)",
     },
     Feature {
         name: "Proxmox VM backend",
@@ -308,6 +312,59 @@ mod tests {
             fleet.evidence.contains("DOES NOT EXIST"),
             "the fleet row must say the capability is absent, not merely immature"
         );
+    }
+
+    /// **The sentence and the matrix change in the same commit, or this fails.**
+    ///
+    /// The `Docker Engine API` row quotes four counts, and the lists that
+    /// produce them live in [`crate::cmd::dockerapi`]. This module's header
+    /// says prose drifts; the Docker row is where it would drift first, because
+    /// a route moving between `API_MATRIX` and `API_UNIMPLEMENTED` changes the
+    /// counts without touching this file.
+    ///
+    /// So the counts are read back out of [`crate::cmd::dockerapi::matrix_json`]
+    /// — the SAME payload `delonix compatibility docker -o json` publishes, so
+    /// the command and this sentence cannot disagree — and the test asserts the
+    /// whole PHRASE, not the bare digits: `7` would otherwise be satisfied by
+    /// the `7.2.0` in the client version.
+    ///
+    /// Measured 2026-10-18 on `5b65a74b` (engine 5.1.1): 15 served, 11 refused
+    /// (26 published), and 21 routes real tooling calls of which 7 are refused.
+    #[test]
+    fn the_docker_api_evidence_quotes_the_matrix_it_is_built_from() {
+        let v = crate::cmd::dockerapi::matrix_json();
+        let served = v["served"].as_array().expect("served is a list").len();
+        let refused = v["refused"].as_array().expect("refused is a list").len();
+        let upstream = v["upstreamUsed"]
+            .as_array()
+            .expect("upstreamUsed is a list");
+        let upstream_refused = upstream.iter().filter(|r| r["state"] == "refused").count();
+
+        let evidence = FEATURES
+            .iter()
+            .find(|f| f.name == "Docker Engine API")
+            .expect("the Docker Engine API row")
+            .evidence;
+
+        for phrase in [
+            format!(
+                "{served} of the {} published routes are served and {refused} are refused",
+                served + refused
+            ),
+            format!(
+                "of the {} routes real tooling calls, {upstream_refused} are refused",
+                upstream.len()
+            ),
+        ] {
+            assert!(
+                evidence.contains(&phrase),
+                "the Docker Engine API evidence no longer matches the matrix it quotes.\n  \
+                 expected to find: {phrase:?}\n  evidence reads: {evidence:?}\nA route moved \
+                 between API_MATRIX/API_UNIMPLEMENTED/API_UPSTREAM_USED: update the sentence \
+                 in the SAME commit, so `delonix compatibility docker` and `delonix features` \
+                 cannot tell a reader two different things."
+            );
+        }
     }
 
     #[test]
