@@ -3748,18 +3748,11 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     // `nobody`): the pivot_root and the files go to the host overlay (which accepts
     // the host uid). Without a user ns, it mounts `/dev` right away (bind of the host's real nodes).
     // With a user ns, `/dev` is mounted next, after the setuid — see below.
-    // What a non-root user will need, read NOW: after `pivot_root` neither the
-    // container's own directory nor a volume's host path is visible. Applied
-    // further down, at the user switch (see `apply_image_owners`).
-    let non_root = run_uid.filter(|u| *u != 0);
-    let image_owners = match non_root {
-        Some(_) => pending_image_owners(rootfs),
-        None => Vec::new(),
-    };
-    let fresh_volumes = match non_root {
-        Some(_) => empty_named_volumes(mounts),
-        None => Vec::new(),
-    };
+    // Read NOW, while the container's own directory and the volumes' host paths
+    // are still visible — after `pivot_root` neither is. Applied further down
+    // (see `apply_image_owners`).
+    let (image_owners, fresh_volumes) =
+        pending_owner_work(rootfs, run_uid.filter(|u| *u != 0), mounts);
     if let Err(e) = setup_rootfs(
         rootfs,
         hostname,
@@ -3871,9 +3864,9 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     // volume and the failure surfaced two steps later, in the restore.
     //
     // Deliberately BEFORE the confinement work below (caps, seccomp,
-    // `verify_confinement`, apparmor) and before `chown_tree_once`, which walks
-    // the whole rootfs for an image with a non-root `USER`: none of those change
-    // what a joiner sees, and making `run -d` wait for a full-tree chown would
+    // `verify_confinement`, apparmor) and before `apply_image_owners`, which
+    // walks the entries the image gives to someone other than root: none of
+    // those change what a joiner sees, and making `run -d` wait on them would
     // trade one real defect for a visible slowdown.
     //
     // CLOEXEC (set by the `pipe2` in `spawn`): if this init dies before getting
@@ -3887,6 +3880,20 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
             libc::close(w);
         }
     }
+    // The container gets what the IMAGE gives, and nothing else (ADR-0062).
+    //
+    // This used to be `chown -R uid:gid /`: measured, it made a non-root user
+    // the owner of 940 of 986 entries of its root filesystem — it could write
+    // `/etc/passwd` and replace its own binary — and the walk crossed mount
+    // points, so a bind-mounted HOST directory was re-owned to a subuid and its
+    // owner could no longer write his own files.
+    //
+    // Outside the user-switch block below, because the ownership is the image's
+    // and not the switch's — see `pending_owner_work` for the defect that
+    // standing inside it caused. Here CAP_CHOWN is still held (the switch keeps
+    // it, and `drop_capabilities` is further down) and `pivot_root` has already
+    // happened, so every path resolves inside the container.
+    apply_image_owners(&image_owners);
     // image `USER` (≠ root): switch to the requested uid/gid HERE, while the
     // capabilities to do it are still held — and keep them across the switch
     // (`PR_SET_KEEPCAPS`), so the confinement below narrows them exactly as it
@@ -3908,14 +3915,6 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     let mut user_switched = false;
     if let Some(uid) = run_uid.filter(|u| *u != 0) {
         let gid = run_gid.unwrap_or(uid);
-        // The user gets what the IMAGE gives it, and nothing else (ADR-0062).
-        //
-        // This used to be `chown -R uid:gid /`: measured, it made a non-root
-        // user the owner of 940 of 986 entries of its root filesystem — it could
-        // write `/etc/passwd` and replace its own binary — and the walk crossed
-        // mount points, so a bind-mounted HOST directory was re-owned to a subuid
-        // and its owner could no longer write his own files.
-        apply_image_owners(&image_owners);
         own_fresh_volumes(&fresh_volumes, &image_owners, uid, gid);
         // The stdout/stderr are the log_shim's pipe, created as uid 0. "unprivileged"
         // images (nginx, etc.) link /var/log/.../*.log → /dev/stdout
@@ -4195,6 +4194,50 @@ pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
             rec(&p, uid, gid, 0);
         }
     }
+}
+
+/// The ownership work a container's init owes its rootfs, read while the
+/// container's directory and the volumes' host paths are still visible: the
+/// image's own owners, and the empty named volumes to hand to its user.
+///
+/// The two halves are gated differently on purpose, and getting that wrong was
+/// a real defect.
+///
+/// The image's owners go to EVERY container, whatever uid its first process
+/// has. They used to be read only for a non-root `run_uid`, and that gate was
+/// the whole of a bug reported as "`build` loses ownership when it commits a
+/// layer". Measured on a commit over `nginx-unprivileged`: the committed
+/// layer's tar and its `.owners` sidecar both carried `101 0 etc/nginx` and
+/// `0 42 etc/shadow` correctly, and a container of that image still read `0 0`
+/// for both — because the Dockerfile's `USER root` closed this gate. The same
+/// image forced to `--user 101` showed 101 and 42, and a PULLED
+/// `nginx-unprivileged` forced to `--user 0` lost them identically. `build` was
+/// never the variable; the uid of the first process was.
+///
+/// A root first process needs them as much as a non-root one. The usual shape
+/// of nginx, postgres and every `gosu`/`su-exec` entrypoint is a root master
+/// that drops to its own user, and `/var/cache/nginx` owned by root is exactly
+/// what breaks then — with the failure landing inside the image's entrypoint,
+/// far from here. `/etc/shadow`'s `gid=42` backs the setgid `unix_chkpwd`.
+/// Docker and Podman have no equivalent gate: they unpack each layer with its
+/// tar ownership, so an image's owners are its container's whoever runs. This
+/// index exists to emulate that (ADR-0062), and withholding it from root
+/// containers made the emulation diverge from what it emulates.
+///
+/// The fresh volumes stay gated: "an empty named volume belongs to the
+/// container's user" has no meaning when that user is root, which already owns
+/// the unpacked tree (see [`own_fresh_volumes`]).
+fn pending_owner_work(
+    rootfs: &str,
+    non_root: Option<u32>,
+    mounts: &[Mount],
+) -> (Vec<delonix_compute::owners::Owner>, Vec<String>) {
+    let owners = pending_image_owners(rootfs);
+    let fresh = match non_root {
+        Some(_) => empty_named_volumes(mounts),
+        None => Vec::new(),
+    };
+    (owners, fresh)
 }
 
 /// The image's non-root owners for this container, when they have not been
@@ -11498,6 +11541,47 @@ mod tests {
         // The earlier call found no index and must not have marked it applied.
         assert_eq!(pending_image_owners(&rootfs), owners);
         assert!(pending_image_owners(&rootfs).is_empty(), "second start");
+    }
+
+    /// An image's ownership is its container's whatever uid the first process
+    /// has — only the FRESH VOLUMES are a non-root user's business.
+    ///
+    /// The regression this pins: the owners used to be read only for a non-root
+    /// `run_uid`, so a container whose image says `USER root` got an empty list
+    /// and a root filesystem flattened to `0:0` while the correct answer sat on
+    /// disk beside its `merged/`. It read as a `build` defect because a
+    /// Dockerfile's `USER root` is what closes the gate — see
+    /// [`pending_owner_work`].
+    #[test]
+    fn a_root_container_gets_the_images_owners_too() {
+        let owners = vec![delonix_compute::owners::Owner {
+            path: "etc/nginx".into(),
+            uid: 101,
+            gid: 0,
+        }];
+        let index = delonix_compute::owners::encode(&owners);
+        let prepared = || {
+            let tmp = tempfile::tempdir().unwrap();
+            let rootfs = tmp.path().join("merged");
+            std::fs::create_dir_all(&rootfs).unwrap();
+            std::fs::write(
+                tmp.path().join(delonix_compute::owners::OWNERS_FILE),
+                &index,
+            )
+            .unwrap();
+            (tmp, rootfs.to_string_lossy().into_owned())
+        };
+
+        // The first process is root: the image's owners still arrive.
+        let (_tmp, rootfs) = prepared();
+        let (got, fresh) = pending_owner_work(&rootfs, None, &[]);
+        assert_eq!(got, owners, "a root container must get the image's owners");
+        assert!(fresh.is_empty(), "no mounts, no fresh volumes");
+
+        // A non-root first process gets exactly the same owners.
+        let (_tmp, rootfs) = prepared();
+        let (got, _) = pending_owner_work(&rootfs, Some(101), &[]);
+        assert_eq!(got, owners, "the uid must not change the owners");
     }
 
     /// Host ids as the container sees them: the invoking id is root, a subid is
