@@ -1317,10 +1317,16 @@ fn main() {
     }
     // The retry of a build `COPY` inside the mapped user namespace. Silent:
     // the caller already holds the error of the first attempt and reports it.
-    if raw.len() == 8 && raw[1] == "__copyin" {
+    if raw.len() == 10 && raw[1] == "__copyin" {
         let context = std::path::Path::new(&raw[2]);
         let ignore =
             (raw[7] == "1").then(|| delonix_oci::dockerignore::DockerIgnore::load(context));
+        // `--chmod`/`--chown`, as serialized by `copy_into_rootfs`: an octal
+        // mode and the verbatim owner spec, each empty when the instruction
+        // did not carry the flag. The mode is re-parsed from base 8 — the
+        // same base it was written in — so a round trip cannot change it.
+        let chmod = u32::from_str_radix(&raw[8], 8).ok();
+        let chown = (!raw[9].is_empty()).then_some(raw[9].as_str());
         let done = cmd::build::copy_into_rootfs_here(
             context,
             &raw[3],
@@ -1328,6 +1334,7 @@ fn main() {
             &raw[5],
             &raw[6],
             ignore.as_ref(),
+            cmd::build::CopyAttrs { chmod, chown },
         );
         std::process::exit(i32::from(done.is_err()));
     }

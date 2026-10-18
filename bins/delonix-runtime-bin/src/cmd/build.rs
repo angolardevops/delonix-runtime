@@ -454,10 +454,28 @@ fn step_title(step: &Step) -> Option<String> {
     const MAX: usize = 60;
     let raw = match step {
         Step::Run(r) => format!("RUN {}", r.cmdline),
-        Step::Copy { src, dst, from } => match from {
-            Some(f) => format!("COPY --from={f} {src} {dst}"),
-            None => format!("COPY {src} {dst}"),
-        },
+        // As written, flags included: `--chmod`/`--chown` change what the
+        // instruction DOES, so a progress line that hid them would stop
+        // identifying which of two otherwise-identical COPYs is running.
+        Step::Copy {
+            src,
+            dst,
+            from,
+            chmod,
+            chown,
+        } => {
+            let mut f = String::from("COPY");
+            if let Some(stage) = from {
+                f.push_str(&format!(" --from={stage}"));
+            }
+            if let Some(m) = chmod {
+                f.push_str(&format!(" --chmod={m:o}"));
+            }
+            if let Some(o) = chown {
+                f.push_str(&format!(" --chown={o}"));
+            }
+            format!("{f} {src} {dst}")
+        }
         // `ENV`/`WORKDIR` não tocam no rootfs — mudam estado em memória e
         // devolvem no mesmo instante. Um passo para elas seria um lampejo de
         // cromagem sobre trabalho que ninguém esperou, o mesmo argumento que
@@ -569,6 +587,8 @@ fn build_one_stage(
                     src,
                     dst,
                     from: copy_from,
+                    chmod,
+                    chown,
                 } => {
                     let (hash_src_path, src_root, stage_rel) =
                         resolve_copy_source(context, stages, src, copy_from)?;
@@ -585,9 +605,19 @@ fn build_one_stage(
                     // ignored file is not copied, so it does not move the key.
                     let content_hash = hash_path_content(&hash_src_path, &stage_rel, filter)
                         .unwrap_or_else(|_| "unreadable".into());
+                    // The mode and the owner are part of the key for the same
+                    // reason the content is: changing `--chmod=755` to `644`
+                    // leaves src, dst and bytes identical, so without them the
+                    // next build would clone a cached rootfs carrying the OLD
+                    // permissions and report success.
+                    let perm_key = format!(
+                        "{}:{}",
+                        chmod.map(|m| format!("{m:o}")).unwrap_or_default(),
+                        chown.as_deref().unwrap_or("")
+                    );
                     let new_hash = hash_link(
                         &chain_hash,
-                        &format!("COPY:{stage_rel}:{dst}:{content_hash}"),
+                        &format!("COPY:{stage_rel}:{dst}:{content_hash}:{perm_key}"),
                     );
                     if use_cache {
                         if let Some((cid, crootfs)) = try_clone_cached(images, &new_hash)? {
@@ -613,7 +643,18 @@ fn build_one_stage(
                         from,
                         rootless,
                     )?;
-                    copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir, filter)?;
+                    copy_into_rootfs(
+                        src_root,
+                        &cur_rootfs,
+                        &stage_rel,
+                        dst,
+                        &cur_workdir,
+                        filter,
+                        CopyAttrs {
+                            chmod: *chmod,
+                            chown: chown.as_deref(),
+                        },
+                    )?;
                     if use_cache {
                         save_to_cache(&new_hash, &cur_rootfs);
                     }
@@ -1745,6 +1786,15 @@ fn canonical_base(p: &Path) -> Result<PathBuf> {
 /// `Permission denied`. So a failed copy is repeated inside the mapped user
 /// namespace, where this user is root over the whole range. What it writes
 /// there is owned by uid 0 of the namespace, as a `COPY` is in Docker.
+/// The `--chmod`/`--chown` of one `COPY`, as written in the Dockerfile and
+/// still unresolved — grouped so the copy helpers take one attribute
+/// parameter instead of two more positional `Option`s.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CopyAttrs<'a> {
+    pub(crate) chmod: Option<u32>,
+    pub(crate) chown: Option<&'a str>,
+}
+
 fn copy_into_rootfs(
     context: &Path,
     rootfs: &str,
@@ -1752,17 +1802,142 @@ fn copy_into_rootfs(
     dst: &str,
     workdir: &str,
     ignore: Option<&DockerIgnore>,
+    attrs: CopyAttrs<'_>,
 ) -> Result<()> {
-    let direct = copy_into_rootfs_here(context, rootfs, src, dst, workdir, ignore);
+    let (chmod, chown) = (attrs.chmod, attrs.chown);
+    // **A rootless `--chown` must not be attempted here.** The ids in a
+    // `--chown` are the CONTAINER's, and rootless maps them (`0 <own> 1`,
+    // then `1 USERNS_UID_BASE …`): container 0 is the invoking user on the
+    // host, container 101 is host 100100. A plain `lchown(f, 1000, 1000)` run
+    // as uid 1000 therefore does not write container-1000 — it writes the
+    // invoking user, which packages back as container 0, and it SUCCEEDS
+    // while doing it (chowning a file you own to yourself needs no
+    // privilege). That spurious success is the trap: it would never fall
+    // through to the retry below, and `--chown=1000:1000` would land as root
+    // — measured, before this guard existed. Only inside the mapped user
+    // namespace does `lchown` take container ids, so go straight there.
+    let wants_chown = chown.is_some_and(|c| !c.is_empty());
+    // Resolve the name HERE even when the copy itself is about to be handed
+    // to the child: reading the rootfs's `/etc/passwd` needs no privilege,
+    // and the child is deliberately silent (the comment below), so a
+    // `--chown=typo` resolved only there would surface as the generic
+    // namespace message instead of "unknown user 'typo'".
+    if let Some(spec) = chown.filter(|_| wants_chown) {
+        resolve_chown(Path::new(rootfs), spec)?;
+    }
+    let direct = if wants_chown && runtime::is_rootless() {
+        Err(Error::Invalid(
+            "COPY --chown: rootless needs a mapped user namespace (newuidmap/newgidmap \
+             from the `uidmap` package) to set an owner other than your own"
+                .to_string(),
+        ))
+    } else {
+        copy_into_rootfs_here(context, rootfs, src, dst, workdir, ignore, attrs)
+    };
     let Err(e) = direct else { return Ok(()) };
     let ctx = context.to_string_lossy();
     // The rules are a property of the context: the retry reloads them there
     // rather than carrying them across the re-exec.
     let filtered = if ignore.is_some() { "1" } else { "0" };
-    match runtime::reexec_mapped(&["__copyin", &ctx, rootfs, src, dst, workdir, filtered]) {
+    // `--chown` is the reason this retry matters more than it used to: an
+    // unprivileged uid cannot `lchown` a file to anyone else, so the direct
+    // attempt fails with EPERM and only the mapped user namespace can do it.
+    // Empty string means "not given" for both — neither a mode nor an owner
+    // spell as the empty string, so there is nothing to confuse it with.
+    let mode = chmod.map(|m| format!("{m:o}")).unwrap_or_default();
+    let owner = chown.unwrap_or("");
+    match runtime::reexec_mapped(&[
+        "__copyin", &ctx, rootfs, src, dst, workdir, filtered, &mode, owner,
+    ]) {
         Some(true) => Ok(()),
         _ => Err(e),
     }
+}
+
+/// The `--chmod`/`--chown` of one `COPY`, resolved against the target rootfs
+/// and ready to apply to each entry the copy writes.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CopyPerms {
+    mode: Option<u32>,
+    owner: Option<(u32, u32)>,
+}
+
+impl CopyPerms {
+    /// Applies the mode and the owner to one entry the copy just wrote.
+    ///
+    /// Order matters: the owner goes on LAST. A `chown` by a privileged user
+    /// clears setuid/setgid on the file, so doing it after `chmod` would
+    /// silently drop the very bits a `--chmod=4755` asked for.
+    fn apply(&self, path: &Path, is_symlink: bool) -> Result<()> {
+        // A symbolic link has no mode of its own on Linux — `chmod` would
+        // follow it and change the target instead, which is the trap
+        // `owners::restore_special_mode` already documents. It does have an
+        // owner, which `lchown` sets without following.
+        if let Some(m) = self.mode.filter(|_| !is_symlink) {
+            std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(m))
+                .map_err(|e| Error::Invalid(format!("chmod {:o} {}: {e}", m, path.display())))?;
+        }
+        if let Some((uid, gid)) = self.owner {
+            std::os::unix::fs::lchown(path, Some(uid), Some(gid)).map_err(|e| {
+                Error::Invalid(format!("chown {uid}:{gid} {}: {e}", path.display()))
+            })?;
+        }
+        Ok(())
+    }
+}
+
+/// Resolves a `--chown=<user>[:<group>]` against the TARGET rootfs.
+///
+/// Names mean what the image being built says they mean, not what the host
+/// says: a `--chown=nginx:nginx` is about the `nginx` line in the image's own
+/// `/etc/passwd`, and resolving it against the builder's host would hand the
+/// files to whatever unrelated account happens to share the name. A name with
+/// no entry is an error rather than a fallback to root — handing a file to the
+/// wrong owner is exactly the silent wrongness this flag was ignored for.
+fn resolve_chown(rootfs: &Path, spec: &str) -> Result<(u32, u32)> {
+    let (user, group) = match spec.split_once(':') {
+        Some((u, g)) => (u, Some(g)),
+        None => (spec, None),
+    };
+    if user.is_empty() {
+        return Err(Error::Invalid(format!("--chown={spec}: empty user")));
+    }
+    // A numeric id needs no entry to exist — Docker lets `--chown=1000:1000`
+    // name a user the image has never heard of, and so does this.
+    let (uid, primary_gid) = match user.parse::<u32>() {
+        Ok(id) => (id, id),
+        Err(_) => lookup_id(rootfs, "etc/passwd", user)
+            .ok_or_else(|| Error::Invalid(format!("--chown={spec}: unknown user '{user}'")))?,
+    };
+    let gid = match group {
+        None => primary_gid,
+        Some("") => primary_gid,
+        Some(g) => match g.parse::<u32>() {
+            Ok(id) => id,
+            Err(_) => {
+                lookup_id(rootfs, "etc/group", g)
+                    .ok_or_else(|| Error::Invalid(format!("--chown={spec}: unknown group '{g}'")))?
+                    .0
+            }
+        },
+    };
+    Ok((uid, gid))
+}
+
+/// Looks `name` up in a colon-separated `/etc/passwd`- or `/etc/group`-shaped
+/// file inside the rootfs. Returns the id in field 3 and, for `passwd`, the
+/// primary group in field 4 (for `group`, field 4 is the member list, and the
+/// caller only ever reads the first element of the pair).
+fn lookup_id(rootfs: &Path, rel: &str, name: &str) -> Option<(u32, u32)> {
+    let text = std::fs::read_to_string(rootfs.join(rel)).ok()?;
+    text.lines().find_map(|line| {
+        let mut f = line.split(':');
+        (f.next()? == name).then_some(())?;
+        let _passwd = f.next()?;
+        let id = f.next()?.parse().ok()?;
+        let secondary = f.next().and_then(|s| s.parse().ok()).unwrap_or(id);
+        Some((id, secondary))
+    })
 }
 
 /// The copy itself, in whatever user namespace the caller is in.
@@ -1773,9 +1948,18 @@ pub(crate) fn copy_into_rootfs_here(
     dst: &str,
     workdir: &str,
     ignore: Option<&DockerIgnore>,
+    attrs: CopyAttrs<'_>,
 ) -> Result<()> {
+    let CopyAttrs { chmod, chown } = attrs;
     let canon_context = canonical_base(context)?;
     let canon_rootfs = canonical_base(Path::new(rootfs))?;
+    let perms = CopyPerms {
+        mode: chmod,
+        owner: chown
+            .filter(|s| !s.is_empty())
+            .map(|s| resolve_chown(Path::new(rootfs), s))
+            .transpose()?,
+    };
 
     let src_path = safe_join(context, src)?;
     let src_path = confine_to(&canon_context, &src_path)?;
@@ -1798,6 +1982,7 @@ pub(crate) fn copy_into_rootfs_here(
             &canon_rootfs,
             src,
             ignore,
+            &perms,
         )
     } else {
         if dir_dest || dst_path.is_dir() {
@@ -1817,7 +2002,7 @@ pub(crate) fn copy_into_rootfs_here(
                 dst_path.display()
             ))
         })?;
-        Ok(())
+        perms.apply(&dst_path, false)
     }
 }
 
@@ -1852,6 +2037,12 @@ fn ignored(ignore: Option<&DockerIgnore>, rel: &str, is_dir: bool) -> bool {
     }
 }
 
+/// `perms` is applied to each entry this writes, and deliberately NOT to `dst`
+/// itself: the destination directory of a `COPY dir/ /target/` is not one of
+/// the copied entries, and it frequently already exists in the base image
+/// (`/docker-entrypoint.d/`, `/app`). Re-moding it would change a directory
+/// the instruction never mentioned. A subdirectory reached by the recursion
+/// below IS a copied entry, and is re-moded by its caller.
 fn copy_dir_all(
     src: &Path,
     dst: &Path,
@@ -1859,6 +2050,7 @@ fn copy_dir_all(
     canon_rootfs: &Path,
     rel: &str,
     ignore: Option<&DockerIgnore>,
+    perms: &CopyPerms,
 ) -> Result<()> {
     std::fs::create_dir_all(dst)
         .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
@@ -1898,6 +2090,7 @@ fn copy_dir_all(
             }
             std::os::unix::fs::symlink(&link, &target)
                 .map_err(|e| Error::Invalid(format!("symlink {}: {e}", target.display())))?;
+            perms.apply(&target, true)?;
             continue;
         }
         let entry_path = confine_to(canon_context, &entry.path())?;
@@ -1910,9 +2103,15 @@ fn copy_dir_all(
                 canon_rootfs,
                 &child,
                 ignore,
+                perms,
             )?;
+            // After the recursion, never before: a `--chmod=644` on the
+            // directory would strip its `x` bit and the writes into it would
+            // then fail with EACCES.
+            perms.apply(&target, false)?;
         } else {
             replace_file(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
+            perms.apply(&target, false)?;
         }
     }
     Ok(())
@@ -2203,7 +2402,9 @@ mod progresso_tests {
             step_title(&Step::Copy {
                 src: "a.txt".into(),
                 dst: "/app/".into(),
-                from: None
+                from: None,
+                chmod: None,
+                chown: None,
             })
             .as_deref(),
             Some("COPY a.txt /app/")
@@ -2212,7 +2413,9 @@ mod progresso_tests {
             step_title(&Step::Copy {
                 src: "bin".into(),
                 dst: "/usr/bin".into(),
-                from: Some("builder".into())
+                from: Some("builder".into()),
+                chmod: None,
+                chown: None,
             })
             .as_deref(),
             Some("COPY --from=builder bin /usr/bin")
@@ -2235,6 +2438,8 @@ mod progresso_tests {
             src: longo.clone(),
             dst: "/x".into(),
             from: None,
+            chmod: None,
+            chown: None,
         })
         .expect("COPY abre passo");
         assert!(t.chars().count() <= 61, "cortado a 60 + reticências: {t}");
@@ -2282,6 +2487,7 @@ mod dockerignore_tests {
             "/app/",
             "/",
             Some(&ig),
+            super::CopyAttrs::default(),
         )
         .unwrap();
         let app = rootfs.path().join("app");
@@ -2298,6 +2504,7 @@ mod dockerignore_tests {
             "/app/",
             "/",
             None,
+            super::CopyAttrs::default(),
         )
         .unwrap();
         assert!(rootfs2.path().join("app/.env").exists());
@@ -2322,6 +2529,7 @@ mod dockerignore_tests {
             "/app/nm",
             "/",
             None,
+            super::CopyAttrs::default(),
         )
         .unwrap();
         let out = rootfs.path().join("app/nm");
@@ -2335,6 +2543,121 @@ mod dockerignore_tests {
             fs::read_link(out.join("abs")).unwrap().to_str(),
             Some("/etc/hostname")
         );
+    }
+
+    /// **`--chmod` has to land on the file, not just parse.**
+    ///
+    /// Accepting the flag and dropping it would turn the loud DX-1407 into a
+    /// silent wrong permission — an entrypoint copied without `+x`, failing at
+    /// container start instead of at build. The mode of the SOURCE is
+    /// deliberately 0600 here so a pass cannot come from `cp` preserving it.
+    #[test]
+    fn chmod_sets_the_mode_of_what_the_copy_writes() {
+        use std::os::unix::fs::PermissionsExt;
+        let ctx = tempfile::tempdir().unwrap();
+        fs::create_dir_all(ctx.path().join("deploy/inner")).unwrap();
+        fs::write(ctx.path().join("deploy/entrypoint.sh"), "#!/bin/sh\n").unwrap();
+        fs::write(ctx.path().join("deploy/inner/x"), "x\n").unwrap();
+        for f in ["deploy/entrypoint.sh", "deploy/inner/x"] {
+            fs::set_permissions(ctx.path().join(f), PermissionsExt::from_mode(0o600)).unwrap();
+        }
+        let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+
+        // One file to one file — the shape of the measured failure.
+        let rootfs = tempfile::tempdir().unwrap();
+        fs::create_dir_all(rootfs.path().join("docker-entrypoint.d")).unwrap();
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs.path().to_str().unwrap(),
+            "deploy/entrypoint.sh",
+            "/docker-entrypoint.d/40-cfg.sh",
+            "/",
+            None,
+            super::CopyAttrs {
+                chmod: Some(0o755),
+                chown: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            mode(&rootfs.path().join("docker-entrypoint.d/40-cfg.sh")),
+            0o755
+        );
+
+        // A tree: every entry written gets the mode, including a nested
+        // directory — but NOT the destination directory, which already
+        // existed and is not one of the copied entries.
+        let rootfs2 = tempfile::tempdir().unwrap();
+        let dest = rootfs2.path().join("app");
+        fs::create_dir_all(&dest).unwrap();
+        fs::set_permissions(&dest, PermissionsExt::from_mode(0o700)).unwrap();
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs2.path().to_str().unwrap(),
+            "deploy",
+            "/app/",
+            "/",
+            None,
+            super::CopyAttrs {
+                chmod: Some(0o755),
+                chown: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(mode(&dest.join("entrypoint.sh")), 0o755);
+        assert_eq!(mode(&dest.join("inner")), 0o755, "a copied subdirectory");
+        assert_eq!(mode(&dest.join("inner/x")), 0o755);
+        assert_eq!(mode(&dest), 0o700, "the destination itself is untouched");
+
+        // No flag, no re-moding: the old behaviour is exactly preserved.
+        let rootfs3 = tempfile::tempdir().unwrap();
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs3.path().to_str().unwrap(),
+            "deploy/entrypoint.sh",
+            "/e.sh",
+            "/",
+            None,
+            super::CopyAttrs::default(),
+        )
+        .unwrap();
+        assert_eq!(mode(&rootfs3.path().join("e.sh")), 0o600);
+    }
+
+    /// `--chown=nginx` means the `nginx` of the IMAGE being built. Resolving
+    /// it against the builder's host would hand the files to whatever
+    /// unrelated account happens to share the name.
+    #[test]
+    fn chown_resolves_names_against_the_target_rootfs() {
+        let rootfs = tempfile::tempdir().unwrap();
+        fs::create_dir_all(rootfs.path().join("etc")).unwrap();
+        fs::write(
+            rootfs.path().join("etc/passwd"),
+            "root:x:0:0:root:/root:/bin/sh\nnginx:x:101:103:nginx:/:/sbin/nologin\n",
+        )
+        .unwrap();
+        fs::write(
+            rootfs.path().join("etc/group"),
+            "root:x:0:\nstaff:x:50:\nnginx:x:103:\n",
+        )
+        .unwrap();
+        let r = |s: &str| super::resolve_chown(rootfs.path(), s);
+
+        // A bare user takes its PRIMARY group from passwd (103), not its uid.
+        assert_eq!(r("nginx").unwrap(), (101, 103));
+        assert_eq!(r("nginx:staff").unwrap(), (101, 50));
+        // Numeric ids need no entry to exist, as in Docker; a bare numeric
+        // user takes the same number for its group.
+        assert_eq!(r("1000").unwrap(), (1000, 1000));
+        assert_eq!(r("1000:2000").unwrap(), (1000, 2000));
+        assert_eq!(r("nginx:1").unwrap(), (101, 1));
+        // An unknown name is an error, never a silent fallback to root — the
+        // wrong owner is the failure mode this flag was ignored for.
+        for bad in ["ghost", "nginx:ghosts", ""] {
+            let e = r(bad).unwrap_err().to_string();
+            assert!(e.contains("--chown"), "{bad}: {e}");
+        }
+        assert!(r("ghost").unwrap_err().to_string().contains("ghost"));
     }
 
     /// An ignored file is never copied, so editing it must not invalidate the
