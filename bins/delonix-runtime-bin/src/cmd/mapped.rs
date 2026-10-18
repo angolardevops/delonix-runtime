@@ -258,17 +258,38 @@ pub fn cptree(src: &Path, dst: &Path) -> Result<()> {
     }
 }
 
-/// Gives the entries of a flat rootfs the owners its image records (ADR-0062).
+/// What [`apply_owners`] managed to write — the kernel's answer, not a guess
+/// from the caller's euid.
 ///
-/// `index` is an owners index as `delonix_compute::owners::encode` writes it.
-/// A build's work rootfs is exported with every entry owned by whoever runs the
-/// engine; without this a `RUN` executing as the image's user could not write
-/// its own home. An entry whose path crosses a symlink is skipped: the index
-/// names real paths of the image, and following a link here could reach outside
-/// `rootfs`. `lchown` never follows the last component. Best-effort per entry.
-pub fn chownidx(rootfs: &Path, index: &Path) -> Result<()> {
-    let bytes = std::fs::read(index).map_err(io_err("apply owners"))?;
-    for owner in delonix_compute::owners::decode(&bytes) {
+/// The distinction a caller needs is whether `refused` is empty: a rootless
+/// engine is told `EPERM` for every id it does not own, and a tree that only
+/// PARTLY carries the owners the image records is not a faithful one. The
+/// refused entries are kept, not just counted, so a report can name paths.
+#[derive(Debug, Default)]
+pub struct OwnersWritten {
+    /// Entries whose owner the kernel let us set.
+    pub applied: usize,
+    /// Entries present in the tree whose owner the kernel refused, in index
+    /// order.
+    pub refused: Vec<delonix_compute::owners::Owner>,
+    /// Entries the index names that this tree does not hold — a path a later
+    /// layer whited out, or one that crosses a symlink (see below). Not a
+    /// failure: there is nothing there to own.
+    pub absent: usize,
+}
+
+/// Gives the entries of a flat rootfs the owners its image records (ADR-0062),
+/// reporting what the kernel allowed.
+///
+/// An entry whose path crosses a symlink is skipped: the index names real paths
+/// of the image, and following a link here could reach outside `rootfs`.
+/// `lchown` never follows the last component.
+///
+/// Per entry, and it does NOT stop at the first refusal — a caller reporting
+/// the loss wants the whole list, not the first name in it.
+pub fn apply_owners(rootfs: &Path, owners: &[delonix_compute::owners::Owner]) -> OwnersWritten {
+    let mut out = OwnersWritten::default();
+    for owner in owners {
         let mut path = rootfs.to_path_buf();
         let mut parents = owner.path.components().peekable();
         let mut crosses_link = false;
@@ -281,10 +302,28 @@ pub fn chownidx(rootfs: &Path, index: &Path) -> Result<()> {
                 break;
             }
         }
-        if !crosses_link && std::fs::symlink_metadata(&path).is_ok() {
-            let _ = std::os::unix::fs::lchown(&path, Some(owner.uid), Some(owner.gid));
+        if crosses_link || std::fs::symlink_metadata(&path).is_err() {
+            out.absent += 1;
+            continue;
+        }
+        match std::os::unix::fs::lchown(&path, Some(owner.uid), Some(owner.gid)) {
+            Ok(()) => out.applied += 1,
+            Err(_) => out.refused.push(owner.clone()),
         }
     }
+    out
+}
+
+/// [`apply_owners`] from an owners index on disk, as
+/// `delonix_compute::owners::encode` writes it — the re-exec form, for a build.
+///
+/// A build's work rootfs is exported with every entry owned by whoever runs the
+/// engine; without this a `RUN` executing as the image's user could not write
+/// its own home. Best-effort: a build that cannot write an owner behaves as it
+/// did before the index existed, so the counts are discarded here.
+pub fn chownidx(rootfs: &Path, index: &Path) -> Result<()> {
+    let bytes = std::fs::read(index).map_err(io_err("apply owners"))?;
+    apply_owners(rootfs, &delonix_compute::owners::decode(&bytes));
     Ok(())
 }
 
@@ -742,6 +781,60 @@ mod tests {
             ctime(&rootfs.join("home/app")),
             app_before,
             "the real entry"
+        );
+    }
+
+    /// A refusal is REPORTED, not swallowed, and it does not end the pass: this
+    /// is what lets `image export` say which paths its bundle does not carry
+    /// instead of printing "OCI bundle at <dir>" over a rootfs that lost every
+    /// non-root owner (ADR-0062). Run as a normal user, `uid 101` is refused
+    /// with `EPERM` and the caller's own id is not; the test asserts the second
+    /// refusal is seen, which a loop that stopped at the first would miss.
+    #[test]
+    fn apply_owners_reports_every_refusal_and_keeps_going() {
+        use delonix_compute::owners::Owner;
+        use std::os::unix::fs::MetadataExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = tmp.path().join("rootfs");
+        std::fs::create_dir_all(rootfs.join("etc/nginx")).unwrap();
+        std::fs::write(rootfs.join("etc/shadow"), b"x").unwrap();
+        let me = std::fs::metadata(&rootfs).unwrap();
+        let owner = |p: &str, uid: u32, gid: u32| Owner {
+            path: p.into(),
+            uid,
+            gid,
+        };
+        let index = [
+            owner("etc/nginx", 101, 0),
+            owner("etc", me.uid(), me.gid()),
+            owner("etc/shadow", 0, 42),
+            owner("var/cache/nginx", 101, 0),
+        ];
+        let written = apply_owners(&rootfs, &index);
+        if me.uid() == 0 {
+            // A root tree (or one in a mapped userns) writes the ids instead —
+            // the case the export is faithful in. Nothing to assert about
+            // refusals there.
+            assert!(written.refused.is_empty(), "root could not chown");
+            assert_eq!(written.applied, 3);
+        } else {
+            let refused: Vec<_> = written
+                .refused
+                .iter()
+                .map(|o| o.path.display().to_string())
+                .collect();
+            assert_eq!(
+                refused,
+                vec!["etc/nginx".to_string(), "etc/shadow".to_string()],
+                "both refusals, in index order"
+            );
+            assert_eq!(written.applied, 1, "the entry asking for our own id");
+        }
+        assert_eq!(written.absent, 1, "var/cache/nginx is not in this tree");
+        assert_eq!(
+            written.applied + written.refused.len() + written.absent,
+            index.len(),
+            "every entry accounted for"
         );
     }
 

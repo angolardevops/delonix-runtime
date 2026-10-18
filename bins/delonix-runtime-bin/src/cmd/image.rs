@@ -1112,12 +1112,132 @@ fn cmd_load(images: &ImageStore, input: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// How many refused paths an export NAMES before it stops listing them. An
+/// image that gives a whole tree to its user (`COPY --chown`) has thousands;
+/// the operator needs to recognise the shape of the loss, not read it.
+const OWNERS_SAMPLE: usize = 3;
+
+/// Gives a freshly exported bundle the owners its image records, and SAYS what
+/// it could not write (ADR-0062).
+///
+/// # Why the literal ids, and why this is allowed to fail
+///
+/// `export_rootfs` applies the layers with `set_preserve_permissions` alone, so
+/// every entry comes out owned by whoever ran the engine: measured on
+/// `nginx-unprivileged:1.30.0-alpine` as uid 1000, `etc/nginx` was `1000 1000`
+/// where the image's own layer sidecar says `101 0`, and `etc/shadow` `1000
+/// 1000` against `0 42`. The bundle said nothing about it.
+///
+/// The ids written here are the image's LITERAL ids, because the `config.json`
+/// this command generates declares no `uidMappings`/`gidMappings` (measured:
+/// `linux` carries only `namespaces`, `maskedPaths`, `readonlyPaths`,
+/// `resources`, and no `user` namespace) — so `runc` reads the rootfs in the
+/// INITIAL id space, and `101` is the only number that means what the image
+/// meant. Going through the `__chownidx` re-exec instead, as a build does, would
+/// write the host subuid `100100`: just as wrong for this `config.json`, and it
+/// would hand the operator a bundle directory their own uid cannot delete.
+///
+/// So this asks the kernel rather than guessing from `geteuid()`: a real-root
+/// engine writes `101`/`42` and the bundle is faithful; a rootless one is
+/// refused and the operator is told, by path, what the rootfs does not carry.
+/// Never fatal — the bundle is still worth having for inspection, for a repack,
+/// or to be chowned by root later, and most images record no non-root owner at
+/// all, in which case this is silent.
+///
+/// # What it costs, measured
+///
+/// `image_owners` goes through `ensure_layers`, so an export of an image that
+/// was only ever PULLED now also unpacks it into the layer cache: on a fresh
+/// store, `alpine:latest` went from 3.8 MiB after the pull to 13 MiB after the
+/// export (`layers/` empty → one layer directory plus its owners and modes
+/// sidecars), beside the 8.7 MiB bundle. One unpacked copy, once per image, not
+/// per export — and it is the same extraction the next `container run` of that
+/// image needs anyway.
+///
+/// The cheaper route would be to read the owners out of the CAS blobs without
+/// unpacking, and it was not taken: `image_owners` is the index a CONTAINER of
+/// this image gets (per path, the topmost layer holding it decides), so going
+/// through it is what makes the bundle's ownership agree with what
+/// `container run` would give. A second reader of the same data is a second
+/// thing to keep in agreement with that.
+fn report_bundle_owners(
+    images: &ImageStore,
+    img: &delonix_oci::image::Image,
+    rootfs: &std::path::Path,
+) {
+    let owners = match images.image_owners(img) {
+        Ok(o) => o,
+        // The export itself succeeded; what failed is reading what the image
+        // gives away. Say that, rather than imply the rootfs is faithful.
+        Err(e) => {
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "warning: the owners this image records could not be read ({err}) — the bundle's rootfs ownership is unverified",
+                    &[("err", &e.to_string())],
+                )
+            );
+            return;
+        }
+    };
+    if owners.is_empty() {
+        return;
+    }
+    let written = super::mapped::apply_owners(rootfs, &owners);
+    // Nothing refused AND nothing written: this tree holds none of the paths the
+    // index names (every one whited out by a later layer, or behind a symlink).
+    // There is no loss to report and no work to announce — "0 paths given the
+    // owners" would be a claim about an empty set.
+    if written.refused.is_empty() && written.applied == 0 {
+        return;
+    }
+    if written.refused.is_empty() {
+        println!(
+            "{}",
+            super::po::tf(
+                "rootfs: {n} paths given the owners the image records",
+                &[("n", &written.applied.to_string())],
+            )
+        );
+        return;
+    }
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "warning: this rootfs does NOT carry the owners the image records — {n} of {total} paths could not be chowned (no privilege for those ids); they belong to you instead",
+            &[
+                ("n", &written.refused.len().to_string()),
+                ("total", &owners.len().to_string()),
+            ],
+        )
+    );
+    for o in written.refused.iter().take(OWNERS_SAMPLE) {
+        eprintln!("  {} {} {}", o.uid, o.gid, o.path.display());
+    }
+    if written.refused.len() > OWNERS_SAMPLE {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "  ... and {n} more",
+                &[("n", &(written.refused.len() - OWNERS_SAMPLE).to_string())],
+            )
+        );
+    }
+    eprintln!(
+        "{}",
+        super::po::t(
+            "  config.json declares no uid/gid mappings, so runc reads these ids literally. Export as real root for a bundle that carries them."
+        )
+    );
+}
+
 fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Result<()> {
     let img = resolve_or_pull(images, reference)?;
     std::fs::create_dir_all(dir)
         .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dir.display())))?;
     let rootfs = dir.join("rootfs");
     images.export_rootfs(&img, &rootfs)?;
+    report_bundle_owners(images, &img, &rootfs);
     let args = effective_command(&img, &[]);
     let args = if args.is_empty() {
         vec!["/bin/sh".to_string()]
