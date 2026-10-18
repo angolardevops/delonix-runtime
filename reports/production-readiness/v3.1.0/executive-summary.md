@@ -36,7 +36,6 @@ e G-003 na CI) e porque rootful, upgrade/rollback, OCI e a verificação dos art
 ## INFERÊNCIA (lida no código, sem reprodução)
 
 - **G-007 (P1)** — falha do mount tmpfs em `--secret-files` escreve os segredos no rootfs do container.
-- **G-009 (P1)** — falhas de masked/readonly paths e `setrlimit` só avisam ou são ignoradas.
 - **G-010 (P2)** — read-only recursivo não suportado.
 - CRI: 2 falhas de port-forward com causa **UNKNOWN** (o servidor não regista erros — G-031).
 
@@ -49,7 +48,7 @@ e G-003 na CI) e porque rootful, upgrade/rollback, OCI e a verificação dos art
 | 3 | CRI de Kubernetes? | **Não para produção.** 82/103 rootless; 3 bugs de imagem/utilizador, OOMKilled e port-forward em falta; sem kubelet real. |
 | 4 | Workloads para produção? | Nenhum sem excepção formal. Piloto: serviços stateless em containers/stack rootless, rede default. |
 | 5 | Bloqueados? | Kubernetes via CRI; ferramentas via Docker API; isolamento por IP como fronteira de segurança multi-inquilino; `--secret-files` sem teste de `/run`. |
-| 6 | Riscos de segurança | G-008 (isolamento fail-open), G-007/G-009 (hardening fail-open), G-020 (actions não pinadas). |
+| 6 | Riscos de segurança | G-008 (isolamento fail-open), G-007 (hardening fail-open), G-020 (actions não pinadas). |
 | 7 | Cinco bloqueios | G-008, G-029, G-027, G-005 (CRI), G-024 (rootful não validado). |
 | 8 | Próxima release | **3.1.1**: G-008 e G-026 fail-closed com teste; G-029; G-003 (job de caos falha em vez de saltar); G-030. **3.2.0**: `docker run`/pull/logs na API; G-011. |
 | 9 | Rollback | Nenhuma mudança aplicada. Para 3.1.1: binário 3.1.0 assinado permanece; o holder novo exige respawn — rollback = reinstalar 3.1.0 e `net netns down/up` numa janela. |

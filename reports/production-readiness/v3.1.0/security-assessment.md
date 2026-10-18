@@ -18,7 +18,7 @@ Não é um pentest completo. É o modelo de ameaça das fronteiras pedidas, cruz
 | MCP | stdio, sem shell; `name` com `-` inicial não recusado | PARTIAL (G-017) |
 | Secrets `--secret-files` | caminho sem `/run` gravável entrega zero segredos com rc=0 (medido); falha de tmpfs escreveria no rootfs (lido) | FAIL (G-026 medido, G-007 lido) |
 | slirp api-socket por container | 0755 medido (não conectável por outros); caminho previsível em /tmp | PARTIAL (G-016) |
-| Hardening best-effort | masked/readonly paths e rlimits só avisam | PARTIAL (G-009) |
+| Hardening masked/readonly paths e rlimits | recusa e honra medidas aos dois uids nas três fatias de mount (chamador, omissão do `/proc`) e nos `rlimits`; caminho AUSENTE ignorado por decisão | PASS (G-009) |
 | Env var sem efeito | `DELONIX_INTERNAL` definido, nunca lido | G-014 |
 | Supply chain CI | 0/20 actions pinadas | FAIL (G-020) |
 | VM providers | opção não honrável recusada; nenhuma acção fora do delonix | PASS |
