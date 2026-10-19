@@ -247,7 +247,19 @@ check() {
   else
     [[ $rc -eq "$expect" ]] && verdict=PASS
   fi
-  python3 - "$name" "$verdict" "$rc" "$out" "$*" >>"$OUT/results.jsonl" <<'PY'
+  # `out` and the command line travel through ARGV, and Linux caps a SINGLE
+  # argv string at MAX_ARG_STRLEN (128 KiB) regardless of how much room the
+  # total has. A check whose output is bigger killed `python3` with "Argument
+  # list too long" and the line was NEVER appended — the console still printed
+  # PASS, so the run read as complete while `results.jsonl` quietly lost that
+  # leaf, which is the exact number `cli_exec_ratchet.py --from-results`
+  # counts. Measured 2026-10-18 on `manifest schema`.
+  #
+  # Truncating `out` is not a behaviour change: the writer below already keeps
+  # only the first 4000 characters. `cmd` is a separate local because
+  # `${*:0:N}` slices the positional PARAMETERS, not the characters of `$*`.
+  local cmd="$*"
+  python3 - "$name" "$verdict" "$rc" "${out:0:4000}" "${cmd:0:65536}" >>"$OUT/results.jsonl" <<'PY'
 import json,sys
 name,verdict,rc,out,cmd=sys.argv[1:6]
 print(json.dumps({"name":name,"verdict":verdict,"rc":int(rc),"cmd":cmd,"output":out[:4000]}))
