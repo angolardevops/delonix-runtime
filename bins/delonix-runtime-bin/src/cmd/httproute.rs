@@ -190,31 +190,80 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
             apply(&docs)
         }
         HttpRouteCmd::Rm => {
+            use ingress_proxy::Where;
+            // Whether there is a proxy to stop at all, and on WHICH instance, read
+            // BEFORE the clear. `clear_manual` recomposes, and a composition left with
+            // nothing calls `stop`, which removes the pidfile — so asking afterwards,
+            // which is what this arm did, can only ever see the absence it just
+            // created. See `rm_report` for what that announced.
+            let holder_was_running = ingress_proxy::is_running(Where::Holder);
+            let host_was_running = ingress_proxy::is_running(Where::Host);
+
             // Remove only the MANUAL routes; the auto-registered ones (`--expose`)
             // survive and the proxy only stops if nothing else remains.
-            let host = ingress_proxy::clear_manual(ingress_proxy::Where::Host)?;
-            let holder = ingress_proxy::clear_manual(ingress_proxy::Where::Holder)?;
+            let host = ingress_proxy::clear_manual(Where::Host)?;
+            let holder = ingress_proxy::clear_manual(Where::Holder)?;
             super::ippool::release_unlisted("HTTPRoute/", &[])?;
             if !host && !holder {
                 println!("{}", super::po::t("httproute: no manual routes to remove"));
                 return Ok(());
             }
-            if ingress_proxy::is_running(ingress_proxy::Where::Holder) {
-                println!(
-                    "{}",
-                    super::po::t(
-                        "httproute: manual routes removed — proxy stays up (there are auto-registered routes)"
-                    )
-                );
-            } else {
-                println!(
-                    "{}",
-                    super::po::t("httproute: proxy stopped and ports unpublished")
-                );
-            }
+            println!(
+                "{}",
+                super::po::t(rm_report(
+                    holder_was_running,
+                    host_was_running,
+                    ingress_proxy::is_running(Where::Holder),
+                ))
+            );
             Ok(())
         }
     }
+}
+
+/// The line `net httproute rm` closes with, chosen from what was observed about
+/// the proxy BEFORE the manual routes were cleared.
+///
+/// **It used to be chosen from the absence of a proxy AFTER the clear**, which is
+/// a state this command produces itself: `clear_manual` recomposes, and a
+/// composition with nothing left calls `stop`. So "proxy stopped and ports
+/// unpublished" was also printed when an `apply` had written the config and its
+/// `spawn_proxy` failed, when the proxy had died earlier, and when nothing had
+/// ever published a port — rc 0 and a teardown that never happened. Same shape as
+/// the four arms corrected in #885: the result of what was done was discarded
+/// before the message was written.
+///
+/// **Only the holder instance publishes anything.** It listens inside the holder
+/// netns and `ensure_running` hands its ports to the slirp (`publish_listeners`),
+/// which `stop` hands back. The host instance is an ordinary process binding the
+/// host loopback directly, so stopping it unpublishes nothing — the old line
+/// claimed an unpublish for a libvirt-VM route too.
+///
+/// Returns the UNTRANSLATED msgid, and the caller passes it through `po::t`: the
+/// branch is the part worth pinning, and a test of it must not depend on the
+/// process-wide language flag `po::t` reads.
+///
+/// No port NUMBERS on purpose. A live proxy that was SIGHUP'd through a listener
+/// change still holds the sockets it bound at startup while `config.json` already
+/// carries the new set — `ensure_running` warns about exactly that — so a port read
+/// from the config is not evidence about what was published.
+fn rm_report(
+    holder_was_running: bool,
+    host_was_running: bool,
+    holder_still_running: bool,
+) -> &'static str {
+    if holder_still_running {
+        // Auto-registered `--expose` routes kept the composition non-empty, so
+        // `rebuild` re-ensured the proxy instead of stopping it.
+        return "httproute: manual routes removed — proxy stays up (there are auto-registered routes)";
+    }
+    if holder_was_running {
+        return "httproute: proxy stopped and ports unpublished";
+    }
+    if host_was_running {
+        return "httproute: manual routes removed — the host-netns proxy was stopped (it binds the host loopback directly, so it had no published port to take down)";
+    }
+    "httproute: manual routes removed — no proxy was running"
 }
 
 /// `spec` for `kind: HTTPRoute`.
@@ -1714,6 +1763,62 @@ mod tests {
                 .unwrap_or_default(),
             stamps: Vec::new(),
             bind: None,
+        }
+    }
+
+    /// Nothing was running, so `rm` removed a config and stopped nothing. The arm
+    /// asked `is_running` AFTER its own `clear_manual` — a question whose answer it
+    /// had just produced — and announced a stop and an unpublish for an `apply`
+    /// whose `spawn_proxy` failed, for a proxy that had died earlier, and for ports
+    /// that were never published.
+    #[test]
+    fn rm_does_not_claim_a_teardown_when_no_proxy_was_running() {
+        assert_eq!(
+            rm_report(false, false, false),
+            "httproute: manual routes removed — no proxy was running"
+        );
+    }
+
+    /// Only the holder instance publishes (`publish_listeners` is holder-only, and
+    /// so is the `slirp_remove_hostfwd` loop in `stop`). The host instance binds the
+    /// host loopback directly, so a libvirt-VM route's `rm` stops a proxy and
+    /// unpublishes nothing — the old line claimed both.
+    #[test]
+    fn rm_does_not_claim_an_unpublish_for_the_host_instance() {
+        let line = rm_report(false, true, false);
+        assert_ne!(line, "httproute: proxy stopped and ports unpublished");
+        assert!(line.contains("host-netns proxy was stopped"), "{line}");
+        assert!(line.contains("no published port"), "{line}");
+    }
+
+    /// The two claims that WERE backed stay exactly as they were: a holder proxy
+    /// that was running and is not any more really was stopped, and its ports really
+    /// were handed back to the slirp.
+    #[test]
+    fn rm_still_reports_the_teardown_it_does_perform() {
+        assert_eq!(
+            rm_report(true, false, false),
+            "httproute: proxy stopped and ports unpublished"
+        );
+        assert_eq!(
+            rm_report(true, false, true),
+            "httproute: manual routes removed — proxy stays up (there are auto-registered routes)"
+        );
+    }
+
+    /// Every sentence the chooser can return is in the catalog — `po::t` falls back
+    /// to English on a miss, so a forgotten `msgid` is silent in a PT run.
+    #[test]
+    fn every_rm_sentence_is_translated() {
+        let catalog = include_str!("../../data/pt.po");
+        for (h, x, s) in [
+            (false, false, false),
+            (false, true, false),
+            (true, false, false),
+            (true, false, true),
+        ] {
+            let msgid = format!("msgid \"{}\"", rm_report(h, x, s));
+            assert!(catalog.contains(&msgid), "pt.po has no {msgid}");
         }
     }
 
