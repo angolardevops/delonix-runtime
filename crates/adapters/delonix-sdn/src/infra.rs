@@ -2335,8 +2335,49 @@ pub fn pin_main() -> ! {
     }
 }
 
+/// The background threads [`control_main`] starts, each with the name that
+/// identifies it in a diagnostic.
+///
+/// # Why a roster and not two `spawn` calls
+///
+/// Whether the RA emitter runs AT ALL is a security decision, and taken inline in
+/// `control_main` it is a decision no test can read: that function is `-> !`, it
+/// binds the control socket and it never returns. Returning the roster makes the
+/// same decision an ordinary value, which is what
+/// `the_ra_emitter_only_runs_when_ipv6_is_opted_in` asserts.
+///
+/// The names are what the test matches on. Comparing function pointers would be
+/// the obvious alternative and is not one — `clippy::fn_address_comparisons`
+/// rejects it, and rightly: equality of `fn` items is not guaranteed.
+fn control_plane_threads() -> Vec<(&'static str, fn())> {
+    // ingress DNS server (resolves container/VM names).
+    let mut threads: Vec<(&'static str, fn())> = vec![("dns", dns_server_main)];
+    // Router Advertisements emitter (SLAAC IPv6 for VMs/containers) — ONLY when the
+    // v6 SDN is explicitly opted in.
+    //
+    // BUG FIXED HERE: this was spawned unconditionally, so in the DEFAULT
+    // configuration the holder advertised a SLAAC `/64` on every ingress bridge —
+    // one RA every 8s — for a dataplane it then refuses to govern. Everything the
+    // firewall writes lives in `table ip` (see the long note on
+    // `ipv6_sdn_enabled`); the only v6 rule is the blanket `forward policy drop` of
+    // `ingress_v6_refusal_ruleset`. Announcing a prefix and governing it with a
+    // single drop is not a dual-stack dataplane, it is an invitation: anything that
+    // autoconfigured from the prefix and shared a bridge talked east-west with no
+    // policy applying, which is precisely the bypass the v6 refusal exists to close.
+    //
+    // The emitter is a plain control-plane thread, not a ruleset, so a gate is the
+    // whole fix: the holder is restartable and re-reads this on every start. The
+    // build-once problem that forced a reconciler on `ingress_table_ruleset`
+    // (single caller, no `flush` on reattach) does not reach here.
+    if ipv6_sdn_enabled() {
+        threads.push(("ra", ra_sender_main));
+    }
+    threads
+}
+
 /// The **control plane**, running inside the pin's namespaces: control socket,
-/// DNS, Router Advertisements and the per-bridge DHCP servers.
+/// DNS, the per-bridge DHCP servers, and Router Advertisements when — and only
+/// when — the v6 SDN is opted in (see [`control_plane_threads`]).
 ///
 /// Restartable by design. On a FRESH netns it builds the infra; on one that is
 /// already configured (the pin survived, only this process restarted) it
@@ -2363,10 +2404,10 @@ pub fn control_main() -> ! {
     });
     match started {
         Ok(listener) => {
-            // ingress DNS server on a thread (resolves container/VM names).
-            std::thread::spawn(dns_server_main);
-            // Router Advertisements emitter (SLAAC IPv6 for VMs/containers).
-            std::thread::spawn(ra_sender_main);
+            for (name, thread_main) in control_plane_threads() {
+                tracing::debug!(thread = name, "starting a control-plane thread");
+                std::thread::spawn(thread_main);
+            }
             // only now do we signal ready — the control socket already accepts connections.
             write_status("ready");
             control_loop(listener); // never returns (until SIGTERM)
@@ -9595,6 +9636,10 @@ fn parse_v4(s: &str) -> Option<[u8; 4]> {
 /// sends an RA (ICMPv6 type 134) to `ff02::1` on EACH ingress bridge, with the
 /// network's ULA `/64` prefix (flags A+L → SLAAC). VMs and containers auto-configure
 /// an IPv6 from the prefix. Replaces radvd (nonexistent/rootless-hostile).
+///
+/// Started ONLY under `DELONIX_ENABLE_IPV6=1` — [`control_plane_threads`] is the
+/// gate and carries the reasoning. Reaching this function at all means someone
+/// accepted an IPv6 dataplane that no firewall rule governs.
 fn ra_sender_main() {
     // SAFETY: creates a raw ICMPv6 socket (CAP_NET_RAW in the infra netns).
     let fd = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
@@ -10801,6 +10846,54 @@ Inter-|   Receive                                                |  Transmit
             );
         }
         assert!(joined.iter().all(|c| c.starts_with("netns exec dlx-abc ")));
+    }
+
+    /// The same refusal, one layer up: with v6 off the holder does not ADVERTISE a
+    /// prefix either.
+    ///
+    /// The two layers above keep containers from using v6; neither stops the holder
+    /// from announcing it. `control_main` spawned the RA emitter unconditionally, so
+    /// the default configuration put a SLAAC `/64` on every ingress bridge every 8s
+    /// — a prefix whose only governing rule is a blanket `forward policy drop`.
+    ///
+    /// Asserted on the roster rather than on the live thread on purpose: the
+    /// operator-facing proof is `tcpdump -ni delonix0 'icmp6 && ip6[40] == 134'`
+    /// reading 0 packets, and the absence of a thread is explicitly NOT that proof.
+    /// What is unit-testable is the decision, and that is what this pins.
+    #[test]
+    fn the_ra_emitter_only_runs_when_ipv6_is_opted_in() {
+        let mut env = crate::testenv::lock();
+
+        // Default — the variable absent entirely, which is the shipped configuration.
+        env.unset("DELONIX_ENABLE_IPV6");
+        let names: Vec<&str> = control_plane_threads().iter().map(|(n, _)| *n).collect();
+        assert!(
+            !names.contains(&"ra"),
+            "the RA emitter must not run with v6 off: {names:?}"
+        );
+        // DNS is not v6-gated and must survive the gate — the regression that would
+        // make this fix a node-wide outage instead of a security fix.
+        assert!(names.contains(&"dns"), "{names:?}");
+
+        // Anything that is not exactly `1` is still off, same as `ipv6_sdn_enabled`.
+        for off in ["0", "", "true", "yes"] {
+            env.set("DELONIX_ENABLE_IPV6", off);
+            let names: Vec<&str> = control_plane_threads().iter().map(|(n, _)| *n).collect();
+            assert!(
+                !names.contains(&"ra"),
+                "`DELONIX_ENABLE_IPV6={off}` is not the opt-in: {names:?}"
+            );
+        }
+
+        // The opt-in must not regress: whoever accepts the ungoverned v6 SDN still
+        // gets SLAAC.
+        env.set("DELONIX_ENABLE_IPV6", "1");
+        let names: Vec<&str> = control_plane_threads().iter().map(|(n, _)| *n).collect();
+        assert!(
+            names.contains(&"ra"),
+            "the opt-in regressed — no RA emitter with DELONIX_ENABLE_IPV6=1: {names:?}"
+        );
+        assert!(names.contains(&"dns"), "{names:?}");
     }
 
     /// The holder's own services are not reachable from a container.
