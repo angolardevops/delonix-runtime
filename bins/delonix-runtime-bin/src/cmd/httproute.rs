@@ -239,6 +239,14 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
 /// host loopback directly, so stopping it unpublishes nothing — the old line
 /// claimed an unpublish for a libvirt-VM route too.
 ///
+/// **A proxy running afterwards is not proof one was running before.** With manual
+/// routes cleared but auto-registered ones surviving, `rebuild` skips its `stop`
+/// (listeners and routes are both non-empty) and calls `ensure_running`, which
+/// `spawn_proxy`s when there is no live pid. So `rm` can START the proxy and publish
+/// its ports, and "proxy stays up" would announce a continuity that never happened —
+/// the same defect, in the branch the first pass left alone. Reached by exactly the
+/// cases listed above: an `apply` whose `spawn_proxy` failed, or a proxy that died.
+///
 /// Returns the UNTRANSLATED msgid, and the caller passes it through `po::t`: the
 /// branch is the part worth pinning, and a test of it must not depend on the
 /// process-wide language flag `po::t` reads.
@@ -254,7 +262,13 @@ fn rm_report(
 ) -> &'static str {
     if holder_still_running {
         // Auto-registered `--expose` routes kept the composition non-empty, so
-        // `rebuild` re-ensured the proxy instead of stopping it.
+        // `rebuild` re-ensured the proxy instead of stopping it. Whether that was
+        // a continuity or a START depends on what was there before: `ensure_running`
+        // SIGHUPs a live proxy, but with no live pid it calls `spawn_proxy` and,
+        // for the holder, `publish_listeners` right after.
+        if !holder_was_running {
+            return "httproute: manual routes removed — the proxy was not running and was started for the auto-registered routes (its ports are now published)";
+        }
         return "httproute: manual routes removed — proxy stays up (there are auto-registered routes)";
     }
     if holder_was_running {
@@ -1806,6 +1820,28 @@ mod tests {
         );
     }
 
+    /// A proxy running after the clear is not evidence one was running before it.
+    /// With the manual routes gone but auto-registered ones surviving, `rebuild`
+    /// skips its `stop` and `ensure_running` `spawn_proxy`s when no pid is live — so
+    /// `rm` STARTED the proxy and published its ports. "Stays up" would claim a
+    /// continuity that never happened, and would hide from the operator that
+    /// something earlier had lost the proxy.
+    #[test]
+    fn rm_does_not_call_a_startup_a_continuity() {
+        let started = rm_report(false, false, true);
+        let stayed = rm_report(true, false, true);
+        assert_ne!(started, stayed);
+        assert_ne!(
+            started,
+            "httproute: manual routes removed — proxy stays up (there are auto-registered routes)"
+        );
+        assert!(
+            started.contains("was not running and was started"),
+            "{started}"
+        );
+        assert!(started.contains("ports are now published"), "{started}");
+    }
+
     /// Every sentence the chooser can return is in the catalog — `po::t` falls back
     /// to English on a miss, so a forgotten `msgid` is silent in a PT run.
     #[test]
@@ -1816,6 +1852,7 @@ mod tests {
             (false, true, false),
             (true, false, false),
             (true, false, true),
+            (false, false, true),
         ] {
             let msgid = format!("msgid \"{}\"", rm_report(h, x, s));
             assert!(catalog.contains(&msgid), "pt.po has no {msgid}");
