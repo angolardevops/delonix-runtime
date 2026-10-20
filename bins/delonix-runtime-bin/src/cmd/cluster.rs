@@ -1320,6 +1320,12 @@ pub enum ClusterCmd {
         /// `delonix`, else the release asset of this version.
         #[arg(value_hint = clap::ValueHint::FilePath, long = "cri-bin")]
         cri_bin: Option<PathBuf>,
+        /// Point `kubectl` at this cluster once it is up, so a bare `kubectl get
+        /// nodes` reaches it. Without this flag a `~/.kube/config` that already
+        /// selects a usable context keeps it — the cluster's context is merged
+        /// either way, and the command to switch to it is printed.
+        #[arg(long = "use-context")]
+        use_context: bool,
     },
     /// Print a cluster's kubeconfig from the local cache (no live SSH).
     ///
@@ -1644,6 +1650,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             copy_kubeconfig,
             etcd_cluster,
             cri_bin,
+            use_context,
         } => {
             let name = match name {
                 Some(n) => n,
@@ -1711,6 +1718,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 copy_kubeconfig,
                 etcd_cluster,
                 cri_bin,
+                use_context,
             })
         }
         ClusterCmd::Network(cmd) => cmd_network(cmd),
@@ -2294,7 +2302,11 @@ pub fn apply(docs: &[ManifestDoc], cri_bin: Option<&std::path::Path>) -> Result<
         // `cluster apply` (manifest-driven) keeps the historical timing: no
         // wait for node Ready. `cluster kubeadm --copy-kubeconfig` is the
         // opt-in path for that (see `provision_and_apply`).
-        apply_one(name, &spec, false, cri_bin)?;
+        // A manifest has no `--use-context`: `cluster apply -f` is the
+        // declarative path and silently repointing `kubectl` is not something a
+        // file applied in a loop should do. The printed switch line is how this
+        // path says where kubectl ended up.
+        apply_one(name, &spec, false, cri_bin, ContextTakeover::Keep)?;
     }
     Ok(())
 }
@@ -2304,6 +2316,7 @@ fn apply_one(
     spec: &ClusterSpec,
     wait_ready: bool,
     cri_bin: Option<&std::path::Path>,
+    takeover: ContextTakeover,
 ) -> Result<()> {
     check_cluster_name(name)?;
     validate(spec)?;
@@ -2311,10 +2324,10 @@ fn apply_one(
     // cni) hold in all three; only the mode-specific block changes.
     match spec.mode.as_str() {
         "kind" => return apply_kind(name, spec),
-        "vm" => return apply_vm(name, spec, wait_ready, cri_bin),
+        "vm" => return apply_vm(name, spec, wait_ready, cri_bin, takeover),
         _ => {} // `ssh` follows below (the original path)
     }
-    apply_ssh(name, spec, wait_ready, cri_bin)
+    apply_ssh(name, spec, wait_ready, cri_bin, takeover)
 }
 
 /// `mode: kind` — nodes in containers on this machine (see `cmd::kindmode`).
@@ -2354,6 +2367,7 @@ fn apply_vm(
     spec: &ClusterSpec,
     wait_ready: bool,
     cri_bin: Option<&std::path::Path>,
+    takeover: ContextTakeover,
 ) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
         Error::Invalid(
@@ -2402,6 +2416,7 @@ fn apply_vm(
         // combined with `mode: vm` outright, so this is never silently dropped.
         etcd_cluster: None,
         cri_bin: cri_bin.map(|p| p.to_path_buf()),
+        use_context: takeover == ContextTakeover::Switch,
     })
 }
 
@@ -2422,6 +2437,7 @@ fn apply_ssh(
     spec: &ClusterSpec,
     wait_ready: bool,
     cri_bin: Option<&std::path::Path>,
+    takeover: ContextTakeover,
 ) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(cri_bin.map(|p| p.to_path_buf()))?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
@@ -2575,7 +2591,7 @@ fn apply_ssh(
     // reached or the state root cannot be written, and installing a pod
     // network on top of that would only produce a second, worse error.
     p.step(super::po::t("Fetching kubeconfig"), "📇");
-    let kubeconfig_path = fetch_kubeconfig(&cp1_target, name)?;
+    let kubeconfig_path = fetch_kubeconfig(&cp1_target, name, takeover)?;
     p.ok();
 
     // `spec.cni` used to be validated by round-trip and then never read again
@@ -2975,6 +2991,11 @@ struct ProvisionArgs {
     etcd_cluster: Option<u32>,
     /// `--cri-bin`: the `delonix-cri` to install (else resolved, see `resolve_cri_bin`).
     cri_bin: Option<PathBuf>,
+    /// `--use-context`: make this cluster the one a bare `kubectl` talks to,
+    /// even when `~/.kube/config` already points somewhere usable. Carried as
+    /// a `bool` here to match the flag, and turned into a
+    /// [`ContextTakeover`] at the single place that consumes it.
+    use_context: bool,
 }
 
 /// Deterministic VM names of a role (`<cluster>-cp1`, `<cluster>-w1`, ...).
@@ -3252,6 +3273,53 @@ fn remove_local_kubeconfig_entries(dest: &Path, cluster_name: &str) -> Result<()
     std::fs::write(&tmp, out)?;
     std::fs::rename(&tmp, dest)?;
     Ok(())
+}
+
+/// Removes a VM/SSH cluster's three kubeconfig entries, but ONLY when they are
+/// recognizably the ones this engine wrote.
+///
+/// BUG FIXED HERE: `cluster destroy <name>` only reaches `destroy_vm_cluster`
+/// when the cluster still HAS VMs. A `mode: ssh` cluster — remote hosts that
+/// were already live, which this engine never created a machine for — has none
+/// by definition, so it falls through to kind-mode's leftover collection. That
+/// path removes the cached `<name>-kubeconfig.yaml` and the state directory,
+/// but its own context cleanup looks for `delonix-<name>`, which matches NONE
+/// of the three names a VM/SSH cluster is merged under. Destroying such a
+/// cluster therefore left all three `~/.kube/config` entries behind, so
+/// `kubectl config get-contexts` kept listing a cluster whose hosts were gone
+/// and `current-context` could stay pointing at it.
+///
+/// The guard is the `users[]` entry named `<name>-admin`: a name
+/// `merge_into_local_kubeconfig` invents and nothing else on the host does. It
+/// is needed because the cluster and context entries are named after the
+/// cluster and nothing else, so an operator may hold an unrelated, hand-written
+/// context of the same name — and collecting a leftover must not delete a
+/// context for a cluster this engine never created. Without the marker the
+/// triple is left strictly alone, which is why `destroy_vm_cluster` keeps
+/// calling the unguarded removal: there, the VMs it just removed are the proof
+/// the cluster was ours.
+pub(crate) fn remove_ssh_kubeconfig_entries(dest: &Path, cluster_name: &str) -> Result<()> {
+    let Ok(txt) = std::fs::read_to_string(dest) else {
+        return Ok(());
+    };
+    let Ok(cfg) = serde_yaml::from_str::<serde_yaml::Value>(&txt) else {
+        // A kubeconfig this function cannot parse is one it must not rewrite.
+        // The caller is collecting leftovers and has no credentials at stake
+        // here; the unguarded path is where a parse error is worth reporting.
+        return Ok(());
+    };
+    let marker = format!("{cluster_name}-admin");
+    let ours = cfg
+        .get("users")
+        .and_then(|v| v.as_sequence())
+        .is_some_and(|seq| {
+            seq.iter()
+                .any(|e| e.get("name").and_then(|n| n.as_str()) == Some(marker.as_str()))
+        });
+    if !ours {
+        return Ok(());
+    }
+    remove_local_kubeconfig_entries(dest, cluster_name)
 }
 
 /// The OCI reference to `vm pull` for a resolved `image_tag` that has no
@@ -3797,6 +3865,10 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         &spec,
         args.copy_kubeconfig,
         args.cri_bin.as_deref(),
+        match args.use_context {
+            true => ContextTakeover::Switch,
+            false => ContextTakeover::Keep,
+        },
     )
 }
 
@@ -4550,7 +4622,11 @@ fn kubeadm_join(
     Ok(())
 }
 
-fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<PathBuf> {
+fn fetch_kubeconfig(
+    cp1: &SshTarget,
+    cluster_name: &str,
+    takeover: ContextTakeover,
+) -> Result<PathBuf> {
     let dir = state_root().join("clusters");
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{cluster_name}-kubeconfig.yaml"));
@@ -4587,7 +4663,7 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<PathBuf> {
         let kube_dir = PathBuf::from(home).join(".kube");
         let kube_config = kube_dir.join("config");
         std::fs::create_dir_all(&kube_dir)?;
-        merge_into_local_kubeconfig(&dest, cluster_name, &kube_config)?;
+        merge_into_local_kubeconfig(&dest, cluster_name, &kube_config, takeover)?;
     }
     Ok(dest)
 }
@@ -4652,7 +4728,28 @@ fn safe_user_entry(name: &str, raw: &serde_yaml::Value) -> serde_yaml::Value {
     Value::Mapping(m)
 }
 
-fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -> Result<()> {
+/// Whether the cluster being created takes over `current-context` in the
+/// operator's kubeconfig.
+///
+/// A named type and not a fourth `bool` parameter: the functions that carry it
+/// down (`apply_one`, `apply_ssh`) already take `wait_ready: bool`, and two
+/// adjacent bools at a call site is precisely how the wrong one gets passed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ContextTakeover {
+    /// Leave an already usable `current-context` pointing where it points —
+    /// the default, and the invariant the multi-cluster test pins.
+    Keep,
+    /// Point `kubectl` at the cluster just created, even over a usable
+    /// selection (`--use-context`).
+    Switch,
+}
+
+fn merge_into_local_kubeconfig(
+    source: &Path,
+    cluster_name: &str,
+    dest: &Path,
+    takeover: ContextTakeover,
+) -> Result<()> {
     use serde_yaml::Value;
 
     let read_yaml = |p: &Path| -> Result<Value> {
@@ -4751,7 +4848,10 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
                 .iter()
                 .any(|e| entry_name(e).as_deref() == Some(current))
         });
-    if first_write || !current_is_usable {
+    // `--use-context` is the operator saying "and point kubectl here" — the one
+    // case that may override a perfectly usable selection. Without it the
+    // decision is exactly what it was.
+    if first_write || !current_is_usable || takeover == ContextTakeover::Switch {
         merged["current-context"] = Value::String(cluster_name.to_string());
     }
 
@@ -4767,36 +4867,47 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
     // `fetch_kubeconfig` already carries a few functions up; this path had been
     // left on the old shape.
     delonix_state::write_atomic_mode(dest, out.as_bytes(), Some(0o600))?;
-    let selected = merged
-        .get("current-context")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        == cluster_name;
-    println!(
-        "{}",
-        super::po::tf(
-            if selected {
-                "merged into {path} as context '{ctx}' — kubectl now points here"
-            } else {
-                // Say where kubectl still points, not just how to move it: the
-                // useful fact is that this cluster is NOT the current one.
-                "merged into {path} as context '{ctx}' (kubectl stays on '{cur}'; \
-                 kubectl config use-context {ctx})"
-            },
-            &[
-                ("path", &dest.display().to_string()),
-                ("ctx", cluster_name),
-                (
-                    "cur",
-                    merged
-                        .get("current-context")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                ),
-            ]
-        )
-    );
+    for line in merge_report(
+        &dest.display().to_string(),
+        cluster_name,
+        merged
+            .get("current-context")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    ) {
+        println!("{line}");
+    }
     Ok(())
+}
+
+/// What [`merge_into_local_kubeconfig`] reports once the file is written:
+/// where the context landed, and — when `kubectl` did NOT move — the command
+/// that moves it.
+///
+/// Pure and separate from the writing so the switch instruction is pinned by a
+/// test rather than only seen by eye. That instruction is half of how a newly
+/// created cluster becomes reachable by a bare `kubectl` (`--use-context` is
+/// the other half), and it used to be buried mid-sentence inside the "stays
+/// on" line, where a command is a command nobody copies.
+fn merge_report(path: &str, cluster_name: &str, current: &str) -> Vec<String> {
+    if current == cluster_name {
+        return vec![super::po::tf(
+            "merged into {path} as context '{ctx}' — kubectl now points here",
+            &[("path", path), ("ctx", cluster_name)],
+        )];
+    }
+    vec![
+        // Say where kubectl still points, not just how to move it: the useful
+        // fact is that this cluster is NOT the current one.
+        super::po::tf(
+            "merged into {path} as context '{ctx}' (kubectl stays on '{cur}')",
+            &[("path", path), ("ctx", cluster_name), ("cur", current)],
+        ),
+        super::po::t("to point kubectl at this cluster, run:").to_string(),
+        // Not through the catalog: this is a command to be typed, not prose.
+        // A msgid here invites a translation that would stop being the command.
+        format!("    kubectl config use-context {cluster_name}"),
+    ]
 }
 
 /// Handles this group's `init` (see `cmd::scaffold`).
@@ -5339,7 +5450,7 @@ users:
         .unwrap();
         let dest = tmp.path().join("config");
 
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest, ContextTakeover::Keep).unwrap();
 
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
@@ -5370,7 +5481,7 @@ users:
         std::fs::write(&source, fake_admin_conf()).unwrap();
         let dest = tmp.path().join("config");
 
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest, ContextTakeover::Keep).unwrap();
 
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
@@ -5391,12 +5502,12 @@ users:
 
         // 1st cluster: creates the file, becomes current-context.
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest, ContextTakeover::Keep).unwrap();
         // 2nd, DIFFERENT cluster, same kubeadm fixed names in its own admin.conf —
         // the historical bug: this used to be a no-op because ~/.kube/config
         // already existed, so `prod`'s context never made it in at all.
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "prod", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "prod", &dest, ContextTakeover::Keep).unwrap();
 
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
@@ -5416,7 +5527,7 @@ users:
 
         // Re-running for `lab` REPLACES its 3 entries, never duplicates them.
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest, ContextTakeover::Keep).unwrap();
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         assert_eq!(merged["clusters"].as_sequence().unwrap().len(), 2);
@@ -5433,14 +5544,14 @@ users:
         let dest = tmp.path().join("config");
 
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest, ContextTakeover::Keep).unwrap();
 
         let mut m: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         m["current-context"] = serde_yaml::Value::String("gone-with-the-vm".into());
         std::fs::write(&dest, serde_yaml::to_string(&m).unwrap()).unwrap();
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "novo", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "novo", &dest, ContextTakeover::Keep).unwrap();
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         assert_eq!(
@@ -5454,12 +5565,116 @@ users:
         m.as_mapping_mut().unwrap().remove("current-context");
         std::fs::write(&dest, serde_yaml::to_string(&m).unwrap()).unwrap();
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "outro", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "outro", &dest, ContextTakeover::Keep).unwrap();
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         assert_eq!(
             merged["current-context"], "outro",
             "an absent current-context must be filled by the cluster just created"
+        );
+    }
+
+    /// `--use-context` decided from the state that actually matters: a
+    /// kubeconfig that ALREADY selects a usable context. Both directions, in
+    /// one test, because the whole point is that they differ — without the
+    /// flag a second cluster must not move the selection (the invariant the
+    /// multi-cluster accumulation test above pins, and which the live incident
+    /// recorded at the decision point produced), and WITH it a bare `kubectl
+    /// get nodes` has to reach the cluster just created instead of the
+    /// previous one.
+    #[test]
+    fn merge_kubeconfig_takes_over_current_context_only_when_asked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
+        let dest = tmp.path().join("config");
+        let read = || -> serde_yaml::Value {
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap()
+        };
+        let current = || -> String {
+            read()["current-context"]
+                .as_str()
+                .unwrap_or_default()
+                .into()
+        };
+        let names = |key: &str| -> Vec<String> {
+            read()[key]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|e| e["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let merge = |name: &str, takeover: ContextTakeover| {
+            std::fs::write(&source, fake_admin_conf()).unwrap();
+            merge_into_local_kubeconfig(&source, name, &dest, takeover).unwrap();
+        };
+
+        // The precondition the old behaviour protects: `lab` is in the file AND
+        // is what kubectl points at, so the selection is usable — not absent,
+        // not dangling.
+        merge("lab", ContextTakeover::Keep);
+        assert_eq!(current(), "lab", "precondition: a usable selection");
+
+        // Without the flag: merged, and the selection does not move.
+        merge("prod", ContextTakeover::Keep);
+        assert_eq!(
+            current(),
+            "lab",
+            "a 2nd cluster must not yank the context from someone working in the 1st"
+        );
+
+        // With the flag: the selection moves even over a usable one.
+        merge("staging", ContextTakeover::Switch);
+        assert_eq!(
+            current(),
+            "staging",
+            "--use-context must point kubectl at the cluster just created"
+        );
+        // And it moved to something kubectl can actually USE: a
+        // `current-context` naming an entry that is not in the file is the
+        // exact failure this whole decision exists to avoid.
+        assert!(names("contexts").contains(&"staging".to_string()));
+        assert!(names("clusters").contains(&"staging".to_string()));
+        assert!(names("users").contains(&"staging-admin".to_string()));
+        // Taking over the selection is not a licence to drop the other
+        // clusters — all three are still there, accumulated as before.
+        assert_eq!(names("contexts"), vec!["lab", "prod", "staging"]);
+
+        // Switching to a cluster that is ALREADY current is idempotent, not a
+        // second entry.
+        merge("staging", ContextTakeover::Switch);
+        assert_eq!(current(), "staging");
+        assert_eq!(names("contexts"), vec!["lab", "prod", "staging"]);
+    }
+
+    /// The printed half of the mechanism: when `kubectl` was NOT repointed,
+    /// create has to say so AND give the exact command that repoints it, on a
+    /// line of its own. Pinned because an operator who never runs that line
+    /// has a bare `kubectl get nodes` answering for the PREVIOUS cluster —
+    /// and because the command used to sit mid-sentence inside the line above,
+    /// where it reads as prose instead of something to copy.
+    #[test]
+    fn merge_report_prints_the_switch_command_on_its_own_line() {
+        let lines = merge_report("/home/op/.kube/config", "prod", "lab");
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines[0].contains("kubectl stays on 'lab'"),
+            "it must say where kubectl still points: {:?}",
+            lines[0]
+        );
+        assert_eq!(
+            lines[2], "    kubectl config use-context prod",
+            "the switch command has to be exactly runnable, on its own line"
+        );
+
+        // Repointed: no instruction, because there is nothing left to do.
+        let lines = merge_report("/home/op/.kube/config", "prod", "prod");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("kubectl now points here"), "{lines:?}");
+        assert!(
+            !lines.iter().any(|l| l.contains("use-context")),
+            "telling the operator to switch to the cluster kubectl ALREADY \
+             points at is noise: {lines:?}"
         );
     }
 
@@ -5508,9 +5723,9 @@ users:
         let source = tmp.path().join("admin.conf");
         let dest = tmp.path().join("config");
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "doomed", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "doomed", &dest, ContextTakeover::Keep).unwrap();
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "survivor", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "survivor", &dest, ContextTakeover::Keep).unwrap();
 
         remove_local_kubeconfig_entries(&dest, "doomed").unwrap();
 
@@ -5545,7 +5760,7 @@ users:
 
         let source = tmp.path().join("admin.conf");
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest, ContextTakeover::Keep).unwrap();
         remove_local_kubeconfig_entries(&dest, "not-lab").unwrap();
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();

@@ -518,13 +518,16 @@ Options:
           [default: 300]
 
       --copy-kubeconfig
-          Wait for every node to report `Ready` (CNI up) before fetching the kubeconfig, then MERGE it into `~/.kube/config` as its own cluster/user/context (named after `--name`) instead of leaving other clusters&#x27; contexts untouched only by accident. Without this, the kubeconfig is still written to `&lt;root&gt;/clusters/&lt;name&gt;-kubeconfig.yaml` right after `kubeadm join`, before the CNI has necessarily finished
+          Wait for every node to report `Ready` (CNI up) before the command returns. It does NOT decide anything about the kubeconfig, despite the name: that is cached to `&lt;root&gt;/clusters/&lt;name&gt;-kubeconfig.yaml` and merged into `~/.kube/config` as its own cluster/user/context (named after `--name`) on EVERY run, as soon as `kubeadm init` has written it — so the commands a later failure tells you to run can actually run. A pod-network profile waits with or without this flag
 
       --etcd-cluster &lt;ETCD_CLUSTER&gt;
           Auto-provision N more VMs as a DEDICATED etcd cluster (delonix generates its own CA + certs and bootstraps it) instead of the default `stacked` etcd (co-located with the control-planes). Use an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed for dev/test but has no HA (a single point of failure). Omit for today&#x27;s default behavior
 
       --cri-bin &lt;CRI_BIN&gt;
           `delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version
+
+      --use-context
+          Point `kubectl` at this cluster once it is up, so a bare `kubectl get nodes` reaches it. Without this flag a `~/.kube/config` that already selects a usable context keeps it — the cluster&#x27;s context is merged either way, and the command to switch to it is printed
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
