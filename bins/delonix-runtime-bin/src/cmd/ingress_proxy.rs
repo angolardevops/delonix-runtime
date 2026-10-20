@@ -1,15 +1,24 @@
 //! `delonix ingress-proxy` — the embedded L7/HTTP reverse-proxy that serves the
 //! `kind: HTTPRoute` (see `cmd/httproute.rs`). HIDDEN subcommand: it is not for the
-//! user to run by hand — Phase 4 launches it INSIDE the holder's netns (where it
-//! reaches the backends by IP) and publishes the inbound ports on the host.
+//! user to run by hand — `httproute::apply` → `set_manual` → `rebuild` →
+//! `ensure_running` launches it INSIDE the holder's netns (where it reaches the
+//! backends by IP) and publishes the inbound ports on the host.
 //!
-//! **Phase 2 (this file):** the proxy core — `hyper` server (http1),
-//! routing by `Host` + path prefix to `backend.ip:port`, forwarding with
-//! body streaming (no buffering). TLS (Phase 3) and the lifecycle/spawn
-//! (Phase 4) come next; a `listener` with `tls: true` is skipped with a warning here.
+//! **This file** is the proxy core — `hyper` server (http1), routing by `Host` +
+//! path prefix to `backend.ip:port`, forwarding with body streaming (no
+//! buffering) — AND the TLS termination (`build_server_config`, rustls) and the
+//! process lifecycle (`ensure_running`/`spawn_proxy`/`stop`, `publish_listeners`).
+//! A `listener` with `tls: true` terminates TLS here, with BYO material from a
+//! `kind: Secret` or a self-signed cert (`self_signed_pem`).
 //!
-//! The config is a plain JSON written by Phase 4 (`ProxyConfig`) — routes already
-//! resolved to `ip:port` (the proxy talks to no store).
+//! The config is a plain JSON written by `httproute::apply` (`ProxyConfig`) —
+//! routes already resolved to `ip:port` (the proxy talks to no store).
+//!
+//! NOTE ON "phases": the build-out that produced this file numbered its own
+//! stages (core → TLS → lifecycle) and all of them have landed. Do not read
+//! those numbers against ADR-0046, whose phase 4 (`announce: l2`, `hosts:
+//! guest`) is a DIFFERENT, still-unbuilt thing — see `cmd/ippool.rs`, which
+//! refuses `announce: l2` by name.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -38,14 +47,15 @@ pub enum Where {
     Host,
 }
 
-/// The proxy's runtime config (written by Phase 4, read by `run`). Routes already
-/// resolved — the proxy knows no containers or stores.
+/// The proxy's runtime config (written by `httproute::apply`, read by `run`).
+/// Routes already resolved — the proxy knows no containers or stores.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     pub listeners: Vec<Listener>,
     pub routes: Vec<Route>,
-    /// TLS material already resolved by Phase 4 (generated self-signed OR cert/key
-    /// from a `kind: Secret`). Present ⇒ the `tls: true` listeners terminate TLS with it.
+    /// TLS material already resolved by `httproute::apply` (generated self-signed
+    /// OR cert/key from a `kind: Secret`). Present ⇒ the `tls: true` listeners
+    /// terminate TLS with it.
     #[serde(default)]
     pub tls: Option<TlsMaterial>,
     /// Host names to publish in the operator host's `/etc/hosts` (`hosts: [host]`,
@@ -103,7 +113,7 @@ pub struct PoolClaim {
     pub addr: String,
 }
 
-/// Cert + key in PEM, ready to load into rustls (Phase 4 resolves them).
+/// Cert + key in PEM, ready to load into rustls (`httproute::apply` resolves them).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsMaterial {
     #[serde(rename = "certPem")]
@@ -126,7 +136,7 @@ pub struct TlsMaterial {
 }
 
 /// Generates a **self-signed** cert+key pair (PEM) for the given `hosts` (SANs).
-/// Used by Phase 4 when `tls.mode: selfSigned`. No hosts → `localhost`.
+/// Used by `httproute::apply` when `tls.mode: selfSigned`. No hosts → `localhost`.
 pub fn self_signed_pem(hosts: &[String]) -> Result<TlsMaterial> {
     let sans: Vec<String> = if hosts.is_empty() {
         vec!["localhost".into()]
