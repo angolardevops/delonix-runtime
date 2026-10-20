@@ -462,6 +462,15 @@ fn bootstrap_plan(spec: &ClusterSpec, wait_ready: bool) -> Vec<String> {
         plan.push(super::po::t("Bootstrapping the etcd cluster").to_string());
     }
     plan.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
+    // HERE, and not at the end: `kubeadm init` has just written
+    // `admin.conf`, and every step after this one can fail in a way whose
+    // diagnosis needs the cached kubeconfig. DX-6704 tells the operator to
+    // run `delonix cluster <name> -n <ns> describe daemonset <ds>`, which
+    // resolves `<root>/clusters/<name>-kubeconfig.yaml` — fetched last, that
+    // file did not exist yet at the moment the advice was printed, so the
+    // only thing the two named commands could answer was DX-1000 "no
+    // kubeconfig for cluster". Measured on a 3+2 VM cluster, 2026-10-20.
+    plan.push(super::po::t("Fetching kubeconfig").to_string());
     if installs_default_cni(spec) {
         plan.push(super::po::t("Installing the default CNI (bridge, single node)").to_string());
     }
@@ -493,7 +502,6 @@ fn bootstrap_plan(spec: &ClusterSpec, wait_ready: bool) -> Vec<String> {
     if waits_for_ready(spec, wait_ready) {
         plan.push(super::po::t("Waiting for all nodes to be Ready").to_string());
     }
-    plan.push(super::po::t("Fetching kubeconfig").to_string());
     plan
 }
 
@@ -1291,12 +1299,13 @@ pub enum ClusterCmd {
         /// Seconds to wait for each VM to become reachable over SSH.
         #[arg(long, default_value_t = 300)]
         boot_timeout: u64,
-        /// Wait for every node to report `Ready` (CNI up) before fetching the
-        /// kubeconfig, then MERGE it into `~/.kube/config` as its own
-        /// cluster/user/context (named after `--name`) instead of leaving
-        /// other clusters' contexts untouched only by accident. Without this,
-        /// the kubeconfig is still written to `<root>/clusters/<name>-kubeconfig.yaml`
-        /// right after `kubeadm join`, before the CNI has necessarily finished.
+        /// Wait for every node to report `Ready` (CNI up) before the command
+        /// returns. It does NOT decide anything about the kubeconfig, despite
+        /// the name: that is cached to `<root>/clusters/<name>-kubeconfig.yaml`
+        /// and merged into `~/.kube/config` as its own cluster/user/context
+        /// (named after `--name`) on EVERY run, as soon as `kubeadm init` has
+        /// written it — so the commands a later failure tells you to run can
+        /// actually run. A pod-network profile waits with or without this flag.
         #[arg(long)]
         copy_kubeconfig: bool,
         /// Auto-provision N more VMs as a DEDICATED etcd cluster (delonix
@@ -2545,6 +2554,30 @@ fn apply_ssh(
     let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec, &etcd_endpoints)?;
     p.ok();
 
+    // The kubeconfig is cached the moment `admin.conf` exists, and not after
+    // the cluster converges, because every step below can fail and every one
+    // of those failures is diagnosed THROUGH this file. `kubectl_passthrough`
+    // resolves `<root>/clusters/<name>-kubeconfig.yaml`, so fetching it last
+    // made DX-6704's own advice — «look with `delonix cluster {name} -n {ns}
+    // describe daemonset {ds}`» — answer DX-1000 "no kubeconfig for cluster"
+    // every single time it was printed. Measured 2026-10-20 on a 3+2 VM
+    // cluster whose flannel agents never came up: the error named two
+    // commands, the cluster directory held `id_ed25519`, `id_ed25519.pub`
+    // and `network-profile.json`, and neither command could run.
+    //
+    // Nothing is re-read later: `admin.conf` is written once by `kubeadm
+    // init` with the control-plane endpoint already baked in, and a join
+    // does not change it — so the bytes cached here are the bytes the old
+    // code cached at the end.
+    //
+    // A failure HERE is still a failure of the whole bootstrap, not a
+    // warning: it means the control-plane that was just created cannot be
+    // reached or the state root cannot be written, and installing a pod
+    // network on top of that would only produce a second, worse error.
+    p.step(super::po::t("Fetching kubeconfig"), "📇");
+    let kubeconfig_path = fetch_kubeconfig(&cp1_target, name)?;
+    p.ok();
+
     // `spec.cni` used to be validated by round-trip and then never read again
     // anywhere in this function — every cluster bootstrapped through this
     // path stayed `NotReady` forever, with nothing but a manual
@@ -2656,10 +2689,6 @@ fn apply_ssh(
     } else {
         None
     };
-
-    p.step(super::po::t("Fetching kubeconfig"), "📇");
-    let kubeconfig_path = fetch_kubeconfig(&cp1_target, name)?;
-    p.ok();
 
     // The line this replaces said "ready" unconditionally — even on the
     // historical `wait_ready: false` path, where readiness is never even
@@ -6542,5 +6571,49 @@ workers:
         assert!(with_wait.iter().any(|l| l == waiting), "{with_wait:?}");
         let without = bootstrap_plan(&spec, false);
         assert!(!without.iter().any(|l| l == waiting), "{without:?}");
+    }
+
+    /// DX-6704 tells the operator to look with `delonix cluster <name> -n
+    /// <ns> describe daemonset <ds>`, and that passthrough resolves the
+    /// CACHED kubeconfig. Fetched at the END of the bootstrap — after the
+    /// pod-network install and after the readiness wait — the file does not
+    /// exist yet at the moment the error is printed, so the advice answered
+    /// DX-1000 «no kubeconfig for cluster» instead. Measured 2026-10-20 on a
+    /// 3-control-plane + 2-worker flannel cluster: DX-6704 after 420s, and
+    /// the cluster directory held only the two SSH keys and
+    /// `network-profile.json`.
+    ///
+    /// So the order is the contract, not an accident of where the push sits:
+    /// the kubeconfig is announced (and fetched) BEFORE anything that can
+    /// fail with advice that needs it.
+    #[test]
+    fn the_kubeconfig_is_fetched_before_anything_that_can_fail_needing_it() {
+        let spec = ClusterSpec {
+            network: NetworkBlock {
+                experimental: true,
+                ..Default::default()
+            },
+            ..spec_ssh_cp_and_worker("flannel")
+        };
+        let plan = bootstrap_plan(&spec, true);
+        let at = |needle: &str| {
+            plan.iter()
+                .position(|l| l == needle)
+                .unwrap_or_else(|| panic!("{needle:?} is not in the plan: {plan:?}"))
+        };
+        let fetching = at(super::super::po::t("Fetching kubeconfig"));
+        let init = at(super::super::po::t(
+            "Bootstrapping control-plane (kubeadm init)",
+        ));
+        let installing = at(&super::super::po::tf(
+            "Installing the {cni} pod network",
+            &[("cni", "flannel")],
+        ));
+        let waiting = at(super::super::po::t("Waiting for all nodes to be Ready"));
+        // After the init, because `admin.conf` does not exist before it.
+        assert!(init < fetching, "{plan:?}");
+        // Before the two steps whose failures name it.
+        assert!(fetching < installing, "{plan:?}");
+        assert!(fetching < waiting, "{plan:?}");
     }
 }
