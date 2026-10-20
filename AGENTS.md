@@ -1742,7 +1742,15 @@ manifesto mudou de significado.
 - **Ciclo de vida** (`ensure_running`/`stop`): idempotente (vivo → SIGHUP; morto → spawn + publish),
   com **guarda de identidade do PID** (`/proc/<pid>/cmdline` contém `ingress-proxy`, para um PID
   reciclado não levar SIGHUP/SIGTERM), confirmação de arranque (não declara "a servir" se o proxy
-  caiu no bind) e publish idempotente. `httproute rm` mata o proxy + despublica.
+  caiu no bind) e publish idempotente. `httproute rm` mata o proxy + despublica — e **diz só o
+  que observou**: lê `is_running` das duas instâncias ANTES do `clear_manual` (ver `rm_report`),
+  porque a ausência de proxy DEPOIS do clear é um estado que o próprio comando produz. Sem isso
+  anunciava «proxy parado e portas despublicadas» também quando o `spawn_proxy` do `apply` tinha
+  falhado, quando o proxy já tinha morrido, e para a instância do netns do host, que liga ao
+  loopback directamente e nunca publica porta nenhuma. Pela mesma razão, um proxy a correr DEPOIS
+  do clear também não prova que corria antes: com rotas auto-registadas a sobreviver, o `rebuild`
+  salta o `stop` e o `ensure_running` faz `spawn_proxy` se não houver pid vivo — ou seja o `rm`
+  ARRANCA o proxy e publica as portas, e aí diz isso em vez de «proxy mantém-se».
 - **Segurança:** `host`/`path`/`backend.service` passam por `valid_host`/`valid_path_prefix`/
   `valid_service` antes de qualquer uso; headers **hop-by-hop** (Connection/Transfer-Encoding/
   Upgrade/…) removidos nos dois sentidos (anti-smuggling); timeouts anti-slowloris (handshake TLS,

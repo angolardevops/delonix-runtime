@@ -2682,6 +2682,15 @@ msgstr "httproute: rotas manuais removidas — proxy mantém-se (há rotas auto-
 msgid "httproute: proxy stopped and ports unpublished"
 msgstr "httproute: proxy parado e portas despublicadas"
 
+msgid "httproute: manual routes removed — no proxy was running"
+msgstr "httproute: rotas manuais removidas — nenhum proxy estava a correr"
+
+msgid "httproute: manual routes removed — the host-netns proxy was stopped (it binds the host loopback directly, so it had no published port to take down)"
+msgstr "httproute: rotas manuais removidas — o proxy do netns do host foi parado (liga-se directamente ao loopback do host, por isso não tinha porta publicada para despublicar)"
+
+msgid "httproute: manual routes removed — the proxy was not running and was started for the auto-registered routes (its ports are now published)"
+msgstr "httproute: rotas manuais removidas — o proxy não estava a correr e foi arrancado para as rotas auto-registadas (as portas dele estão agora publicadas)"
+
 msgid "spec.rules cannot be empty (nothing to route)"
 msgstr "spec.rules não pode ser vazio (nada para rotear)"
 
