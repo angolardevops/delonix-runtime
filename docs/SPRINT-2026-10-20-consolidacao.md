@@ -221,14 +221,45 @@ compilador a proteger da deriva. E a landing do handbook, que tem as línguas
 
 ## 5. O que só existe nesta máquina
 
-Por ordem de risco. Tudo o resto já está no remoto.
+**Re-medido a 2026-10-20 18:3x contra o remoto, depois de um `git fetch --prune
+--tags`: nada.** A primeira versão desta secção listava quatro riscos; eram
+leitura de refs de rastreio **velhas**, não do remoto. O que está mesmo lá:
 
-| artefacto | risco | destino |
+| artefacto | estado real |
+|---|---|
+| `cons/integration-test-2026-10-20` | no remoto, sha **idêntico** (`0a3e9224`) |
+| `claude/unruffled-proskuriakova-b581a6` | no remoto em `62738979`, = cabeça da PR #891 |
+| `829f17fe` (commit órfão) | em `salvado/829f17fe-testes-cli`, tag **já no remoto** |
+| `docs/sprint-consolidacao-2026-10-20` | no remoto, e `develop` aponta-lhe |
+| contratos em `.claude/sessions/` | `gitignored` — por isso este plano existe |
+
+> **A lição, que vale mais do que a tabela:** `git rev-list <upstream>..<branch>`
+> mede contra a ref de rastreio **local**, que um `fetch` parcial deixa velha. Um
+> `fetch origin main` não actualiza as outras. Antes de declarar qualquer coisa
+> «só-local» — e sobretudo antes de apagar fosse o que fosse por causa disso —
+> corre `git fetch origin --prune --tags` e confirma com `git ls-remote`.
+
+Nada se perdeu, mas perdeu-se por pouco: **arquivar as sessões apagou as branches
+das worktrees**, não só os directórios. Se a medição velha estivesse certa, o
+commit de `claude/unruffled-proskuriakova-b581a6` tinha ido com elas.
+
+### O que a `main` ainda não tem
+
+Tudo está commitado e no remoto; o que falta é **merge**, não commit:
+
+| branch | commits por aterrar | como |
 |---|---|---|
-| commit órfão `829f17fe` | **alto** — em branch nenhuma, o GC leva-o | ver abaixo |
-| commit à frente em `claude/unruffled-proskuriakova-b581a6` | médio | empurrar (bloco 0) |
-| `cons/integration-test-2026-10-20` | baixo | ver abaixo |
-| contratos em `.claude/sessions/` | médio | `gitignored` — por isso este plano existe |
+| `net/unconditional-guards-are-reconciled` | 1 | PR #893, verde |
+| `docs/ingress-phase4-describes-what-exists` | 1 | PR #890, verde |
+| `test/folhas-reais` | 12 | PR #889, verde |
+| `claude/unruffled-proskuriakova-b581a6` | 2 | PR #891, **gate vermelho** |
+| `net/ra-only-when-ipv6-opted-in` | 1 | **sem PR** — bloco 3 |
+| `docs/sprint-consolidacao-2026-10-20` | 1 | este plano |
+
+`cons/integration-test-2026-10-20` marca 15, mas são os mesmos commits das PRs
+acima — é o merge local que as juntou para testar. Não acrescenta nada próprio.
+
+`develop` está em `a5537fcc`: `main` mais o commit deste plano, 0 atrás.
 
 **`829f17fe`** — «cli: pin the two message decisions #806 and #807 turn on, in
 tests». São os 8 testes da sessão `fix/cli-commands-say-what-they-did`, cujo push
