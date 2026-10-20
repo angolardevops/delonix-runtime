@@ -319,6 +319,7 @@ des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige
 | `lang` | lang ratchet |
 | `capability` | capability ratchet |
 | `cli-exec` | cli execution ratchet |
+| `folhas` | leaf inventory ratchet |
 | `arch` | arch fitness |
 | `contract` | contract gate |
 | `version` | version gate |

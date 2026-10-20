@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -304,6 +305,120 @@ class Extractors(unittest.TestCase):
         tools = self.mod.mcp_tools()
         self.assertIn("runtime.info", tools, "the published name is dotted, not snake_case")
         self.assertNotIn("runtime_info", tools)
+
+
+CI = HERE.parent / ".github" / "workflows" / "ci.yml"
+MAKEFILE = HERE.parent / "Makefile"
+GATE = "scripts/folhas_gate.py"
+
+
+def gate_jobs(workflow: str, script: str) -> list[tuple[str, list[str]]]:
+    """`(job id, the job's lines)` for every job whose body mentions `script`.
+
+    Text, not YAML: these gates are stdlib only, and this is the same shape as
+    `scripts/test_tmp_roots_gate.py:gate_steps`. A job starts at a key two
+    spaces in, under the top-level `jobs:`, and ends at the next such key."""
+    jobs: list[tuple[str, list[str]]] = []
+    cur: list[str] | None = None
+    seen_jobs = False
+    for line in workflow.splitlines():
+        if re.match(r"^jobs:\s*(#.*)?$", line):
+            seen_jobs = True
+            continue
+        if not seen_jobs:
+            continue
+        job = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if job:
+            cur = []
+            jobs.append((job.group(1), cur))
+        elif cur is not None:
+            cur.append(line)
+    return [(jid, lines) for jid, lines in jobs if any(script in l for l in lines)]
+
+
+def step_running(job_lines: list[str], script: str) -> list[str] | None:
+    """The lines of the job's step whose `run:` calls `script`, if any."""
+    steps: list[list[str]] = []
+    cur: list[str] | None = None
+    for line in job_lines:
+        if re.match(r"^ {6}- ", line):
+            cur = [line]
+            steps.append(cur)
+        elif cur is not None and line.strip() and not line.startswith(" " * 7):
+            cur = None
+        elif cur is not None:
+            cur.append(line)
+    return next((s for s in steps if any(script in l for l in s)), None)
+
+
+class TheCiRunsTheGate(unittest.TestCase):
+    """A gate nobody runs guards nothing, and this one spent its first eleven
+    commits in that state.
+
+    `ee542004` added `folhas_gate.py` to the `gates` target of the `Makefile`,
+    which reads like wiring and is not: `.github/workflows/ci.yml` does not run
+    `make gates`: it runs each script as its own named step inside a job per
+    concern. Measured at `e4ea083f`, `grep -rn folhas .github/` returned
+    nothing, and of every `*_gate.py`/`*_ratchet.py` under `scripts/` this was
+    the ONLY one no workflow reached. So a `docs/testing/folhas.tsv` drifting
+    from the code denominators, or a class-`A` count going down, would have read
+    green on a pull request and been caught only by whoever ran `make ci` by
+    hand.
+
+    The two parser cases are not ceremony: the thing that has to be
+    distinguished is exactly a step that runs the gate from a step that runs
+    `make`, because confusing them is the mistake this class exists for."""
+
+    def test_the_parser_sees_a_step_that_runs_the_gate(self):
+        wf = (
+            "jobs:\n  folhas:\n    name: leaf inventory ratchet\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            f"      - name: leaves\n        run: python3 {GATE}\n"
+        )
+        ((jid, lines),) = gate_jobs(wf, GATE)
+        self.assertEqual(jid, "folhas")
+        self.assertIsNotNone(step_running(lines, GATE))
+
+    def test_a_make_target_is_not_read_as_a_ci_step(self):
+        """What `ee542004` actually did. `make gates` reaching the gate is not
+        the same claim as CI reaching it, and must not satisfy this test."""
+        wf = "jobs:\n  gates:\n    steps:\n      - name: gates\n        run: make gates\n"
+        self.assertEqual(gate_jobs(wf, GATE), [])
+
+    def test_ci_runs_the_gate_itself_and_not_only_the_makefile(self):
+        self.assertIn(
+            "folhas_gate.py",
+            MAKEFILE.read_text(),
+            "the `gates` target stopped running the gate locally",
+        )
+        jobs = gate_jobs(CI.read_text(), GATE)
+        self.assertTrue(
+            jobs,
+            f"no job in ci.yml runs {GATE}: the gate is in the Makefile only, "
+            "so a drifting table or a regressed baseline reads green on a PR",
+        )
+        for jid, lines in jobs:
+            self.assertIsNotNone(
+                step_running(lines, GATE),
+                f"job `{jid}` mentions {GATE} outside a step that runs it",
+            )
+
+    def test_nothing_skips_the_gate_on_a_pull_request(self):
+        """A job-level `if:` reports `skipped`, and a step-level one reports
+        `success` having run nothing — `perf-probe` above is in the file for
+        that exact distinction. Neither belongs on this gate: it needs no
+        privilege, no toolchain and no build, so there is no condition under
+        which it legitimately does not run."""
+        for jid, lines in gate_jobs(CI.read_text(), GATE):
+            self.assertFalse(
+                [l for l in lines if re.match(r"^    if:", l)],
+                f"job `{jid}` is conditional, so the gate can be skipped",
+            )
+            step = step_running(lines, GATE)
+            self.assertFalse(
+                [l for l in step if l.strip().startswith("if:")],
+                f"the gate step in `{jid}` is conditional:\n" + "\n".join(step),
+            )
 
 
 if __name__ == "__main__":
