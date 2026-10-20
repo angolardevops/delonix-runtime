@@ -49,27 +49,29 @@ de VM. O que falta é tudo externo ao nó, mais duas peças de cgroup.
 
 ---
 
-## 0. `socat` — 5 folhas por um pacote, e é o melhor retorno de todos
+## 0. `socat` — **RESOLVIDO** a 2026-10-20
 
-```bash
-sudo apt install socat
-```
+Nunca foi uma lacuna de cobertura: a bateria **já tinha** os cinco checks de
+`net netns exec/detach/firewall/publish/unpublish` em `scripts/e2e.sh`, e
+julgam no **fio** — dois netns, A responde um token por `socat`, B consome-o
+com `nc`. O bloco saltava num `command -v socat`, e o `socat` não estava no
+host; o `nc` estava.
 
-Isto não é uma lacuna de cobertura: a bateria **já tem** os cinco checks de
-`net netns exec/detach/firewall/publish/unpublish`
-(`scripts/e2e.sh` ~7200-7250), e julgam no **fio** — dois netns, A responde um
-token por `socat`, B consome-o com `nc`. O bloco salta num
-`command -v socat`, e o `socat` não está no host; o `nc` está.
+O bloco entrou em `5c62db13` (2026-10-11), **antes** do trace de `e5be0903`
+(2026-10-16). Logo as cinco folhas contaram zero por o bloco ter saltado, não
+por não haver checks.
 
-Medido a 2026-10-18: o bloco entrou em `5c62db13` (2026-10-11), **antes** do
-trace de `e5be0903` (2026-10-16). Logo as cinco folhas contaram zero por o
-bloco ter saltado, não por não haver checks. Instalado o pacote, uma corrida
-leva a CLI de 254 para **259** sem uma linha de código novo.
+Medido a 2026-10-20, com o `socat` em `/usr/bin/socat`: o bloco corre, os cinco
+checks dão PASS a afirmar efeito no fio, e as cinco folhas estão em **A**. A
+previsão escrita aqui era levar a CLI de 254 para **259** sem uma linha de
+código, e foi exactamente isso — os **263** do trace actual são esses 259 mais
+as quatro folhas da onda 2 (`net l4guard set/clear`, `system boot
+enable/disable`).
 
-A alternativa — reescrever o servidor do fixture com o `nc` que já existe —
-mexe num check que funciona para contornar uma falta do host, e trocaria um
-`socat` com `fork,reuseaddr` por um `nc -k` com semântica diferente. Não vale
-o risco por um `apt install`.
+A alternativa que se considerou — reescrever o servidor do fixture com o `nc`
+que já existe — ficou por fazer, e bem: mexia num check que funciona para
+contornar uma falta do host, e trocaria um `socat` com `fork,reuseaddr` por um
+`nc -k` com semântica diferente.
 
 ## 1. Registry OCI local — 5 folhas, e é o melhor retorno do conjunto
 

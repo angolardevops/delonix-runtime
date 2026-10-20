@@ -12,11 +12,11 @@
 
 | Campo | Valor |
 |---|---|
-| Medido | **2026-10-18** |
-| Commit | `f49d3570` |
-| Motor | `delonix 5.1.1` (`commit: f49d3570c (+45 commits since v5.1.1)`) |
+| Medido | **2026-10-20** |
+| Commit | `2663c846` |
+| Motor | `delonix 5.1.1` (`commit: 2663c846f (+49 commits since v5.1.1)`) |
 | Host | `delonix`, kernel 7.0.0-38-generic, Intel i9-13900H, 20 threads |
-| Binários | os seis de `target/release`, construídos deste sha, lado a lado |
+| Binários | os seis de `target/release`. O motor reporta `2663c846f`; os sidecars foram construídos minutos antes, de uma árvore que difere **só em `scripts/`** — nenhuma linha de Rust entre os dois estados, logo são o mesmo binário em comportamento |
 
 ## As classes
 
@@ -34,13 +34,13 @@
 
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| cli | **273** | 254 | 4 | 0 | 0 | 15 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| cli | **273** | 263 | 0 | 0 | 0 | 10 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
 | node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
 | mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
 | mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
 | cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
 | kinds | **125** | 38 | 48 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 25 kinds × 5 verbos |
-| **total** | **538** | **332** | **66** | **57** | **60** | **23** | — |
+| **total** | **538** | **341** | **62** | **57** | **60** | **18** | — |
 
 <!-- folhas:counts:end -->
 
@@ -74,27 +74,20 @@ legítimas diferentes:
 `scripts/cli-tree.sh --count` → **316 comandos · 273 folhas · 40 grupos**;
 classes de reestruturação 169 `~`, 85 `=`, 17 `→`, 2 `!`. `--gate` **rc=0**.
 
-`scripts/cli_exec_ratchet.py` **rc=0** → **254 de 273 invocadas sob asserção —
-93,0 %**. Proveniência do trace: 2026-10-16, commit `e5be0903`, root isolado,
-`PASS=1324 FAIL=0 SKIP=18`.
+`scripts/cli_exec_ratchet.py` **rc=0** → **263 de 273 invocadas sob asserção —
+96,3 %**. Proveniência do trace: 2026-10-20, commit `2663c846`, root isolado,
+`PASS=1340 FAIL=0 SKIP=16`.
 
-As 19 que nenhuma corrida executa, e o que **cada uma** precisa — medido, não
+As 10 que nenhuma corrida executa, e o que **cada uma** precisa — medido, não
 presumido. Os irmãos de cada grupo já correm, e é isso que as torna baratas:
-`net netns attach/up/down/gc/status`, `net l4guard status`, `system boot status`,
-`vm image import/convert/describe/ls/rm/init` e **19 das 21** folhas de
-`cluster` já são executadas.
+`net netns` (10/10), `net l4guard` (3/3) e `system boot` (3/3) estão
+**completos** desde 2026-10-20, `vm image import/convert/describe/ls/rm/init` e
+**19 das 21** folhas de `cluster` já são executadas. As 10 que restam são
+**todas** classe `E` — nenhuma é lacuna de cobertura, todas esperam
+infra-estrutura.
 
 | folha | precisa | classe |
 |---|---|---|
-| `net netns exec` | **`socat`** — o check já existe | **E** |
-| `net netns detach` | **`socat`** — o check já existe | **E** |
-| `net netns firewall` | **`socat`** — o check já existe | **E** |
-| `net netns publish` | **`socat`** — o check já existe | **E** |
-| `net netns unpublish` | **`socat`** — o check já existe | **E** |
-| `net l4guard set` | `nft` (presente); `status` **já corre** | **B** |
-| `net l4guard clear` | idem | **B** |
-| `system boot enable` | escreve units **de utilizador** e linger — fora do `DELONIX_ROOT`; exige redirigir `XDG_CONFIG_HOME` para não sujar o host | **B**, com cuidado |
-| `system boot disable` | idem | **B**, com cuidado |
 | `vm pause` | VM a correr + imagem arrancável no store isolado | **E** (só a imagem) |
 | `vm unpause` | idem | **E** (só a imagem) |
 | `vm image build` | `virt-customize` (presente) + descarga da cloud image | **E** (rede) |
@@ -106,20 +99,21 @@ presumido. Os irmãos de cada grupo já correm, e é isso que as torna baratas:
 | `vm image push` | registry OCI | **E** |
 | `vm image ls-remote` | registry OCI (listagem de tags) | **E** |
 
-**Cinco das 19 não são lacuna de cobertura — são um pacote em falta.** Medido a
-2026-10-18: a bateria **já tem** checks para `net netns
-exec/detach/firewall/publish/unpublish`, em `scripts/e2e.sh` (~7200-7250), e são
-dos melhores que aqui existem — julgam no **fio**, com um token que A responde e
-B consome, porque «a listener de uma porta publicada aceita a ligação haja ou
-não alguém a responder atrás dela». O bloco inteiro salta num
-`command -v socat`, e **o `socat` não está neste host**. O bloco já existia
-(`5c62db13`, 2026-10-11) quando o trace foi gravado (`e5be0903`, 2026-10-16),
-logo contaram zero por terem saltado, não por não existirem.
+**Cinco destas folhas eram um pacote em falta, e já não são.** A bateria **já
+tinha** checks para `net netns exec/detach/firewall/publish/unpublish`, em
+`scripts/e2e.sh`, desde `5c62db13` (2026-10-11), e são dos melhores que aqui
+existem — julgam no **fio**, com um token que A responde e B consome, porque «a
+listener de uma porta publicada aceita a ligação haja ou não alguém a responder
+atrás dela». Contavam zero porque o bloco inteiro saltava num `command -v
+socat` e o `socat` não estava no host, não por não existirem: o bloco já lá
+estava quando o trace de `e5be0903` (2026-10-16) foi gravado.
 
-Instalar um pacote converte **cinco folhas sem uma linha de código**. É o item
-mais barato de todo o `lab-requisitos.md`.
+Medido a 2026-10-20: o `socat` **está** em `/usr/bin/socat`, o bloco corre, e as
+cinco folhas passaram a **A** sem uma linha de código — converteram-se pela
+instalação de um pacote, tal como o `lab-requisitos.md` previa ser o item mais
+barato de toda a lista.
 
-**Nenhuma das 19 é um stub.** `bins/delonix-runtime-bin/src/` não tem um
+**Nenhuma das 10 é um stub.** `bins/delonix-runtime-bin/src/` não tem um
 `unimplemented!` nem um `todo!` — logo nenhuma é classe `D`. E `vm pause`/`vm
 unpause` são reais nos **três** backends: `delonix-provider-cloud-hypervisor`
 (`:847`/`:851`), `delonix-provider-libvirt` (`:3254`/`:3268`) e `delonix-proxmox`

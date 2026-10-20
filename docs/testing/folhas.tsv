@@ -137,18 +137,18 @@ cli	net ingress policy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=
 cli	net ingress publish	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net ingress rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net ingress unpublish	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net l4guard clear	B	nft presente; par de 'net l4guard set'
-cli	net l4guard set	B	nft presente; 'net l4guard status' ja e executado
+cli	net l4guard clear	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
+cli	net l4guard set	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
 cli	net l4guard status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net netns attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns detach	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
+cli	net netns detach	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
 cli	net netns down	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns exec	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
-cli	net netns firewall	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
+cli	net netns exec	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
+cli	net netns firewall	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
 cli	net netns gc	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns publish	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
+cli	net netns publish	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
 cli	net netns status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net netns unpublish	E	socat ausente no host: o bloco de checks EXISTE e julga no fio (e2e.sh ~7200-7250), mas salta todo em `command -v socat`
+cli	net netns unpublish	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
 cli	net netns up	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net tunnel apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net tunnel expose	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -205,8 +205,8 @@ cli	stack prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FA
 cli	stack rollback	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	stack validate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	stack wait	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	system boot disable	B	par de 'system boot enable'; mesma precaucao de XDG
-cli	system boot enable	B	escreve units de utilizador + linger: exige XDG_CONFIG_HOME redirigido para nao sujar o host
+cli	system boot disable	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
+cli	system boot enable	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
 cli	system boot status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	system df	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	system doctor	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)

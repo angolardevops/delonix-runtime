@@ -2,28 +2,58 @@
   "schema": 1,
   "surfaces": {
     "cli": {
-      "proved": 254,
-      "leaves": 273
+      "proved": 263,
+      "leaves": 273,
+      "A": 263,
+      "B": 0,
+      "C": 0,
+      "D": 0,
+      "E": 10
     },
     "node-api": {
       "proved": 15,
-      "leaves": 59
+      "leaves": 59,
+      "A": 15,
+      "B": 0,
+      "C": 15,
+      "D": 29,
+      "E": 0
     },
     "mgmt-api": {
       "proved": 1,
-      "leaves": 32
+      "leaves": 32,
+      "A": 1,
+      "B": 6,
+      "C": 19,
+      "D": 6,
+      "E": 0
     },
     "mcp": {
       "proved": 0,
-      "leaves": 15
+      "leaves": 15,
+      "A": 0,
+      "B": 5,
+      "C": 10,
+      "D": 0,
+      "E": 0
     },
     "cri": {
       "proved": 24,
-      "leaves": 34
+      "leaves": 34,
+      "A": 24,
+      "B": 3,
+      "C": 5,
+      "D": 2,
+      "E": 0
     },
     "kinds": {
       "proved": 38,
-      "leaves": 125
+      "leaves": 125,
+      "A": 38,
+      "B": 48,
+      "C": 8,
+      "D": 23,
+      "E": 8
     }
   }
 }

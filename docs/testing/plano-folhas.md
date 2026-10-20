@@ -79,12 +79,21 @@ As 15 ferramentas MCP nunca correram pelo protocolo. Um único cliente de teste
 que faça `initialize` + `tools/call` converte **15 folhas** e fecha a lacuna de
 não haver ratchet sobre a lista (que o `folhas_gate.py` agora já guarda).
 
-## As 19 folhas da CLI — blocos próprios
+## As folhas da CLI — blocos próprios
 
-Ordem de ataque: as sete `B` primeiro (não precisam de nada que o host não
-tenha), depois as `E` por ordem do `lab-requisitos.md`.
+**Actualizado a 2026-10-20.** Das 19 originais, **nove** são agora classe `A`:
+as quatro que eram `B` sem bloqueio de host (`net l4guard set/clear`, `system
+boot enable/disable`) e as cinco que o `socat` destrancou (`net netns
+exec/detach/firewall/publish/unpublish`). **Já não há nenhuma `B` na CLI.** As
+**10** que restam são todas `E` — esperam infra-estrutura, por ordem do
+`lab-requisitos.md`.
 
-### `net netns exec` · `net netns detach` — **B**
+Atenção ao que `A` significa aqui, porque é fácil ler a promoção como trabalho
+fechado: a corrida de 2026-10-20 (`2663c846`, `PASS=1340 FAIL=0`) provou o
+**caso 1** de cada uma — o efeito — e não a matriz completa. Os casos
+2/3/4/6/8/9 abaixo continuam em dívida, e é por isso que estes blocos ficam.
+
+### `net netns exec` · `net netns detach` — **A** (caso 1 provado a 2026-10-20)
 
 O `net netns attach` **já é executado**, e `up`/`down`/`gc`/`status` também.
 Casos: 1 (o comando corre dentro da netns certa — compara `ip netns identify` ou
@@ -93,7 +102,7 @@ endereço ao pool), 2 (nome com `../`, netns inexistente), 3 (`detach` duas
 vezes → classe 4), 6 (SIGKILL a meio do `attach` não deixa veth órfão —
 `net-lifecycle-leaks.sh` já tem o instrumento), 8 (`-o json`).
 
-### `net netns firewall` · `net netns publish` · `net netns unpublish` — **B**
+### `net netns firewall` · `net netns publish` · `net netns unpublish` — **A** (caso 1 provado a 2026-10-20)
 
 Casos: 1 (a regra **aparece** no `nft list ruleset` e o DNAT encaminha de
 facto; `unpublish` leva a regra **e** o hostfwd do slirp), 2 (spec inválida:
@@ -102,14 +111,14 @@ facto; `unpublish` leva a regra **e** o hostfwd do slirp), 2 (spec inválida:
 6 (SIGKILL entre o `add_hostfwd` e o DNAT não deixa meio-publicado), 9 (a regra
 de uma namespace não afecta outra).
 
-### `net l4guard set` · `net l4guard clear` — **B**
+### `net l4guard set` · `net l4guard clear` — **A** (caso 1 provado a 2026-10-20)
 
 O `net l4guard status` já corre. Casos: 1 (o guard **existe** no ruleset com as
 duas contagens, e o `status` lê-as de volta), 2 (`set 0 0`, negativos, não
 numéricos), 4 (`set` duas vezes = actualiza, não duplica; `clear` duas vezes),
 6 (SIGKILL no `set` não deixa meio-guard).
 
-### `system boot enable` · `system boot disable` — **B**, com precaução
+### `system boot enable` · `system boot disable` — **A** (caso 1 provado a 2026-10-20), com precaução
 
 **A precaução é o caso:** escrevem units de utilizador e activam linger, fora do
 `DELONIX_ROOT`. A corrida tem de redirigir `XDG_CONFIG_HOME` para o root
