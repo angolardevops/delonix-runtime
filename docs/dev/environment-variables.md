@@ -121,8 +121,8 @@ them belongs in a production configuration. Read the linked `AGENTS.md` section 
 | Variable | Read by | Purpose | Values / default | Notes |
 |---|---|---|---|---|
 | `DELONIX_FORWARD_POLICY` | `crates/adapters/delonix-sdn/src/infra.rs` (ingress ruleset builder) | Reverts the holder netns `forward` chain from default-deny (`policy drop`) to default-allow. | `accept` → default-allow; anything else → default-deny. | **Lowers isolation between networks.** Logged as a security warning. See `AGENTS.md`, *«Bloco 0 do plano 33 (v0.37.1)»*. |
-| `DELONIX_ALLOW_LINK_LOCAL` | `crates/adapters/delonix-sdn/src/infra.rs` (`fwguard` chain) | Removes the unconditional drop of `169.254.0.0/16` (cloud metadata) and `127.0.0.0/8` (host loopback) for container traffic. | `1` → allowed; anything else → dropped. | **Exposes instance metadata credentials on a cloud host.** Security warning. `AGENTS.md`, *«Bloco 0 do plano 33 (v0.37.1)»* (RF-NET-02). |
-| `DELONIX_ALLOW_HOLDER_INGRESS` | `crates/adapters/delonix-sdn/src/infra.rs` (`dlxinput` chain) | Lets containers reach services the holder itself exposes (the L7 proxy, internal DNS) beyond the allowlist. | `1` → allowed; anything else → new connections dropped. | **Through the proxy a container reaches any registered backend, in any namespace, past that backend's own ingress policy.** Security warning. Rationale in `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2. |
+| `DELONIX_ALLOW_LINK_LOCAL` | `crates/adapters/delonix-sdn/src/infra.rs:allow_link_local` (`fwguard` chain) | Removes the unconditional drop of `169.254.0.0/16` (cloud metadata) and `127.0.0.0/8` (host loopback) for container traffic. | `1` → allowed; anything else → dropped. | **Exposes instance metadata credentials on a cloud host** — `fwguard` is the ONLY thing refusing `169.254.0.0/16`; the loopback half is also covered by the slirp's `--disable-host-loopback`. Security warning. **Reconciled, not install-once** (see below). `AGENTS.md`, *«Bloco 0 do plano 33 (v0.37.1)»* (RF-NET-02). |
+| `DELONIX_ALLOW_HOLDER_INGRESS` | `crates/adapters/delonix-sdn/src/infra.rs:allow_holder_ingress` (`dlxinput` chain) | Lets containers reach services the holder itself exposes (the L7 proxy, internal DNS) beyond the allowlist. | `1` → allowed; anything else → new connections dropped. | **Through the proxy a container reaches any registered backend, in any namespace, past that backend's own ingress policy.** Security warning. **Reconciled, not install-once** (see below). Rationale in `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2. |
 | `DELONIX_ENABLE_IPV6` | `crates/adapters/delonix-sdn/src/infra.rs:ipv6_sdn_enabled` | Gives containers IPv6 addresses on the SDN again. | `1` → enabled; anything else → IPv6 disabled in the container and forwarding refused. | **No firewall rule, namespace isolation or `Dependency` applies to IPv6** — every policy is IPv4-only. Security warning. `AGENTS.md`, *«Bloco 0 do plano 33 (v0.37.1)»*. |
 | `DELONIX_ALLOW_UNENFORCED_ISOLATION` | `bins/delonix-runtime-bin/src/cmd/container.rs:refuse_if_namespace_isolation_inert` | Runs a workload in a named namespace even when the kernel does not filter traffic inside a bridge (`br_netfilter` not loaded, or `bridge-nf-call-iptables=0`), with a warning. Without it the request is refused (DX-6305, exit 69), because the isolation would be installed and enforce nothing. Only `1` opens it. | `1` → run with a warning; anything else (or unset) → refused. | The isolation rules are installed and enforce nothing. See [`AGENTS.md`](../../AGENTS.md), «O isolamento de namespace é INERTE sem `br_netfilter`». |
 | `DELONIX_ALLOW_UNENFORCED_LIMITS` | `bins/delonix-runtime-bin/src/cmd/container.rs:preflight_resource_limits` | Runs a container with `-m`/`--cpus`/`--cpu-weight` even when this session has no cgroup delegation, and with `--cpuset`/`--io-weight`/`--device-*` even when the container's cgroup lacks the `cpuset`/`io` controller (`preflight_controller_limits`), instead of refusing (exit 69). | Set (any value) → run, unlimited, with a warning. | The kernel never sees the limits. See [cgroup delegation](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced). |
@@ -133,6 +133,34 @@ them belongs in a production configuration. Read the linked `AGENTS.md` section 
 | `DELONIX_SUBNET_BASE` | `crates/adapters/delonix-sdn/src/lib.rs:default_base` | Forces the second octet of the default network (`10.<base>.0.0/16`). | An integer 0–255 (no further range check). Unset: the value persisted in `<root>/net/default-base`, else a free octet detected on the host. | Only for a collision the detection did not see. Changing it after containers exist changes the default network's addresses. |
 | `DELONIX_CNI` | `crates/adapters/delonix-sdn/src/cni.rs:enabled_conf`, consumed by `crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs` (`RunPodSandbox`) and `runtime_svc.rs` (`UpdateRuntimeConfig`) | **Rootless CRI only:** networks pod sandboxes through the CNI plugin chain (`/etc/cni/net.d`, plugins from `CNI_PATH`), run inside the network holder, instead of the native SDN. | `1` → on, and only if a config exists; anything else → native SDN. | Has no effect when the CRI runs as root: root always uses the node's CNI configuration. |
 | `DELONIX_TRACE_UNPUBLISH` | `crates/adapters/delonix-sdn/src/infra.rs:trace_unpublish` | Records every port unpublish with the function, port, pid, parent pid, executable and a backtrace. | `1` or `stderr` → stderr; any other value → appended to that file. | A diagnostic tool, zero cost when unset. Kept for the investigation in `AGENTS.md`, *«RESOLVIDO — as portas publicadas morriam sozinhas»*. |
+
+### The ingress guards are reconciled, not install-once
+
+`DELONIX_ALLOW_LINK_LOCAL` and `DELONIX_ALLOW_HOLDER_INGRESS` empty the holder's two
+unconditional denial chains, `fwguard` and `dlxinput`. Both are read on **every**
+invocation that brings the ingress up or attaches a workload to it, and the chains are
+flushed and refilled from the result (`unconditional_guards_script`, applied by
+`ensure_unconditional_guards_current` from the host and by `apply_unconditional_guards`
+inside the holder). Two consequences, both deliberate:
+
+- **The hatch only holds while it is set.** It is not a node-wide switch you flip once:
+  the next `delonix` invocation that touches the ingress *without* the variable puts the
+  denials back. Export it for the shell, or the session, you are debugging in.
+- **Dropping it repairs the node.** No `net netns down` is needed, and the running
+  workloads are not disturbed — the chain is brought to shape inside the live holder.
+
+It used to work the other way, and that was the bug: the chains were emitted only by
+`ingress_table_ruleset`, whose one production caller builds the netns, and the reattach
+path never reloads that ruleset (re-applying it would re-append the dispatch rules — it
+carries no `flush`). A node whose infra came up once with either variable set kept the
+emptied chain for the entire life of the pin, which by design never restarts. Nothing
+reported it, and nothing short of a full teardown could restore it. The dispatch
+(`ensure_fw_dispatch_current`) and the private-egress guard
+(`ensure_private_egress_guard_current`) already worked this way; these two now match.
+
+A per-pin marker (`<root>/ingress/guards.<pin>`, holding the hash of the script that
+was applied) keeps the common case free of work: when the holder is already in the
+requested shape, no `nft` runs at all.
 
 ## Build and images
 

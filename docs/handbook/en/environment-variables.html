@@ -581,17 +581,17 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_LINK_LOCAL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (<code>fwguard</code> chain)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:allow_link_local</code></a> (<code>fwguard</code> chain)</td>
 <td>Removes the unconditional drop of <code>169.254.0.0/16</code> (cloud metadata) and <code>127.0.0.0/8</code> (host loopback) for container traffic.</td>
 <td><code>1</code> → allowed; anything else → dropped.</td>
-<td><strong>Exposes instance metadata credentials on a cloud host.</strong> Security warning. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em> (RF-NET-02).</td>
+<td><strong>Exposes instance metadata credentials on a cloud host</strong> — <code>fwguard</code> is the ONLY thing refusing <code>169.254.0.0/16</code>; the loopback half is also covered by the slirp's <code>--disable-host-loopback</code>. Security warning. <strong>Reconciled, not install-once</strong> (see below). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em> (RF-NET-02).</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_HOLDER_INGRESS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (<code>dlxinput</code> chain)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:allow_holder_ingress</code></a> (<code>dlxinput</code> chain)</td>
 <td>Lets containers reach services the holder itself exposes (the L7 proxy, internal DNS) beyond the allowlist.</td>
 <td><code>1</code> → allowed; anything else → new connections dropped.</td>
-<td><strong>Through the proxy a container reaches any registered backend, in any namespace, past that backend's own ingress policy.</strong> Security warning. Rationale in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/discovery/46_GAPS_ENCONTRADOS.md" target="_blank" rel="noopener"><code>docs/<wbr>discovery/<wbr>46_GAPS_ENCONTRADOS.<wbr>md</code></a> §4.2.</td>
+<td><strong>Through the proxy a container reaches any registered backend, in any namespace, past that backend's own ingress policy.</strong> Security warning. <strong>Reconciled, not install-once</strong> (see below). Rationale in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/discovery/46_GAPS_ENCONTRADOS.md" target="_blank" rel="noopener"><code>docs/<wbr>discovery/<wbr>46_GAPS_ENCONTRADOS.<wbr>md</code></a> §4.2.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ENABLE_IPV6</code></td>
@@ -665,6 +665,31 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 </tr>
 </tbody>
 </table></div>
+<h3 id="the-ingress-guards-are-reconciled-not-install-once">The ingress guards are reconciled, not install-once<a class="hanchor" href="#the-ingress-guards-are-reconciled-not-install-once" aria-label="#">#</a></h3>
+<p><code>DELONIX_ALLOW_LINK_LOCAL</code> and <code>DELONIX_ALLOW_HOLDER_INGRESS</code> empty the holder's two
+unconditional denial chains, <code>fwguard</code> and <code>dlxinput</code>. Both are read on <strong>every</strong>
+invocation that brings the ingress up or attaches a workload to it, and the chains are
+flushed and refilled from the result (<code>unconditional_guards_script</code>, applied by
+<code>ensure_unconditional_guards_current</code> from the host and by <code>apply_unconditional_guards</code>
+inside the holder). Two consequences, both deliberate:</p>
+<ul>
+<li><strong>The hatch only holds while it is set.</strong> It is not a node-wide switch you flip once:
+  the next <code>delonix</code> invocation that touches the ingress <em>without</em> the variable puts the
+  denials back. Export it for the shell, or the session, you are debugging in.</li>
+<li><strong>Dropping it repairs the node.</strong> No <code>net netns down</code> is needed, and the running
+  workloads are not disturbed — the chain is brought to shape inside the live holder.</li>
+</ul>
+<p>It used to work the other way, and that was the bug: the chains were emitted only by
+<code>ingress_table_ruleset</code>, whose one production caller builds the netns, and the reattach
+path never reloads that ruleset (re-applying it would re-append the dispatch rules — it
+carries no <code>flush</code>). A node whose infra came up once with either variable set kept the
+emptied chain for the entire life of the pin, which by design never restarts. Nothing
+reported it, and nothing short of a full teardown could restore it. The dispatch
+(<code>ensure_fw_dispatch_current</code>) and the private-egress guard
+(<code>ensure_private_egress_guard_current</code>) already worked this way; these two now match.</p>
+<p>A per-pin marker (<code>&lt;root&gt;/ingress/guards.&lt;pin&gt;</code>, holding the hash of the script that
+was applied) keeps the common case free of work: when the holder is already in the
+requested shape, no <code>nft</code> runs at all.</p>
 <h2 id="build-and-images">Build and images<a class="hanchor" href="#build-and-images" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
@@ -1531,7 +1556,10 @@ and you never need to set them:</p>
 </ul>
 </li>
 <li><a href="#everyday-configuration">Everyday configuration</a></li>
-<li><a href="#networking-and-security-escape-hatches">Networking and security escape hatches</a></li>
+<li><a href="#networking-and-security-escape-hatches">Networking and security escape hatches</a><ul>
+<li><a href="#the-ingress-guards-are-reconciled-not-install-once">The ingress guards are reconciled, not install-once</a></li>
+</ul>
+</li>
 <li><a href="#build-and-images">Build and images</a></li>
 <li><a href="#cloud-hypervisor-and-vm-resource-tuning">Cloud Hypervisor and VM resource tuning</a><ul>
 <li><a href="#container-resource-budget">Container resource budget</a></li>
