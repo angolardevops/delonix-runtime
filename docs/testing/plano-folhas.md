@@ -184,7 +184,7 @@ criada **e removida** pelo `cluster destroy`, e uma rede nomeada por quem chama
 | # | trabalho | folhas convertidas | estimativa |
 |---|---|---:|---|
 | 1 | E3 — cliente `tools/call` para o MCP | 15 | 1 sessão |
-| 2 | As 7 folhas `B` da CLI (`net netns`, `l4guard`, `system boot`) | 7 | 1–2 sessões |
+| 2 | ~~As folhas `B` da CLI (`net netns`, `l4guard`, `system boot`)~~ — **FEITO 2026-10-20** (`87992e4f`): 9 folhas, não 7, porque as cinco do `net netns` estavam em `E` e não em `B` | ~~9~~ | — |
 | 3 | E2 — `test_state()` com binário real | 7 | 1 sessão |
 | 4 | E1 — a perna gRPC na bateria | 57 | 1–2 sessões |
 | 5 | Registry local → as 5 folhas de push/pull | 5 | 1 sessão |
@@ -194,9 +194,10 @@ criada **e removida** pelo `cluster destroy`, e uma rede nomeada por quem chama
 | 9 | As 40 operações do mgmt a sério (decisão do dono) | 32 | 2–3 sessões |
 | 10 | Kinds: os 9 sem `apply` em corrida real | ~45 células | 2–3 sessões |
 
-Os passos 1 a 7 levam o total de **332/538 (61,7 %)** a cerca de **425/538
-(79 %)** sem uma linha de funcionalidade nova. Os passos 8 a 10 são projecto,
-não sessão, e o 8 é o maior de todos: quatro serviços inteiros.
+O passo 2 já está dentro do total: **341/538 (63,4 %)** a 2026-10-20. Os passos
+que faltam de 1 a 7 levam-no a cerca de **427/538 (79 %)** sem uma linha de
+funcionalidade nova. Os passos 8 a 10 são projecto, não sessão, e o 8 é o maior
+de todos: quatro serviços inteiros.
 
 **Nota de honestidade sobre o 8 e o 9.** Foram decididos a 2026-10-18 na forma
 maximal («implementar as 29», «as 40 a sério»). Nenhum dos dois cabe no
