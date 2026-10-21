@@ -6617,8 +6617,17 @@ check "o mesmo template com as mesmas flags continua a passar (2.º --up idempot
 check "uma config editada à mão NÃO é glue e não trava nada" ok bash -c \
   "printf 'worker_processes 1;\\n' >> '$FGN/nginx.conf' && \
    '$BIN' stack init -t nginx --port 19085 --tls-port 19446 --hostname fg '$FGN'"
-if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force \
-    >"${TMPDIR:-/tmp}/e2e-scaffold-up.log" 2>&1; then
+# The guard is the HOST's ports, read with `ss` before the engine is asked. It
+# used to be the `--up` itself: any failure SKIPped as «rede lenta, ou porta
+# 8080/8443 já ocupada», so a broken build or apply read as a busy host. Measured
+# 2026-10-21 on the dev host, where it was the port (8443 held by the host's
+# nginx) — the guard now says so by name, and a failure on free ports is a FAIL.
+_scaf_busy=$(ss -tlnpH 2>/dev/null | awk '$4 ~ /:(8080|8443)$/ {print $4, $6}' | tr '\n' ' ')
+if [[ -n "$_scaf_busy" ]]; then
+  skip "stack init --template httpd --up" "as portas do template já estão ocupadas neste host: $_scaf_busy"
+elif check_then "--up: stack init --template httpd constrói e aplica (180 s)" ok bash -c \
+    "timeout 180 '$BIN' stack init --template httpd '$SCAFDIR/$SCAFN' --up --force >'${TMPDIR:-/tmp}/e2e-scaffold-up.log' 2>&1 \
+     || { rc=\$?; tail -15 '${TMPDIR:-/tmp}/e2e-scaffold-up.log'; exit \$rc; }"; then
   check "--up: o container tem memory_max do manifesto (não só o run cru)" ok bash -c \
     "$BIN container inspect '$SCAFN' | grep -q '\"memory_max\": \"512M\"'"
   check "--up: o HTTPS responde, com HTTP/2, e o HTTP redirecciona para lá" ok bash -c \
@@ -6643,8 +6652,6 @@ if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force
      && curl -ks https://127.0.0.1:8443/ | grep -q 'e2e second build'"
   "$BIN" stack destroy -f "$SCAFDIR/$SCAFN/delonix-manifest.yaml" >/dev/null 2>&1
 else
-  skip "stack init --template httpd --up" \
-    "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080/8443 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
   e2e_rm "$SCAFN"
 fi
 rm -rf "$SCAFDIR"
