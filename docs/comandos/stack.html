@@ -309,6 +309,7 @@ SEE ALSO:
 <p class='intro'>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.</p>
 <p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
 <p class='intro'>ADOPTS an existing, non-empty project instead: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project&#x27;s own code is never touched — a warning follows, since the Delonixfile still assumes the template&#x27;s own file layout.</p>
+<p class='intro'>The project is left as a git repository on <code>main</code>, with one commit holding everything it was just given — so the next step is adding a remote and pushing, not four commands of setup. Skipped inside an existing work tree (a monorepo subdirectory), over an existing <code>.git</code>, and when adopting a project that already has a history.</p>
 <div class='help'><pre><code>Usage: delonix stack init [OPTIONS] [DIR]
 
 Arguments:
