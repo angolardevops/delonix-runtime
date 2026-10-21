@@ -149,6 +149,7 @@ serve-o directamente — mesmo contrato do `terraform plan -detailed-exitcode`:
 |---|---|
 | `0` | nada a fazer |
 | `2` | há alterações (= deriva, se o ficheiro não mudou) |
+| `5` | o plano tem um **conflito de posse** (`DX-5601`) — o `stack apply` recusá-lo-ia inteiro |
 | `1` | o comando falhou |
 
 Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de `1` — `4` se o
@@ -158,6 +159,13 @@ em [cli-stability.md](cli-stability.md)). Os dois sinais positivos não mudam:
 `2`. Um gate escrito como «`0` passa, `2` falha por deriva, **o resto** falha
 por erro» continua correcto; um escrito com `elif [ $? -eq 1 ]` para o erro
 passa a precisar de `else`.
+
+O `5` existe desde que um conflito deixou de passar por limpo: um recurso que
+outra stack já carimbou não é uma alteração (o `changed` dele é `false`), e até
+aqui o plano respondia `0` — o gate ficava verde e o `apply` a seguir recusava
+com `5`. O conflito ganha às alterações: com um conflito no plano a resposta é
+`5` mesmo que haja também recursos a mudar, porque o `apply` não aplicaria
+nenhum deles.
 
 ```yaml
   drift:

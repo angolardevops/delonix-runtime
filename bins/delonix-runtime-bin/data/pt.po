@@ -4020,8 +4020,8 @@ msgstr "Mostra o que um `apply` MUDARIA, sem mudar nada."
 msgid "Stack name (owner of the resources). Default: a `kind: Stack`'s name, else the manifest's directory."
 msgstr "Nome da stack (dono dos recursos). Omissão: o nome de um `kind: Stack`, senão o directório do manifesto."
 
-msgid "Exit 2 when there are changes (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
-msgstr "Sai com 2 quando há alterações (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
+msgid "Exit 2 when there are changes, 5 when the plan holds a conflict `stack apply` would refuse (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
+msgstr "Sai com 2 quando há alterações, 5 quando o plano tem um conflito que o `stack apply` recusaria (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
 
 msgid "to create"
 msgstr "a criar"
@@ -4066,6 +4066,9 @@ msgstr "stack apply recusado: {n} recurso(s) precisam de uma decisão explícita
 
 msgid "stack apply refused: {n} resource(s) belong to another stack or only to the provider (nothing was changed)"
 msgstr "stack apply recusado: {n} recurso(s) pertencem a outra stack ou só ao provider (nada foi alterado)"
+
+msgid "stack plan: {n} resource(s) belong to another stack or only to the provider — `stack apply` would refuse this plan"
+msgstr "stack plan: {n} recurso(s) pertencem a outra stack ou só ao provider — o `stack apply` recusaria este plano"
 
 msgid "{kind}/{name}: recreating"
 msgstr "{kind}/{name}: a recriar"
@@ -10147,8 +10150,8 @@ msgstr "Imprime o que seria aplicado, e não aplica nada"
 msgid "Authorize the recreate of a resource whose cold field changed"
 msgstr "Autoriza a recriação de um recurso cujo campo frio mudou"
 
-msgid "0 = no changes, 2 = there are changes, 1 = error (`terraform plan`)"
-msgstr "0 = sem alterações, 2 = há alterações, 1 = erro (`terraform plan`)"
+msgid "0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`)"
+msgstr "0 = sem alterações, 2 = há alterações, 5 = um conflito que o apply recusaria, 1 = erro (`terraform plan`)"
 
 msgid "Print WHICH fields the plan compares, per Kind, and exit"
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai"
@@ -15051,8 +15054,8 @@ msgstr "Passa `--restart` para o parar, mover e arrancar no destino, ou `--with-
 msgid "a resource the manifest declares is held by someone else — nothing was changed"
 msgstr "um recurso que o manifesto declara pertence a outrem — nada foi alterado"
 
-msgid "`stack apply` planned a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so the whole apply is refused before anything is touched. No flag authorises it."
-msgstr "O `stack apply` planeou um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o apply inteiro é recusado antes de se tocar em qualquer coisa. Nenhuma flag o autoriza."
+msgid "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, and `stack plan --detailed-exitcode` exits with this code instead of 0 or 2. No flag authorises it."
+msgstr "O plano tem um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o `stack apply` recusa o apply inteiro antes de se tocar em qualquer coisa, e o `stack plan --detailed-exitcode` sai com este código em vez de 0 ou 2. Nenhuma flag o autoriza."
 
 msgid "Apply it from the stack that owns it, remove it there first, or rename it in this manifest; `stack plan` names the owner."
 msgstr "Aplica-o a partir da stack que é dona dele, remove-o lá primeiro, ou muda-lhe o nome neste manifesto; o `stack plan` diz quem é o dono."

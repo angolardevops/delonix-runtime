@@ -282,7 +282,7 @@ enum Cmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: cmd::output::OutputFormat,
-        /// 0 = no changes, 2 = there are changes, 1 = error (`terraform plan`).
+        /// 0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`).
         #[arg(long)]
         detailed_exitcode: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit.
