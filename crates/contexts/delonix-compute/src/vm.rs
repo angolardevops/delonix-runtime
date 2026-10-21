@@ -595,6 +595,25 @@ where
         // outlived every destroy, so «removes everything» was not quite true.
         // Nothing holds it once the record is gone.
         let _ = std::fs::remove_file(vmdir.join(format!(".{name}.lock")));
+        // The hypervisor-side network goes with its LAST user — counted here,
+        // over every record (a stopped VM still needs it at its next `start`),
+        // and only among this backend's VMs. A failure does not undo an `rm`
+        // that has already happened; it is said, not swallowed.
+        if let Some(vm) = &record {
+            let shared = st.list().map_or(true, |all| {
+                all.iter()
+                    .any(|o| o.backend == vm.backend && o.network == vm.network)
+            });
+            if !shared {
+                if let Err(e) = self.backends.for_vm(vm).and_then(|b| b.release_network(vm)) {
+                    tracing::warn!(
+                        vm = %name,
+                        network = %vm.network,
+                        "the VM is removed, but the network its backend defined for it could not be released: {e}"
+                    );
+                }
+            }
+        }
         Ok(out)
     }
     /// Stops the VM via ITS backend (CH/libvirt) but **preserves** the record and disk
@@ -2072,6 +2091,13 @@ mod tests {
             *self.0.running.borrow_mut() = false;
             Ok(())
         }
+        fn release_network(&self, vm: &Vm) -> delonix_model::Result<()> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("release_network {} {}", vm.name, vm.network));
+            Ok(())
+        }
         fn resize_cold(
             &self,
             _vmdir: &Path,
@@ -3177,5 +3203,44 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.to_string().contains("52:54:00:00:00:09"), "{err}");
+    }
+
+    /// The hypervisor-side network is released with its LAST user, and the
+    /// count includes stopped VMs: libvirt's `stop` undefines the domain, so
+    /// asking the hypervisor would have pulled the network from under the
+    /// stopped one's next `start`. Measured 2026-10-21: before, nothing was
+    /// released at all and the libvirt network, its bridge and route outlived
+    /// `vm rm` and `stack destroy`.
+    #[test]
+    fn the_network_is_released_with_its_last_vm_not_before() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        let on = |n: &str, net: &str| VmConfig {
+            network: net.into(),
+            ..cfg(n)
+        };
+        e.create(&on("a", "lab-net")).expect("create a");
+        e.create(&on("b", "lab-net")).expect("create b");
+        e.create(&on("c", "other-net")).expect("create c");
+        e.stop("b").expect("stop b");
+        let released = |s: &Seen| -> Vec<String> {
+            calls(s)
+                .into_iter()
+                .filter(|c| c.starts_with("release_network"))
+                .collect()
+        };
+
+        e.destroy("a", false, false).expect("rm a");
+        assert!(released(&seen).is_empty(), "b (stopped) still names it");
+
+        e.destroy("b", false, false).expect("rm b");
+        assert_eq!(released(&seen), ["release_network b lab-net"]);
+
+        e.destroy("c", false, false).expect("rm c");
+        assert_eq!(
+            released(&seen),
+            ["release_network b lab-net", "release_network c other-net"]
+        );
     }
 }
