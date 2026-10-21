@@ -3530,6 +3530,39 @@ if check_then "conflito de posse: a stk-a aplica um volume e uma rede" ok \
     printf '%s\n' \"\$out\"
     [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
     exit \$rc"
+  # O `plan --detailed-exitcode` sobre o MESMO conflito. Até ao #911 saía 0
+  # (o `Conflict` vinha com `changed: false` e o plano só olhava para isso): um
+  # portão de deriva em CI ficava verde e o `apply` a seguir recusava com 5. O
+  # #911 só tinha testes unitários; isto prova o binário no caminho real, contra
+  # registos com o carimbo de outra stack. Corre ANTES do «nada mudou» abaixo,
+  # que assim prova também que o plano não escreveu nada.
+  check "conflito de posse: stack plan --detailed-exitcode sai 5 com DX-5601, como o apply" 5 bash -c "
+    out=\$('$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+    printf '%s\n' \"\$out\"
+    [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+    exit \$rc"
+  # Com `-o json` o stdout continua a ser o plano, JSON válido e com os dois
+  # conflitos a nomear o dono; o DX vai para o stderr. Um 5 com o stdout partido
+  # rebentava o `jq` do portão que o lê.
+  check "…com -o json: sai 5, o stdout é o plano em JSON e o DX-5601 vai para o stderr" 5 bash -c "
+    js=\$('$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSB' -o json --detailed-exitcode 2>'$CFWORK/plan.err'); rc=\$?
+    printf '%s\n' \"\$js\"; cat '$CFWORK/plan.err'
+    [[ \$rc == 5 ]] || exit \$rc
+    grep -q DX-5601 '$CFWORK/plan.err' || { echo 'sem DX-5601 no stderr'; exit 99; }
+    python3 -c 'import json,sys
+p=json.loads(sys.argv[1])
+got=sorted((r[\"kind\"],r[\"name\"]) for r in p if r[\"action\"]==\"conflict\" and r.get(\"owner\")==sys.argv[2])
+sys.exit(0 if got==[(\"Network\",sys.argv[4]),(\"Volume\",sys.argv[3])] else 1)' \"\$js\" '$CSA' '$CFV' '$CFN' \
+      || { echo 'o stdout não é o plano com os dois conflitos da $CSA'; exit 99; }
+    exit 5"
+  check "…o plan de topo responde o mesmo 5" 5 bash -c "
+    out=\$('$BIN' plan -f '$CFWORK/a.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+    printf '%s\n' \"\$out\"
+    [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+    exit \$rc"
+  # Sem a flag, o contrato do `plan` não muda: mostra o conflito e sai 0.
+  check "…e sem --detailed-exitcode o plano do conflito continua a sair 0" ok \
+    "$BIN" stack plan -f "$CFWORK/a.yaml" --name "$CSB"
   check "…e nada mudou: os dois registos iguais, a stk-b sem revisão, a stk-a sem deriva" ok bash -c "
     s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN') || { echo 'um registo desapareceu'; exit 1; }
     [[ -n '$CF_A' && \"\$s\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }
@@ -3539,6 +3572,21 @@ if check_then "conflito de posse: a stk-a aplica um volume e uma rede" ok \
   if check_then "conflito de posse: a stk-b aplica um volume seu" ok \
        "$BIN" stack apply -f "$CFWORK/b.yaml" --name "$CSB"; then
     CF_B=$(cf_sums "volumes/$CFB/meta.json"); CF_BREVS=$(cf_revs "$CSB")
+    # Um plano com um conflito E uma alteração saía 2, «há o que aplicar», e o
+    # apply não aplicaria nada. O conflito ganha ao 2.
+    check "conflito + alteração: o stack plan --detailed-exitcode sai 5, não 2" 5 bash -c "
+      out=\$('$BIN' stack plan -f '$CFWORK/misto.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+      exit \$rc"
+    # ...e sem conflito, a mesma alteração continua a ser 2. O 2 é também o rc
+    # de um erro de uso do clap (`docs/cli-stability.md`): só conta se a saída
+    # for um plano que nomeia o volume, e não a ajuda de uma flag recusada.
+    check "…e a mesma alteração sem conflito continua 2" 2 bash -c "
+      out=\$('$BIN' stack plan -f '$CFWORK/b2.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 2 ]] && { grep -q 'Usage:' <<<\"\$out\" || ! grep -q 'Volume/$CFB' <<<\"\$out\"; } && exit 99
+      exit \$rc"
     # O conflito ganha a um Replace por autorizar: passar `--replace` não o
     # desbloquearia, e «argumento inválido» mandava o operador atrás dele.
     check "conflito + Replace por autorizar continua 5 com DX-5601" 5 bash -c "
