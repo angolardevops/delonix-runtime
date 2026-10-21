@@ -4956,14 +4956,29 @@ while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") a
 assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op'
       check "node API: a rede libvirt nasce com a sub-rede declarada (virsh net-dumpxml)" ok bash -c \
         "virsh -c qemu:///system net-dumpxml '$NVNET' | grep -q \"address='10.237.$NVOCT.1' netmask='255.255.255.0'\""
+      # The node API's DELETE of the network's last VM takes the libvirt
+      # network with it — the release the use case owns. Measured through the
+      # API because that is where it stayed behind (cli-tester, 2026-10-21).
+      check "node API: o DELETE da última VM leva a rede libvirt que o motor definiu" ok \
+        env NODESOCK="$NODESOCK" NVVM="$NVVM" NVNET="$NVNET" python3 -c '
+import json,os,subprocess,time
+def call(method, path):
+    out=subprocess.run(["curl","-s","-X",method,"--unix-socket",os.environ["NODESOCK"],"http://localhost"+path],capture_output=True,text=True).stdout
+    return json.loads(out)
+op=call("DELETE","/v1/namespaces/default/virtualmachines/"+os.environ["NVVM"])
+assert "id" in op, op
+deadline=time.time()+120
+while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") and time.time()<deadline:
+    time.sleep(1); op=call("GET","/v1/operations/"+op["id"])
+assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op
+gone=subprocess.run(["virsh","-c","qemu:///system","net-info",os.environ["NVNET"]],capture_output=True).returncode!=0
+assert gone, "the libvirt network outlived its last VM"'
     fi
     "$BIN" delete vm "$NVVM" -f >/dev/null 2>&1
     kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
-    # By hand, and that is a KNOWN defect, not the design: neither the
-    # node API's DELETE nor `network rm` removes the libvirt network the
-    # provider defined, and a later declaration with another subnet reuses
-    # the stale one (cli-tester, 2026-10-21). When teardown owns it, this
-    # becomes a check that `net-info` fails after `network rm`.
+    # Only a safety net: the check above is what proves the release. A FAIL
+    # there must not leave this block's network on the host, and it is still
+    # the one this block saw absent and then created.
     if virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
       virsh -c qemu:///system net-destroy "$NVNET" >/dev/null 2>&1
       virsh -c qemu:///system net-undefine "$NVNET" >/dev/null 2>&1
