@@ -4738,6 +4738,61 @@ else
   skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
 fi
 
+# The NODE API's own create on a network the node declared and libvirt does
+# not know yet (cli-tester, 2026-10-21): `config_from_spec` left the subnet
+# out, the provider had nothing to define the libvirt network from, and the
+# operation FAILED with DX-9501 "no network with matching name" — while the
+# CLI, on the same input, worked. What is read is the libvirt network itself.
+# The subnet is picked off the host's routes, and the only libvirt network
+# removed is the one this block saw absent and then created.
+if libvirt_system_usable && [[ -x "$NODEBIN" ]]; then
+  NVNET="nv-$PFX"; NVVM="nvvm-$PFX"; NVDISK="$OUT/$NVVM.qcow2"; NVOCT=""
+  for _o in $(seq 20 250); do
+    ip -4 route | grep -q "^10\.237\.$_o\." || { NVOCT=$_o; break; }
+  done
+  if [[ -z "$NVOCT" ]]; then
+    skip "node API: VM libvirt numa rede declarada" "nenhum 10.237.N.0/24 livre nas rotas deste host"
+  elif virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
+    skip "node API: VM libvirt numa rede declarada" "a rede libvirt $NVNET já existe — não é deste teste"
+  else
+    qemu-img create -f qcow2 "$NVDISK" 64M >/dev/null 2>&1
+    "$BIN" serve node-api --addr "unix://$NODESOCK" >>"$OUT/node-api.log" 2>&1 &
+    NODEPID=$!
+    for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
+    if check_then "network create $NVNET --subnet 10.237.$NVOCT.0/24 (node API, libvirt)" ok \
+         "$BIN" network create "$NVNET" --subnet "10.237.$NVOCT.0/24"; then
+      check "node API: CreateVirtualMachine libvirt numa rede declarada sem rede libvirt prévia termina SUCCEEDED" ok \
+        env NODESOCK="$NODESOCK" NVVM="$NVVM" NVNET="$NVNET" NVDISK="$NVDISK" python3 -c '
+import json,os,subprocess,time
+def call(method, path, body=None):
+    cmd=["curl","-s","-X",method,"--unix-socket",os.environ["NODESOCK"]]
+    if body is not None: cmd+=["-H","content-type: application/json","-d",json.dumps(body)]
+    return json.loads(subprocess.run(cmd+["http://localhost"+path],capture_output=True,text=True).stdout)
+op=call("POST","/v1/namespaces/default/virtualmachines",{"name":os.environ["NVVM"],"spec":{
+    "image":os.environ["NVDISK"],"provider":"libvirt","memory_bytes":268435456,
+    "networks":[{"network":os.environ["NVNET"]}]}})
+assert "id" in op, op
+deadline=time.time()+180
+while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") and time.time()<deadline:
+    time.sleep(1); op=call("GET","/v1/operations/"+op["id"])
+assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op'
+      check "node API: a rede libvirt $NVNET nasce com a sub-rede declarada (virsh net-dumpxml)" ok bash -c \
+        "virsh -c qemu:///system net-dumpxml '$NVNET' | grep -q \"address='10.237.$NVOCT.1' netmask='255.255.255.0'\""
+    fi
+    "$BIN" delete vm "$NVVM" -f >/dev/null 2>&1
+    kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+    if virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
+      virsh -c qemu:///system net-destroy "$NVNET" >/dev/null 2>&1
+      virsh -c qemu:///system net-undefine "$NVNET" >/dev/null 2>&1
+    fi
+    e2e_net_rm "$NVNET"
+    rm -f "$NVDISK"
+  fi
+  unset _o
+else
+  skip "node API: VM libvirt numa rede declarada" "sem libvirt de sistema utilizável ou sem delonix-node-api"
+fi
+
 # Mesma ressalva de isolamento da secção CH acima: meia-isolação é pior que
 # nenhuma.
 if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
