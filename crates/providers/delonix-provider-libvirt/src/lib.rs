@@ -18,8 +18,8 @@ use delonix_compute::capability::{
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
     guest_cpu_outcome as cpu_outcome, guest_memory_outcome as memory_outcome, guest_memory_state,
-    guest_online_vcpus, mem_mib, names_a_declared_network, BackendRegistration, Boot, CreateStage,
-    GuestFilesystem, GuestInfo, HotplugOutcome, VmBackend, VmConfig,
+    guest_online_vcpus, libvirt_nic, mem_mib, names_a_declared_network, BackendRegistration, Boot,
+    CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome, LibvirtNic, VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -2053,25 +2053,26 @@ fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
         "      <model type='virtio'/>\n{}    </interface>\n",
         libvirt_filterref_xml(cfg.net_mode.as_deref(), cfg.allow_mac_spoofing)
     )[..];
-    match cfg.net_mode.as_deref().unwrap_or("user") {
-        "nat" | "network" => {
+    // The same function `vm describe` and the node API read the record back
+    // with (`delonix_compute::vm::attached_network`), so what is reported is
+    // what this XML says.
+    match libvirt_nic(cfg.net_mode.as_deref(), cfg.bridge.as_deref(), &cfg.network) {
+        LibvirtNic::Network(net) => {
             // NAT network managed by libvirt (DHCP + IP via domifaddr). `bridge` = name
             // of the libvirt network (default "default").
-            let net = cfg.bridge.as_deref().unwrap_or("default");
             format!(
                 "    <interface type='network'>\n      <source network='{}'/>\n      <mac address='{mac}'/>\n{model}",
-                xml_escape(net)
+                xml_escape(&net)
             )
         }
-        "bridge" => {
+        LibvirtNic::Bridge(br) => {
             // attaches to a pre-existing host bridge.
-            let br = cfg.bridge.as_deref().unwrap_or("virbr0");
             format!(
                 "    <interface type='bridge'>\n      <source bridge='{}'/>\n      <mac address='{mac}'/>\n{model}",
-                xml_escape(br)
+                xml_escape(&br)
             )
         }
-        _ => {
+        LibvirtNic::User => {
             // user-mode (SLIRP/passt): egress without a tap — rootless-friendly (default).
             format!("    <interface type='user'>\n      <mac address='{mac}'/>\n{model}")
         }
@@ -4816,6 +4817,51 @@ mod tests {
         c.bridge = Some("br0".into());
         super::map_declared_network(&mut c);
         assert_eq!(c.bridge.as_deref(), Some("br0"));
+    }
+    /// What `vm describe`, `vm ls -o json` and the node API report for a libvirt
+    /// VM is read back from its RECORD; the domain is built from the config.
+    /// Both go through `libvirt_nic`, and this holds them to each other for
+    /// every net mode: the record as `boot` writes it (`tap` = the net mode, the
+    /// boot spec from the config before `map_declared_network`) reports the
+    /// network the generated `<interface>` names.
+    #[test]
+    fn the_reported_network_is_the_one_in_the_domain_xml() {
+        for mode in [
+            None,
+            Some("user"),
+            Some("nat"),
+            Some("network"),
+            Some("bridge"),
+        ] {
+            for network in ["", "ingress", "default", "lab-net"] {
+                for bridge in [None, Some("br-x")] {
+                    let mut c = hpc_cfg();
+                    c.net_mode = mode.map(str::to_string);
+                    c.network = network.into();
+                    c.bridge = bridge.map(str::to_string);
+                    let record: delonix_compute::Vm = serde_json::from_value(serde_json::json!({
+                        "name": c.name, "disk": c.disk, "overlay": "/o.qcow2",
+                        "vcpus": c.vcpus, "memory": c.memory, "network": c.network,
+                        "tap": mode.unwrap_or("user"), "mac": "52:54:00:00:00:01",
+                        "pid": null, "api_socket": "", "status": "Running",
+                        "created_unix": 1, "backend": "libvirt",
+                        "boot": delonix_compute::vm::boot_spec_of(&c),
+                    }))
+                    .unwrap();
+                    super::map_declared_network(&mut c);
+                    let xml = libvirt_interface_xml(&c, "52:54:00:00:00:01");
+                    let case = format!("{mode:?} {network:?} {bridge:?}: {xml}");
+                    match delonix_compute::vm::attached_network(&record) {
+                        None => assert!(xml.contains("type='user'"), "{case}"),
+                        Some(n) => assert!(
+                            xml.contains(&format!("source network='{n}'"))
+                                || xml.contains(&format!("source bridge='{n}'")),
+                            "reported {n:?} — {case}"
+                        ),
+                    }
+                }
+            }
+        }
     }
 }
 

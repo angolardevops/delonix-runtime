@@ -263,6 +263,41 @@ pub fn names_a_declared_network(network: &str) -> bool {
     !matches!(network, "" | "ingress" | "bridge" | "default")
 }
 
+/// What a libvirt guest's primary NIC is plugged into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibvirtNic {
+    /// `<interface type='network'>`: a libvirt network, by name.
+    Network(String),
+    /// `<interface type='bridge'>`: a host bridge, by name.
+    Bridge(String),
+    /// `<interface type='user'>`: user-mode networking (SLIRP/passt). Egress
+    /// only, and on no network at all.
+    User,
+}
+
+/// The ONE answer to "what is this libvirt NIC attached to", from the three
+/// fields that decide it: the net mode (`VmConfig.net_mode`, which a libvirt
+/// `Vm` record keeps in `tap`), an explicit bridge or libvirt network
+/// (`bridge`), and the engine network the VM was asked for (`network`). An
+/// explicit `bridge` wins; a declared `network` comes next; otherwise libvirt's
+/// own default (`default` for a NAT network, `virbr0` for a bridge). **Pure.**
+///
+/// The domain XML is generated from this, and so is what `vm describe`, `vm ls
+/// -o json` and the node API report — so the two cannot disagree. They did: a
+/// VM created without `--network` carries `network: "ingress"`, the
+/// engine-wide default, and was reported on `ingress` while its domain sat in
+/// `<source network='default'>`.
+pub fn libvirt_nic(net_mode: Option<&str>, bridge: Option<&str>, network: &str) -> LibvirtNic {
+    let named = bridge
+        .filter(|b| !b.is_empty())
+        .or_else(|| names_a_declared_network(network).then_some(network));
+    match net_mode.unwrap_or("user") {
+        "nat" | "network" => LibvirtNic::Network(named.unwrap_or("default").to_string()),
+        "bridge" => LibvirtNic::Bridge(named.unwrap_or("virbr0").to_string()),
+        _ => LibvirtNic::User,
+    }
+}
+
 /// The memory size `s` names, in MiB, or `None` when it does not parse.
 ///
 /// The one parser of the memory syntax (`512M`, `4G`, the k8s-style `4Gi`, a
@@ -1031,6 +1066,36 @@ impl std::fmt::Debug for BackendRegistration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_libvirt_nic_is_the_default_network_unless_one_was_named() {
+        use super::{libvirt_nic, LibvirtNic::*};
+        // `vm create --backend libvirt` without `--network`: the record says
+        // `ingress`, libvirt runs it in `default`.
+        for default in ["", "ingress", "bridge", "default"] {
+            assert_eq!(
+                libvirt_nic(Some("nat"), None, default),
+                Network("default".into()),
+                "{default:?}"
+            );
+            assert_eq!(
+                libvirt_nic(Some("bridge"), None, default),
+                Bridge("virbr0".into()),
+                "{default:?}"
+            );
+        }
+        assert_eq!(
+            libvirt_nic(Some("network"), None, "lab-net"),
+            Network("lab-net".into())
+        );
+        // An explicit bridge wins over the declared network.
+        assert_eq!(
+            libvirt_nic(Some("bridge"), Some("br0"), "lab-net"),
+            Bridge("br0".into())
+        );
+        assert_eq!(libvirt_nic(Some("user"), Some("br0"), "lab-net"), User);
+        assert_eq!(libvirt_nic(None, None, "ingress"), User);
+    }
+
     #[test]
     fn only_a_real_name_is_a_declared_network() {
         for default in ["", "ingress", "bridge", "default"] {

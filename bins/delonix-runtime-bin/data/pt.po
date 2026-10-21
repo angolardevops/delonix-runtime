@@ -16834,3 +16834,12 @@ msgstr "{path}: nada foi aplicado — {n} campo(s) não reconhecido(s): {fields}
 
 msgid "{path}: {n} field(s) not understood, ignored (DELONIX_MANIFEST_LENIENT=1): {fields}"
 msgstr "{path}: {n} campo(s) não reconhecido(s), ignorado(s) (DELONIX_MANIFEST_LENIENT=1): {fields}"
+
+msgid "<none> (user-mode NIC: egress only)"
+msgstr "<nenhuma> (NIC em modo utilizador: só saída)"
+
+msgid "{name} (host bridge)"
+msgstr "{name} (bridge do host)"
+
+msgid "{name} (libvirt network)"
+msgstr "{name} (rede do libvirt)"

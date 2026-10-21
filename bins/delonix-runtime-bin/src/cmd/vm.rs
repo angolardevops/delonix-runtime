@@ -3874,23 +3874,13 @@ pub fn run(action: VmCmd) -> Result<()> {
             if output == super::output::OutputFormat::Json {
                 let rows: Vec<VmLsRow> = filter(delonix_vm::list(&base)?)
                     .into_iter()
-                    .map(|vm| VmLsRow {
-                        credentials: credentials.then(|| cred(&vm)),
-                        name: vm.name.clone(),
-                        vcpus: vm.vcpus,
-                        memory: vm.memory,
-                        status: fmt_vm_status(&vm.status),
-                        ip: vm.ip.clone(),
-                        started_unix: vm.started_unix,
-                        role: vm_role(&vm.name).to_string(),
-                        gpu: fmt_vm_gpu(&vm.devices),
-                        backend: vm.backend.clone(),
-                        image: fmt_vm_image(&vm.disk),
-                        namespace: vm.namespace.clone(),
-                        created_unix: vm.created_unix,
+                    .map(|vm| {
+                        let mut row = ls_row(&vm);
+                        row.services = svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref());
+                        row.credentials = credentials.then(|| cred(&vm));
                         // The probe does live network I/O — only when --ports (like the column).
-                        ports_open: ports.then(|| fmt_open_ports(vm.ip.as_deref())),
-                        services: svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref()),
+                        row.ports_open = ports.then(|| fmt_open_ports(vm.ip.as_deref()));
+                        row
                     })
                     .collect();
                 return output::print_json(&rows);
@@ -4443,6 +4433,10 @@ struct VmLsRow {
     /// Proxmox one from a lab box.
     image: String,
     namespace: String,
+    /// The network the VM is on (`delonix_compute::vm::attached_network`):
+    /// for libvirt the one its domain names, `null` for a user-mode NIC. Never
+    /// skipped, so a VM on no network reads as such and not as an old binary.
+    network: Option<String>,
     created_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     ports_open: Option<String>,
@@ -4452,6 +4446,30 @@ struct VmLsRow {
     /// Only with `--credentials` (ADR-0048 D4).
     #[serde(skip_serializing_if = "Option::is_none")]
     credentials: Option<super::credentials::View>,
+}
+
+/// One `vm ls -o json` element, without the parts read from elsewhere
+/// (`services`, from the proxy) or only asked of `ls` (`--credentials`,
+/// `--ports`). **Pure.**
+fn ls_row(vm: &delonix_compute::Vm) -> VmLsRow {
+    VmLsRow {
+        name: vm.name.clone(),
+        vcpus: vm.vcpus,
+        memory: vm.memory.clone(),
+        status: fmt_vm_status(&vm.status),
+        ip: vm.ip.clone(),
+        started_unix: vm.started_unix,
+        role: vm_role(&vm.name).to_string(),
+        gpu: fmt_vm_gpu(&vm.devices),
+        backend: vm.backend.clone(),
+        image: fmt_vm_image(&vm.disk),
+        namespace: vm.namespace.clone(),
+        network: delonix_compute::vm::attached_network(vm),
+        created_unix: vm.created_unix,
+        ports_open: None,
+        services: Vec::new(),
+        credentials: None,
+    }
 }
 
 /// IMAGE column: the base disk's file stem (`…/truenas-scale_25.10.qcow2` →
@@ -5728,6 +5746,24 @@ fn antispoof_describe(vm: &delonix_compute::Vm) -> Option<String> {
     })
 }
 
+/// The `Network` line of `vm describe`: where the VM IS, not what it was
+/// asked for. For libvirt that is the libvirt network or host bridge its domain
+/// names, said as such, because `default` alone would read as the engine's
+/// default network. **Pure.**
+fn describe_network(vm: &delonix_compute::Vm) -> String {
+    let Some(net) = delonix_compute::vm::attached_network(vm) else {
+        return super::po::t("<none> (user-mode NIC: egress only)").to_string();
+    };
+    if vm.backend != "libvirt" || vm.boot.libvirt_xml.is_some() {
+        return net;
+    }
+    if vm.tap == "bridge" {
+        super::po::tf("{name} (host bridge)", &[("name", &net)])
+    } else {
+        super::po::tf("{name} (libvirt network)", &[("name", &net)])
+    }
+}
+
 fn describe_one(
     vm: &delonix_compute::Vm,
     guest: &delonix_vm::Result<Option<delonix_vm::GuestInfo>>,
@@ -5783,7 +5819,7 @@ fn describe_one(
     d.sub_opt("Overlay size", file_size(&vm.overlay).map(output::fmt_size));
 
     d.section(k::NETWORK);
-    d.sub(k::NETWORK, &vm.network);
+    d.sub(k::NETWORK, describe_network(vm));
     // An isolation boundary that is invisible is an isolation boundary nobody
     // audits — shown always, `default` included, so "which namespace is this VM
     // in" never needs a guess or a look at the JSON.
@@ -6693,6 +6729,59 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         vm.tap = "bridge".into();
         vm.backend = "cloud-hypervisor".into();
         assert_eq!(antispoof_describe(&vm), None);
+    }
+
+    /// The record `vm create vgj-lv --backend libvirt` without `--network`
+    /// writes (measured 2026-10-21): `network: ingress`, `tap: nat`, and a
+    /// domain in `<source network='default'>`.
+    fn libvirt_vm_without_network() -> delonix_compute::Vm {
+        let mut vm = delonix_compute::Vm::new(
+            "vgj-lv".into(),
+            "/tmp/dlxvg/x.qcow2".into(),
+            "/o".into(),
+            1,
+            "256M".into(),
+            "ingress".into(),
+            "nat".into(),
+            "52:54:00:bd:15:b5".into(),
+            String::new(),
+        );
+        vm.backend = "libvirt".into();
+        vm
+    }
+
+    /// `vm describe` said `Network: ingress` for that VM.
+    #[test]
+    fn describe_names_the_network_the_libvirt_domain_is_on() {
+        let mut vm = libvirt_vm_without_network();
+        assert_eq!(super::describe_network(&vm), "default (libvirt network)");
+        vm.network = "lab-net".into();
+        assert_eq!(super::describe_network(&vm), "lab-net (libvirt network)");
+        vm.tap = "bridge".into();
+        vm.boot.bridge = Some("br0".into());
+        assert_eq!(super::describe_network(&vm), "br0 (host bridge)");
+        vm.tap = "user".into();
+        assert!(super::describe_network(&vm).starts_with("<none>"));
+        // Cloud Hypervisor is on the engine's `ingress` bridge, and says so.
+        let mut ch = libvirt_vm_without_network();
+        ch.backend = "cloud-hypervisor".into();
+        ch.tap = "dlxtap0".into();
+        assert_eq!(super::describe_network(&ch), "ingress");
+    }
+
+    /// `vm ls -o json` had no `network` at all, and `get vm <name> -o json`
+    /// emits this same element.
+    #[test]
+    fn the_json_row_carries_the_attached_network() {
+        let row = serde_json::to_value(super::ls_row(&libvirt_vm_without_network())).unwrap();
+        assert_eq!(row["network"], "default", "{row}");
+        assert_eq!(row["name"], "vgj-lv");
+        let mut user = libvirt_vm_without_network();
+        user.tap = "user".into();
+        let row = serde_json::to_value(super::ls_row(&user)).unwrap();
+        // Present and null: on no network, not an older binary without the field.
+        assert!(row.as_object().unwrap().contains_key("network"), "{row}");
+        assert!(row["network"].is_null(), "{row}");
     }
 
     /// Builds a `kind: Vm` document from a spec body, for the tests below.
