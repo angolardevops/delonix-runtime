@@ -1,8 +1,8 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: 2026-10-21, this host, isolated root DELONIX_ROOT=~/.cache/dlxsk/d3/root DELONIX_NET_RUNTIME_DIR=~/.cache/dlxsk/nd3, scripts/e2e.sh invoked with target/debug/delonix and the four siblings side by side (built at f7d949e2): PASS=1533 FAIL=0 SKIP=15, every PASS also in results.jsonl; the 15 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg and virt-customize present, no VM images in the isolated store, boot units outside the root, CRI root/CNI path, no DELONIX_UPGRADE_FROM, template ports 8080/8443 held by the host's nginx)
-# commit: f7d949e2
+# recorded: 2026-10-21, this host, isolated root DELONIX_ROOT=~/.cache/dlxsk/d4/root DELONIX_NET_RUNTIME_DIR=~/.cache/dlxsk/nd4, scripts/e2e.sh invoked with target/debug/delonix and the four siblings side by side (built at 6dc31582, whose scripts/e2e.sh is byte-identical to this commit's): PASS=1537 FAIL=0 SKIP=15, one results.jsonl line per verdict; the 15 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg and virt-customize present, no VM images in the isolated store, boot units outside the root, CRI root/CNI path, no DELONIX_UPGRADE_FROM, template ports 8080/8443 held by the host's nginx)
+# commit: 6dc31582
 # executed: 268
 # leaves: 280
 api-resources
