@@ -10178,8 +10178,8 @@ msgstr "remove também o que esta stack possui e o ficheiro já não declara"
 msgid "what an apply would change"
 msgstr "o que um apply mudaria"
 
-msgid "a drift gate for CI: 0 none, 2 changes, 1 error"
-msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 1 erro"
+msgid "a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would refuse, 1 error"
+msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 5 um conflito que o apply recusaria, 1 erro"
 
 msgid "which fields are compared, per Kind"
 msgstr "que campos são comparados, por Kind"

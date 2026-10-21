@@ -597,7 +597,8 @@ file**: the last applied spec lives on the resource itself
 so a resource created by hand is adopted and one belonging to another stack is
 never touched. ``stack destroy`` removes what the stack owns, in reverse order.
 ``--detailed-exitcode`` returns 0/2/1 like ``terraform plan``, which makes a
-drift gate in CI one command.
+drift gate in CI one command; a plan holding a resource another stack owns
+returns 5, the conflict the apply would refuse it with.
 
 The schema is **generated from the code** (``delonix manifest schema``,
 ``delonix explain Pod.containers``) and published, so an editor gives you

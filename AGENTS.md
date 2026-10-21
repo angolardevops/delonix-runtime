@@ -1289,7 +1289,8 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   `--replace <Kind>/<nome>`, antes da primeira criação (o apply é fail-fast sem rollback — recusar
   a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
-- **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
+- **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI; um
+  plano com um `Conflict` sai **5** (`DX-5601`, o erro do `apply`) e ganha ao 2.
 - **Âmbito: 12 dos 13 Kinds convergem** (`CONVERGING_KINDS`) — Network/NetworkRoute/Volume/
   ShareVolume/Image/VirtualMachine/Container/Pod/NetworkPolicy/HTTPRoute/Ingress/Gateway. **Esta
   linha já esteve errada duas vezes** (dizia 8, depois 11 de 12 quando o `KINDS` já tinha 13, e

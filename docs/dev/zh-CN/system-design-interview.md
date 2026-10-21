@@ -1,4 +1,4 @@
-<!-- translated-from: system-design-interview.md sha256:4dc968058b2bad04dcabc1a8e8808533f5108d7fcee9df62ff8cb70bda00af79 -->
+<!-- translated-from: system-design-interview.md sha256:2aa684bf763ff432abe940b618378dffaf9c6c1111db9c9501bc08e6a9ba9759 -->
 # 系统设计面试 — Delonix 引擎
 
 **阅读之前：**[架构](architecture.md)和[各个 crate](crates.md) —— 本页论证的是它们所描述的结构*为什么*是这个样子。
@@ -438,7 +438,7 @@ sequenceDiagram
 - **动作**有 `Create`、`Adopt`、`Update`（热更新，同一个 PID）、`Replace`（除非给出了
   `--replace <Kind>/<name>`，否则会被拒绝，且这一点会在创建任何东西之前就被检查）、`NoOp`、
   `Delete`、`Conflict`、`NotConverged`。`plan --detailed-exitcode` 会为一个 CI 漂移门禁
-  回答 0/2/1。
+  回答 0/2/1；当计划中含有 apply 会拒绝的 `Conflict` 时回答 5。
 - **一张 Kind 事实表**（domain、form、是否收敛、有没有 teardown、是否 namespaced、如何
   观测是否存在）统管规划器、apply 的顺序和 teardown 的顺序，而不是靠人手动去保持多份列表
   同步。
