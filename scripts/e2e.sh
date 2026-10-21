@@ -3488,11 +3488,14 @@ check "…e já não está" fail "$BIN" volume inspect "ov-$PFX"
 # O rc sozinho não chega: uma recusa com 5 DEPOIS de mexer no recurso passaria.
 # Por isso cada recusa exige também o código DX na saída, e a seguir mede-se o
 # registo de cada recurso (é nele que vive o carimbo `delonix.io/stack`) contra
-# o que estava antes, e que a stack recusada não ganhou revisão. O rc gravado
-# no JSONL é o do `apply`; 99 quer dizer rc certo com o código DX errado.
+# o que estava antes, e que a stack recusada não ganhou revisão — contada antes
+# e depois, nunca contra um 0 fixo: o `stack destroy` não apaga a história. O
+# rc gravado no JSONL é o do `apply`; 99 quer dizer rc certo e código DX errado.
 CFWORK="$WORK/conflito-$PFX"; mkdir -p "$CFWORK"
 CSA="stk-a-$PFX"; CSB="stk-b-$PFX"; CFV="cfv-$PFX"; CFN="cfn-$PFX"; CFB="cfb-$PFX"
-CROOT="${DELONIX_ROOT:-$HOME/.local/share/delonix}"
+# O root como o motor o resolve (`delonix-state`, `Store::root`): sem
+# DELONIX_ROOT, `$XDG_DATA_HOME/delonix` antes de `~/.local/share/delonix`.
+CROOT="${DELONIX_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/delonix}"
 cat >"$CFWORK/a.yaml" <<YAML
 apiVersion: delonix.io/v1
 kind: Volume
@@ -3514,20 +3517,24 @@ printf 'apiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: {
   >"$CFWORK/b2.yaml"
 { cat "$CFWORK/b2.yaml"; printf -- '---\napiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: {}\n' "$CFV"; } \
   >"$CFWORK/misto.yaml"
-cf_sums() { (cd "$CROOT" && sha256sum "volumes/$CFV/meta.json" "networks/$CFN" "$@" 2>&1); }
+# Sem `2>&1`, e de propósito: um registo em falta (layout mudado, CROOT errado)
+# dava a MESMA mensagem de erro antes e depois, e a comparação passava sem ter
+# medido nada. Assim o baseline fica vazio e o check chumba pelo rc.
+cf_sums() { (cd "$CROOT" && sha256sum "volumes/$CFV/meta.json" "networks/$CFN" "$@"); }
 cf_revs() { "$BIN" stack history --name "$1" -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
 if check_then "conflito de posse: a stk-a aplica um volume e uma rede" ok \
      "$BIN" stack apply -f "$CFWORK/a.yaml" --name "$CSA"; then
-  CF_A=$(cf_sums)
+  CF_A=$(cf_sums); CF_AREVS=$(cf_revs "$CSB")
   check "conflito de posse: o mesmo manifesto sob outra stack sai 5 com DX-5601" 5 bash -c "
     out=\$('$BIN' stack apply -f '$CFWORK/a.yaml' --name '$CSB' 2>&1); rc=\$?
     printf '%s\n' \"\$out\"
     [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
     exit \$rc"
   check "…e nada mudou: os dois registos iguais, a stk-b sem revisão, a stk-a sem deriva" ok bash -c "
-    [[ \"\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN' 2>&1)\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }
+    s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN') || { echo 'um registo desapareceu'; exit 1; }
+    [[ -n '$CF_A' && \"\$s\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }
     n=\$('$BIN' stack history --name '$CSB' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
-    [[ \$n == 0 ]] || { echo \"a $CSB ganhou \$n revisão(ões)\"; exit 1; }
+    [[ \$n =~ ^[0-9]+\$ && \$n == '$CF_AREVS' ]] || { echo \"a $CSB passou de '$CF_AREVS' para '\$n' revisões\"; exit 1; }
     '$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSA' --detailed-exitcode"
   if check_then "conflito de posse: a stk-b aplica um volume seu" ok \
        "$BIN" stack apply -f "$CFWORK/b.yaml" --name "$CSB"; then
@@ -3546,9 +3553,10 @@ if check_then "conflito de posse: a stk-a aplica um volume e uma rede" ok \
       [[ \$rc == 1 ]] && { ! grep -q DX-1000 <<<\"\$out\" || grep -q DX-5601 <<<\"\$out\"; } && exit 99
       exit \$rc"
     check "…e nada mudou: os três registos iguais, a stk-b sem revisão nova" ok bash -c "
-      [[ \"\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN' 'volumes/$CFB/meta.json' 2>&1)\" == '$CF_B' ]] || { echo 'o registo mudou'; exit 1; }
+      s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN' 'volumes/$CFB/meta.json') || { echo 'um registo desapareceu'; exit 1; }
+      [[ -n '$CF_B' && \"\$s\" == '$CF_B' ]] || { echo 'o registo mudou'; exit 1; }
       n=\$('$BIN' stack history --name '$CSB' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
-      [[ \$n == '$CF_BREVS' ]] || { echo \"a $CSB passou de $CF_BREVS para \$n revisões\"; exit 1; }"
+      [[ \$n =~ ^[0-9]+\$ && \$n == '$CF_BREVS' ]] || { echo \"a $CSB passou de '$CF_BREVS' para '\$n' revisões\"; exit 1; }"
     "$BIN" stack destroy -f "$CFWORK/b.yaml" --name "$CSB" >/dev/null 2>&1
   fi
   "$BIN" stack destroy -f "$CFWORK/a.yaml" --name "$CSA" >/dev/null 2>&1
