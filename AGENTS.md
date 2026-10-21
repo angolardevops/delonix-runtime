@@ -4044,6 +4044,18 @@ permitia, com os dois roots isolados):
    (é a rede por omissão do motor); `restricted` é recusado pelo nome (precisa do
    utilizador efectivo da imagem, que a admissão não tem). Uma política só com
    `denyPrivileged` passa a denunciar o próprio buraco (`POLICY-PRIVILEGE-EQUIVALENTS-OPEN`).
+   **As capabilities do conjunto por omissão do motor não contam como pedido**
+   (corrigido a 2026-10-21, no resgate do #841). A primeira versão comparava cada
+   `--cap-add` só com a lista do PSS, e o CRI, ao aplicar o tecto de capabilities,
+   reescreve o conjunto por omissão inteiro como `--cap-drop ALL` mais um `--cap-add`
+   por capability, com `NET_RAW`, `NET_BROADCAST` e `SYS_CHROOT` incluídas. Medido com
+   o `crictl`: num nó baseline, um pod sem capabilities pedidas era recusado por
+   `NET_BROADCAST,NET_RAW` e nenhum pod arrancava, os static pods incluídos. O critério
+   passa a ser o efeito: pedir de novo o que todo o container já recebe
+   (`KEPT_CAPS`, entregue à admissão em `ContainerHardening::default_caps`) não alarga
+   nada. Ficámos mais permissivos que o PSS num ponto, e de propósito: o PSS recusa um
+   `add: [NET_RAW]` explícito, mas aqui o resultado desse pedido é o mesmo que o de um
+   container que não pediu nada. Gate: `re_stating_the_engine_defaults_is_not_asking_for_more`.
 3. **ALTO — `kind: VirtualMachine` não passava pela admissão.** Só o `vm create` da CLI
    chamava `policy::enforce`; o mesmo VM por manifesto contornava `denyDevicePassthrough`,
    `denyLatestVmImage` e `allowedImageUrlHosts`. E um manifesto tem mais portas de

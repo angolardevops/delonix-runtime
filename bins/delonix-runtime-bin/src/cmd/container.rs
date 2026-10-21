@@ -2838,6 +2838,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let security = delonix_compute::run::parse_security_opts(&opts.security_opt)?;
     let apparmor_unconfined = security.apparmor.as_deref() == Some("unconfined")
         || opts.apparmor.as_deref() == Some("unconfined");
+    // What every container already gets: re-asking for it (the CRI's
+    // capability ceiling always does) is not a request for more.
+    let engine_default_caps: Vec<&'static str> = delonix_linux::capabilities::KEPT_CAPS
+        .iter()
+        .filter_map(|&n| delonix_linux::capabilities::cap_name(n))
+        .collect();
     super::policy::enforce(
         &super::util::state_root(),
         opts.name.as_deref().unwrap_or(&opts.image),
@@ -2848,6 +2854,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         )
         .with_hardening(super::policy::ContainerHardening {
             cap_add: &opts.cap_add,
+            default_caps: &engine_default_caps,
             host_pid: opts.host_pid,
             host_ipc: opts.host_ipc,
             seccomp_unconfined: security.seccomp_unconfined,

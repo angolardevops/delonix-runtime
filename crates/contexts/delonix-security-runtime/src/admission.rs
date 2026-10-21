@@ -106,6 +106,12 @@ pub const BASELINE_READONLY_PATHS: &[&str] = &[
 pub struct ContainerHardening<'a> {
     /// `--cap-add`, as written.
     pub cap_add: &'a [String],
+    /// The capabilities the engine gives every container without asking
+    /// (`delonix_linux::capabilities::KEPT_CAPS`, by name). Adding one of them
+    /// grants nothing a plain run does not already have, so baseline does not
+    /// count it. Empty = judge every `--cap-add` against the baseline list
+    /// alone, which is stricter, never looser.
+    pub default_caps: &'a [&'a str],
     pub host_pid: bool,
     pub host_ipc: bool,
     pub seccomp_unconfined: bool,
@@ -157,12 +163,23 @@ pub fn raw_host_devices(devices: &[String], gpus: Option<&str>) -> Vec<String> {
 
 /// The capability names in `cap_add` the baseline does not allow, normalised
 /// (`cap_sys_admin` → `SYS_ADMIN`), in the order given and without repeats.
-pub fn caps_beyond_baseline(cap_add: &[String]) -> Vec<String> {
+///
+/// A name in `default_caps` is not counted: the engine gives it to every
+/// container anyway, so asking for it again widens nothing. This is what keeps
+/// the CRI working under baseline — its capability ceiling re-states the
+/// engine's whole default set (`NET_RAW`, `NET_BROADCAST`, `SYS_CHROOT`
+/// included) as explicit `--cap-add` after a `--cap-drop ALL`, and a pod that
+/// asked for nothing was refused for capabilities it never requested
+/// (measured with `crictl` on 2026-10-21).
+pub fn caps_beyond_baseline(cap_add: &[String], default_caps: &[&str]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for c in cap_add {
         let up = c.trim().to_ascii_uppercase();
         let name = up.strip_prefix("CAP_").unwrap_or(&up).to_string();
-        if !BASELINE_ADDABLE_CAPS.contains(&name.as_str()) && !out.contains(&name) {
+        if !BASELINE_ADDABLE_CAPS.contains(&name.as_str())
+            && !default_caps.contains(&name.as_str())
+            && !out.contains(&name)
+        {
             out.push(name);
         }
     }
@@ -504,7 +521,7 @@ fn baseline(r: &Request<'_>, privileged_already: bool, v: &mut Vec<Violation>) {
     if r.privileged && !privileged_already {
         v.push(Violation::Privileged);
     }
-    let caps = caps_beyond_baseline(h.cap_add);
+    let caps = caps_beyond_baseline(h.cap_add, h.default_caps);
     if !caps.is_empty() {
         v.push(Violation::BaselineCapabilities { caps });
     }
@@ -981,7 +998,48 @@ mod tests {
     #[test]
     fn baseline_names_each_capability_beyond_its_set_once() {
         let caps = s(&["SYS_ADMIN", "cap_sys_admin", "NET_ADMIN", "CHOWN"]);
-        assert_eq!(caps_beyond_baseline(&caps), ["SYS_ADMIN", "NET_ADMIN"]);
+        assert_eq!(caps_beyond_baseline(&caps, &[]), ["SYS_ADMIN", "NET_ADMIN"]);
+    }
+
+    /// The CRI's ceiling turns «nothing asked» into `--cap-drop ALL` plus the
+    /// engine's whole default set as `--cap-add`. Under baseline that must
+    /// pass: it is exactly what a plain run gets. Without `default_caps` the
+    /// same request is refused for NET_RAW/NET_BROADCAST — the bug this guards.
+    #[test]
+    fn re_stating_the_engine_defaults_is_not_asking_for_more() {
+        let defaults = [
+            "CHOWN",
+            "DAC_OVERRIDE",
+            "FOWNER",
+            "FSETID",
+            "KILL",
+            "SETGID",
+            "SETUID",
+            "SETPCAP",
+            "NET_BIND_SERVICE",
+            "NET_BROADCAST",
+            "NET_RAW",
+            "SYS_CHROOT",
+            "AUDIT_WRITE",
+            "SETFCAP",
+        ];
+        let clamp: Vec<String> = defaults.iter().map(|c| c.to_string()).collect();
+        assert!(caps_beyond_baseline(&clamp, &defaults).is_empty());
+        assert_eq!(
+            caps_beyond_baseline(&clamp, &[]),
+            ["NET_BROADCAST", "NET_RAW"]
+        );
+        let h = ContainerHardening {
+            cap_add: &clamp,
+            default_caps: &defaults,
+            ..Default::default()
+        };
+        let r = Request::container("alpine:3.20", false, false).with_hardening(h);
+        assert_eq!(evaluate(&baseline_only(), &r), Decision::Allow);
+        // A capability outside both lists is still refused next to them.
+        let mut more = clamp.clone();
+        more.push("SYS_ADMIN".into());
+        assert_eq!(caps_beyond_baseline(&more, &defaults), ["SYS_ADMIN"]);
     }
 
     #[test]
