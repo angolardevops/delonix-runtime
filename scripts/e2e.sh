@@ -274,6 +274,30 @@ skip() {
     "$name" "$reason" >>"$OUT/results.jsonl"
 }
 
+# `check` whose status IS the verdict, for a step the rest of a section stands
+# on (a `vm create` the snapshot checks need). `check` itself always returns 0,
+# which is why these steps used to be `if "$BIN" … >/dev/null; then … else skip`
+# — and that `else skip` hid a real regression: on 2026-10-21 every libvirt
+# `vm create` on main failed with "no network with matching name 'ingress'"
+# and the three libvirt sections reported it as SKIP «o vm create falhou neste
+# host», which the trace then filed under host properties. A create that fails
+# on a host that HAS the hypervisor is a FAIL, with the error in the report.
+check_then() {
+  local before=$FAIL
+  check "$@"
+  (( FAIL == before ))
+}
+
+# The host can run a libvirt VM: the two binaries the provider's `available()`
+# demands, `qemu-img` for the test disks, and a usable `qemu:///system` (the
+# NAT connection `vm create` picks when it can). Only when this is false may a
+# libvirt section SKIP.
+libvirt_system_usable() {
+  command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+    && command -v qemu-system-x86_64 >/dev/null \
+    && virsh -c qemu:///system list --all >/dev/null 2>&1
+}
+
 # --- defeitos JÁ CONHECIDOS: o ratchet, não uma lista de desculpas -----------
 #
 # Um check que chumba por um defeito com achado escrito não pode chumbar o
@@ -3265,8 +3289,7 @@ check "network apply / volume apply fora de uma stack também escrevem os labels
 e2e_net_rm nl-pk-net; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
 # The same for a `kind: VirtualMachine` — measured dropping them too. Labels are
 # the one VM field that converges in place: the domain keeps its id.
-if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
-   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+if libvirt_system_usable; then
   NLVM="nl-vm-$PFX"; qemu-img create -f qcow2 "$NLDIR/vm.qcow2" 64M >/dev/null 2>&1
   nl_vm_manifest() {
     printf '%s\n' 'apiVersion: compute.delonix.io/v1alpha1' 'kind: VirtualMachine' \
@@ -3275,7 +3298,8 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
   }
   nl_vm_labels() { "$BIN" describe vm "$NLVM" 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ','; }
   nl_vm_manifest '{ app: web, tier: front }'
-  if (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1); then
+  if check_then "stack apply de uma VirtualMachine libvirt (labels)" ok \
+       bash -c "cd '$NLDIR' && '$BIN' stack apply -f vm.yaml"; then
     NLDOM="$(virsh -c qemu:///system domid "$NLVM" 2>/dev/null | head -1)"
     check "stack apply: metadata.labels de uma VirtualMachine chegam ao registo, sem deriva no plano" ok bash -c \
       "[[ '$(nl_vm_labels)' == 'app=web,tier=front,' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
@@ -3283,12 +3307,10 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1)
     check "mudar os labels de uma VM converge a quente: o registo segue e o domínio é o mesmo" ok bash -c \
       "[[ '$(nl_vm_labels)' == 'app=api,' ]] && [[ \"\$(virsh -c qemu:///system domid '$NLVM' | head -1)\" == '$NLDOM' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
-  else
-    skip "labels de uma VirtualMachine" "o stack apply da VM não passou neste host"
   fi
   (cd "$NLDIR" && "$BIN" stack destroy -f vm.yaml >/dev/null 2>&1)
 else
-  skip "labels de uma VirtualMachine" "precisa de virsh + qemu-img e de uma ligação qemu:///system utilizável"
+  skip "labels de uma VirtualMachine" "precisa de virsh, qemu-img, qemu-system-x86_64 e de uma ligação qemu:///system utilizável"
 fi
 
 # ---------------------------------------------------------------------------
@@ -4359,14 +4381,14 @@ section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
 # O caminho do overlay vem do PRÓPRIO motor, nunca de um default assumido aqui.
 SROOT=$("$BIN" system info 2>/dev/null | awk '/state root:/{print $3}')
 
-if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
-   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+if libvirt_system_usable; then
   SVM="snap-$PFX"; SDISK="$OUT/$SVM.qcow2"
   qemu-img create -f qcow2 "$SDISK" 64M >/dev/null 2>&1
   # `--require vm.snapshot.memory`: the accepted half of ADR-0050 D6 — libvirt
   # marks it usable on a host with qemu:///system, so the requirement passes and
   # the create goes ahead exactly as before (the refusals are in the vm section).
-  if "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M --require vm.snapshot.memory >/dev/null 2>&1; then
+  if check_then "vm create libvirt (snapshot)" ok \
+       "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M --require vm.snapshot.memory; then
     check "vm snapshot create" ok "$BIN" vm snapshot create "$SVM" s1
     check "vm snapshot ls nomeia-o com a VM a correr" ok bash -c \
       "'$BIN' vm snapshot ls '$SVM' | grep -qx s1"
@@ -4469,13 +4491,12 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "out=\$('$BIN' vm move '$SVM' --node pve2 --live 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'vm migrate'"
     "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   else
-    skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"
     "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   fi
 
   rm -f "$SDISK"
 else
-  skip "vm: snapshot sobrevive a stop/start" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+  skip "vm: snapshot sobrevive a stop/start" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
 fi
 
 ########################################
@@ -4643,11 +4664,11 @@ section "vm: --disk-size cresce o disco de arranque, só a crescer (vm.disk.resi
 # validado ao vivo, à mão, com a golden debian-bookworm — registado no
 # discovery doc, não repetido aqui (pedir um pull de imagem a cada corrida da
 # bateria custaria minutos por nada que este mecanismo já não prove).
-if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
-   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+if libvirt_system_usable; then
   RVM="resize-$PFX"; RDISK="$OUT/$RVM.qcow2"
   qemu-img create -f qcow2 "$RDISK" 64M >/dev/null 2>&1
-  if "$BIN" vm create "$RVM" --disk "$RDISK" --backend libvirt --memory 256M >/dev/null 2>&1; then
+  if check_then "vm create libvirt (disk resize)" ok \
+       "$BIN" vm create "$RVM" --disk "$RDISK" --backend libvirt --memory 256M; then
     check "vm resize --disk-size com a VM a correr recusa (5)" 5 "$BIN" vm resize "$RVM" --disk-size 1
     check "vm stop (disk resize)" ok "$BIN" vm stop "$RVM"
     check "vm resize --disk-size 0 recusa (1)" 1 "$BIN" vm resize "$RVM" --disk-size 0
@@ -4661,12 +4682,11 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "[ \"\$(virsh -c qemu:///system domstate '$RVM')\" = running ]"
     "$BIN" delete vm "$RVM" -f >/dev/null 2>&1
   else
-    skip "vm: --disk-size (libvirt)" "o vm create falhou neste host"
     "$BIN" delete vm "$RVM" -f >/dev/null 2>&1
   fi
   rm -f "$RDISK"
 else
-  skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+  skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
 fi
 
 # Mesma ressalva de isolamento da secção CH acima: meia-isolação é pior que
