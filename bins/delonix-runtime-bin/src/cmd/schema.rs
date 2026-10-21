@@ -68,6 +68,7 @@ const TYPED_KINDS: &[&str] = &[
     k::SERVICE,
     k::IPPOOL,
     k::STORAGE_POOL,
+    k::GITOPS_SOURCE,
     k::WORKLOAD,
     k::CLUSTER,
     k::STACK,
@@ -223,6 +224,11 @@ fn typed_spec_parts(
             generator.subschema_for::<super::service::ServiceSpec>(),
             "ServiceSpec",
             super::service::SERVICE_SPEC_FIELDS,
+        ),
+        k::GITOPS_SOURCE => (
+            generator.subschema_for::<super::gitops::GitOpsSourceSpec>(),
+            "GitOpsSourceSpec",
+            super::gitops::GITOPS_SOURCE_SPEC_FIELDS,
         ),
         k::IPPOOL => (
             generator.subschema_for::<super::ippool::IpPoolSpec>(),

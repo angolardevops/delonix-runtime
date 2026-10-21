@@ -851,6 +851,14 @@ fn render_planned(
         eprintln!("{}", already_complete_line(&o.dir));
         return Ok(cert);
     }
+    // The project is complete here: a repository with everything in it is the
+    // starting point, not a chore. Adoption is left alone — that project has
+    // its own history.
+    if !adopt {
+        if let Some(why) = git_init(&o.dir) {
+            super::output::warn(&why);
+        }
+    }
     if adopt {
         println!(
             "{}",
@@ -1263,6 +1271,111 @@ fn containers_of_image(tag: &str) -> Vec<(String, bool)> {
 /// Seconds `--up` waits for the health path: the template's `wait=`, or 120.
 fn wait_secs(tname: &str) -> u64 {
     template_meta(tname).wait_secs
+}
+
+/// Makes the generated project a git repository, on `main`, with everything
+/// it was just given in one commit — so the next step is `git remote add
+/// <name> <url> && git push <name> main` and not four commands of setup.
+///
+/// Four things it refuses to do, each because doing it would be worse:
+///
+///  * **inside an existing work tree** (a monorepo subdirectory) it does
+///    nothing: a nested repository there is a trap that only shows up when
+///    someone pushes and the files are not in it;
+///  * **over an existing `.git`** it does nothing — that repository is the
+///    project's history, not ours to add to;
+///  * **without `git` on the PATH** it says so and carries on; a scaffold is
+///    not the place to fail for a tool the project does not need to build;
+///  * **without an author configured** it leaves the files STAGED and prints
+///    the two `git config` lines, instead of inventing a name and an address
+///    that would end up in the history of every project generated here.
+///
+/// `--initial-branch` needs git 2.28; older git gets the same result from
+/// `symbolic-ref`, which has always existed.
+fn git_init(dir: &Path) -> Option<String> {
+    use std::process::{Command, Stdio};
+    let git = |args: &[&str]| -> Option<std::process::Output> {
+        Command::new("git")
+            .args(["-C", &dir.display().to_string()])
+            .args(args)
+            .output()
+            .ok()
+    };
+    // A `git` that fails to START and one that starts and exits non-zero are
+    // both unusable, and only the first is an `Err`: the status is read too,
+    // because the probe has to answer "git works", not "git launches".
+    let usable = Command::new("git")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|st| st.success());
+    if !usable {
+        return Some(
+            super::po::t("git does not work here, so the project is not a repository yet").into(),
+        );
+    }
+    if dir.join(".git").exists() {
+        return None;
+    }
+    // Already inside someone else's work tree: a nested repository here is a
+    // trap, and `git rev-parse` is the only honest way to ask.
+    if git(&["rev-parse", "--is-inside-work-tree"]).is_some_and(|o| o.status.success()) {
+        return Some(
+            super::po::t(
+                "this directory is already inside a git repository — not creating one inside it",
+            )
+            .into(),
+        );
+    }
+    let ok = git(&["init", "--initial-branch=main"]).is_some_and(|o| o.status.success())
+        || (git(&["init"]).is_some_and(|o| o.status.success())
+            && git(&["symbolic-ref", "HEAD", "refs/heads/main"])
+                .is_some_and(|o| o.status.success()));
+    if !ok {
+        return Some(
+            super::po::t("`git init` failed, so the project is not a repository yet").into(),
+        );
+    }
+    if !git(&["add", "-A"]).is_some_and(|o| o.status.success()) {
+        return Some(super::po::t("the files could not be staged").into());
+    }
+    let Some(out) = git(&["commit", "-m", "chore: scaffold"]) else {
+        return Some(super::po::t("the commit could not be run").into());
+    };
+    if out.status.success() {
+        return None;
+    }
+    // A commit fails for more than a missing author: a signing key that is not
+    // there, a `commit-msg` hook inherited from `init.templateDir`, a
+    // read-only object store. Blaming the author names a cause nobody verified
+    // and hands over two commands that fix none of those — the same family as
+    // «the ENOENT of a `Command::status()` is not a missing file». So the
+    // author is named only when it really is absent; otherwise git's own words
+    // are quoted, because they are the ones that say what happened.
+    let has =
+        |k: &str| git(&["config", k]).is_some_and(|o| o.status.success() && !o.stdout.is_empty());
+    if !has("user.email") || !has("user.name") {
+        return Some(
+            super::po::t(
+                "git repository created on `main` and everything staged, but the commit needs an author:\n\
+                 \x20 git config user.name  \"Your Name\"\n\
+                 \x20 git config user.email you@example.com\n\
+                 \x20 git commit -m \"chore: scaffold\"",
+            )
+            .into(),
+        );
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let why = err
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    Some(super::po::tf(
+        "git repository created on `main` and everything staged, but the commit failed: {why}",
+        &[("why", why)],
+    ))
 }
 
 /// The two files that decide what gets BUILT and STARTED here: the image
@@ -1737,6 +1850,13 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
     if n == 0 {
         eprintln!("{}", already_complete_line(&o.dir));
         return Ok(());
+    }
+    // The generic scaffold writes the same kind of artefact as a template does
+    // — a Delonixfile, a manifest, a README — so it becomes a repository for
+    // the same reason. Leaving it out would be a difference nobody could
+    // explain from the outside.
+    if let Some(why) = git_init(&o.dir) {
+        super::output::warn(&why);
     }
     println!("{}", next_steps(target, o));
     Ok(())
@@ -2452,6 +2572,11 @@ mod tests {
             while let Some(d) = stack.pop() {
                 for e in std::fs::read_dir(&d).unwrap() {
                     let p = e.unwrap().path();
+                    // `.git` is metadata, and its objects differ byte for
+                    // byte between two runs of the SAME template.
+                    if p.file_name().and_then(|n| n.to_str()) == Some(".git") {
+                        continue;
+                    }
                     if p.is_dir() {
                         stack.push(p);
                     } else {
@@ -2810,9 +2935,17 @@ mod tests {
         }
     }
 
+    /// Every file the scaffold WROTE. `.git` is skipped: since a generated
+    /// project is a repository, that directory is there too — and it holds
+    /// binary objects whose bytes differ between two runs of the same
+    /// template. It is metadata, never generated content, and every walker
+    /// over a project has to agree on that.
     fn all_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
+            if p.file_name().and_then(|n| n.to_str()) == Some(".git") {
+                continue;
+            }
             if p.is_dir() {
                 all_files(&p, out);
             } else {
@@ -3332,6 +3465,101 @@ mod tests {
                 has_vm_support,
                 "template {name} missing vm_support=yes in template.meta"
             );
+        }
+    }
+
+    /// An existing repository is the project's own history, not ours to add
+    /// to: the helper leaves it alone.
+    #[test]
+    fn an_existing_repository_is_left_alone() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // no git here; the scaffold says so and carries on
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("app");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let ok = std::process::Command::new("git")
+            .args([
+                "-C",
+                &dir.display().to_string(),
+                "init",
+                "--initial-branch=main",
+            ])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        assert!(ok, "git init works here");
+        assert_eq!(git_init(&dir), None, "an existing repository is left alone");
+    }
+
+    /// A nested repository inside someone else's work tree is a trap that only
+    /// shows up when a push lands without the files. The helper refuses it and
+    /// says why.
+    #[test]
+    fn a_monorepo_subdirectory_never_gets_a_nested_repository() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let ok = std::process::Command::new("git")
+            .args(["-C", &root.display().to_string(), "init"])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        assert!(ok, "git init works here");
+        let sub = root.join("svc");
+        std::fs::create_dir_all(&sub).expect("mkdir");
+        let why = git_init(&sub).expect("a nested repository is refused");
+        assert!(why.contains("already inside"), "{why}");
+        assert!(!sub.join(".git").exists(), "nothing was created");
+    }
+
+    /// A generated project is a git repository from the moment `init`
+    /// finishes, so what a template tells you to keep out of git has to be
+    /// ignored by the template itself. Measured before this test: `odoo` was
+    /// the only one of the eleven with no `.gitignore` at all, while both its
+    /// README and its manifest said to move the database password into
+    /// `.secrets.env`, "a file you keep OUT of git" — following that advice
+    /// put the password in a file git was already watching. `.dockerignore`
+    /// keeps a file out of an IMAGE; it is not the same file and not the same
+    /// promise.
+    ///
+    /// The rule is deliberately concrete — a `.gitignore` for everyone, plus
+    /// the two paths this engine KNOWS carry a secret — instead of trying to
+    /// parse every promise out of prose. A template that invents a third one
+    /// is not caught here, and that is written down rather than pretended.
+    #[test]
+    fn no_template_tells_you_to_keep_a_secret_in_a_file_git_is_watching() {
+        for (name, files) in TEMPLATES {
+            let body = |rel: &str| files.iter().find(|(r, _, _)| *r == rel).map(|(_, c, _)| *c);
+            let ignore = body(".gitignore").unwrap_or_else(|| {
+                panic!("{name} ships no .gitignore, so nothing is kept out of git")
+            });
+            // The private key of a template that serves TLS.
+            if meta_kv(name, "tls").is_some() {
+                assert!(
+                    ignore.lines().any(|l| l.trim() == "tls/"),
+                    "{name}: serves TLS and does not ignore tls/"
+                );
+            }
+            // A secrets file the template's own documents point at.
+            let points_at_secrets = [".dockerignore", "README.md", "delonix-manifest.yaml"]
+                .iter()
+                .filter_map(|r| body(r))
+                .any(|c| c.contains(".secrets.env"));
+            if points_at_secrets {
+                assert!(
+                    ignore.lines().any(|l| l.trim() == ".secrets.env"),
+                    "{name}: points at .secrets.env and does not ignore it"
+                );
+            }
         }
     }
 }

@@ -158,10 +158,66 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
     );
 }
 
+/// An unsafe group name is REFUSED before anything is placed — in either privilege
+/// mode. It used to be dropped on the rootless path: the container started with no
+/// group at all, while its caller believed it was capped with the others.
+///
+/// Needs no busybox and no delegation: the refusal comes before the rootfs or a
+/// cgroup is touched. Kept here, beside the test it replaces, because the live
+/// behaviour is what changed.
 #[test]
-#[ignore = "needs /usr/bin/busybox and a host that delegates cgroup v2 (memory, cpu, pids) to this user: cargo test -p delonix-linux --test cgroup_parent -- --ignored --test-threads=1"]
-fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
+fn an_unsafe_group_name_is_refused_before_the_container_starts() {
     let root = tmp("escape");
+    let _ = std::fs::remove_dir_all(&root);
+    let rootfs = root.join("rootfs");
+    std::fs::create_dir_all(&rootfs).expect("create a scratch rootfs dir");
+    let store = Store::open(root.join("containers"))
+        .unwrap_or_else(|e| panic!("cannot open a store under {}: {e}", root.display()));
+    let mut guard = Cleanup {
+        store_dir: root.join("containers"),
+        ids: Vec::new(),
+        root: root.clone(),
+    };
+
+    let mut c = Container::new(
+        "00000000deadbeef".into(),
+        "escape".into(),
+        rootfs.to_string_lossy().to_string(),
+        vec!["/bin/true".into()],
+        "32M".into(),
+    );
+    // `..` would climb OUT of the engine's base, into a cgroup this engine was
+    // never granted — ceiling included.
+    c.cgroup_parent = Some(CgroupParent {
+        name: "../escaped".into(),
+        ..Default::default()
+    });
+    match delonix_linux::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
+        Ok(st) => {
+            guard.ids.push(c.clone());
+            panic!("a container with an unsafe group name started ({st:?})");
+        }
+        Err(e) => {
+            let code = delonix_model::Error::from(e).number();
+            assert_eq!(code, 1116, "refused, with the group's own dictionary entry");
+        }
+    }
+}
+
+/// ROOT mode honours the group: the container lands under
+/// `delonix.slice/<group>/`, and the group has its ceiling — written before the
+/// container joined. Before, root mode put every container at
+/// `delonix.slice/delonix-<id>`, and a group of containers had no aggregate cap.
+#[test]
+#[ignore = "needs root and /usr/bin/busybox: sudo -E cargo test -p delonix-linux --test cgroup_parent -- --ignored --test-threads=1 root_mode"]
+fn root_mode_container_of_a_group_lands_under_the_group_with_its_ceiling() {
+    // SAFETY: `geteuid` takes no arguments and has no preconditions.
+    let euid = unsafe { libc::geteuid() };
+    assert_eq!(
+        euid, 0,
+        "this test proves the ROOT path: run it with sudo (see the ignore reason)"
+    );
+    let root = tmp("rootgrp");
     let _ = std::fs::remove_dir_all(&root);
     let rootfs = root.join("rootfs");
     build_rootfs(&rootfs)
@@ -173,10 +229,10 @@ fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
         ids: Vec::new(),
         root: root.clone(),
     };
-
+    let name = format!("dlx-test-group-{}", std::process::id());
     let mut c = Container::new(
-        "00000000deadbeef".into(),
-        "fuga".into(),
+        "00000000c0ffee01".into(),
+        "load-root".into(),
         rootfs.to_string_lossy().to_string(),
         vec![
             "/bin/sh".into(),
@@ -185,24 +241,47 @@ fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
         ],
         "32M".into(),
     );
-    // `..` would climb OUT of the delegated base, into a cgroup this engine was
-    // never granted — ceiling included.
     c.cgroup_parent = Some(CgroupParent {
-        name: "../escapou".into(),
-        ..Default::default()
+        name: name.clone(),
+        memory_max: Some("64Mi".into()),
+        cpus: Some("1".into()),
+        pids_max: Some("256".into()),
     });
-    match delonix_linux::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
-        Ok(_) => guard.ids.push(c.clone()),
-        Err(e) => panic!(
-            "this host cannot start a rootless container ({e}) — the test needs a \
-             delegated cgroup v2 base"
-        ),
-    }
-    let path = delonix_linux::live_cgroup(&c);
-    eprintln!("cgroup with a rejected name: {path}");
-    assert!(
-        !path.contains("escapou"),
-        "the unsafe name was honoured: {path}"
+    let st = delonix_linux::create(&store, &mut c, &rootfs.to_string_lossy(), true)
+        .unwrap_or_else(|e| panic!("the root container did not start: {e}"));
+    guard.ids.push(c.clone());
+    assert_eq!(st, Status::Running);
+
+    let gdir = format!("/sys/fs/cgroup/delonix.slice/{name}");
+    let live = delonix_linux::live_cgroup(&c);
+    assert_eq!(
+        live,
+        format!("{gdir}/delonix-{}", c.id),
+        "where the container landed"
     );
-    assert!(!path.contains(".."), "the path climbed out: {path}");
+    assert_eq!(
+        live,
+        c.cgroup(),
+        "the static root path and the live one agree"
+    );
+    let read = |f: &str| {
+        std::fs::read_to_string(format!("{gdir}/{f}"))
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    assert_eq!(read("memory.max"), GROUP_MEM, "64Mi normalised to bytes");
+    assert_eq!(read("cpu.max"), "100000 100000");
+    assert_eq!(read("pids.max"), "256");
+    let delegated = read("cgroup.subtree_control");
+    for ctrl in ["memory", "cpu", "pids"] {
+        assert!(
+            delegated.split_whitespace().any(|c| c == ctrl),
+            "{ctrl} not handed down to the group: {delegated:?}"
+        );
+    }
+    drop(guard);
+    // The group outlives its containers on purpose (siblings may still use it);
+    // this test made it, so it removes it.
+    let _ = std::fs::remove_dir(&gdir);
 }

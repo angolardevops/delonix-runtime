@@ -104,6 +104,12 @@ enum Cmd {
     /// CONTRIBUTING.md) is written, the project's own code is never touched —
     /// a warning follows, since the Delonixfile still assumes the template's
     /// own file layout and needs a look before `build`.
+    ///
+    /// The project is left as a git repository on `main`, with one commit
+    /// holding everything it was just given — so the next step is adding a
+    /// remote and pushing, not four commands of setup. Skipped inside an
+    /// existing work tree (a monorepo subdirectory), over an existing
+    /// `.git`, and when adopting a project that already has a history.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath)]
@@ -422,6 +428,15 @@ enum Cmd {
     Backup {
         #[command(subcommand)]
         action: cmd::rbackup::BackupCmd,
+    },
+    /// Pull sources: one reconcile pass, status, suspend and resume (ADR-0021).
+    ///
+    /// A source is declared with `kind: GitOpsSource` and `stack apply`; this
+    /// group acts on one that already exists. Nothing here runs in the
+    /// background: a pass fetches, verifies, plans and applies, and exits.
+    Gitops {
+        #[command(subcommand)]
+        action: cmd::gitops::GitopsCmd,
     },
     /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
     ///
@@ -1011,6 +1026,10 @@ fn run() -> Result<()> {
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
         state_root: cmd::util::state_root(),
     }));
+    // Same port shape for the cgroup leaf a Cloud Hypervisor VMM starts in: the
+    // provider may not reach the cgroup adapter, so the composition root hands
+    // it over. Without it, every Cloud Hypervisor VM would be refused (DX-6515).
+    delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),
@@ -1102,6 +1121,7 @@ fn run() -> Result<()> {
         }
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Backup { action } => cmd::rbackup::cmd_backup(action),
+        Cmd::Gitops { action } => cmd::gitops::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Compatibility { action } => cmd::compatibility::run(action),
@@ -1691,6 +1711,7 @@ mod cli_stability_classification_tests {
         "drift",
         "explain",
         "get",
+        "gitops",
         "hosts",
         "init",
         "man",

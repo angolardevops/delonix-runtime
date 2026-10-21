@@ -3,16 +3,18 @@
 //! `ingress_to_httproute`); the L4 firewall lives under `kind: NetworkPolicy`
 //! (see `cmd/firewall.rs`).
 //!
-//! **Architecture** (see `cmd/ingress_proxy.rs` / `realize` in Phase 4): the schema
-//! here is the declarative surface; the physical plane is an embedded `hyper`
-//! reverse-proxy, launched INSIDE the holder netns (where it reaches the backends by
-//! IP), with the entry ports published on the host via the already existing
-//! `publish` mechanism. TLS terminates at the proxy (BYO via `kind: Secret` or
+//! **Architecture** (see `cmd/ingress_proxy.rs`): the schema here is the
+//! declarative surface; the physical plane is an embedded `hyper` reverse-proxy,
+//! launched INSIDE the holder netns (where it reaches the backends by IP), with
+//! the entry ports published on the host via the already existing `publish`
+//! mechanism. TLS terminates at the proxy (BYO via `kind: Secret` or
 //! self-signed).
 //!
-//! **"Ensure present" semantics** like all Kinds: no reconciler. This Phase (F1)
-//! delivers only the **parsing + validation** (schema, `valid_*`, reference graph);
-//! the proxy and the lifecycle come in the following phases.
+//! **"Ensure present" semantics** like all Kinds: no reconciler. Both planes are
+//! built: `parse_and_validate` is the schema half (schema, `valid_*`, reference
+//! graph) and `apply` is the physical one — it resolves the backends to
+//! `ip:port`, resolves the TLS material, then brings the proxy up and publishes
+//! the listeners.
 
 use super::kinds as k;
 use clap::Subcommand;
@@ -527,8 +529,8 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     Ok(())
 }
 
-/// Deserializes + validates each `kind: HTTPRoute` of the manifest (without
-/// applying anything yet — the proxy and the lifecycle come in Phase 4). Warns per
+/// Deserializes + validates each `kind: HTTPRoute` of the manifest. Applies
+/// nothing itself — that is `apply`, below, which brings the proxy up. Warns per
 /// unknown field.
 pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRouteSpec)>> {
     let mut out = Vec::new();
@@ -792,9 +794,8 @@ struct IngressTls {
 }
 
 // ============================================================================
-// Application (Phase 4b): resolves the HTTPRoutes into a ProxyConfig
-// (backends→ip:port, TLS) and ensures the reverse-proxy is serving (see
-// `cmd::ingress_proxy`).
+// Application: resolves the HTTPRoutes into a ProxyConfig (backends→ip:port,
+// TLS) and ensures the reverse-proxy is serving (see `cmd::ingress_proxy`).
 // ============================================================================
 
 use super::ingress_proxy::{self, Listener, ProxyConfig, Route, TlsMaterial};

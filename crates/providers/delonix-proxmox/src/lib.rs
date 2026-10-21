@@ -75,8 +75,9 @@ pub use lxc::ProxmoxSystemContainerProvider;
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
 // 1 GiB here — silently, which is the failure this repo treats as its worst.
 use delonix_compute::vm_backend::{
-    guest_cpu_outcome, guest_memory_outcome, guest_memory_state, guest_online_vcpus, mem_mib, Boot,
-    CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome, VmBackend, VmConfig,
+    guest_cpu_outcome, guest_memory_outcome, guest_memory_state, guest_online_vcpus, mem_mib,
+    names_a_declared_network, Boot, CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome,
+    VmBackend, VmConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -5241,7 +5242,7 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
             bad.push(field);
         }
     };
-    add(names_an_engine_network(&cfg.network), "network");
+    add(names_a_declared_network(&cfg.network), "network");
     add(cfg.kernel.is_some(), "kernel");
     add(cfg.initrd.is_some(), "initrd");
     add(cfg.firmware.is_some(), "firmware");
@@ -5272,13 +5273,6 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
          XML here at all. Remove the field, or use a local backend (`--backend libvirt`)",
         bad.join(", ")
     )))
-}
-
-/// Whether `VmConfig.network` names an engine SDN network, as opposed to the
-/// values that mean "the default network" (the same set the Cloud Hypervisor
-/// backend treats as the ingress bridge). Pure.
-fn names_an_engine_network(network: &str) -> bool {
-    !matches!(network, "" | "ingress" | "bridge" | "default")
 }
 
 /// Translates the cloud-init INTENT of a `VmConfig` into the node's own

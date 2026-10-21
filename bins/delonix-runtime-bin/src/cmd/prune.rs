@@ -231,10 +231,29 @@ pub(crate) fn lease_owners(store: &Store) -> Result<std::collections::HashMap<St
         .into_iter()
         .map(|c| (c.id, c.name, c.pod))
         .collect();
-    Ok(lease_owners_from(
-        &containers,
-        &delonix_sdn::infra::attached_refs(),
-    ))
+    let mut owners = lease_owners_from(&containers, &delonix_sdn::infra::attached_refs());
+    let services: Vec<(String, String)> = delonix_sdn::infra::service_list()
+        .into_iter()
+        .filter(|d| d.vip.is_some())
+        .map(|d| (d.namespace, d.name))
+        .collect();
+    add_service_owners(&mut owners, &services);
+    Ok(owners)
+}
+
+/// A declared Service that holds a VIP owns its lease (`svc:<ns>/<name>`,
+/// ADR-0066 D2). Without this the IPAM reaper reclaims the VIP of a Service
+/// that is very much alive and hands it to the next one.
+fn add_service_owners(
+    owners: &mut std::collections::HashMap<String, String>,
+    services: &[(String, String)],
+) {
+    for (namespace, name) in services {
+        owners.insert(
+            delonix_sdn::service_lb::lease_id(namespace, name),
+            format!("service {namespace}/{name}"),
+        );
+    }
 }
 
 /// Ref markers a live workload still holds: every live container id, PLUS the
@@ -1978,6 +1997,15 @@ mod tests {
         assert!(owners.contains_key("cri-sandbox1"));
         assert!(owners.contains_key("manual"));
         assert!(!owners.contains_key("gone"));
+    }
+
+    /// A VIP lease is owned by the Service that declares it, and only by it.
+    #[test]
+    fn a_vip_lease_is_owned_by_its_service() {
+        let mut owners = lease_owners_from(&[], &[]);
+        add_service_owners(&mut owners, &[("teamA".into(), "web".into())]);
+        assert_eq!(owners["svc:teamA/web"], "service teamA/web");
+        assert!(!owners.contains_key("svc:teamA/db"));
     }
 
     /// A container id that also has a ref marker is labelled by its NAME, not

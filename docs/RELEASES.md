@@ -4,6 +4,339 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v5.1.1 — o instalador mostra onde está a release, e o `--l18n` deixa de ser aceite depois de um subcomando
+
+Release de correcção sobre a `v5.1.0`, com **três commits** em cima da tag e
+nenhum merge (`git rev-list --count 1843b321..a0da90f5`): uma linha nova no fim
+do instalador, uma mudança à flag `--l18n` com dois helpers sem chamador, e o
+aumento de versão com a documentação regenerada. Estas notas foram escritas
+depois de a release sair; a release foi publicada com as notas geradas pelo
+GitHub.
+
+---
+
+### Ler antes de actualizar: `--l18n` depois de um subcomando passa a ser um erro (`cb047291`)
+
+A flag `--l18n` perdeu o `global = true`. A intenção era que ela deixasse de
+aparecer no `--help` de todos os subcomandos. Mas o `global` também é o que deixa a
+flag ser *lida* depois de um subcomando, por isso a mudança fez mais do que
+esconder a flag. Medido no binário publicado (`delonix 5.1.1`, commit `a0da90f5`):
+
+| Invocação | Resultado |
+|---|---|
+| `delonix --l18n=pt volume --help` | ajuda em português |
+| `delonix volume --help --l18n=pt` | ajuda em português |
+| `DELONIX_L18N=pt delonix volume inspect x` | `erro[DX-4201] …` (em português) |
+| `delonix --l18n=pt volume inspect x` | `erro[DX-4201] …` (em português) |
+| `delonix volume inspect x --l18n=pt` | **rc=2**, `error: unexpected argument '--l18n' found` |
+| `delonix volume ls --l18n=pt` | **rc=2**, o mesmo erro |
+
+O `--help` continua a funcionar em qualquer posição, porque a língua é decidida
+lendo o argv *antes* de o clap o processar, e o `--help` sai durante o
+processamento. O que deixa de funcionar é um comando normal com a flag no fim.
+Isto contradiz o próprio texto de ajuda da flag, que manda usá-la com
+`<command> --help`, e os exemplos do manual que a tratam como global.
+
+**Na v5.1.1, o que funciona sempre** é pôr a flag antes do subcomando
+(`delonix --l18n=pt …`) ou usar `DELONIX_L18N=pt`.
+
+A correcção já está na `main` (`d22e9336`, #862): a flag volta a ser `global`
+e fica com `hide = true`, ou seja, é aceite em todo o lado e não aparece em
+ajuda nenhuma. Sai na próxima release.
+
+### O instalador mostra o endereço da release no fim (`54179fdb`)
+
+Quando a instalação termina sem falhas, o `install.sh` imprime agora uma linha
+`downloads and documentation:` com o endereço da release instalada.
+
+**Com a instalação por omissão, o primeiro endereço está partido.** Sem
+`--version`, o `VERSION` do script vale `latest`, e o instalador imprime
+`…/releases/tag/latest` (HTTP 404) e, a seguir, `…/releases/latest` (redirecciona
+para a release mais recente). Com `--version v5.1.1` imprime só
+`…/releases/tag/v5.1.1` (HTTP 200). Medido com `curl` a 2026-10-21. A `main`
+tem a mesma linha; a correcção fica para outro commit.
+
+### Dois helpers de template, ainda sem chamador (`cb047291`)
+
+O `build.rs` passa a ler a chave `tls=` do `template.meta`, e o `scaffold.rs`
+ganha `template_supports_tls` e `template_has_version`. Na v5.1.1 nada os chama
+(`git grep` na tag), e é por isso que o `clippy -D warnings` da CI chumba a tag
+com `dead_code` nas duas funções. Na `main` passaram a ser usados para esconder
+`--tls-port`/`--hostname` e `-v`/`--template-version` da autocompletação dos
+templates que não os aceitam. Isso também sai na próxima release.
+
+### Versão e documentação (`a0da90f5`)
+
+O `Cargo.toml` passa a `5.1.1` e as páginas de `docs/comandos/` são
+regeneradas a partir do binário, para o gate de documentação do workflow de
+release não falhar por documentação desactualizada.
+
+---
+
+### Como foi validada esta release
+
+Foi mal validada, e isso fica escrito aqui.
+
+- Os três commits foram empurrados directamente para a `main`, **sem PR**. A
+  `ci.yml` corre em push para a `main` e **chumbou** em `54179fdb` e `cb047291`.
+  Em `a0da90f5`, a tag, chumbou o `rustfmt` (diferenças em `scaffold.rs`) e o
+  `clippy -D warnings` (`dead_code` nos dois helpers acima, e
+  `type_complexity` no `templates.rs` gerado), e os outros jobs, `test`
+  incluído, foram cancelados.
+- Parte disto já vinha da `v5.1.0`: a CI do commit da v5.1.0
+  (`1843b321`) também chumbava o `rustfmt`, os documentos gerados e dois testes
+  (`the_published_matrix_is_the_generated_one` e
+  `no_string_in_the_sources_tells_the_operator_to_run_a_dead_command`).
+- O `release.yml` falhou três vezes (08:57, 08:58 e 09:38 UTC de 2026-10-15)
+  antes de publicar à quarta, às 10:05 UTC. As corridas falhadas não foram
+  investigadas para estas notas. A corrida que publicou usou o `release.yml` do `727c8d3d` (a `main`
+  de então) e construiu a tag: o binário publicado diz
+  `commit: a0da90f50`.
+- Depois da publicação foram medidos, contra o binário publicado e contra o
+  GitHub, o comportamento do `--l18n` e os endereços do instalador, como
+  descrito acima.
+- **Não corrido**: a bateria `scripts/e2e.sh`, o arnês de caos e o `cargo test`
+  sobre esta tag.
+
+---
+
+## v5.1.0 — o que o motor não consegue impor passa a recusar, e os projectos que ele gera nascem com portão
+
+Duzentos e oitenta e nove commits desde a `v5.0.2` (197 sem contar os merges),
+de `#723` a `#843` — medidos em `a46095a3`
+(`git rev-list --count v5.0.2..a46095a3`). O número vai com o commit em que
+foi medido: sem isso envelhece em silêncio assim que a `main` cresce.
+
+**MINOR, e a razão é verificável**: nada nesta release quebra um contrato que
+alguma versão tenha declarado. As recusas novas (há muitas) caem todas sobre
+pedidos que o motor **já não conseguia cumprir** e reportava como sucesso, ou
+sobre superfícies que o `docs/cli-stability.md` lista como «sem promessa
+declarada em nenhuma versão» — o `init` entre elas.
+
+O fio é o mesmo das duas últimas releases, agora empurrado para os sítios onde
+ainda havia um sim barato: **o que o motor não consegue impor, recusa; o que
+não entende, não engole; e o que não mediu, não afirma.** A novidade é que
+isso chegou ao que o motor **gera** — um projecto saído do `delonix init`
+passa a nascer com testes, dois CIs, Conventional Commits, SonarQube e um
+README que aconselha arquitectura, com um portão a exigi-lo.
+
+---
+
+### Ler antes de actualizar
+
+Nenhuma destas é uma quebra de contrato declarado, mas as quatro mudam o que
+um comando que hoje devolve `0` faz amanhã.
+
+- **O CRI tem tecto de capabilities POR OMISSÃO** (`#828`). Sem configuração, o
+  tecto é o `KEPT_CAPS` do motor em modo `reject`: um pod normal corre como
+  dantes, e `privileged: true` ou um `capabilities.add` acima desse conjunto
+  são **recusados no `CreateContainer`**. Ausente ou vazio já não quer dizer
+  «sem tecto» — a única saída é escrevê-la (`DELONIX_CRI_CAP_CEILING=all`), e
+  um valor ou modo inválido impede o servidor de arrancar em vez de cair para
+  «ilimitado».
+- **`delonix vm image <verbo>` é o único caminho** (`#772`). `image vm …`,
+  `image --vm …` e as formas planas `vm build|convert|pull|push|ls-remote`
+  falham com `unrecognized subcommand`. Corte limpo, sem alias: o grupo `vm`
+  está na lista dos não-estáveis.
+- **`delonix init` recusa mais do que recusava** (`#842`, `#843`): uma porta
+  que este host não consegue publicar pára o `--up` **antes** do build; um
+  `init -t <outro>` sobre um directório que já tem outro projecto é um
+  conflito (saída 5) em vez de «nothing to do» seguido de um build do projecto
+  errado; e uma chave desconhecida no `template.meta` pára o build do próprio
+  motor.
+- **`cluster kubeadm` recusa o CNI por omissão num cluster multi-nó**
+  (`#810`), antes de criar uma única VM. Antes provisionava tudo e o cluster
+  ficava sem rede entre nós.
+
+---
+
+### Um projecto gerado nasce com portão (`#842`, `#843`)
+
+Começou num bug de produção: `delonix init -t nginx --port 9000 --tls-port 943`
+gerava o projecto e o `build` morria **sempre** em `nginx: [emerg] bind() to
+0.0.0.0:943 failed (13: Permission denied)`, no passo que só devia verificar a
+sintaxe da configuração.
+
+Quatro medições, e cada uma mudou a correcção:
+
+1. o container de trabalho do `build` corre na **netns do HOST** (mesmo inode),
+   onde a userns do motor não tem `CAP_NET_BIND_SERVICE`;
+2. `nginx -t` **binda** cada `listen` que lê — não é um parser;
+3. e tolera `EADDRINUSE`: **só o `EACCES` é fatal**, por isso o gate óbvio
+   («ocupa a porta e constrói») passaria sobre o binário defeituoso;
+4. só o nginx tem o problema — `httpd -t` e `haproxy -c` construíram com as
+   mesmas portas sem uma queixa.
+
+O check passa a correr sobre uma cópia cujos dois `listen` são sockets unix. A
+porta em si nunca foi inutilizável: dentro da netns do próprio container o
+mesmo `listen 943` devolve `rc=0`.
+
+**Os onze templates foram depois gerados com a porta adversarial e
+construídos: 11/11.** A varredura encontrou outro defeito, que fica **aberto**
+e está escrito: `init -t go ./go` gera com exit 0 um módulo `go` que o Go
+recusa, e `-t django ./django` um pacote que depende de si próprio.
+
+E o contrato dos templates ganhou portão. Antes, `nginx`, `httpd`, `haproxy` e
+`odoo` tinham **zero** CI, SonarQube e `CONTRIBUTING.md`; o `nestjs` tinha
+perdido o `commitlint` dos dois irmãos; e nenhum dos onze tinha secção de
+arquitectura no README. Agora todos têm, dois testes exigem-no, e o
+`scripts/init-ci.sh` **executa** o CI gerado dos onze — o job do GitLab e os
+passos do GitHub nos sete de aplicação, o `ci-check.sh` nos três de edge (que
+constrói a imagem e a sonda **de fora**, a única forma em que o próprio smoke
+é honesto) e o `pre-commit` no `odoo`.
+
+Correr esse CI em vez de o ler encontrou três bugs nos projectos gerados: o
+`smoke.sh` dos três de edge **ignorava** os URLs que recebe como argumento
+(`127.0.0.1` escrito à mão, logo FAIL contra qualquer servidor correcto fora
+do loopback); um check do `haproxy` exigia um container gerido pelo delonix e
+passou a **skip com a razão**; e o `prettier` da OCA reformatava os ficheiros
+que o `init` gera, chumbando o gate do `odoo` num projecto intocado.
+
+---
+
+### Segurança
+
+- **Toda a extracção de layer passou a ter tecto** (`#828`, `#788`): número de
+  entradas e bytes descomprimidos, contra uma bomba de descompressão, e todos
+  os caminhos confinados.
+- **Um bit setuid alheio é largado no caminho de extracção como root real**
+  (`#800`).
+- **O portão de admissão falha FECHADO numa FALHA de scan** (`#778`) — não só
+  num resultado de scan com achados. A distinção é a que interessa: «não
+  consegui analisar» não é «está limpo».
+- **Uma guarda opcional mantém as cargas fora de espaço privado e CGNAT atrás
+  do uplink** (`#819`): `denyPrivateEgress` na política do nó, desligada por
+  omissão, com concessões por prefixo. Vive numa chain própria antes de tudo o
+  resto, por isso nem uma `allowlist:` de rede nem um `egress allow` a reabrem.
+- **`cluster apply` pode fixar a chave de host do SSH** em vez de confiar na
+  primeira ligação (`#796`), opt-in.
+- **Uma admissão que não restringe nada é REGISTADA como tal** (`#767`).
+- **`install.sh` verifica os user namespaces através do perfil AppArmor do
+  delonix** (`#775`), que é o caminho real — não genericamente.
+- Avisos de dependência: `rustls` 0.23.46 (`#839`), `unsafe-libyaml` nomeado
+  com a razão (`#833`).
+
+### Kubernetes (CRI)
+
+- **`cpuset_mems`, `unified` e `hugepage_limits`**: honrar-ou-recusar, com a
+  sonda feita no cgroup onde o container vai REALMENTE viver (ADR-0038 item 3,
+  `#752`).
+- **`UpdateContainerResources` implementado** e sensível ao lugar (ADR-0038
+  item 4, `#755`): sob um scope do kubelet são propriedades do systemd, fora
+  dele é escrita na leaf, e a fusão é campo a campo — «não especificado» num
+  update é «não tocar», não «sem limite».
+- **Um `cpu_quota`/`cpu_period` parcial é recusado** em vez de escrever um
+  limite de CPU absurdo (`#766`).
+- **Um tecto de hugepage a zero sobre uma pool vazia não é um pedido**
+  (`#787`).
+- **O `serve cri` avisa alto quando não há tecto de capabilities** (`#794`), e
+  nomeia **o erro do motor**, não a linha de progresso antes dele (`#795`).
+- O fallback de root do ADR-0062 chega ao `ContainerStatus.info` (`#750`).
+
+### VMs
+
+- **Hotplug a quente de CPU e memória**: Cloud Hypervisor (ADR-0068 fase 1,
+  `#749`) e, a seguir, libvirt e Proxmox, com uma mudança de forma a
+  **reiniciar em vez de substituir** a VM (ADR-0012/ADR-0068, `#831`) — o
+  `Replace` deitava fora o disco overlay.
+- **Prontidão de VMaaS** (`#741`): guest agent, o `vm ssh` corrigido na netns,
+  e `vm.disk.resize`.
+- **`etcd` backup/restore** para um control-plane stacked provisionado em VM
+  (`#747`).
+- **Uma VM cloud-init no Proxmox ganha a porta série em que o `console=ttyS0`
+  arranca** (`#781`) — sem ela o primeiro boot entrava em pânico.
+- **Avaliação ao vivo das capacidades** de Proxmox e Cloud Hypervisor (`#744`,
+  `#742`), com a correcção do índice de tokens da firewall de vnet.
+- **Um teste ao vivo que não corre já não passa em silêncio** (`#779`, `#802`):
+  é `#[ignore]`, e um portão mantém-no assim.
+
+### API de nó
+
+- **`VirtualMachineService` servido** (ADR-0040 P5, `#746`), e a resolução das
+  omissões de vCPU/memória/backend que a própria imagem declara (`#763`).
+- **Activação por socket e saída por inactividade** (ADR-0040 P5, `#822`).
+- **Corrida no livro de operações e identidade de idempotência** corrigidas
+  (`#762`, ADR-0076 em `#765`).
+- O passo E do ADR-0042 validado ao vivo pelo socket (`#814`).
+
+### Rede, IPAM e DNS
+
+- **Uma zona nomeia o seu controlador de IPAM, e as subnets mudam no lugar**
+  (ADR-0063 D1/D2, `#754`): o gateway e os ranges passaram a campo quente, e
+  uma entrada de gateway movida por um rollback é reparada.
+- **O plano lê as entradas de gateway do IPAM** (`#834`): antes, uma entrada
+  libertada à mão planeava «sem alterações».
+- **Uma reserva de zona pode nomear uma carga que é uma VM** (ADR-0063 D3.3,
+  `#768`).
+- **O motor limpa os registos de gateway que um nó Proxmox deixa para trás**
+  (ADR-0064 D6, `#758`), e as escritas da firewall de vnet **recusam
+  incondicionalmente** em vez de falharem a meio (`#757`).
+- **Uma rota de rede é utilizável a partir de uma rede adicional** (`#733`).
+- **Um arranque falhado já não desfaz a rede de um container que está a
+  correr** (`#801`).
+
+### Armazenamento
+
+- **Pools de armazenamento** (ADR-0067 P1–P4/P6, `#830`): o helper root
+  activado por socket e os drivers `btrfs`, `zfs` e `lvm-thin`, com posse
+  marcada e recusa acima dos 95 %.
+- **Encolher uma quota rígida recusa um uso que não se conseguiu medir**
+  (`#782`) — desconhecido nunca é zero.
+
+### Compose, Docker API e CLI
+
+- **Compose contra uma amostra real, credenciais de serviço** (ADR-0048 fase
+  3) **e a API Docker ao nível do Testcontainers** (`#821`).
+- **`container ps` sem `-a` lista só o que corre**, e a API Docker honra o
+  `all` e devolve as portas (`#816`).
+- **`vm image <verbo>`** como ponto de entrada único (`#772`).
+- **O `COPY` do VMfile mantém o significado que tem num Dockerfile** (`#783`).
+- **`secret rotate-key` já não faz a versão recuar** (ACH-034, `#723`) — rodar
+  a chave-mestra não muda valor nenhum, e punha todas as versões a 1.
+- **`audit.query` do MCP regista a própria chamada**, como as outras (`#780`).
+
+### Robustez do motor
+
+- **O `spawn()` foi partido em passos com nome, com fuzzing contínuo — e isso
+  encontrou dois defeitos** (`#829`).
+- **Um container que passou o tecto de montagens nunca é entrado** (`#813`).
+
+### A linha de montagem
+
+- **O `protoc` é pinado e verificado** nos dois jobs de release e nos oito do
+  CI, numa acção local só (`#728`, `#730`, `#731`) — a v5.0.0 falhou à
+  primeira porque o `ubuntu-22.04` traz o 3.12 e o CI pinava outro runner.
+- **O renderizador de markdown da documentação gerada é pinado** (`#840`).
+- **O portão de estado dos ADR lê o índice em bullets** — e quatro mentiam
+  (`#732`, `#739`).
+- **O `vm-image.yml` chamava uma flag removida** e o seu ramo `no_k8s` nunca
+  chegava a correr (`#743`, `#745`, `#748`).
+
+### Cobertura medida
+
+A fracção de folhas da CLI que a bateria **executa e julga** (não que só pede
+`--help`) passou de **126/272** para **258/270 — 95,6 %** ao longo da série (`#721`,
+`#722`, `#761`, `#811`, `#818`), com um ratchet a travá-la nos três sentidos e
+o numerador a sair de um trace commitado, com proveniência e data.
+Ao lado: a bateria mede que o irmão servido é da release do `$BIN` (`#725`),
+que uma raiz de estado escrita pela release anterior abre inalterada (`#777`),
+e o teardown espera pelo `DX-8101` e diz o que não conseguiu remover (`#832`,
+`#837`).
+
+---
+
+### O que esta release NÃO fecha
+
+- **O nome de um projecto que colide com o do framework** continua a gerar com
+  exit 0 um projecto que não constrói (`init -t go ./go`).
+- **O `release.yml` continua sem ser exercitado por nada**: zero referências
+  nos jobs do `ci.yml`, nos `scripts/` e em testes. Uma referência partida ali
+  só aparece no `gh workflow run` seguinte.
+- **O OpenStack continua sem backend** — ADR-0039, *Proposed*, e
+  `provider.type: openstack` é recusado no carregamento.
+
+---
+
 ## v5.0.2 — uma rota entre redes passa a servir os containers ligados a mais de uma
 
 Release de correcção sobre a `v5.0.1`, cortada do mesmo ramo de manutenção
