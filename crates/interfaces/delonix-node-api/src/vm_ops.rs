@@ -157,6 +157,29 @@ fn mib_ceil(bytes: i64, field: &str) -> Result<Option<u64>, Status> {
     Ok(Some((bytes as u64).div_ceil(1024 * 1024)))
 }
 
+/// The subnet of `network` as this node's registry records it, for
+/// `VmConfig::network_subnet` — the same resolution the CLI does
+/// (`subnet_of` in `bins/delonix-runtime-bin/src/cmd/network.rs`), on this
+/// side because a provider does not read the registry
+/// (`docs/discovery/61`): without it the libvirt provider has no subnet to
+/// define a network that libvirt does not know yet, and the VM's create
+/// FAILS with "no network with matching name".
+///
+/// Only a DECLARED record resolves. No attachment (or the reserved default
+/// network) has no record, and its subnet is the engine's own bridge, which
+/// must not become a libvirt network. A record that exists and cannot be
+/// read is refused before any operation exists, not dropped into the same
+/// fallback a missing one gets.
+fn declared_subnet(root: &Path, network: &str) -> Result<Option<String>, Status> {
+    if network.is_empty() || !crate::network_ops::declared(root, network) {
+        return Ok(None);
+    }
+    let net = delonix_sdn::NetworkStore::open(root)
+        .and_then(|store| store.get(network))
+        .map_err(|e| Status::internal(format!("reading network '{network}': {e}")))?;
+    Ok((!net.subnet.is_empty()).then_some(net.subnet))
+}
+
 /// The engine's `VmConfig` from the contract's `VirtualMachineSpec` — the
 /// node API's own resolution (see the module doc comment's "known gap").
 /// Everything that can be decided here is decided before any operation is
@@ -177,6 +200,7 @@ fn config_from_spec(
         ));
     }
     let (network, static_ip) = network_of(&spec.networks)?;
+    let network_subnet = declared_subnet(root, &network)?;
     // "0 = image default, then 1" (the contract's own comment): look up the
     // image's own recommendation ONCE, reuse it for whichever of
     // vcpus/memory/backend the request left unspecified.
@@ -204,6 +228,7 @@ fn config_from_spec(
         disk: delonix_vm::store_image_disk(root, &spec.image),
         vcpus,
         memory,
+        network_subnet,
         network,
         namespace,
         static_ip,
@@ -1041,5 +1066,60 @@ mod tests {
         .unwrap();
         assert_eq!(unregistered.vcpus, 1);
         assert_eq!(unregistered.memory, "1G");
+    }
+
+    /// REGRESSION (cli-tester, 2026-10-21): a VM attached to a network the
+    /// node declared (`delonix network create cf-net2 --subnet ...`) reached
+    /// the libvirt provider with no subnet, the provider could not define a
+    /// network libvirt did not know, and the create FAILED with DX-9501 "no
+    /// network with matching name". The CLI resolves the subnet; this side
+    /// must too. A network with no record, and no attachment at all, still
+    /// carry none — the engine's own bridge is not a libvirt network.
+    #[test]
+    fn a_declared_network_carries_its_subnet_to_the_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        delonix_sdn::NetworkStore::open(dir.path())
+            .unwrap()
+            .create_with_cidr(
+                "cf-net2",
+                delonix_sdn::Cidr::parse("10.231.78.0/24").unwrap(),
+            )
+            .unwrap();
+        let on = |network: &str| {
+            config_from_spec(
+                dir.path(),
+                "web",
+                None,
+                &VirtualMachineSpec {
+                    image: "golden".into(),
+                    provider: "libvirt".into(),
+                    networks: if network.is_empty() {
+                        vec![]
+                    } else {
+                        vec![NetworkAttachment {
+                            network: network.into(),
+                            ..Default::default()
+                        }]
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+
+        let declared = on("cf-net2");
+        assert_eq!(declared.network, "cf-net2");
+        assert_eq!(
+            declared.network_subnet.as_deref(),
+            Some("10.231.78.0/24"),
+            "the registry's subnet, so the provider can define the libvirt network"
+        );
+        assert_eq!(on("not-declared").network_subnet, None);
+        assert_eq!(on("").network_subnet, None, "no attachment, no subnet");
+        assert_eq!(
+            on("bridge").network_subnet,
+            None,
+            "the reserved default has no record: its subnet is the engine's bridge"
+        );
     }
 }
