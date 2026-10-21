@@ -85,6 +85,16 @@ Concretamente, garante-se:
 > vermelho exactamente onde o `apply` ia falhar. Sem a flag, o `plan` continua a
 > responder `0`.
 
+> **Alteração de contrato depois da v5.1.1 (2).** O `stack plan` (e o `plan`)
+> ganhou `--prune`, e passou a planear com as flags do `apply`. Sem `--prune`, um
+> recurso que esta stack possui e o manifesto já não declara continua listado
+> (`-`), mas como **mantido**: `changed: false` no `-o json` e fora do
+> `--detailed-exitcode`. Antes contava como alteração, e um gate de deriva sem
+> poda respondia `2` para sempre, porque o `apply` que o acompanha nunca o remove.
+> Com `--prune` responde como antes: a remoção é uma alteração (`2`). Quem fazia o
+> gate dar `2` com recursos que saíram do manifesto passa a precisar de
+> `--prune`. O `action` continua `delete`, e o `planDigest` não muda.
+
 | código | significado |
 |---|---|
 | `0` | sucesso |

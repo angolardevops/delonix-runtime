@@ -285,6 +285,9 @@ enum Cmd {
         /// 0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`).
         #[arg(long)]
         detailed_exitcode: bool,
+        /// Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept.
+        #[arg(long)]
+        prune: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit.
         #[arg(long)]
         fields: bool,
@@ -1066,12 +1069,14 @@ fn run() -> Result<()> {
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         } => cmd::stack::run(cmd::stack::StackCmd::Plan {
             file,
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         }),
         Cmd::Wait { file, timeout } => {
