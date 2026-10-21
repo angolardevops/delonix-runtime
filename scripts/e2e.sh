@@ -370,10 +370,60 @@ section() { log ""; log "=== $1 ==="; }
 # The teardown helpers (`e2e_rm`, `e2e_net_rm`) live in their own file so the
 # scenario that proves them under a real DX-8101 sources the very same code.
 source "$(dirname "$0")/e2e_teardown.sh"
+# shellcheck source=scripts/e2e_ports.sh
+source "$(dirname "$0")/e2e_ports.sh"
 
 [[ -x "$BIN" ]] || { log "binário não executável: $BIN"; exit 1; }
 log "binário: $BIN"
 log "versão:  $("$BIN" --version 2>&1)"
+
+########################################
+section "guarda: as portas que a bateria publica"
+########################################
+# Cada porta que a bateria publica no host vem do `e2e_port` (scripts/
+# e2e_ports.sh). Antes vinham de `BASE + RANDOM % N`, e a base 51800 caía dentro
+# do intervalo efémero: a 2026-10-21 saiu 51814, que era a ponta local de uma
+# ligação de saída do host (127.0.0.1:51814↔:5433); o motor recusou bem o publish
+# (EADDRINUSE) e isso deu 7 FAIL em cascata que nada tinham a ver com o diff. Um
+# picker que erra assim volta a dar FAIL alheios, por isso prova-se aqui, antes
+# de qualquer secção depender dele — e o segundo check reconstrói o caso exacto:
+# uma porta presa por um socket LIGADO, não por um que escuta.
+EPORTS="$(cd "$(dirname "$0")" && pwd)/e2e_ports.sh"
+cat >"$OUT/ports-window.sh" <<'EOF'
+source "$1"; log() { printf '%s\n' "$*" >&2; }
+read -r lo hi </proc/sys/net/ipv4/ip_local_port_range
+e2e_port p
+# A host whose ephemeral range leaves no window (1024–65535) gets a kernel port.
+(( lo - 20000 < 1000 && 65535 - hi < 1000 )) || (( p < lo || p > hi )) || { echo "p=$p dentro de $lo–$hi"; exit 1; }
+_e2e_port_free "$p" || { echo "p=$p não está livre"; exit 1; }
+EOF
+check "e2e_port: a porta fica fora do intervalo efémero do host e está livre" ok bash "$OUT/ports-window.sh" "$EPORTS"
+cat >"$OUT/ports-held.sh" <<'EOF'
+source "$1"; log() { printf '%s\n' "$*" >&2; }
+e2e_port h
+ready="$2/ports-held.ready"; rm -f "$ready"
+# The client end of a connection bound to $h, with a listener on a kernel port.
+python3 -I -c '
+import socket, sys, time
+srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(1)
+cli = socket.socket(); cli.bind(("127.0.0.1", int(sys.argv[1]))); cli.connect(srv.getsockname())
+open(sys.argv[2], "w").close(); time.sleep(60)' "$h" "$ready" & holder=$!
+trap 'kill $holder 2>/dev/null; rm -f "$ready"' EXIT
+for _ in $(seq 1 50); do [[ -e "$ready" ]] && break; sleep 0.1; done
+[[ -e "$ready" ]] || { echo "o socket ligado a $h não chegou a existir"; exit 1; }
+_e2e_port_free "$h" && { echo "a sonda deu $h por livre com uma ligação nele"; exit 1; }
+E2E_PORT_MIN=$h E2E_PORT_MAX=$h e2e_port q
+[[ "$q" != "$h" ]] || { echo "e2e_port devolveu $h, que está preso"; exit 1; }
+EOF
+check "e2e_port: uma porta presa por uma ligação de saída é saltada" ok bash "$OUT/ports-held.sh" "$EPORTS" "$OUT"
+cat >"$OUT/ports-distinct.sh" <<'EOF'
+source "$1"; log() { printf '%s\n' "$*" >&2; }
+e2e_port a
+E2E_PORT_MIN=$a E2E_PORT_MAX=$((a + 1))
+E2E_PORTS_GIVEN=" "; e2e_port x; e2e_port y; e2e_port z
+[[ "$x" != "$y" && "$z" != "$x" && "$z" != "$y" ]] || { echo "repetida: $x $y $z"; exit 1; }
+EOF
+check "e2e_port: a mesma corrida nunca recebe a mesma porta duas vezes" ok bash "$OUT/ports-distinct.sh" "$EPORTS"
 
 ########################################
 section "guarda: o irmão SERVIDO é da release do \$BIN"
@@ -1559,8 +1609,8 @@ rm -rf "$_bmin"
 section "container: ciclo de vida + hot reconfig"
 ########################################
 C="c-$PFX"
-# Porta alta e improvável de colidir com o que já corre na máquina.
-P1=$((29500 + RANDOM % 300)); P2=$((29900 + RANDOM % 90))
+# Portas livres e fora do intervalo efémero do host (`e2e_port`, scripts/e2e_ports.sh).
+e2e_port P1; e2e_port P2
 
 # Um passo que se ANUNCIA tem de se FECHAR, e o caminho rápido não anuncia nada.
 #
@@ -2111,11 +2161,10 @@ section "publish: o endereço de bind é REGISTADO e sobrevive a um start"
 # de ser através de um `stop`+`start`, porque cada passo isolado devolve 0 mesmo
 # com o defeito. Um check pelo rc ficaria verde sobre o bug.
 CPB="cpb-$PFX"
-# Portas altas e pouco prováveis; se alguma estiver ocupada o troço salta com
-# razão audível em vez de chumbar por causa de um vizinho.
-P_LOOP=51081
-P_SPEC=51082
-P_ENVV=51083
+# Portas livres e fora do intervalo efémero (`e2e_port`); se alguma for ocupada
+# entretanto o troço salta com razão audível em vez de chumbar por causa de um
+# vizinho. (Eram 51081–51083 fixas, dentro do intervalo efémero por omissão.)
+e2e_port P_LOOP; e2e_port P_SPEC; e2e_port P_ENVV
 if ss -tulnH 2>/dev/null | grep -qE ":($P_LOOP|$P_SPEC|$P_ENVV) "; then
   skip "endereço de bind persistido" "uma das portas $P_LOOP/$P_SPEC/$P_ENVV já está ocupada neste host"
 elif ! "$BIN" container run -d --name "$CPB" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
@@ -2411,7 +2460,7 @@ fi
 if [[ "$E2E_ISOLATED" == 1 ]]; then
   PE="pe-$PFX"; PC="pc-$PFX"; POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
   HIP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
-  HPORT=$((20000 + $$ % 20000))
+  e2e_port HPORT
   is_private() { python3 -c 'import ipaddress,sys; a=ipaddress.ip_address(sys.argv[1]); sys.exit(0 if any(a in ipaddress.ip_network(n) for n in ("10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","100.64.0.0/10")) else 1)' "$1" 2>/dev/null; }
   if [[ -n "$HIP" ]] && is_private "$HIP" \
      && { python3 -m http.server --bind "$HIP" "$HPORT" >/dev/null 2>&1 & HSRV=$!; sleep 1; kill -0 "$HSRV" 2>/dev/null; } \
@@ -5505,7 +5554,7 @@ check "ingress ls json separa governado de aberto" ok bash -c \
     "$BIN" net egress allow naoexiste-$PFX 80
 
   # --- deny/rm/unpublish: os irmãos de allow/ls/clear que nunca corriam -------
-  NGNET="ngnet-$PFX"; NGC="ngc-$PFX"; NGP=$(( 29300 + RANDOM % 150 ))
+  NGNET="ngnet-$PFX"; NGC="ngc-$PFX"; e2e_port NGP
   if "$BIN" network create "$NGNET" >/dev/null 2>&1 \
      && "$BIN" container run -d --name "$NGC" --net "$NGNET" -p "$NGP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
     check "net ingress deny" ok "$BIN" net ingress deny "$NGC" 80
@@ -7180,7 +7229,7 @@ fi
 # a route that asks for names makes the apply itself write the hosts file, and
 # /etc/hosts is the user's. The backend is busybox `nc` in a loop — alpine's
 # busybox has no `httpd`.
-L3HR="hr-$PFX.e2e.test"; L3HP=$(( 29500 + RANDOM % 150 )); L3HF="$L3/hosts"
+L3HR="hr-$PFX.e2e.test"; e2e_port L3HP; L3HF="$L3/hosts"
 # The body's length follows $PFX (the run's pid): a fixed Content-Length cut the
 # answer, and the proxy was right to honour it.
 L3PONG="pong-$PFX"
@@ -7265,7 +7314,7 @@ if [[ -n "$L3AIP" ]] && command -v socat >/dev/null 2>&1; then
   check "net netns firewall --clear: B reaches A again" ok bash -c "
     '$BIN' net netns firewall '$L3A' --clear >/dev/null || exit 1
     for _ in \$(seq 1 10); do $L3REACH && exit 0; sleep 0.3; done; exit 1"
-  L3PP=$(( 29700 + RANDOM % 150 ))
+  e2e_port L3PP
   check "net netns publish: the host port forwards to A's listener" ok bash -c "
     '$BIN' net netns publish '$L3A' '$L3PP:7171' >/dev/null || exit 1
     for _ in \$(seq 1 20); do [ \"\$(nc -w 2 127.0.0.1 $L3PP </dev/null 2>/dev/null)\" = pong-$PFX ] && exit 0; sleep 0.3; done; exit 1"
@@ -7397,7 +7446,7 @@ YAML
 check "pod port-forward: a pod that does not exist is 4" 4 "$BIN" pod port-forward "nao-existe-$PFX" 7070
 if "$BIN" stack apply -f "$L3/pfpod.yaml" >/dev/null 2>&1; then
   check "pod port-forward: a port spec that is not a port is refused (1)" 1 "$BIN" pod port-forward "l3pf$PFX" abc
-  L3FP=$(( 29900 + RANDOM % 90 ))
+  e2e_port L3FP
   check "pod port-forward: 127.0.0.1:<hostPort> reaches the pod's port" ok bash -c "
     timeout -s KILL 60 '$BIN' pod port-forward 'l3pf$PFX' '$L3FP:7070' >/dev/null 2>&1 & pf=\$!
     r=
@@ -7460,7 +7509,7 @@ check "vm apply: a disk that is neither a VM image nor a file is 4, and no VM is
 # needs root and change nothing without `--apply` — and `--apply` without root
 # is refused before the first command runs. 192.0.2.0/24 (TEST-NET-1) stands in
 # for a VM subnet.
-L3RP=$(( 29850 + RANDOM % 100 ))
+e2e_port L3RP
 if "$BIN" container run -d --name "$L3C-pub" --net "$L3N" -p "$L3RP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
   check "vm reach: a port published on the default 127.0.0.1 is reported host-only" ok bash -c "
     '$BIN' vm reach 2>&1 | grep '$L3C-pub' | grep -q '127.0.0.1 (host only)'"
@@ -7503,7 +7552,7 @@ section "container ps sem -a: só os que estão a correr, na CLI e na API Docker
 # ignorava o `all` e devolvia tudo, e perdia as portas publicadas: o parser dela
 # esperava `hostPort:contPort` e o registo guarda `addr:hostPort:contPort/proto`
 # desde 2026-10-07. Medido a 2026-10-11 nos três.
-PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"; PSPORT=$(( 51800 + RANDOM % 150 ))
+PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"; e2e_port PSPORT
 # Creating the three is a CHECK, not a condition: a first version folded it into
 # the `if` and skipped the whole section when one refused to start — which it
 # did, because `-p` with `--net none` is refused (correctly). A gate that skips

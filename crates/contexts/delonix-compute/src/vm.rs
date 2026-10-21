@@ -9,8 +9,8 @@
 use crate::capability::Capability;
 use crate::ports::{LocalDiskImages, SeedBuilder, VmBackends, VmNetwork};
 use crate::vm_backend::{
-    mem_mib, names_a_declared_network, parse_mem_mib, CloudInitIntent, CreateStage, DestroyStage,
-    GuestInfo, HotplugOutcome, MoveOptions, VmBackend, VmConfig,
+    libvirt_nic, mem_mib, names_a_declared_network, parse_mem_mib, CloudInitIntent, CreateStage,
+    DestroyStage, GuestInfo, HotplugOutcome, LibvirtNic, MoveOptions, VmBackend, VmConfig,
 };
 use crate::vm_error::{Error, Result};
 use crate::vm_firewall as firewall;
@@ -1776,6 +1776,28 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         libvirt_xml: b.libvirt_xml.clone(),
     }
 }
+/// The network a VM is actually on, for whoever REPORTS it (`vm describe`,
+/// `vm ls -o json`, the node API). `None` for a libvirt user-mode NIC, which is
+/// on no network. **Pure.**
+///
+/// `Vm.network` is what was ASKED for, and for every backend but libvirt that
+/// is also where the VM is: Cloud Hypervisor attaches the engine's `ingress`
+/// bridge or the named SDN network. libvirt does not — without a declared
+/// network the domain lands in libvirt's own `default`, so reading `network`
+/// back said `ingress` for a VM that was in `<source network='default'>`. The
+/// answer comes from [`libvirt_nic`], the function the domain XML is built
+/// from. A domain given whole as `libvirt_xml` is not parsed: its NIC is
+/// whatever that XML says, and the request is the best this can report.
+pub fn attached_network(vm: &Vm) -> Option<String> {
+    if vm.backend != "libvirt" || vm.boot.libvirt_xml.is_some() {
+        return Some(vm.network.clone());
+    }
+    match libvirt_nic(Some(&vm.tap), vm.boot.bridge.as_deref(), &vm.network) {
+        LibvirtNic::Network(n) | LibvirtNic::Bridge(n) => Some(n),
+        LibvirtNic::User => None,
+    }
+}
+
 /// Is `argv` the `cloud-hypervisor` serving THIS VM? PURE.
 ///
 /// The api-socket path is the ownership token: we choose it, it is unique per
@@ -2243,6 +2265,39 @@ mod tests {
 
     /// A local backend: the overlay and the seed are built, the backend boots
     /// the overlay with the seed attached, and the record says Running.
+    /// The record `vm create vgj-lv --backend libvirt` (no `--network`) wrote,
+    /// measured 2026-10-21; `virsh dumpxml` had `<source network='default'>`.
+    fn libvirt_record(network: &str, tap: &str) -> Vm {
+        serde_json::from_value(serde_json::json!({
+            "name": "vgj-lv", "disk": "/d.qcow2", "overlay": "/o.qcow2",
+            "vcpus": 1, "memory": "256M", "network": network, "tap": tap,
+            "mac": "52:54:00:bd:15:b5", "pid": null, "api_socket": "",
+            "status": "Running", "created_unix": 1, "backend": "libvirt",
+            "boot": {}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_libvirt_vm_reports_the_network_its_domain_is_on() {
+        assert_eq!(
+            attached_network(&libvirt_record("ingress", "nat")).as_deref(),
+            Some("default")
+        );
+        assert_eq!(
+            attached_network(&libvirt_record("lab-net", "nat")).as_deref(),
+            Some("lab-net")
+        );
+        let mut bridged = libvirt_record("ingress", "bridge");
+        bridged.boot.bridge = Some("br0".into());
+        assert_eq!(attached_network(&bridged).as_deref(), Some("br0"));
+        assert_eq!(attached_network(&libvirt_record("ingress", "user")), None);
+        // Cloud Hypervisor IS on the engine's `ingress` bridge.
+        let mut ch = libvirt_record("ingress", "dlxtap0");
+        ch.backend = "cloud-hypervisor".into();
+        assert_eq!(attached_network(&ch).as_deref(), Some("ingress"));
+    }
+
     #[test]
     fn a_new_vm_on_a_local_backend_gets_an_overlay_and_a_seed() {
         let root = tempfile::tempdir().unwrap();
