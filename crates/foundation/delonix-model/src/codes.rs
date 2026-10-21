@@ -1672,11 +1672,11 @@ pub static CATALOG: &[Code] = &[
 /// still answers it, with the code that replaced it. ADR-0059 D5 folded the
 /// network provider failures into its reason block (`DX-C380`…`DX-C399`).
 pub static RETIRED: &[Retired] = &[
-    retired!(1361, Some("v5.0.2"), 1329, "network.vip_outside_ingress_space", InvalidArgument, Network, 1,
+    retired!(1361, Some("v5.1.1"), 1329, "network.vip_outside_ingress_space", InvalidArgument, Network, 1,
         "VIP outside the ingress address space",
         "A load-balancer VIP is outside the ingress address space (10.200-254.x).",
         "Use an address inside the ingress range this engine reports."),
-    retired!(1361, Some("v5.0.2"), 1330, "network.invalid_lb_spec", InvalidArgument, Network, 1,
+    retired!(1361, Some("v5.1.1"), 1330, "network.invalid_lb_spec", InvalidArgument, Network, 1,
         "invalid load-balancer spec",
         "An `lbset` backend list has a bad weight, a backend with no port, an invalid backend, or is empty.",
         "Write backends as ip:port[#weight], comma-separated, with at least one entry."),
