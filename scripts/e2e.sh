@@ -247,23 +247,27 @@ check() {
   else
     [[ $rc -eq "$expect" ]] && verdict=PASS
   fi
-  # The output goes in on STDIN, never as an argument: one argument is capped at
-  # 128 KiB (MAX_ARG_STRLEN), and the 150 KB of `manifest schema` made python3
-  # fail with «Argument list too long» — the check printed PASS and its line
-  # never reached results.jsonl (cli-tester, 2026-10-21: 1459 PASS in the log,
-  # 1458 in the JSONL).
-  printf '%s' "$out" | python3 -c '
+  # The output and the command go through files, never argv: one argv string
+  # is capped at 128 KiB (MAX_ARG_STRLEN), and on 2026-10-21 `manifest schema`
+  # printed more than that — python3 never started («Argument list too long»),
+  # the check still counted as PASS, and its line was missing from the JSONL. A
+  # FAIL with a long output would have vanished the same way. `printf` is a
+  # builtin, so writing the files has no such limit.
+  local tmp="$OUT/.check.$BASHPID"
+  printf '%s' "$out" >"$tmp.out"; printf '%s' "$*" >"$tmp.cmd"
+  python3 - "$name" "$verdict" "$rc" "$tmp.out" "$tmp.cmd" >>"$OUT/results.jsonl" <<'PY'
 import json,sys
-name,verdict,rc,cmd=sys.argv[1:5]
-out=sys.stdin.read()
+name,verdict,rc,outf,cmdf=sys.argv[1:6]
+out=open(outf,encoding="utf-8",errors="replace").read()
+cmd=open(cmdf,encoding="utf-8",errors="replace").read()
 # The END of the output is where a failing step says why (the `virsh` error
 # under a `vm create`, the last line of a build), so a long output keeps its
 # head and its tail, never only its head.
 if len(out) > 4000:
     out = out[:1000] + "\n[... %d chars cut ...]\n" % (len(out) - 4000) + out[-3000:]
 print(json.dumps({"name":name,"verdict":verdict,"rc":int(rc),"cmd":cmd,"output":out}))
-' "$name" "$verdict" "$rc" "$*" >>"$OUT/results.jsonl" \
-    || log "  !!    $name: a linha do results.jsonl não foi escrita"
+PY
+  rm -f "$tmp.out" "$tmp.cmd"
   if [[ $verdict == PASS ]]; then
     PASS=$((PASS+1)); log "  PASS  $name"
   else
@@ -1995,6 +1999,22 @@ fi
 e2e_rm "rs-$PFX"
 sleep 2
 check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 0 ]"
+
+# O `rename` simples, sem corrida de tempos. Até 2026-10-21 a folha só era
+# executada pelo check da espera entre reinícios, logo abaixo, que salta quando
+# não apanha o container parado — e cada corrida que não o apanhava descia o
+# ratchet de execução de 266 para 265 sem nada ter mudado no motor. Uma folha
+# não pode depender de uma janela de tempo para ser executada.
+if check_then "container rename: o container de prova arranca" ok \
+     "$BIN" container run -d --net none --name "rnp-$PFX" "$IMG" sleep 600; then
+  check "container rename" ok "$BIN" container rename "rnp-$PFX" "rnp2-$PFX"
+  # The old name must be GONE (class 4, DX-4101), not merely unreadable: a bare
+  # `!` would also pass on a DX-8101 or an unreadable root.
+  check "container rename: o nome novo responde e o antigo já não existe" ok bash -c \
+    "'$BIN' container inspect 'rnp2-$PFX' >/dev/null || exit 1
+     '$BIN' container inspect 'rnp-$PFX' >/dev/null 2>&1; [ \$? -eq 4 ]"
+fi
+e2e_rm "rnp-$PFX" "rnp2-$PFX"
 
 # Um `rename` feito na espera entre reinícios fica. O supervisor arrancava da
 # cópia do registo que trazia desde o primeiro arranque, e o `create_with` grava o
@@ -8211,6 +8231,30 @@ YAML
 fi
 
 ########################################
+section "guarda: o results.jsonl tem uma linha por veredicto"
+########################################
+# The totals below come from the shell counters; the ratchet and every reader
+# after this run come from the JSONL. On 2026-10-21 they disagreed by one (a
+# check whose python3 could not start, see `check`) and nothing said so. Every
+# `check` writes its raw PASS/FAIL line, `xfail`/`xflaky` add an XFAIL/XPASS
+# line after it, and `skip` writes a SKIP line — so the counts must match
+# exactly, measured before this check adds its own line.
+check "o results.jsonl tem uma linha por veredicto contado" ok python3 -I - \
+  "$OUT/results.jsonl" "$((PASS + FAIL + XFAIL + XPASS))" "$SKIP" "$((XFAIL + XPASS))" <<'PY'
+import collections, json, sys
+path, raw, skip, marked = sys.argv[1], *map(int, sys.argv[2:5])
+seen = collections.Counter()
+for n, line in enumerate(open(path, encoding="utf-8"), 1):
+    try:
+        seen[json.loads(line)["verdict"]] += 1
+    except (ValueError, KeyError) as e:
+        sys.exit(f"line {n} is not a verdict: {e}")
+got = (seen["PASS"] + seen["FAIL"], seen["SKIP"], seen["XFAIL"] + seen["XPASS"])
+want = (raw, skip, marked)
+if got != want:
+    sys.exit(f"JSONL (PASS+FAIL, SKIP, XFAIL+XPASS) = {got}, counters = {want}")
+PY
+
 log ""
 log "======================================"
 log " PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP  XFAIL=$XFAIL  XPASS=$XPASS"
