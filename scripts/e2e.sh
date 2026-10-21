@@ -250,7 +250,12 @@ check() {
   python3 - "$name" "$verdict" "$rc" "$out" "$*" >>"$OUT/results.jsonl" <<'PY'
 import json,sys
 name,verdict,rc,out,cmd=sys.argv[1:6]
-print(json.dumps({"name":name,"verdict":verdict,"rc":int(rc),"cmd":cmd,"output":out[:4000]}))
+# The END of the output is where a failing step says why (the `virsh` error
+# under a `vm create`, the last line of a build), so a long output keeps its
+# head and its tail, never only its head.
+if len(out) > 4000:
+    out = out[:1000] + "\n[... %d chars cut ...]\n" % (len(out) - 4000) + out[-3000:]
+print(json.dumps({"name":name,"verdict":verdict,"rc":int(rc),"cmd":cmd,"output":out}))
 PY
   if [[ $verdict == PASS ]]; then
     PASS=$((PASS+1)); log "  PASS  $name"
@@ -258,7 +263,16 @@ PY
     FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
     log "  FAIL  $name  (rc=$rc, esperado=$expect)"
     log "        $ $*"
-    sed 's/^/        | /' <<<"$out" | head -8
+    # Head AND tail. `head -8` alone cut a failing `vm create` before the
+    # hypervisor's error: the first lines are progress, the reason comes last.
+    local n; n=$(wc -l <<<"$out")
+    if (( n > 16 )); then
+      sed 's/^/        | /' <<<"$out" | head -6
+      log "        | [… $((n - 12)) linhas cortadas — a saída está em results.jsonl …]"
+      sed 's/^/        | /' <<<"$out" | tail -6
+    else
+      sed 's/^/        | /' <<<"$out"
+    fi
   fi
 }
 
@@ -282,6 +296,14 @@ skip() {
 # and the three libvirt sections reported it as SKIP «o vm create falhou neste
 # host», which the trace then filed under host properties. A create that fails
 # on a host that HAS the hypervisor is a FAIL, with the error in the report.
+#
+# The rule holds for every setup step in this battery, not only libvirt's: a
+# `network create`, a `container run`, a `stack apply`, a `build`, a `pod
+# create` or a `serve cri` the rest of a block stands on goes through here. A
+# block SKIPs only when a guard written from the HOST's side says the capability
+# is absent — `libvirt_system_usable`, `ch_usable`, `host_has_subuid`,
+# `E2E_HAVE_IMAGE`, `command -v crictl` — never because the engine's own step
+# failed.
 check_then() {
   local before=$FAIL
   check "$@"
@@ -296,6 +318,52 @@ libvirt_system_usable() {
   command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     && command -v qemu-system-x86_64 >/dev/null \
     && virsh -c qemu:///system list --all >/dev/null 2>&1
+}
+
+# The host can boot a Cloud Hypervisor VM: what the provider's own probe
+# (`CloudHypervisorHost::probe`) asks for — the binary, `/dev/kvm` and one of
+# the firmwares in `DEFAULT_CH_FIRMWARES` — plus `qemu-img` for the test disks,
+# and `/dev/kvm` openable by THIS user, not only present. The CH sections used
+# to guard on the binary alone and SKIP «o vm create CH falhou neste host (infra
+# de rede?)» on anything else, a guess written into the report as a host
+# property. Only when this is false may a CH section SKIP.
+ch_usable() {
+  command -v cloud-hypervisor >/dev/null && command -v qemu-img >/dev/null \
+    && [[ -r /dev/kvm && -w /dev/kvm ]] || return 1
+  [[ -n "${DELONIX_HYPERVISOR_FW:-}" && -e "$DELONIX_HYPERVISOR_FW" ]] && return 0
+  local f
+  for f in /usr/local/share/delonix/CLOUDHV.fd /usr/share/delonix/CLOUDHV.fd \
+           /usr/local/share/delonix/hypervisor-fw /usr/share/delonix/hypervisor-fw; do
+    [[ -e "$f" ]] && return 0
+  done
+  return 1
+}
+ch_missing() {  # the SKIP reason when `ch_usable` is false: the absent piece
+  local m=()
+  command -v cloud-hypervisor >/dev/null || m+=("cloud-hypervisor")
+  command -v qemu-img >/dev/null || m+=("qemu-img")
+  [[ -r /dev/kvm && -w /dev/kvm ]] || m+=("/dev/kvm legível e gravável")
+  (( ${#m[@]} )) || m+=("um firmware de DEFAULT_CH_FIRMWARES")
+  local IFS=,; printf 'sem %s' "${m[*]}"
+}
+
+# The host hands this user a subordinate uid range, which is what lets a
+# container run as a uid other than 0 (ADR-0062). Read from `/etc/subuid` and
+# `newuidmap`, never from the engine's own answer: the USER checks used to
+# branch on what `container run … id -u` printed, so a broken USER mapping on a
+# host WITH subuid read as «este host não mapeia um segundo uid» and SKIPped.
+host_has_subuid() {
+  command -v newuidmap >/dev/null \
+    && grep -qE "^($(id -un)|$(id -u)):[0-9]+:[0-9]+" /etc/subuid 2>/dev/null
+}
+
+# The `serve cri` that `e2e_serve_up` started is up: a pid and its socket. A
+# `serve cri` that does not come up on this host is the engine failing, not a
+# missing host piece (the `crictl` guards above are the capability), so this is
+# a judged step, with the server's log in the report when it fails.
+cri_serving() {  # $1=label $2=pid $3=socket
+  check_then "$1: serve cri sobe (pid e socket)" ok bash -c \
+    "[ -n '$2' ] && [ -S '$3' ] || { echo 'pid=$2 socket=$3'; tail -8 '$SRVLOG' 2>/dev/null; exit 1; }"
 }
 
 # --- defeitos JÁ CONHECIDOS: o ratchet, não uma lista de desculpas -----------
@@ -1369,8 +1437,8 @@ check "a recusa NOMEIA a forma que funciona" ok bash -c \
   "'$BIN' network route '$NET' 2>&1 | grep -q 'PAIR'"
 
 NET2="net2-e2e-$PFX"
-if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 \
-   && "$BIN" network route "$NET" "$NET2" >/dev/null 2>&1; then
+if check_then "rota: a 2.ª rede cria-se" ok "$BIN" network create "$NET2" --subnet 10.252.0.0/16 \
+   && check_then "rota: network route abre" ok "$BIN" network route "$NET" "$NET2"; then
   # O CICLO, que é a única coisa que prova alguma coisa aqui: cada passo
   # isolado devolve 0 mesmo com a listagem partida.
   check "a rota aberta aparece na listagem" ok bash -c \
@@ -1387,7 +1455,6 @@ if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 \
   e2e_net_rm "$NET2"
 else
   e2e_net_rm "$NET2"
-  skip "ciclo de uma rota" "não foi possível criar a 2.ª rede ou abrir a rota neste host"
 fi
 
 # --- `--gateway` declarado: validado SEMPRE, e relatado como está em vigor ---
@@ -1404,7 +1471,8 @@ check "gateway recusado não deixa registo órfão" fail bash -c \
 check "gateway = endereço de rede: recusa" fail \
   "$BIN" network create "gwn-$PFX" --subnet 10.251.0.0/16 --gateway 10.251.0.0
 NETGW="netgw-$PFX"
-if "$BIN" network create "$NETGW" --subnet 10.251.0.0/16 --gateway 10.251.0.254 >/dev/null 2>&1; then
+if check_then "network create --gateway dentro do prefixo" ok \
+     "$BIN" network create "$NETGW" --subnet 10.251.0.0/16 --gateway 10.251.0.254; then
   # O que se lê no `inspect` tem de ser o que os workloads recebem. O registo
   # declarativo DERIVA sempre `.0.1`; sem ler o plano físico, esta linha dizia
   # um endereço e o dataplane usava outro — a mesma família do nome de bridge
@@ -1414,8 +1482,6 @@ if "$BIN" network create "$NETGW" --subnet 10.251.0.0/16 --gateway 10.251.0.254 
   check "describe relata o gateway EM VIGOR" ok bash -c \
     "'$BIN' network describe '$NETGW' | grep -q '10.251.0.254'"
   e2e_net_rm "$NETGW"
-else
-  skip "gateway declarado: relato" "network create --gateway falhou neste host"
 fi
 
 # --- `wg` ausente: nem errno cru, nem sucesso falso ---
@@ -1515,7 +1581,8 @@ spec:
   command: [sleep, "600"]
   credentials: {user: admin, password: {secret: $CRC, key: password}}
 EOF2
-  if "$BIN" stack apply -f "$CRW/m.yaml" >/dev/null 2>&1; then
+  if check_then "credentials: stack apply de um Secret e de um container que o referencia" ok \
+       "$BIN" stack apply -f "$CRW/m.yaml"; then
     check "credentials: container ls --credentials shows the user and where the password lives" ok bash -c \
       "'$BIN' container ls --credentials | grep '$CRC' | grep -q 'admin .*(secret $CRC)'"
     check "credentials: --reveal prints the value, and the record does not hold it" ok bash -c \
@@ -1638,10 +1705,14 @@ check "progresso: todo o • tem o seu ✓" ok bash -c "
 # para a bateria não depender de uma imagem com USER estar em cache.
 _ud="$OUT/userimg-$PFX"; _ui="e2e-userimg-$PFX:1"
 mkdir -p "$_ud" && printf 'FROM %s\nRUN mkdir -p /srv/own && chown 1000:1000 /srv/own\nUSER 1000\n' "$IMG" > "$_ud/Delonixfile"
-if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
+# Which branch runs is the HOST's answer (`host_has_subuid`), never the run's:
+# branching on the `id -u` it printed let a broken USER mapping on a host with
+# subuid take the «no subuid» branch.
+if check_then "USER da imagem: o build da imagem de teste" ok "$BIN" build -t "$_ui" "$_ud"; then
   _udef="$("$BIN" container run --rm --net none "$_ui" id -u 2>/dev/null)"
-  if [ "$_udef" = 1000 ]; then
-    check "USER da imagem: sem -u o processo corre como esse utilizador" ok true
+  if host_has_subuid; then
+    check "USER da imagem: sem -u o processo corre como esse utilizador" ok bash -c \
+      "[ '$_udef' = 1000 ] || { echo \"id -u respondeu '$_udef', esperado 1000\"; exit 1; }"
     check "USER da imagem: aplicado, não há aviso" ok bash -c \
       "! '$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER'"
   else
@@ -1662,7 +1733,9 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
   _bd="$OUT/userbuild-$PFX"; _bi="e2e-userbuild-$PFX"
   mkdir -p "$_bd" && printf 'FROM %s\nRUN adduser -D app\nUSER app\nRUN id -u > /home/app/who\nUSER root\nRUN mkdir /srv/own && chown app:app /srv/own\nUSER app\n' "$IMG" > "$_bd/Delonixfile"
   _bown() { "$BIN" container run --rm --net none "$1" sh -c 'cat /home/app/who; stat -c %U /srv/own /home/app /home/app/who /etc/passwd' 2>/dev/null | tr '\n' ' '; }
-  if [ "$_udef" = 1000 ] && "$BIN" build -t "$_bi:1" "$_bd" >/dev/null 2>&1; then
+  if ! host_has_subuid; then
+    skip "build: USER posicional e donos na cache" "este host não dá a $(id -un) um intervalo de subuid (/etc/subuid + newuidmap)"
+  elif check_then "build: uma imagem com adduser e USER app" ok "$BIN" build -t "$_bi:1" "$_bd"; then
     check "build: um RUN depois de USER corre como esse utilizador, e os donos ficam na imagem" ok bash -c \
       "[ \"$(_bown "$_bi:1")\" = '1000 app app app root ' ]"
     echo 'RUN true' >> "$_bd/Delonixfile"
@@ -1677,8 +1750,6 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     check "build: um COPY substitui um ficheiro que a base dá a um não-root, e o novo é de root" ok bash -c \
       "[ \"\$('$BIN' container run --rm --net none '$_bi:3' sh -c 'cat /home/app/who; stat -c %U /home/app/who' 2>/dev/null | tr '\\n' ' ')\" = 'copied root ' ]"
     "$BIN" image remove "$_bi:1" "$_bi:2" "$_bi:3" >/dev/null 2>&1 || true
-  else
-    skip "build: USER posicional e donos na cache" "sem subuid, ou o build de teste falhou neste host"
   fi
   rm -rf "$_bd"
 
@@ -1696,7 +1767,10 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
   "$BIN" volume create "$_uv" >/dev/null 2>&1 || true
   _urun() { "$BIN" container run --rm --net none -u 1000 -v "$_ub:/bind" -v "$_uv:/vol" "$_ui" sh -c "$1" 2>/dev/null; }
   export -f _urun; export BIN _ub _uv _ui
-  if [ "$(_urun 'id -u')" = 1000 ]; then
+  if ! host_has_subuid; then
+    skip "-u: posse do rootfs e dos mounts" "este host não dá a $(id -un) um intervalo de subuid (/etc/subuid + newuidmap)"
+  elif check_then "-u 1000 com um bind e um volume corre como 1000" ok bash -c \
+         "[ \"\$(_urun 'id -u')\" = 1000 ]"; then
     check "-u: o utilizador NÃO escreve em /etc/passwd" fail bash -c "_urun 'echo x >> /etc/passwd'"
     check "-u: /etc/passwd continua a ser de root" ok bash -c "[ \"\$(_urun 'stat -c %u /etc/passwd')\" = 0 ]"
     check "-u: a pasta que a imagem lhe dá é dele e é gravável" ok bash -c \
@@ -1710,26 +1784,21 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     # do uid 1000 do container como 100999 (o subuid) — uma imagem que dá o rootfs
     # inteiro ao uid 1000 em qualquer motor que respeite a posse do tar.
     _uc="e2e-usercommit-$PFX"; _uci="e2e-usercommit-$PFX:1"
-    if "$BIN" container run -d --name "$_uc" --net none -u 1000 "$_ui" sleep 120 >/dev/null 2>&1; then
+    if check_then "commit: o container de teste arranca (-u 1000)" ok \
+         "$BIN" container run -d --name "$_uc" --net none -u 1000 "$_ui" sleep 120; then
       check "container commit" ok "$BIN" container commit "$_uc" "$_uci"
       check "commit: a layer guarda os donos que o CONTAINER vê" ok bash -c \
         "[ \"\$('$BIN' container run --rm --net none -u 1000 '$_uci' stat -c %u /etc/passwd /srv/own 2>/dev/null | tr '\n' ' ')\" = '0 1000 ' ]"
       check "commit: o USER da imagem base sobrevive" ok bash -c \
         "[ \"\$('$BIN' container run --rm --net none '$_uci' id -u 2>/dev/null)\" = 1000 ]"
-    else
-      skip "commit: donos na layer" "o run do container de teste falhou neste host"
     fi
     e2e_rm "$_uc"
     "$BIN" image remove "$_uci" >/dev/null 2>&1 || true
-  else
-    skip "-u: posse do rootfs e dos mounts" "este host não mapeia um segundo uid (sem subuid)"
   fi
   "$BIN" container run --rm --net none -u 0 -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
   "$BIN" volume rm "$_uv" >/dev/null 2>&1 || true
   rm -rf "$_ub"
   "$BIN" image remove "$_ui" >/dev/null 2>&1 || true
-else
-  skip "USER da imagem" "o build da imagem de teste falhou neste host"
 fi
 rm -rf "$_ud"
 
@@ -1964,10 +2033,11 @@ pkill -9 -f -x "sleep $SS_SLEEP" 2>/dev/null || true
 # retomar, o `stop` gravava `pid = None` por cima dele, e o processo novo
 # sobrevivia ao `rm -f`. Congelar o `stop` (SIGSTOP) torna a corrida determinística.
 SW_SLEEP=$(( 5000 + RANDOM % 900 ))
-"$BIN" container run -d --net none --name "sw-$PFX" "$IMG" sh -c "exec sleep $SW_SLEEP" >/dev/null 2>&1
-sleep 1
-SW_X=$(pgrep -f -x "sleep $SW_SLEEP" | head -1)
-if [ -n "$SW_X" ]; then
+SW_X=
+if check_then "stop/start: o container de teste arranca" ok \
+     "$BIN" container run -d --net none --name "sw-$PFX" "$IMG" sh -c "exec sleep $SW_SLEEP" \
+   && sleep 1 && SW_X=$(pgrep -f -x "sleep $SW_SLEEP" | head -1) \
+   && check_then "stop/start: o processo do container está no host" ok test -n "$SW_X"; then
   "$BIN" container stop -t 30 "sw-$PFX" >/dev/null 2>&1 & SW_STOP=$!
   sleep 1
   kill -STOP "$SW_STOP" 2>/dev/null
@@ -1982,8 +2052,6 @@ if [ -n "$SW_X" ]; then
   kill -CONT "$SW_STOP" 2>/dev/null; wait "$SW_STOP" 2>/dev/null
   check "um stop que retoma não apaga o pid de um start feito entretanto" ok bash -c \
     "for _ in \$(seq 1 30); do live=\$(pgrep -f -x 'sleep $SW_SLEEP'); rec=\$('$BIN' container inspect 'sw-$PFX' | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get(\"pid\"))'); [ \"\$(echo \"\$live\" | wc -w)\" = 1 ] && [ \"\$rec\" = \"\$live\" ] && exit 0; sleep 0.5; done; exit 1"
-else
-  skip "um stop que retoma não apaga o pid de um start feito entretanto" "o container não arrancou"
 fi
 e2e_rm "sw-$PFX"
 sleep 1
@@ -2037,13 +2105,15 @@ section "network route: uma carga ligada por rede ADICIONAL usa a rota (ADR-0013
 MH_BASE="mhb-$PFX"; MH_A="mha-$PFX"; MH_B="mhz-$PFX"
 MH_WA="mhwa-$PFX"; MH_WB="mhwb-$PFX"; MH_WC="mhwc-$PFX"
 mh_ip() { "$BIN" container exec "$1" ip -4 -o addr show eth1 2>/dev/null | awk '{print $4}' | cut -d/ -f1; }
-if "$BIN" network create "$MH_BASE" >/dev/null 2>&1 \
-   && "$BIN" network create "$MH_A" >/dev/null 2>&1 \
-   && "$BIN" network create "$MH_B" >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$MH_WA" --net "$MH_BASE" "$IMG" sleep 600 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$MH_WB" --net "$MH_BASE" "$IMG" sleep 600 >/dev/null 2>&1 \
-   && "$BIN" network connect "$MH_A" "$MH_WA" >/dev/null 2>&1 \
-   && "$BIN" network connect "$MH_B" "$MH_WB" >/dev/null 2>&1; then
+if check_then "multi-homed: a rede base cria-se" ok "$BIN" network create "$MH_BASE" \
+   && check_then "multi-homed: a rede A cria-se" ok "$BIN" network create "$MH_A" \
+   && check_then "multi-homed: a rede B cria-se" ok "$BIN" network create "$MH_B" \
+   && check_then "multi-homed: a carga A arranca na rede base" ok \
+        "$BIN" container run -d --name "$MH_WA" --net "$MH_BASE" "$IMG" sleep 600 \
+   && check_then "multi-homed: a carga B arranca na rede base" ok \
+        "$BIN" container run -d --name "$MH_WB" --net "$MH_BASE" "$IMG" sleep 600 \
+   && check_then "multi-homed: network connect A a quente" ok "$BIN" network connect "$MH_A" "$MH_WA" \
+   && check_then "multi-homed: network connect B a quente" ok "$BIN" network connect "$MH_B" "$MH_WB"; then
   MH_IPA="$(mh_ip "$MH_WA")"; MH_IPB="$(mh_ip "$MH_WB")"
   check "multi-homed: as duas cargas têm endereço na rede adicional" ok test -n "$MH_IPA" -a -n "$MH_IPB"
   check "multi-homed: sem rota, A não alcança B" fail "$BIN" container exec "$MH_WA" ping -c 2 -W 1 "$MH_IPB"
@@ -2052,8 +2122,9 @@ if "$BIN" network create "$MH_BASE" >/dev/null 2>&1 \
   check "multi-homed: a rota é dirigida — B não abre conversa para A" fail "$BIN" container exec "$MH_WB" ping -c 2 -W 1 "$MH_IPA"
   check "multi-homed: a carga em A tem a rota para a rede B pela eth1" ok bash -c \
     "'$BIN' container exec '$MH_WA' ip route | grep -q ' via .* dev eth1'"
-  if "$BIN" container run -d --name "$MH_WC" --net "$MH_BASE" "$IMG" sleep 600 >/dev/null 2>&1 \
-     && "$BIN" network connect "$MH_A" "$MH_WC" >/dev/null 2>&1; then
+  if check_then "multi-homed: a carga C arranca depois da rota" ok \
+       "$BIN" container run -d --name "$MH_WC" --net "$MH_BASE" "$IMG" sleep 600 \
+     && check_then "multi-homed: network connect C a quente" ok "$BIN" network connect "$MH_A" "$MH_WC"; then
     check "multi-homed: uma carga ligada DEPOIS de a rota existir também a usa" ok "$BIN" container exec "$MH_WC" ping -c 2 -W 1 "$MH_IPB"
   fi
   "$BIN" network route "$MH_A" "$MH_B" --rm >/dev/null 2>&1
@@ -2074,7 +2145,8 @@ section "container em rede custom: dois starts concorrentes (#798)"
 # conta uma ronda em que exactamente um start ganhou: com o `stop` ainda a acabar
 # os dois recusam, e essa ronda não diz nada sobre a corrida.
 CR="cr-$PFX"
-if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
+if check_then "start concorrente: o container arranca na rede custom" ok \
+     "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600; then
   CR_ROUNDS=0 CR_LOST=0
   for _r in 1 2 3 4 5 6; do
     # Com o disco do host ocupado, o PID 1 fica em D à espera do writeback e o
@@ -2107,8 +2179,6 @@ if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null
     skip "start concorrente" "nenhuma ronda teve exactamente um start vencedor"
   fi
   e2e_rm "$CR"
-else
-  skip "start concorrente" "container run --net falhou neste host"
 fi
 
 ########################################
@@ -2116,8 +2186,9 @@ section "container em rede custom: hot reconfig pelo ingress"
 ########################################
 CN="cn-$PFX"
 NET2="net2-$PFX"
-if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
-   "$BIN" container run -d --name "$CN" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
+if check_then "hot reconfig: a rede extra cria-se" ok "$BIN" network create "$NET2" --subnet 10.252.0.0/16 \
+   && check_then "hot reconfig: o container arranca na rede custom" ok \
+        "$BIN" container run -d --name "$CN" --net "$NET" "$IMG" sleep 600; then
   check "network connect a quente" ok "$BIN" network connect "$NET2" "$CN"
   check "network connect: rede extra no describe" ok bash -c "'$BIN' container describe '$CN' | grep -q '$NET2'"
   check "network connect repetido recusa" fail "$BIN" network connect "$NET2" "$CN"
@@ -2140,8 +2211,6 @@ if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
   else
     check "run -d --net-bps numa rede custom" ok false
   fi
-else
-  skip "hot reconfig em rede custom" "não foi possível criar rede/container em rede custom"
 fi
 e2e_net_rm "$NET2"
 
@@ -2167,8 +2236,9 @@ CPB="cpb-$PFX"
 e2e_port P_LOOP; e2e_port P_SPEC; e2e_port P_ENVV
 if ss -tulnH 2>/dev/null | grep -qE ":($P_LOOP|$P_SPEC|$P_ENVV) "; then
   skip "endereço de bind persistido" "uma das portas $P_LOOP/$P_SPEC/$P_ENVV já está ocupada neste host"
-elif ! "$BIN" container run -d --name "$CPB" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
-  skip "endereço de bind persistido" "não foi possível criar o container na rede custom"
+elif ! check_then "endereço de bind: o container arranca na rede custom" ok \
+       "$BIN" container run -d --name "$CPB" --net "$NET" "$IMG" sleep 600; then
+  :  # já é um FAIL, com o erro; os checks abaixo dependem dele
 else
   # 1) Sem endereço: liga só ao loopback, e o REGISTO di-lo (é o que torna o
   #    `start` seguinte determinístico em vez de dependente do ambiente).
@@ -2248,10 +2318,12 @@ ipam_de() {
 # check do stop passava contra o defeito.
 LC="lc-$PFX"; NET3="net3-$PFX"; NET4="net4-$PFX"
 ORF0=$(ipam_orfaos)
-if [ -n "$ORF0" ] && "$BIN" network create "$NET3" --subnet 10.250.0.0/16 >/dev/null 2>&1 \
-   && "$BIN" network create "$NET4" >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$LC" --net "$NET4" "$IMG" sleep 600 >/dev/null 2>&1 \
-   && "$BIN" network connect "$NET3" "$LC" >/dev/null 2>&1; then
+if check_then "ipam: network ipam ls -o json conta os órfãos" ok test -n "$ORF0" \
+   && check_then "ipam: a rede CIDR cria-se" ok "$BIN" network create "$NET3" --subnet 10.250.0.0/16 \
+   && check_then "ipam: a rede legada cria-se" ok "$BIN" network create "$NET4" \
+   && check_then "ipam: o container arranca na rede legada" ok \
+        "$BIN" container run -d --name "$LC" --net "$NET4" "$IMG" sleep 600 \
+   && check_then "ipam: network connect à rede CIDR" ok "$BIN" network connect "$NET3" "$LC"; then
   IPS0=$(ipam_de "$LC")
   check "ipam: um container multi-homed tem um lease por rede" ok bash -c \
     "[ \"\$(wc -w <<<'$IPS0')\" = 2 ]"
@@ -2271,7 +2343,6 @@ else
   e2e_rm "$LC"
   e2e_net_rm "$NET3"
   e2e_net_rm "$NET4"
-  skip "ipam: ciclo run/connect/stop/start/rm" "rede ou container em rede custom indisponível neste host"
 fi
 # O mesmo pelo caminho declarativo: uma rede com CIDR e um container nela, e o
 # `stack destroy` tem de levar os leases com eles.
@@ -2295,14 +2366,14 @@ spec:
   network: in-$PFX
 YAML
 ORF0=$(ipam_orfaos)
-if "$BIN" stack apply -f "$IWORK/m.yaml" >/dev/null 2>&1 && [ -n "$(ipam_de "ic-$PFX")" ]; then
+if check_then "ipam: stack apply de uma rede CIDR com um container" ok "$BIN" stack apply -f "$IWORK/m.yaml" \
+   && check_then "ipam: o container do apply tem lease" ok bash -c "[ -n \"$(ipam_de "ic-$PFX")\" ]"; then
   "$BIN" stack destroy -f "$IWORK/m.yaml" >/dev/null 2>&1
   check "ipam: stack destroy não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
   check "ipam: nenhum lease fica na rede destruída" ok bash -c \
     "! '$BIN' network ipam ls -o json | grep -q '10\\.249\\.'"
 else
   "$BIN" stack destroy -f "$IWORK/m.yaml" >/dev/null 2>&1
-  skip "ipam: stack apply/destroy de rede + container" "o apply não passou neste host"
 fi
 
 ########################################
@@ -2327,11 +2398,11 @@ if [[ "$E2E_ISOLATED" != 1 || "$DELONIX_ROOT" == "$REAL_ROOT" ]]; then
   skip "D5: recusa sem br_netfilter" "estado partilhado — o sysctl tocaria no holder real"
 else
   N5="n5-$PFX"; K5="k5-$PFX"
-  if "$BIN" network create "$N5" >/dev/null 2>&1 \
-     && "$BIN" container run -d --name "$K5" --net "$N5" "$IMG" sleep 600 >/dev/null 2>&1 \
-     && PIN5=$(cat "$DELONIX_ROOT/ingress/holder.pid" 2>/dev/null) \
-     && nsenter -t "$PIN5" -U -n --preserve-credentials \
-          sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null; then
+  if check_then "D5: a rede cria-se" ok "$BIN" network create "$N5" \
+     && check_then "D5: o container que segura o holder arranca" ok \
+          "$BIN" container run -d --name "$K5" --net "$N5" "$IMG" sleep 600 \
+     && check_then "D5: o sysctl bridge-nf-call-iptables vai a 0 no holder ISOLADO" ok bash -c \
+          "pin=\$(cat '$DELONIX_ROOT/ingress/holder.pid') && nsenter -t \"\$pin\" -U -n --preserve-credentials sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables'"; then
     ORF5=$(ipam_orfaos)
     check "D5: --namespace sem filtragem de bridge sai com 69" 69 \
       "$BIN" container run -d --name "r5-$PFX" --namespace teama --net "$N5" "$IMG" sleep 600
@@ -2346,8 +2417,6 @@ else
       "DELONIX_ALLOW_UNENFORCED_ISOLATION=1 '$BIN' container run -d --name v5-$PFX --namespace teama --net '$N5' '$IMG' sleep 600 2>&1 | grep -q 'would not be enforced'"
     check "D5: a namespace default nunca é recusada" ok \
       "$BIN" container run -d --name d5-$PFX --net "$N5" "$IMG" sleep 600
-  else
-    skip "D5: recusa sem br_netfilter" "não foi possível preparar o holder isolado (rede, imagem ou nsenter)"
   fi
   for c in "r5-$PFX" "r5b-$PFX" "v5-$PFX" "d5-$PFX" "$K5" "p5-$PFX-a"; do
     e2e_rm "$c"
@@ -2370,11 +2439,14 @@ section "network: anti-spoofing na bridge — origem e MAC forjados são bloquea
 AS="as-$PFX"; A1="as1-$PFX"; A2="as2-$PFX"; A3="as3-$PFX"; A4="as4-$PFX"
 echos_of() { "$BIN" container exec "$1" awk '/^Icmp:/{getline; print $10}' /proc/net/snmp 2>/dev/null; }
 ip_of() { "$BIN" container inspect "$1" 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d["ip"])'; }
-if "$BIN" network create "$AS" >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$A1" --cap-add NET_ADMIN --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$A2" --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$A3" --namespace asteam --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$A4" --namespace asteam --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1; then
+if check_then "antispoof: a rede cria-se" ok "$BIN" network create "$AS" \
+   && check_then "antispoof: A1 (NET_ADMIN) arranca" ok \
+        "$BIN" container run -d --name "$A1" --cap-add NET_ADMIN --net "$AS" "$IMG" sleep 900 \
+   && check_then "antispoof: A2 arranca" ok "$BIN" container run -d --name "$A2" --net "$AS" "$IMG" sleep 900 \
+   && check_then "antispoof: A3 arranca na namespace asteam" ok \
+        "$BIN" container run -d --name "$A3" --namespace asteam --net "$AS" "$IMG" sleep 900 \
+   && check_then "antispoof: A4 arranca na namespace asteam" ok \
+        "$BIN" container run -d --name "$A4" --namespace asteam --net "$AS" "$IMG" sleep 900; then
   I2=$(ip_of "$A2"); I3=$(ip_of "$A3"); I4=$(ip_of "$A4")
   e0=$(echos_of "$A2"); "$BIN" container exec "$A1" ping -c3 -W1 "$I2" >/dev/null 2>&1
   check "antispoof: o tráfego legítimo chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 3
@@ -2403,8 +2475,6 @@ if "$BIN" network create "$AS" >/dev/null 2>&1 \
   "$BIN" container exec "$A2" ip neigh flush all >/dev/null 2>&1
   "$BIN" container exec "$A1" sh -c "ip link set eth0 down; ip link set eth0 address 02:00:00:00:be:ef; ip link set eth0 up; ip neigh flush all; ping -c3 -W1 $I2" >/dev/null 2>&1
   check "antispoof: MAC forjado não chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 0
-else
-  skip "antispoof" "não foi possível preparar a rede e os containers (imagem ou rede)"
 fi
 for c in "$A1" "$A2" "$A3" "$A4"; do e2e_rm "$c"; done
 e2e_net_rm "$AS"
@@ -2425,10 +2495,13 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
   printf '{"allowedSourcePrefixes":["10.99.0.0/16"],"allowSourceCheckOptOut":true}\n' > "$POL"
   check "antispoof: um prefixo fora da concessão é recusado" 77 \
     "$BIN" container run -d --name "$GR" --allow-source 10.98.0.0/24 --net none "$IMG" true
-  if "$BIN" network create "$GS" >/dev/null 2>&1 \
-     && "$BIN" container run -d --name "$GT" --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1 \
-     && "$BIN" container run -d --name "$GR" --cap-add NET_ADMIN --allow-source 10.99.1.0/24 --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1 \
-     && "$BIN" container run -d --name "$GO" --cap-add NET_ADMIN --no-source-check --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1; then
+  if check_then "antispoof: concessões — a rede cria-se" ok "$BIN" network create "$GS" \
+     && check_then "antispoof: concessões — o alvo arranca" ok \
+          "$BIN" container run -d --name "$GT" --net "$GS" "$IMG" sleep 900 \
+     && check_then "antispoof: concessões — o router com --allow-source concedido arranca" ok \
+          "$BIN" container run -d --name "$GR" --cap-add NET_ADMIN --allow-source 10.99.1.0/24 --net "$GS" "$IMG" sleep 900 \
+     && check_then "antispoof: concessões — o --no-source-check concedido arranca" ok \
+          "$BIN" container run -d --name "$GO" --cap-add NET_ADMIN --no-source-check --net "$GS" "$IMG" sleep 900; then
     IT=$(ip_of "$GT")
     from_src() {  # <container> <source> → echo requests that reached GT
       local e0; e0=$(echos_of "$GT")
@@ -2440,8 +2513,6 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
     check "antispoof: o opt-out concedido deixa passar qualquer origem" ok test "$(from_src "$GO" 10.77.0.9)" -eq 3
     check "antispoof: cada uso fica no registo de eventos" ok bash -c \
       "grep -q '\"source-prefixes-allowed\"' '$DELONIX_ROOT/events.jsonl' && grep -q '\"source-check-off\"' '$DELONIX_ROOT/events.jsonl'"
-  else
-    skip "antispoof: concessões" "não foi possível preparar a rede e os containers"
   fi
   for c in "$GR" "$GT" "$GO"; do e2e_rm "$c"; done
   e2e_net_rm "$GS"
@@ -2462,10 +2533,14 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
   HIP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
   e2e_port HPORT
   is_private() { python3 -c 'import ipaddress,sys; a=ipaddress.ip_address(sys.argv[1]); sys.exit(0 if any(a in ipaddress.ip_network(n) for n in ("10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","100.64.0.0/10")) else 1)' "$1" 2>/dev/null; }
-  if [[ -n "$HIP" ]] && is_private "$HIP" \
-     && { python3 -m http.server --bind "$HIP" "$HPORT" >/dev/null 2>&1 & HSRV=$!; sleep 1; kill -0 "$HSRV" 2>/dev/null; } \
-     && "$BIN" network create "$PE" >/dev/null 2>&1 \
-     && "$BIN" container run -d --name "$PC" --net "$PE" "$IMG" sleep 900 >/dev/null 2>&1; then
+  # The host half is the guard (a private primary address, a listener on it);
+  # the engine half (the network, the container) is judged.
+  if ! [[ -n "$HIP" ]] || ! is_private "$HIP" \
+     || ! { python3 -m http.server --bind "$HIP" "$HPORT" >/dev/null 2>&1 & HSRV=$!; sleep 1; kill -0 "$HSRV" 2>/dev/null; }; then
+    skip "private egress" "no private primary address on this host, or no listener could bind to it"
+  elif check_then "private egress: the network is created" ok "$BIN" network create "$PE" \
+     && check_then "private egress: its container starts" ok \
+          "$BIN" container run -d --name "$PC" --net "$PE" "$IMG" sleep 900; then
     reach() { timeout 15 "$BIN" container exec "$PC" wget -q -T 3 -O /dev/null "http://$HIP:$HPORT/" >/dev/null 2>&1; }
     # Every `container run` hands the node policy to the running holder.
     sync_run() { "$BIN" container run --rm --name "ps-$PFX" --net "$PE" "$IMG" true >/dev/null 2>&1; }
@@ -2480,8 +2555,6 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
     else
       skip "private egress" "the host's private address is not reachable from a container even without a policy"
     fi
-  else
-    skip "private egress" "no private primary address on this host, or the probe could not be prepared"
   fi
   [[ -n "${HSRV:-}" ]] && kill "$HSRV" 2>/dev/null
   e2e_rm "$PC"
@@ -2565,7 +2638,7 @@ spec:
   memory: 64M
   network: host
 YAML
-if "$BIN" stack apply -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1; then
+if check_then "drift: stack apply do container de teste" ok "$BIN" stack apply -f "$DRW/delonix-manifest.yaml"; then
   check "drift: logo a seguir ao apply não há deriva" 0 \
     "$BIN" drift -f "$DRW/delonix-manifest.yaml" --detailed-exitcode
   "$BIN" container update "dr-$PFX" --memory 128M >/dev/null 2>&1
@@ -2591,10 +2664,8 @@ if "$BIN" stack apply -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1; then
   check "drift: --stack de outra stack não vê esta deriva" 0 \
     "$BIN" drift -f "$DRW/delonix-manifest.yaml" --stack naoexiste-$PFX --detailed-exitcode
   "$BIN" stack destroy -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1
-  e2e_rm "dr-$PFX"
-else
-  skip "drift: o apply do container de teste não passou neste ambiente"
 fi
+e2e_rm "dr-$PFX"
 
 check "stack destroy --dry-run" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml" --dry-run
 check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
@@ -2780,7 +2851,8 @@ spec:
   restart: "no"
   env: ["RP_MARK=old"]
 YAML
-  if "$BIN" stack apply -f "$RPW/delonix-manifest.yaml" >/dev/null 2>&1; then
+  if check_then "stack apply --replace nomeado: o apply do container de teste" ok \
+       "$BIN" stack apply -f "$RPW/delonix-manifest.yaml"; then
     sed -i 's/RP_MARK=old/RP_MARK=new/' "$RPW/delonix-manifest.yaml"
     # Pelo `-o json`: o código da condição só sai no JSON (o plano humano diz a
     # frase, e traduzida), e o JSON não muda com a locale (ADR-0005).
@@ -2829,8 +2901,6 @@ assert len(msgs) == 1 and \": env — \" in msgs[0] and \"Container/$RPC\" in ms
       printf '%s' \"\$out\" | grep FieldsNotCompared | grep -qv ': env — ' && { echo 'o aviso nomeou mais do que o env'; exit 1; }
       '$BIN' container inspect '$RPC' | grep -q 'RP_MARK=old' || { echo 'o rollback não repôs o env'; exit 1; }"
     "$BIN" stack destroy -f "$RPW/delonix-manifest.yaml" >/dev/null 2>&1
-  else
-    skip "stack apply --replace nomeado: o apply do container de teste não passou neste host"
   fi
   e2e_rm "$RPC"
 fi
@@ -2942,13 +3012,12 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   for spec in "64M:67108864" "64Mi:67108864" "1Gi:1073741824"; do
     _v=${spec%%:*}; _want=${spec##*:}; _n="${PFX}lim$(echo "$_v" | tr -d '.')"
     e2e_rm "$_n"
-    if "$BIN" container run -d --name "$_n" --net none -m "$_v" "$IMG" sleep 60 >/dev/null 2>&1; then
+    if check_then "-m $_v: o container arranca" ok \
+         "$BIN" container run -d --name "$_n" --net none -m "$_v" "$IMG" sleep 60; then
       # A prova é o CGROUP, não o registo: era exactamente aí que os dois
       # discordavam, com o registo a dizer 64Mi e o kernel a dizer `max`.
       check "-m $_v chega ao kernel como $_want" ok \
         bash -c "[ \"\$(_cg_of $_n memory.max)\" = $_want ]" || true
-    else
-      skip "-m $_v chega ao kernel" "o container não arrancou neste host"
     fi
     e2e_rm "$_n"
   done
@@ -2961,15 +3030,13 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # Medido 2026-09-30 com o template `odoo`, o único com `network:`.
   _ln="${PFX}limnet"; _lc="${PFX}limnetc"
   e2e_rm "$_lc"
-  if "$BIN" network create "$_ln" >/dev/null 2>&1; then
+  if check_then "-m 64M numa rede própria: a rede cria-se" ok "$BIN" network create "$_ln"; then
     check "-m 64M numa rede própria arranca (não é recusado)" ok \
       "$BIN" container run -d --name "$_lc" --net "$_ln" -m 64M "$IMG" sleep 60
     check "-m 64M numa rede própria chega ao kernel como 67108864" ok \
       bash -c "[ \"\$(_cg_of $_lc memory.max)\" = 67108864 ]" || true
     e2e_rm "$_lc"
     e2e_net_rm "$_ln"
-  else
-    skip "-m 64M numa rede própria" "network create falhou neste host"
   fi
   # A outra metade: o que não se consegue ler é RECUSADO antes de criar seja o
   # que for. `64MB` e `99999999999T` estão aqui de propósito — o primeiro é a
@@ -3008,11 +3075,10 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # E o que passa tem de CHEGAR ao registo: aceitar a política e não a guardar é
   # o mesmo defeito com outra roupa.
   e2e_rm "${PFX}limrs"
-  if "$BIN" container run -d --name "${PFX}limrs" --net none --restart on-failure:3 "$IMG" sleep 30 >/dev/null 2>&1; then
+  if check_then "--restart on-failure:3: o container arranca" ok \
+       "$BIN" container run -d --name "${PFX}limrs" --net none --restart on-failure:3 "$IMG" sleep 30; then
     check "--restart on-failure:3 fica no registo" ok \
       bash -c "'$BIN' container inspect ${PFX}limrs | grep -q 'on-failure:3'" || true
-  else
-    skip "--restart on-failure:3 fica no registo" "o container não arrancou neste host"
   fi
   e2e_rm "${PFX}limrs"
 else
@@ -3128,7 +3194,7 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # numa só corrida, porque as três vivem na mesma leaf.
   _n="${PFX}enfdef"
   e2e_rm "$_n"
-  if "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60 >/dev/null 2>&1; then
+  if check_then "sem flags: o container arranca" ok "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60; then
     check "sem flags: a leaf TEM tecto de memória (não 'max')" ok \
       bash -c '[ "$(cat "$(_leaf_of '"$_n"')/memory.max")" != max ]'
     # Sem isto o tecto de memória é contornável: as páginas saem para swap e o
@@ -3137,8 +3203,6 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
       bash -c '[ "$(cat "$(_leaf_of '"$_n"')/memory.swap.max")" = 0 ]'
     check "sem flags: pids.max=512 (anti fork-bomb por omissão)" ok \
       bash -c '[ "$(cat "$(_leaf_of '"$_n"')/pids.max")" = 512 ]'
-  else
-    skip "sem flags: os tectos por omissão" "o container não arrancou neste host"
   fi
   e2e_rm "$_n"
 
@@ -3172,9 +3236,10 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # dos 4 cores que passariam sem quota nenhuma, que é o que isto tem de apanhar.
   _n="${PFX}enfcpu"
   e2e_rm "$_n"
-  if "$BIN" container run -d --name "$_n" --net none --cpus 0.5 "$IMG" \
-       sh -c 'i=0; while [ $i -lt 4 ]; do (while :; do :; done) & i=$((i+1)); done; sleep 120' >/dev/null 2>&1 \
-     && sleep 3 && [ -r "$(_leaf_of "$_n" 2>/dev/null)/cpu.stat" ]; then
+  if ! check_then "--cpus 0.5: o container arranca" ok "$BIN" container run -d --name "$_n" --net none --cpus 0.5 "$IMG" \
+       sh -c 'i=0; while [ $i -lt 4 ]; do (while :; do :; done) & i=$((i+1)); done; sleep 120'; then
+    :  # já é um FAIL, com o erro do run
+  elif sleep 3 && [ -r "$(_leaf_of "$_n" 2>/dev/null)/cpu.stat" ]; then
     check "--cpus 0.5: 4 ciclos ocupados ficam por ~0.5 core (não 4)" ok bash -c '
       cg=$(_leaf_of '"$_n"') || exit 1
       # A PRÉ-CONDIÇÃO PRIMEIRO. Um cgroup onde só está o PID 1 lê 0 cores, e
@@ -3207,13 +3272,11 @@ sys.exit(0 if cores <= 0.75 else 1)"
   # PAI da leaf, seja ele a `delonix.slice` (root) ou a base delegada (rootless).
   _n="${PFX}enfagg"
   e2e_rm "$_n"
-  if "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60 >/dev/null 2>&1; then
+  if check_then "tecto agregado: o container arranca" ok "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60; then
     check "o cgroup PAI tem tecto agregado de memória (a soma não mata o host)" ok \
       bash -c '[ "$(cat "$(dirname "$(_leaf_of '"$_n"')")/memory.max")" != max ]'
     check "…e tecto agregado de pids" ok \
       bash -c '[ "$(cat "$(dirname "$(_leaf_of '"$_n"')")/pids.max")" != max ]'
-  else
-    skip "tecto agregado" "o container não arrancou neste host"
   fi
   e2e_rm "$_n"
 
@@ -4028,8 +4091,8 @@ VMINIT="$OUT/vminit-$PFX"; mkdir -p "$VMINIT"
 # The scaffold itself is a judged invocation (a setup line that ends in a
 # silent `if` is invisible to the coverage ratchet); what it must have produced
 # is judged by the two checks below.
-check "vm init: gera o projecto" ok "$BIN" vm init "$VMINIT" --name "v$PFX"
-if [ -s "$VMINIT/delonix-manifest.yaml" ]; then
+if check_then "vm init: gera o projecto" ok "$BIN" vm init "$VMINIT" --name "v$PFX" \
+   && check_then "vm init: o manifesto gerado não está vazio" ok test -s "$VMINIT/delonix-manifest.yaml"; then
   check "vm init: o projecto que gera valida-se" ok \
     "$BIN" stack validate -f "$VMINIT/delonix-manifest.yaml"
   check "vm init: gera os três Kinds" ok bash -c "
@@ -4037,8 +4100,6 @@ if [ -s "$VMINIT/delonix-manifest.yaml" ]; then
       grep -q \"kind: \$k\" '$VMINIT/delonix-manifest.yaml' || { echo \"falta kind: \$k\"; exit 1; }
     done
   "
-else
-  skip "vm init: projecto completo" "o vm init falhou"
 fi
 
 ########################################
@@ -4076,7 +4137,8 @@ spec:
       image: $IMG
       command: ["sleep", "120"]
 YAML
-if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
+if check_then "pod create de dois membros" ok bash -c \
+     "'$BIN' pod create -f '$PODY' 2>'$OUT/pod-$PFX.err' >/dev/null || { cat '$OUT/pod-$PFX.err'; exit 1; }"; then
   check "pod create: o aviso de cgroup não se repete por membro" ok bash -c "
     n=\$(grep -c 'cgroup delegation' '$OUT/pod-$PFX.err' || true)
     [ \"\$n\" -le 1 ] || { echo \"o aviso saiu \$n vezes (um por membro)\"; exit 1; }
@@ -4201,8 +4263,6 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
 
   check "describe pod" ok "$BIN" describe pod "p$PFX"
   check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
-else
-  skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"
 fi
 
 # As portas de um membro de pod vivem no ingress partilhado, e o registo de um
@@ -4228,7 +4288,8 @@ pp_wait() {  # $1 = código esperado
   for i in $(seq 1 30); do [ "$(pp_code)" = "$1" ] && return 0; sleep 0.5; done
   return 1
 }
-if "$BIN" pod create -f "$PPY" >/dev/null 2>&1 && pp_wait 200; then
+if check_then "pod com hostPort: pod create" ok "$BIN" pod create -f "$PPY" \
+   && check_then "pod com hostPort: a porta responde 200" ok pp_wait 200; then
   "$BIN" container stop -t 1 "pp$PFX-web" >/dev/null 2>&1
   check "o stop de um membro de pod liberta a porta" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$PPORT')\" ]"
   "$BIN" container start "pp$PFX-web" >/dev/null 2>&1
@@ -4246,9 +4307,9 @@ if "$BIN" pod create -f "$PPY" >/dev/null 2>&1 && pp_wait 200; then
   check "container update --publish-rm num membro de pod" ok "$BIN" container update --publish-rm "$HPORT" "pp$PFX-web"
   check "e a porta deixa de escutar" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$HPORT')\" ]"
   e2e_rm "pp$PFX-web"
-else
-  skip "portas de um membro de pod" "o pod create com porta falhou (holder/SDN indisponível)"
 fi
+# A pod that came up without answering is still there: same teardown either way.
+e2e_rm "pp$PFX-web"
 check "secret ls" ok "$BIN" secret ls
 check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
 
@@ -4651,7 +4712,8 @@ section "vm: os mesmos snapshots no backend cloud-hypervisor"
 # — restaurá-la contra um disco que andou não é voltar atrás). O que este bloco
 # prova é que a recusa é CLARA e que os quatro verbos funcionam com a VM parada
 # — nunca um silêncio. Precisa do holder de rede a correr (o vmm do CH vive lá
-# dentro), por isso salta em vez de falhar quando o `create` não passa.
+# dentro). Salta só quando o host não tem o CH (`ch_usable`); um `create` que
+# falha num host que o tem é FAIL — o holder é coisa do motor, não do host.
 #
 # MEIA-ISOLAÇÃO É PIOR QUE NENHUMA, e custou um incidente real (2026-08-12):
 # `DELONIX_ROOT` isolado SEM `DELONIX_NET_RUNTIME_DIR` deixa os dois roots a
@@ -4665,10 +4727,11 @@ section "vm: os mesmos snapshots no backend cloud-hypervisor"
 if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
   skip "vm: snapshots no cloud-hypervisor" \
     "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
-elif command -v cloud-hypervisor >/dev/null; then
+elif ch_usable; then
   CVM="chsnap-$PFX"; CDISK="$OUT/$CVM.qcow2"
   qemu-img create -f qcow2 "$CDISK" 64M >/dev/null 2>&1
-  if "$BIN" vm create "$CVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M >/dev/null 2>&1; then
+  if check_then "vm create cloud-hypervisor (snapshot)" ok \
+       "$BIN" vm create "$CVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M; then
     # A PRÉ-CONDIÇÃO dos checks «com a VM a correr», verificada e não presumida.
     #
     # Medido 2026-09-16: dentro da bateria completa esta secção chumbava 2 a 4
@@ -4787,12 +4850,11 @@ elif command -v cloud-hypervisor >/dev/null; then
       "'$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$WVM' and v['status']=='Running' for v in json.load(sys.stdin)) else 1)\""
     "$BIN" delete vm "$WVM" -f >/dev/null 2>&1
   else
-    skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
   fi
   rm -f "$CDISK"
 else
-  skip "vm: snapshots no cloud-hypervisor" "sem cloud-hypervisor instalado"
+  skip "vm: snapshots no cloud-hypervisor" "$(ch_missing)"
 fi
 
 ########################################
@@ -4901,10 +4963,11 @@ fi
 if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
   skip "vm: --disk-size (cloud-hypervisor)" \
     "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
-elif command -v cloud-hypervisor >/dev/null; then
+elif ch_usable; then
   RCVM="chresize-$PFX"; RCDISK="$OUT/$RCVM.qcow2"
   qemu-img create -f qcow2 "$RCDISK" 64M >/dev/null 2>&1
-  if "$BIN" vm create "$RCVM" --disk "$RCDISK" --backend cloud-hypervisor --memory 256M >/dev/null 2>&1; then
+  if check_then "vm create cloud-hypervisor (disk resize)" ok \
+       "$BIN" vm create "$RCVM" --disk "$RCDISK" --backend cloud-hypervisor --memory 256M; then
     # A pré-condição «o vmm está mesmo vivo», verificada e não presumida —
     # a mesma lição da secção CH de snapshots, acima.
     for _ in $(seq 50); do
@@ -4920,12 +4983,11 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: um --disk-size que não cresce recusa (1)" 1 "$BIN" vm resize "$RCVM" --disk-size 1
     "$BIN" delete vm "$RCVM" -f >/dev/null 2>&1
   else
-    skip "vm: --disk-size (cloud-hypervisor)" "o vm create CH falhou neste host (infra de rede?)"
     "$BIN" delete vm "$RCVM" -f >/dev/null 2>&1
   fi
   rm -f "$RCDISK"
 else
-  skip "vm: --disk-size (cloud-hypervisor)" "sem cloud-hypervisor instalado"
+  skip "vm: --disk-size (cloud-hypervisor)" "$(ch_missing)"
 fi
 
 ########################################
@@ -4946,10 +5008,10 @@ section "vm: o mesmo nome noutra namespace é um conflito, não «ensured»"
 if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
   skip "vm: nome repetido noutra namespace" \
     "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
-elif command -v cloud-hypervisor >/dev/null; then
+elif ch_usable; then
   NSW="$WORK/vm-namespace"; mkdir -p "$NSW"; NSVM="nsvm-$PFX"; NSNET="nsnet-$PFX"
   qemu-img create -f qcow2 "$NSW/d.qcow2" 64M >/dev/null 2>&1
-  "$BIN" network create "$NSNET" >/dev/null 2>&1
+  check "vm namespace: a rede da VM cria-se" ok "$BIN" network create "$NSNET"
   for ns in teamA teamB; do
     cat >"$NSW/$ns.yaml" <<YAML
 apiVersion: compute.delonix.io/v1alpha1
@@ -4966,21 +5028,19 @@ spec:
     type: cloud-hypervisor
 YAML
   done
-  if "$BIN" stack apply -f "$NSW/teamA.yaml" >/dev/null 2>&1; then
+  if check_then "vm namespace: stack apply da VM CH em teamA" ok "$BIN" stack apply -f "$NSW/teamA.yaml"; then
     check "o mesmo nome noutra namespace é um conflito (5)" 5 \
       "$BIN" stack apply -f "$NSW/teamB.yaml"
     check "... e a recusa nomeia as duas namespaces" ok bash -c "
       '$BIN' stack apply -f '$NSW/teamB.yaml' 2>&1 | grep -q \"already exists in namespace 'teamA'\""
     check "... e a VM continua na namespace da primeira" ok bash -c "
       '$BIN' vm ls --namespace teamA | grep -q '$NSVM'"
-  else
-    skip "vm: nome repetido noutra namespace" "o vm create CH falhou neste host (infra de rede?)"
   fi
   "$BIN" delete vm "$NSVM" -f >/dev/null 2>&1
   e2e_net_rm "$NSNET"
   rm -rf "$NSW"
 else
-  skip "vm: nome repetido noutra namespace" "sem cloud-hypervisor instalado"
+  skip "vm: nome repetido noutra namespace" "$(ch_missing)"
 fi
 
 ########################################
@@ -5259,8 +5319,8 @@ if ! command -v crictl >/dev/null 2>&1; then
 else
   CRISOCK2="/tmp/dlx-cri-sctp-$PFX.sock"
   CRIPID2="$(e2e_serve_up cri "$CRISOCK2")"
-  if [ -z "$CRIPID2" ] || [ ! -S "$CRISOCK2" ]; then
-    skip "CRI: hostPort SCTP recusado" "o serve cri não subiu"
+  if ! cri_serving "CRI hostPort SCTP" "$CRIPID2" "$CRISOCK2"; then
+    :  # já é um FAIL, com o log do servidor
   else
     CRICFG="$OUT/pod-sctp.json"
     cat > "$CRICFG" <<'JSON'
@@ -5344,8 +5404,8 @@ JSON
 
   CRISOCK3="/tmp/dlx-cri-res-$PFX.sock"
   CRIPID3="$(e2e_serve_up cri "$CRISOCK3")"
-  if [ -z "$CRIPID3" ] || [ ! -S "$CRISOCK3" ]; then
-    skip "CRI: cpuset_mems/unified/hugepage_limits honour-or-refuse" "o serve cri não subiu"
+  if ! cri_serving "CRI honour-or-refuse" "$CRIPID3" "$CRISOCK3"; then
+    :  # já é um FAIL, com o log do servidor
   else
     C3="crictl --runtime-endpoint unix://$CRISOCK3 --image-endpoint unix://$CRISOCK3"
     POD3="$($C3 runp "$CRIRES_POD" 2>/dev/null)"
@@ -5394,8 +5454,8 @@ JSON
   setsid env DELONIX_ALLOW_UNENFORCED_LIMITS=1 "$BIN" serve cri --addr "unix://$CRISOCK4" >>"$SRVLOG" 2>&1 &
   for i in $(seq 1 60); do [ -S "$CRISOCK4" ] && break; sleep 0.2; done
   CRIPID4="$(ss -xlpnH 2>/dev/null | grep -F "$CRISOCK4" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"
-  if [ -z "$CRIPID4" ] || [ ! -S "$CRISOCK4" ]; then
-    skip "CRI: DELONIX_ALLOW_UNENFORCED_LIMITS deixa arrancar sem o controlador" "o serve cri não subiu"
+  if ! cri_serving "CRI com DELONIX_ALLOW_UNENFORCED_LIMITS" "$CRIPID4" "$CRISOCK4"; then
+    :  # já é um FAIL, com o log do servidor
   else
     C4="crictl --runtime-endpoint unix://$CRISOCK4 --image-endpoint unix://$CRISOCK4"
     POD4="$($C4 runp "$CRIRES_POD" 2>/dev/null)"
@@ -5437,8 +5497,8 @@ elif [ ! -x /opt/cni/bin/portmap ]; then
 else
   CRISOCK3="/run/dlx-cri-hp-$PFX.sock"
   CRIPID3="$(e2e_serve_up cri "$CRISOCK3")"
-  if [ -z "$CRIPID3" ] || [ ! -S "$CRISOCK3" ]; then
-    skip "CRI root/CNI: o hostPort é publicado" "o serve cri não subiu"
+  if ! cri_serving "CRI root/CNI hostPort" "$CRIPID3" "$CRISOCK3"; then
+    :  # já é um FAIL, com o log do servidor
   else
     C3="crictl --runtime-endpoint unix://$CRISOCK3"
     HPCFG="$OUT/pod-hostport.json"
@@ -5713,8 +5773,9 @@ check "ingress ls json separa governado de aberto" ok bash -c \
 
   # --- deny/rm/unpublish: os irmãos de allow/ls/clear que nunca corriam -------
   NGNET="ngnet-$PFX"; NGC="ngc-$PFX"; e2e_port NGP
-  if "$BIN" network create "$NGNET" >/dev/null 2>&1 \
-     && "$BIN" container run -d --name "$NGC" --net "$NGNET" -p "$NGP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
+  if check_then "net ingress/egress: a rede cria-se" ok "$BIN" network create "$NGNET" \
+     && check_then "net ingress/egress: o container com -p arranca" ok \
+          "$BIN" container run -d --name "$NGC" --net "$NGNET" -p "$NGP:80" "$IMG" sleep 600; then
     check "net ingress deny" ok "$BIN" net ingress deny "$NGC" 80
     check "net ingress deny: a regra aparece na firewall do container" ok bash -c \
       "'$BIN' net ingress ls '$NGC' | grep -qE '^any +80 .*deny'"
@@ -5730,8 +5791,6 @@ check "ingress ls json separa governado de aberto" ok bash -c \
     check "net egress rm" ok "$BIN" net egress rm "$NGC" 80
     check "net egress rm: a regra saiu" ok bash -c \
       "! '$BIN' net egress ls '$NGC' | grep -qE '^any +80 .*deny'"
-  else
-    skip "net ingress/egress deny/rm/unpublish" "não foi possível preparar rede+container"
   fi
   e2e_rm "$NGC"
   e2e_net_rm "$NGNET"
@@ -6423,9 +6482,11 @@ section "delete networkpolicies — um DELETE que reporta sucesso tem de apagar"
 # (`Icmp InEchos`) e não pelo rc do ping: um ping cuja resposta é dropada também
 # falha, e um check pelo rc passaria sobre um defeito que entrega o pacote.
 DP="dp-$PFX"; DPS="dps-$PFX"; DPC="dpc-$PFX"
-if "$BIN" network create "$DP" >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$DPS" --net "$DP" "$IMG" sleep 900 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$DPC" --net "$DP" "$IMG" sleep 900 >/dev/null 2>&1; then
+if check_then "delete networkpolicies: a rede cria-se" ok "$BIN" network create "$DP" \
+   && check_then "delete networkpolicies: o servidor arranca" ok \
+        "$BIN" container run -d --name "$DPS" --net "$DP" "$IMG" sleep 900 \
+   && check_then "delete networkpolicies: o cliente arranca" ok \
+        "$BIN" container run -d --name "$DPC" --net "$DP" "$IMG" sleep 900; then
   DPIP=$(ip_of "$DPS")
   e0=$(echos_of "$DPS"); "$BIN" container exec "$DPC" ping -c3 -W1 "$DPIP" >/dev/null 2>&1
   check "delete policy: a linha de base alcança" ok test "$(( $(echos_of "$DPS") - e0 ))" -eq 3
@@ -6447,8 +6508,6 @@ if "$BIN" network create "$DP" >/dev/null 2>&1 \
   check "net ingress clear: a omissão da direcção FICA (deny)" ok bash -c \
     "'$BIN' get networkpolicies 2>&1 | grep -qE '^$DPS +ingress +deny'"
   "$BIN" delete networkpolicies "$DPS/ingress" >/dev/null 2>&1
-else
-  skip "delete networkpolicies" "não foi possível preparar a rede e os dois containers"
 fi
 for c in "$DPS" "$DPC"; do e2e_rm "$c"; done
 e2e_net_rm "$DP"
@@ -7328,8 +7387,9 @@ check "systemcontainer snapshot rm of a name not registered is 4" 4 \
 
 # --- net: the per-network egress policy, and the per-container clear -----------
 L3N="l3n-$PFX"; L3C="l3c-$PFX"
-if "$BIN" network create "$L3N" >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$L3C" --net "$L3N" "$IMG" sleep 600 >/dev/null 2>&1; then
+if check_then "net egress: the network is created" ok "$BIN" network create "$L3N" \
+   && check_then "net egress: its container starts" ok \
+        "$BIN" container run -d --name "$L3C" --net "$L3N" "$IMG" sleep 600; then
   check "net egress show: a fresh network has no restriction and no FQDN allowlist" ok bash -c "
     out=\$('$BIN' net egress show '$L3N' 2>&1) || exit 1
     grep -q 'policy: allow' <<<\"\$out\" && grep -q 'FQDN allowlist: (none)' <<<\"\$out\""
@@ -7355,8 +7415,6 @@ if "$BIN" network create "$L3N" >/dev/null 2>&1 \
     '$BIN' net egress clear '$L3C' >/dev/null || exit 1
     '$BIN' net egress ls '$L3C' 2>&1 | grep -qE '443' && { echo 'a rule survived the clear'; exit 1; }
     '$BIN' get networkpolicies 2>&1 | grep -qE '^$L3C +egress +deny'"
-else
-  skip "net egress show/host/net/policy/clear" "could not prepare the network and its container"
 fi
 
 # --- net httproute apply/rm, and `hosts sync` over the names a route asks for --
@@ -7371,8 +7429,8 @@ L3HR="hr-$PFX.e2e.test"; e2e_port L3HP; L3HF="$L3/hosts"
 # answer, and the proxy was right to honour it.
 L3PONG="pong-$PFX"
 printf '127.0.0.1 localhost\n' >"$L3HF"
-if "$BIN" container run -d --name "$L3C-web" --net "$L3N" "$IMG" sh -c \
-     "while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: ${#L3PONG}\r\n\r\n$L3PONG' | nc -l -p 80; done" >/dev/null 2>&1; then
+if check_then "net httproute: the backend container starts" ok "$BIN" container run -d --name "$L3C-web" --net "$L3N" "$IMG" sh -c \
+     "while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: ${#L3PONG}\r\n\r\n$L3PONG' | nc -l -p 80; done"; then
   cat >"$L3/route.yaml" <<YAML
 apiVersion: gateway.delonix.io/v1alpha1
 kind: HTTPRoute
@@ -7417,8 +7475,6 @@ YAML
       sleep 0.5
     done
     echo 'the entrypoint still answers after rm'; exit 1"
-else
-  skip "net httproute apply/rm and hosts sync" "could not start the backend container"
 fi
 e2e_rm "$L3C-web"
 
@@ -7581,7 +7637,7 @@ spec:
       command: ["nc", "-lk", "-p", "7070", "-e", "echo", "pong-$PFX"]
 YAML
 check "pod port-forward: a pod that does not exist is 4" 4 "$BIN" pod port-forward "nao-existe-$PFX" 7070
-if "$BIN" stack apply -f "$L3/pfpod.yaml" >/dev/null 2>&1; then
+if check_then "pod port-forward: the pod applies" ok "$BIN" stack apply -f "$L3/pfpod.yaml"; then
   check "pod port-forward: a port spec that is not a port is refused (1)" 1 "$BIN" pod port-forward "l3pf$PFX" abc
   e2e_port L3FP
   check "pod port-forward: 127.0.0.1:<hostPort> reaches the pod's port" ok bash -c "
@@ -7594,10 +7650,8 @@ if "$BIN" stack apply -f "$L3/pfpod.yaml" >/dev/null 2>&1; then
     done
     kill \$pf 2>/dev/null; wait \$pf 2>/dev/null
     [ \"\$r\" = pong-$PFX ] || { echo \"got '\$r'\"; exit 1; }"
-  "$BIN" delete pod "l3pf$PFX" -f >/dev/null 2>&1
-else
-  skip "pod port-forward to a live pod" "could not apply the pod"
 fi
+"$BIN" delete pod "l3pf$PFX" -f >/dev/null 2>&1
 
 # --- vm image: import, describe, convert, rm — a disk this engine did not build
 # A 16 MiB empty qcow2 is enough: none of these four boots anything. `--appliance`
@@ -7647,11 +7701,10 @@ check "vm apply: a disk that is neither a VM image nor a file is 4, and no VM is
 # is refused before the first command runs. 192.0.2.0/24 (TEST-NET-1) stands in
 # for a VM subnet.
 e2e_port L3RP
-if "$BIN" container run -d --name "$L3C-pub" --net "$L3N" -p "$L3RP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
+if check_then "vm reach: the publishing container starts" ok \
+     "$BIN" container run -d --name "$L3C-pub" --net "$L3N" -p "$L3RP:80" "$IMG" sleep 600; then
   check "vm reach: a port published on the default 127.0.0.1 is reported host-only" ok bash -c "
     '$BIN' vm reach 2>&1 | grep '$L3C-pub' | grep -q '127.0.0.1 (host only)'"
-else
-  skip "vm reach: host-only port" "could not start the publishing container"
 fi
 e2e_rm "$L3C-pub"
 check "vm bridge: a DRY-RUN plan that changes nothing on the host" ok bash -c "
