@@ -1795,14 +1795,34 @@ else
   printf '[verify] %s: %sNOT DELEGATED%s\n' "cgroup delegation" "$C_WARN" "$C_0"
 fi
 
+# The page of the release that was installed. `latest` is not a tag: printing
+# `releases/tag/latest` gave a 404 on every default install (measured with curl
+# on 2026-10-21). With `latest`, the installed binary says which release it is;
+# when it cannot (not installed, not runnable), `releases/latest` is the page
+# GitHub redirects to the newest one.
+release_page_url() { # <repo> <requested version> <installed delonix binary>
+  local repo="$1" version="$2" bin="$3" ver=""
+  if [ "$version" != latest ]; then
+    echo "https://github.com/$repo/releases/tag/$version"
+    return
+  fi
+  if [ -x "$bin" ]; then
+    ver=$("$bin" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  fi
+  if [ -n "$ver" ]; then
+    echo "https://github.com/$repo/releases/tag/v$ver"
+  else
+    echo "https://github.com/$repo/releases/latest"
+  fi
+}
+
 echo
 if [ "$FAIL" = 0 ]; then
   msg "ready"
   echo "    delonix container run -d -p 8080:80 nginx && curl localhost:8080"
   echo
   msg "downloads and documentation:"
-  echo "    https://github.com/$REPO/releases/tag/$VERSION"
-  [ "$VERSION" != latest ] || echo "    https://github.com/$REPO/releases/latest"
+  echo "    $(release_page_url "$REPO" "$VERSION" "${BIN_DIR:-}/delonix")"
 else
   warn "installation finished with warnings — review the FAILED lines above"
 fi

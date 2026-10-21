@@ -274,6 +274,30 @@ skip() {
     "$name" "$reason" >>"$OUT/results.jsonl"
 }
 
+# `check` whose status IS the verdict, for a step the rest of a section stands
+# on (a `vm create` the snapshot checks need). `check` itself always returns 0,
+# which is why these steps used to be `if "$BIN" … >/dev/null; then … else skip`
+# — and that `else skip` hid a real regression: on 2026-10-21 every libvirt
+# `vm create` on main failed with "no network with matching name 'ingress'"
+# and the three libvirt sections reported it as SKIP «o vm create falhou neste
+# host», which the trace then filed under host properties. A create that fails
+# on a host that HAS the hypervisor is a FAIL, with the error in the report.
+check_then() {
+  local before=$FAIL
+  check "$@"
+  (( FAIL == before ))
+}
+
+# The host can run a libvirt VM: the two binaries the provider's `available()`
+# demands, `qemu-img` for the test disks, and a usable `qemu:///system` (the
+# NAT connection `vm create` picks when it can). Only when this is false may a
+# libvirt section SKIP.
+libvirt_system_usable() {
+  command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+    && command -v qemu-system-x86_64 >/dev/null \
+    && virsh -c qemu:///system list --all >/dev/null 2>&1
+}
+
 # --- defeitos JÁ CONHECIDOS: o ratchet, não uma lista de desculpas -----------
 #
 # Um check que chumba por um defeito com achado escrito não pode chumbar o
@@ -3265,8 +3289,7 @@ check "network apply / volume apply fora de uma stack também escrevem os labels
 e2e_net_rm nl-pk-net; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
 # The same for a `kind: VirtualMachine` — measured dropping them too. Labels are
 # the one VM field that converges in place: the domain keeps its id.
-if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
-   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+if libvirt_system_usable; then
   NLVM="nl-vm-$PFX"; qemu-img create -f qcow2 "$NLDIR/vm.qcow2" 64M >/dev/null 2>&1
   nl_vm_manifest() {
     printf '%s\n' 'apiVersion: compute.delonix.io/v1alpha1' 'kind: VirtualMachine' \
@@ -3275,7 +3298,8 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
   }
   nl_vm_labels() { "$BIN" describe vm "$NLVM" 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ','; }
   nl_vm_manifest '{ app: web, tier: front }'
-  if (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1); then
+  if check_then "stack apply de uma VirtualMachine libvirt (labels)" ok \
+       bash -c "cd '$NLDIR' && '$BIN' stack apply -f vm.yaml"; then
     NLDOM="$(virsh -c qemu:///system domid "$NLVM" 2>/dev/null | head -1)"
     check "stack apply: metadata.labels de uma VirtualMachine chegam ao registo, sem deriva no plano" ok bash -c \
       "[[ '$(nl_vm_labels)' == 'app=web,tier=front,' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
@@ -3283,12 +3307,10 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1)
     check "mudar os labels de uma VM converge a quente: o registo segue e o domínio é o mesmo" ok bash -c \
       "[[ '$(nl_vm_labels)' == 'app=api,' ]] && [[ \"\$(virsh -c qemu:///system domid '$NLVM' | head -1)\" == '$NLDOM' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
-  else
-    skip "labels de uma VirtualMachine" "o stack apply da VM não passou neste host"
   fi
   (cd "$NLDIR" && "$BIN" stack destroy -f vm.yaml >/dev/null 2>&1)
 else
-  skip "labels de uma VirtualMachine" "precisa de virsh + qemu-img e de uma ligação qemu:///system utilizável"
+  skip "labels de uma VirtualMachine" "precisa de virsh, qemu-img, qemu-system-x86_64 e de uma ligação qemu:///system utilizável"
 fi
 
 # ---------------------------------------------------------------------------
@@ -4359,14 +4381,14 @@ section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
 # O caminho do overlay vem do PRÓPRIO motor, nunca de um default assumido aqui.
 SROOT=$("$BIN" system info 2>/dev/null | awk '/state root:/{print $3}')
 
-if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
-   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+if libvirt_system_usable; then
   SVM="snap-$PFX"; SDISK="$OUT/$SVM.qcow2"
   qemu-img create -f qcow2 "$SDISK" 64M >/dev/null 2>&1
   # `--require vm.snapshot.memory`: the accepted half of ADR-0050 D6 — libvirt
   # marks it usable on a host with qemu:///system, so the requirement passes and
   # the create goes ahead exactly as before (the refusals are in the vm section).
-  if "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M --require vm.snapshot.memory >/dev/null 2>&1; then
+  if check_then "vm create libvirt (snapshot)" ok \
+       "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M --require vm.snapshot.memory; then
     check "vm snapshot create" ok "$BIN" vm snapshot create "$SVM" s1
     check "vm snapshot ls nomeia-o com a VM a correr" ok bash -c \
       "'$BIN' vm snapshot ls '$SVM' | grep -qx s1"
@@ -4469,13 +4491,12 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "out=\$('$BIN' vm move '$SVM' --node pve2 --live 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'vm migrate'"
     "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   else
-    skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"
     "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   fi
 
   rm -f "$SDISK"
 else
-  skip "vm: snapshot sobrevive a stop/start" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+  skip "vm: snapshot sobrevive a stop/start" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
 fi
 
 ########################################
@@ -4643,11 +4664,11 @@ section "vm: --disk-size cresce o disco de arranque, só a crescer (vm.disk.resi
 # validado ao vivo, à mão, com a golden debian-bookworm — registado no
 # discovery doc, não repetido aqui (pedir um pull de imagem a cada corrida da
 # bateria custaria minutos por nada que este mecanismo já não prove).
-if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
-   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+if libvirt_system_usable; then
   RVM="resize-$PFX"; RDISK="$OUT/$RVM.qcow2"
   qemu-img create -f qcow2 "$RDISK" 64M >/dev/null 2>&1
-  if "$BIN" vm create "$RVM" --disk "$RDISK" --backend libvirt --memory 256M >/dev/null 2>&1; then
+  if check_then "vm create libvirt (disk resize)" ok \
+       "$BIN" vm create "$RVM" --disk "$RDISK" --backend libvirt --memory 256M; then
     check "vm resize --disk-size com a VM a correr recusa (5)" 5 "$BIN" vm resize "$RVM" --disk-size 1
     check "vm stop (disk resize)" ok "$BIN" vm stop "$RVM"
     check "vm resize --disk-size 0 recusa (1)" 1 "$BIN" vm resize "$RVM" --disk-size 0
@@ -4661,12 +4682,11 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "[ \"\$(virsh -c qemu:///system domstate '$RVM')\" = running ]"
     "$BIN" delete vm "$RVM" -f >/dev/null 2>&1
   else
-    skip "vm: --disk-size (libvirt)" "o vm create falhou neste host"
     "$BIN" delete vm "$RVM" -f >/dev/null 2>&1
   fi
   rm -f "$RDISK"
 else
-  skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+  skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
 fi
 
 # Mesma ressalva de isolamento da secção CH acima: meia-isolação é pior que
@@ -5097,19 +5117,19 @@ else
 { "metadata": { "name": "respod", "uid": "resc-uid-1", "namespace": "default", "attempt": 0 }, "linux": {} }
 JSON
   CRIRES_BOGUS="$OUT/ctr-res-bogus.json"
-  cat > "$CRIRES_BOGUS" <<'JSON'
+  cat > "$CRIRES_BOGUS" <<JSON
 {
   "metadata": { "name": "resc", "attempt": 0 },
-  "image": { "image": "alpine:3.19" },
+  "image": { "image": "$IMG" },
   "command": ["sleep", "300"],
   "linux": { "resources": { "unified": { "nonexistentctrl.limit": "1" } } }
 }
 JSON
   CRIRES_ESCAPE="$OUT/ctr-res-escape.json"
-  cat > "$CRIRES_ESCAPE" <<'JSON'
+  cat > "$CRIRES_ESCAPE" <<JSON
 {
   "metadata": { "name": "resc2", "attempt": 0 },
-  "image": { "image": "alpine:3.19" },
+  "image": { "image": "$IMG" },
   "command": ["sleep", "300"],
   "linux": { "resources": { "hugepage_limits": [ { "page_size": "../etc/passwd", "limit": 1 } ] } }
 }
@@ -7565,6 +7585,334 @@ check "stack prune: sem o manifesto, RECUSA — não varre a stack às cegas" ok
 check "system prune: varre o nó e a imagem com tag CONTINUA lá" ok bash -c "
   '$BIN' system prune -f >/dev/null || exit 1
   '$BIN' image ls 2>&1 | grep -qF '$IMG' || { echo 'o system prune levou a imagem com tag'; exit 1; }"
+
+section "kind: Service type VirtualIP — o VIP L4 com prontidão (ADR-0066)"
+########################################
+# The VIP is judged by its EFFECT: which backend answered each connection, the
+# DNAT counter in the holder, and the spoof drop counter — never the rc of the
+# apply. A VIP that served one backend only would answer too, so every spread
+# check counts per backend.
+#
+# Only in an isolated run: the pool is written to the root's `ingress/vip-pool`
+# and the checks read the counters inside THAT root's holder.
+if [[ "$E2E_ISOLATED" != 1 ]]; then
+  skip "VirtualIP" "estado partilhado — o conjunto de VIP e o holder seriam os reais"
+else
+  VN="vn-$PFX"; VNS="vipa$$"; VNB="vipb$$"; VW="$OUT/vip-www"; VIMG="busybox:1.36"
+  VPOOL="${E2E_VIP_POOL:-10.97.0.0/24}"
+  vpin() { cat "$DELONIX_ROOT/ingress/holder.pid" 2>/dev/null; }
+  vnft() { nsenter -t "$(vpin)" -U -n --preserve-credentials nft "$@"; }
+  vcount() { # <client> <vip> <port> <n>: one line per connection, then counted
+    for _ in $(seq 1 "$4"); do "$BIN" container exec "$1" wget -qO- -T 2 "http://$2:$3/" 2>&1; done | sort | uniq -c
+  }
+  vstate() { "$BIN" describe services "$1" 2>/dev/null | grep -E "^  $2:" ; }
+  vwait() { # <svc> <backend> <regex>: up to 20 s for the backend's state
+    for _ in $(seq 1 100); do vstate "$1" "$2" | grep -qE "$3" && return 0; sleep 0.2; done; return 1
+  }
+  vsvc() { # <name> <ns> <app> [vip] [host port to publish]
+    printf 'apiVersion: networking.delonix.io/v1alpha1\nkind: Service\nmetadata: {name: %s, namespace: %s}\nspec:\n  selector: {matchLabels: {app: %s}}\n  port: 8080\n  type: VirtualIP\n%s%s' \
+      "$1" "$2" "$3" "${4:+  vip: $4
+}" "${5:+  publish: [$5]
+}" > "$OUT/vsvc-$1.yaml"
+    echo "$OUT/vsvc-$1.yaml"
+  }
+  mkdir -p "$VW/v1" "$VW/v2" "$VW/vh"
+  echo v1 > "$VW/v1/index.html"; echo v2 > "$VW/v2/index.html"; echo vh > "$VW/vh/index.html"
+  "$BIN" network vip-pool clear >/dev/null 2>&1
+  check "VirtualIP: sem conjunto de VIP é recusado com a classe 69" 69 \
+    env -u DELONIX_SERVICE_VIP_CIDR "$BIN" apply -f "$(vsvc vweb "$VNS" vweb)"
+  check "VirtualIP: um conjunto público é recusado (DX-1360)" 1 "$BIN" network vip-pool set 8.8.8.0/24
+  if "$BIN" image pull "$VIMG" >/dev/null 2>&1 && "$BIN" network create "$VN" --subnet 10.232.0.0/16 >/dev/null 2>&1; then
+    check "VirtualIP: um conjunto sobreposto a uma rede declarada é recusado e nomeia-a" ok bash -c \
+      "out=\$('$BIN' network vip-pool set 10.232.4.0/24 2>&1); rc=\$?; [ \$rc -eq 5 ] && grep -q 'engine network $VN' <<<\"\$out\""
+    if ! "$BIN" network vip-pool set "$VPOOL" >/dev/null 2>&1; then
+      skip "VirtualIP: o resto da secção" "o conjunto $VPOOL sobrepõe-se a algo neste host (E2E_VIP_POOL muda-o)"
+    else
+      check "VirtualIP: vip-pool show nomeia o conjunto e o ficheiro do nó de onde vem" ok bash -c \
+        "env -u DELONIX_SERVICE_VIP_CIDR '$BIN' network vip-pool show -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d[\"pools\"]==[\"$VPOOL\"] and d[\"source\"].endswith(\"ingress/vip-pool\") else 1)'"
+      check "VirtualIP: vip-pool show diz quando a variável do processo se sobrepõe ao ficheiro" ok bash -c \
+        "out=\$(DELONIX_SERVICE_VIP_CIDR=10.233.250.0/24 '$BIN' network vip-pool show); grep -q '^10.233.250.0/24\$' <<<\"\$out\" && grep -q 'source: DELONIX_SERVICE_VIP_CIDR' <<<\"\$out\""
+      for b in v1 v2; do
+        "$BIN" container run -d --name "$b-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
+          -v "$VW/$b:/www" "$VIMG" httpd -f -p 8080 -h /www >/dev/null 2>&1
+      done
+      "$BIN" container run -d --name "vc-$PFX" --net "$VN" --namespace "$VNS" "$VIMG" sleep 900 >/dev/null 2>&1
+      "$BIN" container run -d --name "vx-$PFX" --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
+      "$BIN" container run -d --name "vs-$PFX" --cap-add NET_ADMIN --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
+      # D5 before any VIP exists: once one does, the holder puts the sysctl
+      # back to 1 on its next round.
+      nsenter -t "$(vpin)" -U -n --preserve-credentials sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null
+      check "VirtualIP: sem bridge-nf-call-iptables no holder é recusado com a classe 69 (DX-6361)" ok bash -c \
+        "out=\$('$BIN' apply -f '$(vsvc vbr "$VNS" vbr)' 2>&1); rc=\$?; echo \"\$out\"; [ \$rc -eq 69 ] && grep -q DX-6361 <<<\"\$out\""
+      nsenter -t "$(vpin)" -U -n --preserve-credentials sh -c 'echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null
+      VHP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+      check "VirtualIP: o apply atribui um VIP do conjunto" ok "$BIN" apply -f "$(vsvc vweb "$VNS" vweb "" "$VHP")"
+      VIP=$("$BIN" get services -o json 2>/dev/null | python3 -c 'import json,sys;print(next(r["vip"] for r in json.load(sys.stdin) if r["name"]=="vweb"))' 2>/dev/null)
+      vwait vweb "v1-$PFX" 'ready \(tcp\)'; vwait vweb "v2-$PFX" 'ready \(tcp\)'
+      check "VirtualIP: o nome do serviço resolve para o VIP" ok bash -c \
+        "'$BIN' container exec vc-$PFX nslookup -type=a vweb.$VNS.svc.delonix.internal 2>&1 | grep -q 'Address: $VIP\$'"
+      SPREAD=$(vcount "vc-$PFX" "$VIP" 8080 60)
+      check "VirtualIP: o VIP espalha as ligações por todos os backends prontos (cada um >= 20%)" ok bash -c \
+        "c1=\$(awk '\$2==\"v1\"{print \$1}' <<<'$SPREAD'); c2=\$(awk '\$2==\"v2\"{print \$1}' <<<'$SPREAD'); [ \"\${c1:-0}\" -ge 12 ] && [ \"\${c2:-0}\" -ge 12 ] && [ \$((c1+c2)) -eq 60 ]"
+      HSPREAD=$(for _ in $(seq 1 40); do curl -s -m 2 "http://127.0.0.1:$VHP/"; done | sort | uniq -c)
+      check "VirtualIP: a porta publicada leva ao mesmo conjunto (D6)" ok bash -c \
+        "c1=\$(awk '\$2==\"v1\"{print \$1}' <<<'$HSPREAD'); c2=\$(awk '\$2==\"v2\"{print \$1}' <<<'$HSPREAD'); [ \"\${c1:-0}\" -ge 8 ] && [ \"\${c2:-0}\" -ge 8 ] && [ \$((c1+c2)) -eq 40 ]"
+      check "VirtualIP: o cliente na rede dos backends chega com o seu IP (hairpin, conntrack)" ok bash -c \
+        "CIP=\$('$BIN' container inspect vc-$PFX | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d[\"ip\"])'); nsenter -t $(vpin) -U -n --preserve-credentials conntrack -L -d $VIP 2>/dev/null | grep -q \"src=\$CIP dst=$VIP .* dst=\$CIP \""
+      check "VirtualIP: um cliente de outra namespace não passa do VIP" fail \
+        "$BIN" container exec "vx-$PFX" wget -qO- -T 2 "http://$VIP:8080/"
+      # Anti-spoof: forging a same-namespace member must not even reach the DNAT.
+      CIP=$("$BIN" container inspect "vc-$PFX" | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d["ip"])')
+      vdnat() { vnft list chain ip dlxing svcpre | awk -v v="$VIP" '$0~v{for(i=1;i<=NF;i++) if($i=="packets") print $(i+1)}'; }
+      d0=$(vdnat)
+      "$BIN" container exec "vs-$PFX" ip addr add "$CIP/16" dev eth0 >/dev/null 2>&1
+      "$BIN" container exec "vs-$PFX" nc -w 2 -s "$CIP" "$VIP" 8080 </dev/null >/dev/null 2>&1
+      d1=$(vdnat)
+      # The counter must be READ (a failed nsenter would make 0 - 0 look like a
+      # pass), and a legitimate connection right after must move it.
+      "$BIN" container exec "vs-$PFX" ip addr del "$CIP/16" dev eth0 >/dev/null 2>&1
+      "$BIN" container exec "vc-$PFX" wget -qO- -T 2 "http://$VIP:8080/" >/dev/null 2>&1
+      d2=$(vdnat)
+      check "VirtualIP: uma origem forjada não chega ao DNAT (anti-spoof)" ok bash -c \
+        "[ -n '$d0' ] && [ -n '$d2' ] && [ $(( ${d1:-0} - ${d0:-0} )) -eq 0 ] && [ $(( ${d2:-0} - ${d1:-0} )) -ge 1 ]"
+      # A backend whose port stops accepting while its process stays up.
+      "$BIN" container rm -f "v2-$PFX" >/dev/null 2>&1
+      "$BIN" container run -d --name "v2-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
+        -v "$VW/v2:/www" "$VIMG" sleep 900 >/dev/null 2>&1
+      "$BIN" container exec "v2-$PFX" httpd -p 8080 -h /www >/dev/null 2>&1
+      vwait vweb "v2-$PFX" 'ready \(tcp\)'
+      "$BIN" container exec "v2-$PFX" killall httpd >/dev/null 2>&1
+      check "VirtualIP: um backend cuja porta deixa de aceitar sai da rotação" ok vwait vweb "v2-$PFX" 'not ready$'
+      check "VirtualIP: e não recebe ligações novas (0 de 30)" ok bash -c \
+        "! ( for i in \$(seq 1 30); do '$BIN' container exec vc-$PFX wget -qO- -T 2 http://$VIP:8080/ 2>&1; done | grep -qv '^v1\$' )"
+      # A backend gated by its health check.
+      "$BIN" container run -d --name "vh-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb -v "$VW/vh:/www" \
+        --health-cmd 'test -f /www/ok' --health-interval 1 --health-retries 1 "$VIMG" httpd -f -p 8080 -h /www >/dev/null 2>&1
+      sleep 3
+      check "VirtualIP: um backend cujo health check não passa não recebe tráfego" ok bash -c \
+        "! ( for i in \$(seq 1 30); do '$BIN' container exec vc-$PFX wget -qO- -T 2 http://$VIP:8080/ 2>&1; done | grep -q '^vh\$' )"
+      touch "$VW/vh/ok"
+      check "VirtualIP: com o health check a passar entra em rotação" ok vwait vweb "vh-$PFX" '[0-9] healthy$'
+      rm -f "$VW/vh/ok"
+      check "VirtualIP: e sai quando volta a falhar" ok vwait vweb "vh-$PFX" 'health: unhealthy'
+      # A backend IN ROTATION is removed: the map must drop it before `rm`
+      # returns (the detach's `nsleave`), not one probe interval later — a
+      # removed backend that was already out would prove nothing.
+      "$BIN" container exec "v2-$PFX" httpd -p 8080 -h /www >/dev/null 2>&1
+      check "VirtualIP: um backend que volta a aceitar regressa à rotação" ok vwait vweb "v2-$PFX" 'ready \(tcp\)'
+      "$BIN" container rm -f "v2-$PFX" "vh-$PFX" >/dev/null 2>&1
+      check "VirtualIP: um backend removido não recebe ligações novas" ok bash -c \
+        "! ( for i in \$(seq 1 30); do '$BIN' container exec vc-$PFX wget -qO- -T 2 http://$VIP:8080/ 2>&1; done | grep -qv '^v1\$' )"
+      check "VirtualIP: um porto do VIP que não é servido é recusado" ok bash -c \
+        "'$BIN' container exec vc-$PFX wget -qO- -T 3 http://$VIP:9999/ 2>&1 | grep -q 'refused'"
+      "$BIN" container stop "v1-$PFX" >/dev/null 2>&1
+      check "VirtualIP: sem backend pronto o VIP recusa de imediato" ok bash -c \
+        "t0=\$(date +%s%N); out=\$('$BIN' container exec vc-$PFX wget -qO- -T 5 http://$VIP:8080/ 2>&1); t1=\$(date +%s%N); echo \"\$out\"; grep -q refused <<<\"\$out\" && [ \$(( (t1-t0)/1000000 )) -lt 2000 ]"
+      check "VirtualIP: sem backend pronto a porta publicada também recusa" ok bash -c \
+        "t0=\$(date +%s%N); curl -s -m 5 http://127.0.0.1:$VHP/; rc=\$?; t1=\$(date +%s%N); echo rc=\$rc; case \$rc in 7|52|56) ;; *) exit 1;; esac; [ \$(( (t1-t0)/1000000 )) -lt 2000 ]"
+      check "VirtualIP: um VIP pedido e já tomado é um conflito (5)" 5 \
+        "$BIN" apply -f "$(vsvc vdup "$VNS" vdup "$VIP")"
+      check "VirtualIP: um VIP pedido fora do conjunto é recusado (DX-1361)" 1 \
+        "$BIN" apply -f "$(vsvc vout "$VNS" vout 10.98.0.9)"
+      check "VirtualIP: o delete liberta o lease do VIP" ok bash -c \
+        "'$BIN' delete services $VNS/vweb >/dev/null 2>&1; ! '$BIN' network ipam ls 2>/dev/null | grep -q 'svc:$VNS/vweb'"
+      check "VirtualIP: o delete tira a porta publicada do host" 7 curl -s -m 3 "http://127.0.0.1:$VHP/"
+    fi
+  else
+    skip "VirtualIP: o resto da secção" "não foi possível puxar $VIMG ou criar a rede"
+  fi
+  for c in v1 v2 vh vc vx vs; do "$BIN" container rm -f "$c-$PFX" >/dev/null 2>&1; done
+  "$BIN" delete services $VNS/vweb $VNS/vbr >/dev/null 2>&1
+  "$BIN" network rm "$VN" >/dev/null 2>&1
+  check "VirtualIP: vip-pool clear tira o conjunto do nó, e o show diz que não há nenhum" ok bash -c \
+    "'$BIN' network vip-pool clear >/dev/null && env -u DELONIX_SERVICE_VIP_CIDR '$BIN' network vip-pool show -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d==dict(pools=[], source=\"none\") else 1)'"
+fi
+
+########################################
+# kind: GitOpsSource (ADR-0021, Sprint 24): uma passagem converge a stack do
+# commit, um campo quente converge com o MESMO PID, e um commit que o guarda, o
+# grafo ou a política de segurança recusam deixa a stack em execução INTACTA e
+# fica registado com o commit que nomeia. O repositório é um bare local
+# (`file://`), nada vai à rede. O temporizador é escrito num HOME falso com um
+# `systemctl` falso à frente no PATH: esta bateria nunca toca no gestor de
+# utilizador real (o `systemctl` real nunca é chamado).
+section "gitops: kind GitOpsSource — uma passagem converge, um commit recusado não toca em nada (ADR-0021)"
+if ! command -v git >/dev/null 2>&1; then
+  skip "gitops: kind GitOpsSource" "git não está instalado neste host"
+elif [ -z "${IMG:-}" ] || ! "$BIN" image ls 2>/dev/null | grep -qF "${IMG%%:*}"; then
+  skip "gitops: kind GitOpsSource" "a imagem $IMG não está no store desta corrida"
+else
+  GO="$OUT/gitops-$PFX"
+  rm -rf "$GO"; mkdir -p "$GO/home/.config" "$GO/bin" "$GO/work/env/prod"
+  printf '#!/bin/sh\necho "systemctl $*" >> "%s/systemctl.log"\nexit 0\n' "$GO" >"$GO/bin/systemctl"
+  printf '#!/bin/sh\necho Linger=yes\n' >"$GO/bin/loginctl"
+  chmod +x "$GO/bin/systemctl" "$GO/bin/loginctl"
+  GS="${PFX}-gs"
+  # Duas stacks, nunca a mesma (G1): a do bootstrap só declara a fonte; as
+  # passagens aplicam o repositório em `gitops.<ns>.<nome>`.
+  GSB="${PFX}-gsboot"
+  GSS="gitops.default.$GS"
+  # O mesmo ambiente que o unit do temporizador dá à passagem, mais o HOME falso.
+  gox() { env HOME="$GO/home" XDG_CONFIG_HOME="$GO/home/.config" PATH="$GO/bin:$PATH" "$BIN" "$@"; }
+  gogit() { git -C "$GO/work" -c user.name=e2e -c user.email=e2e@example.invalid -c commit.gpgsign=false "$@"; }
+  gopush() { gogit add -A >/dev/null && gogit commit -q -m "$1" && gogit push -q --force "$GO/repo.git" main && gogit rev-parse HEAD; }
+  gostate() { "$BIN" container inspect "${PFX}-gweb" 2>/dev/null \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin)[0];print(d["pid"],d["memory_max"])'; }
+  goapplied() { gox gitops status "$GS" -o json \
+    | python3 -c 'import json,sys;r=json.load(sys.stdin)[0];print(r["result"],r["commit"],r["applied"])'; }
+  export -f gox gogit gopush gostate goapplied
+  # The checks that exercise a gitops leaf call the binary DIRECTLY (not through
+  # `gox`): cli_exec_ratchet.py counts a leaf only when the engine binary is a
+  # word of the asserted command, and a shell function hides it.
+  GOX="env HOME='$GO/home' XDG_CONFIG_HOME='$GO/home/.config' PATH='$GO/bin:$PATH' '$BIN'"
+  export GO GS GSB GSS BIN PFX IMG
+
+  git init -q --bare "$GO/repo.git"; gogit init -q -b main
+  goapp() { # $1 = memory, $2 = extra spec lines (já indentados)
+    cat >"$GO/work/env/prod/app.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: {name: ${PFX}-gnet}
+spec: {}
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: {name: ${PFX}-gweb}
+spec:
+  image: $IMG
+  network: ${PFX}-gnet
+  command: ["sleep", "infinity"]
+  memory: $1
+$2
+YAML
+  }
+  goapp 64M ""
+  GOC1=$(gopush v1)
+  cat >"$GO/source.yaml" <<YAML
+apiVersion: gitops.delonix.io/v1alpha1
+kind: GitOpsSource
+metadata: {name: $GS}
+spec:
+  source:
+    url: file://$GO/repo.git
+    path: env/prod
+    interval: 30s
+  sync:
+    automated: true
+YAML
+
+  check "gitops: stack apply regista a fonte e escreve o temporizador (systemctl falso)" ok bash -c "
+    gox stack apply -f '$GO/source.yaml' --name '$GSB' >/dev/null || exit 1
+    test -f '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'sem .timer'; exit 1; }
+    grep -q 'ExecStart=.* gitops reconcile $GS --namespace default' '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.service' || { echo 'ExecStart errado'; exit 1; }
+    grep -q 'enable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'o timer não foi activado'; exit 1; }"
+  check "gitops: um manifesto inalterado planeia ZERO diferenças" 0 \
+    gox stack plan -f "$GO/source.yaml" --name "$GSB" --detailed-exitcode
+  check "gitops: um plan à mão da stack das passagens é recusado (DX-1601), a nomear --name e spec.stack" ok bash -c "
+    out=\$(gox stack plan -f '$GO/source.yaml' --name '$GSS' 2>&1) && { echo 'planeou'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo \"sem DX-1601: \$out\"; exit 1; }
+    grep -q -- '--name' <<<\"\$out\" && grep -q 'spec.stack' <<<\"\$out\" || { echo \"não nomeia as saídas: \$out\"; exit 1; }"
+  check "gitops: um nome de fonte que não é um rótulo DNS é recusado (DX-1601)" ok bash -c "
+    sed 's/name: $GS/name: Bad_Name/' '$GO/source.yaml' >'$GO/bad.yaml'
+    out=\$(gox stack apply -f '$GO/bad.yaml' --name x 2>&1) && { echo 'aceitou'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo 'recusou sem o código DX-1601'; exit 1; }"
+  check "gitops: manifest validate recusa a fonte que o apply recusa (url ext::, DX-1601)" ok bash -c "
+    sed 's|url: file://.*|url: ext::sh -c id|' '$GO/source.yaml' >'$GO/badurl.yaml'
+    out=\$('$BIN' manifest validate -f '$GO/badurl.yaml' 2>&1) && { echo 'validate disse OK'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo \"sem DX-1601: \$out\"; exit 1; }"
+
+  check "gitops: a primeira passagem converge a stack do commit" ok bash -c "
+    $GOX gitops reconcile '$GS' >/dev/null || exit 1
+    $GOX gitops status '$GS' | grep -q '$GS' || { echo 'o status não nomeia a fonte'; exit 1; }
+    s=\$(goapplied); [ \"\$s\" = 'synced $GOC1 $GOC1' ] || { echo \"status: \$s\"; exit 1; }
+    gostate | grep -q ' 64M\$' || { echo \"container: \$(gostate)\"; exit 1; }"
+  GOPID=$(gostate | cut -d' ' -f1)
+
+  goapp 96M ""; GOC2=$(gopush 'v2: memory')
+  check "gitops: um campo quente (memory) converge na passagem seguinte com o MESMO PID" ok bash -c "
+    $GOX gitops reconcile '$GS' >/dev/null || exit 1
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"esperava '$GOPID 96M', está \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'synced $GOC2 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+  check "gitops: uma passagem sem mudanças não escreve revisão nova" ok bash -c "
+    a=\$(ls '$DELONIX_ROOT/stacks/$GSS/revisions' 2>/dev/null | wc -l)
+    [ \"\$a\" -gt 0 ] || { echo 'as passagens anteriores não deixaram revisão nenhuma'; exit 1; }
+    $GOX gitops reconcile '$GS' | grep -q 'in sync' || exit 1
+    b=\$(ls '$DELONIX_ROOT/stacks/$GSS/revisions' 2>/dev/null | wc -l)
+    [ \"\$a\" = \"\$b\" ] || { echo \"revisões \$a -> \$b\"; exit 1; }"
+
+  # G1: a stack do bootstrap e a das passagens são duas. O plan do bootstrap
+  # fica em 0 e um --prune dele nunca toca no que a passagem aplicou; um
+  # --prune da stack das passagens a partir do bootstrap é recusado antes de
+  # qualquer efeito.
+  check "gitops: o plan do bootstrap fica em 0 depois das passagens" 0 \
+    gox stack plan -f "$GO/source.yaml" --name "$GSB" --detailed-exitcode
+  check "gitops: um --prune do bootstrap não toca no que a passagem aplicou" ok bash -c "
+    gox stack apply --prune -f '$GO/source.yaml' --name '$GSB' >/dev/null || exit 1
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack da passagem mexeu: \$(gostate)\"; exit 1; }
+    '$BIN' network inspect '${PFX}-gnet' >/dev/null 2>&1 || { echo 'a rede da passagem foi apagada'; exit 1; }"
+  check "gitops: um --prune da stack das passagens com o manifesto do bootstrap é recusado e não apaga nada" ok bash -c "
+    out=\$(gox stack apply --prune -f '$GO/source.yaml' --name '$GSS' 2>&1) && { echo 'aplicou'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo \"sem DX-1601: \$out\"; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }"
+
+  # O repositório declara-se a si próprio: a passagem toma o registo da fonte
+  # à stack do bootstrap, e daí em diante é a stack das passagens que a possui.
+  cp "$GO/source.yaml" "$GO/work/env/prod/source.yaml"; GOCS=$(gopush 'self: the repository declares its source')
+  check "gitops: uma fonte que se declara no repositório é tomada à stack do bootstrap" ok bash -c "
+    out=\$($GOX gitops reconcile '$GS' 2>&1) || { echo \"recusou: \$out\"; exit 1; }
+    grep -q \"taken over from stack '$GSB'\" <<<\"\$out\" || { echo \"sem a tomada: \$out\"; exit 1; }
+    [ \"\$(goapplied)\" = 'synced $GOCS $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }
+    $GOX gitops reconcile '$GS' | grep -q 'in sync' || { echo 'a segunda passagem não está em sincronia'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    gox stack apply --prune -f '$GO/source.yaml' --name '$GSB' >/dev/null 2>&1 && { echo 'o bootstrap reaplicou uma fonte que já não é sua'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"o --prune do bootstrap mexeu: \$(gostate)\"; exit 1; }"
+
+  goapp 128M "  privileged: true"; GOC3=$(gopush 'broken: privileged')
+  check "gitops: um commit que pede o host é recusado (DX-1602) e a stack fica intacta" ok bash -c "
+    out=\$($GOX gitops reconcile '$GS' 2>&1); rc=\$?
+    [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
+    grep -q 'DX-1602' <<<\"\$out\" || { echo 'sem DX-1602'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'rejected $GOC3 $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+
+  goapp 128M ""; sed -i "s/network: ${PFX}-gnet/network: ${PFX}-nosuch/" "$GO/work/env/prod/app.yaml"
+  GOC4=$(gopush 'broken: graph')
+  check "gitops: um commit cujo grafo falha é recusado e a stack fica intacta" ok bash -c "
+    $GOX gitops reconcile '$GS' >/dev/null 2>&1 && { echo 'aceitou'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'rejected $GOC4 $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+
+  goapp 96M ""; sed -i "s|image: $IMG|image: ${IMG%%:*}:gitops-nao-existe|" "$GO/work/env/prod/app.yaml"
+  GOC5=$(gopush 'blocked: replace')
+  check "gitops: um commit que planeia um Replace é bloqueado (DX-1604) e a stack fica intacta" ok bash -c "
+    out=\$($GOX gitops reconcile '$GS' 2>&1); rc=\$?
+    [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
+    grep -q 'DX-1604' <<<\"\$out\" || { echo 'sem DX-1604'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'blocked $GOC5 $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+
+  goapp 96M ""; GOC6=$(gopush 'v6: back to a good commit')
+  check "gitops: suspensa, uma passagem não obtém nada; retomada, a seguinte está em sincronia" ok bash -c "
+    $GOX gitops suspend '$GS' >/dev/null || exit 1
+    $GOX gitops reconcile '$GS' | grep -q 'suspended' || exit 1
+    $GOX gitops resume '$GS' >/dev/null || { echo 'resume falhou'; exit 1; }
+    out=\$($GOX gitops reconcile '$GS' 2>&1) || { echo \"a passagem depois do resume falhou: \$out\"; exit 1; }
+    grep -q 'in sync' <<<\"\$out\" || { echo \"depois do resume: \$out\"; exit 1; }
+    [ \"\$(goapplied)\" = 'synced $GOC6 $GOC6' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+  check "gitops: uma fonte inexistente diz 4 (DX-4601)" 4 \
+    env HOME="$GO/home" XDG_CONFIG_HOME="$GO/home/.config" PATH="$GO/bin:$PATH" "$BIN" gitops reconcile "${PFX}-nao-existe"
+
+  check "gitops: delete gitopssources desactiva o temporizador e apaga a fonte" ok bash -c "
+    : >'$GO/systemctl.log'
+    gox delete gitopssources '$GS' >/dev/null || exit 1
+    grep -q 'disable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'timer não desactivado'; exit 1; }
+    test ! -e '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'unit ficou'; exit 1; }
+    $GOX gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
+  cp "$GO/work/env/prod/app.yaml" "$GO/app-destroy.yaml"
+  sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
+  gox stack destroy -f "$GO/app-destroy.yaml" --name "$GSS" >/dev/null 2>&1 || true
+  gox stack destroy -f "$GO/source.yaml" --name "$GSB" >/dev/null 2>&1 || true
+fi
 
 ########################################
 log ""

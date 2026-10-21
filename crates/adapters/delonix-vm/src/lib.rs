@@ -57,6 +57,9 @@ pub use delonix_compute::vm::{valid_vm_name, Destroyed, DeviceChange, ResizeRequ
 use delonix_compute::vm_registry;
 pub use delonix_compute::vm_registry::mac_for;
 pub use delonix_compute::vm_registry::set_network;
+/// The cgroup leaf provider a Cloud Hypervisor VMM is started in — registered by
+/// the composition root next to [`set_network`], for the same reason.
+pub use delonix_compute::vm_registry::set_process_leaves;
 #[cfg(test)]
 use delonix_compute::vm_registry::{auto_detect, unmet};
 use delonix_provider_libvirt::LibvirtBackend;

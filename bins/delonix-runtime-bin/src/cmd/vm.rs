@@ -3616,6 +3616,11 @@ pub fn run(action: VmCmd) -> Result<()> {
                 memory,
                 vcpus_max,
                 memory_max_mib,
+                // The same resolution the declarative path does above. Left to
+                // `..Default::default()` it was `None`, so since #866 a
+                // `vm create --network <declared> --backend libvirt` named a
+                // libvirt network nobody defined and the domain did not start.
+                network_subnet: super::network::subnet_of(&network),
                 network,
                 namespace,
                 kernel,

@@ -16,7 +16,12 @@
 use std::path::Path;
 use std::time::Duration;
 
+use delonix_linux::pressure::{self, CgroupSeries, Why};
 use delonix_model::records::Status;
+use delonix_telemetry::workload::{
+    CpuThrottle, MemoryEvents, Pressure as WorkloadPressure, Stall, Unavailable, WorkloadKind,
+    WorkloadSeries,
+};
 
 /// A point-in-time snapshot of engine-wide resource usage. `Serialize` so it
 /// is BOTH the body of `GET /v1/dash` and the payload of `delonix dash --json`.
@@ -378,6 +383,129 @@ pub fn publish_to_metrics(s: &DashSummary) {
     }
 }
 
+/// Per-workload contention series (CPU throttling, pressure, OOM) for every
+/// RUNNING container and VM, read from cgroup v2 files with no new privilege.
+/// Three to five small file reads per workload, so it is safe on a scrape.
+///
+/// A container is read from its own live cgroup. A VM is read only when its
+/// VMM is alone in its cgroup (see [`delonix_linux::pressure::vmm_cgroup`]);
+/// the engine creates no cgroup for a VMM, so on most hosts a VM's series are
+/// absent with reason `shared_cgroup` rather than a whole session's numbers
+/// under the VM's name.
+pub fn collect_workload_series(root: &Path) -> Vec<WorkloadSeries> {
+    let mut out = Vec::new();
+    if let Ok(store) = delonix_state::Store::open(root.join("containers")) {
+        if let Ok(list) = store.list() {
+            for mut c in list {
+                delonix_linux::reconcile_status(&mut c);
+                if c.status == Status::Running {
+                    let dir = std::path::PathBuf::from(delonix_linux::live_cgroup(&c));
+                    out.push(workload_series(
+                        WorkloadKind::Container,
+                        &c.id,
+                        &c.name,
+                        Ok(dir),
+                    ));
+                }
+            }
+        }
+    }
+    for vm in delonix_vm::list(root).unwrap_or_default() {
+        if vm.status != Status::Running {
+            continue;
+        }
+        let cgroup = match vm.pid {
+            Some(pid) => pressure::vmm_cgroup(Path::new("/proc"), Path::new("/sys/fs/cgroup"), pid),
+            None => Err(Why::CgroupMissing),
+        };
+        out.push(workload_series(
+            WorkloadKind::Vm,
+            &vm.name,
+            &vm.name,
+            cgroup,
+        ));
+    }
+    out
+}
+
+/// Reads one workload's series from `cgroup` (or records why there is none)
+/// and converts them to the exporter's types. Every group that could not be
+/// read becomes an [`Unavailable`] entry instead of a value.
+pub fn workload_series(
+    kind: WorkloadKind,
+    id: &str,
+    name: &str,
+    cgroup: Result<std::path::PathBuf, Why>,
+) -> WorkloadSeries {
+    let read = match cgroup {
+        Ok(dir) => pressure::read_cgroup(&dir),
+        Err(why) => CgroupSeries::unavailable(why),
+    };
+    let mut unavailable = Vec::new();
+    let cpu_throttle =
+        take("cpu_throttle", read.cpu_throttle, &mut unavailable).map(|c| CpuThrottle {
+            nr_periods: c.nr_periods,
+            nr_throttled: c.nr_throttled,
+            throttled_usec: c.throttled_usec,
+        });
+    let cpu_pressure = take("cpu_pressure", read.cpu_pressure, &mut unavailable).map(to_pressure);
+    let memory_pressure =
+        take("memory_pressure", read.memory_pressure, &mut unavailable).map(to_pressure);
+    let io_pressure = take("io_pressure", read.io_pressure, &mut unavailable).map(to_pressure);
+    let memory_events =
+        take("memory_events", read.memory_events, &mut unavailable).map(|m| MemoryEvents {
+            oom: m.oom,
+            oom_kill: m.oom_kill,
+        });
+    WorkloadSeries {
+        kind,
+        id: id.to_string(),
+        name: name.to_string(),
+        cpu_throttle,
+        cpu_pressure,
+        memory_pressure,
+        io_pressure,
+        memory_events,
+        unavailable,
+    }
+}
+
+/// A group that could not be read becomes `None` plus its reason.
+fn take<T>(
+    group: &'static str,
+    r: Result<T, Why>,
+    unavailable: &mut Vec<Unavailable>,
+) -> Option<T> {
+    match r {
+        Ok(v) => Some(v),
+        Err(why) => {
+            unavailable.push(Unavailable {
+                group,
+                reason: why.as_str(),
+            });
+            None
+        }
+    }
+}
+
+fn to_pressure(p: pressure::Pressure) -> WorkloadPressure {
+    let stall = |l: pressure::StallLine| Stall {
+        avg10_percent: l.avg10_percent,
+        total_usec: l.total_usec,
+    };
+    WorkloadPressure {
+        some: stall(p.some),
+        full: p.full.map(stall),
+    }
+}
+
+/// Pushes the per-workload series into the shared Prometheus registry. Unlike
+/// [`publish_to_metrics`] this replaces the whole set, so a workload that
+/// stopped is no longer exported.
+pub fn publish_workloads_to_metrics(series: Vec<WorkloadSeries>) {
+    delonix_telemetry::metrics::publish_workloads(series);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,5 +730,123 @@ mod tests {
             one,
             "6 nomes do mesmo inode contaram como 6 ficheiros"
         );
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    const PSI: &str = "some avg10=12.50 avg60=3.00 avg300=1.00 total=4500000\n\
+        full avg10=2.25 avg60=0.50 avg300=0.10 total=500000\n";
+
+    fn fixture_cgroup() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        write(p, "cgroup.controllers", "cpu memory io pids\n");
+        write(
+            p,
+            "cpu.stat",
+            "usage_usec 9000000\nnr_periods 200\nnr_throttled 50\nthrottled_usec 1500000\n",
+        );
+        write(p, "cpu.pressure", PSI);
+        write(p, "memory.pressure", PSI);
+        write(p, "io.pressure", PSI);
+        write(
+            p,
+            "memory.events.local",
+            "low 0\nhigh 0\nmax 4\noom 2\noom_kill 1\n",
+        );
+        d
+    }
+
+    #[test]
+    fn the_exporter_renders_a_fixture_cgroup_with_the_workload_labels() {
+        let d = fixture_cgroup();
+        let ws = workload_series(
+            WorkloadKind::Container,
+            "c1",
+            "web",
+            Ok(d.path().to_path_buf()),
+        );
+        assert!(ws.unavailable.is_empty(), "{:?}", ws.unavailable);
+        let out = delonix_telemetry::workload::render(&[ws]);
+        let l = r#"kind="container",id="c1",name="web""#;
+        for want in [
+            format!("delonix_workload_cpu_periods_total{{{l}}} 200"),
+            format!("delonix_workload_cpu_throttled_periods_total{{{l}}} 50"),
+            format!("delonix_workload_cpu_throttled_seconds_total{{{l}}} 1.5"),
+            format!(
+                r#"delonix_workload_pressure_avg10_percent{{{l},resource="cpu",stall="some"}} 12.5"#
+            ),
+            format!(
+                r#"delonix_workload_pressure_avg10_percent{{{l},resource="memory",stall="full"}} 2.25"#
+            ),
+            format!(
+                r#"delonix_workload_pressure_stall_seconds_total{{{l},resource="io",stall="some"}} 4.5"#
+            ),
+            format!("delonix_workload_memory_oom_events_total{{{l}}} 2"),
+            format!("delonix_workload_memory_oom_kills_total{{{l}}} 1"),
+        ] {
+            assert!(out.contains(&want), "missing `{want}` in:\n{out}");
+        }
+        assert!(!out.contains("series_unavailable"), "{out}");
+    }
+
+    #[test]
+    fn a_missing_pressure_file_gives_no_series_and_the_reason() {
+        let d = fixture_cgroup();
+        std::fs::remove_file(d.path().join("io.pressure")).unwrap();
+        let ws = workload_series(
+            WorkloadKind::Container,
+            "c1",
+            "web",
+            Ok(d.path().to_path_buf()),
+        );
+        assert_eq!(ws.io_pressure, None);
+        let out = delonix_telemetry::workload::render(&[ws]);
+        assert!(!out.contains(r#"resource="io""#), "{out}");
+        assert!(out.contains(r#"resource="cpu""#));
+        assert!(
+            out.contains(r#"group="io_pressure",reason="file_missing"} 1"#),
+            "{out}"
+        );
+        // Only the group that is missing is reported.
+        assert_eq!(out.matches("series_unavailable{").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn a_workload_without_a_readable_cgroup_exports_only_reasons() {
+        let ws = workload_series(WorkloadKind::Vm, "vm1", "vm1", Err(Why::SharedCgroup));
+        assert_eq!(ws.unavailable.len(), 5);
+        assert!(ws.unavailable.iter().all(|u| u.reason == "shared_cgroup"));
+        let out = delonix_telemetry::workload::render(&[ws]);
+        assert_eq!(out.matches("series_unavailable{").count(), 5, "{out}");
+        assert!(out.contains(r#"kind="vm",id="vm1",name="vm1""#));
+        assert!(!out.contains("delonix_workload_cpu_"), "{out}");
+    }
+
+    #[test]
+    fn a_cgroup_v1_style_directory_is_named_as_such() {
+        // cpu.stat of a v1 hierarchy (no cgroup.controllers, `throttled_time`).
+        let d = tempfile::tempdir().unwrap();
+        write(
+            d.path(),
+            "cpu.stat",
+            "nr_periods 1\nnr_throttled 0\nthrottled_time 0\n",
+        );
+        let ws = workload_series(
+            WorkloadKind::Container,
+            "c1",
+            "web",
+            Ok(d.path().to_path_buf()),
+        );
+        assert_eq!(ws.cpu_throttle, None);
+        assert!(ws.unavailable.iter().all(|u| u.reason == "not_cgroup_v2"));
+    }
+
+    #[test]
+    fn collect_workload_series_on_an_empty_root_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(collect_workload_series(dir.path()).is_empty());
     }
 }

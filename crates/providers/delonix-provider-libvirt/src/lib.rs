@@ -18,8 +18,8 @@ use delonix_compute::capability::{
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
     guest_cpu_outcome as cpu_outcome, guest_memory_outcome as memory_outcome, guest_memory_state,
-    guest_online_vcpus, mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem,
-    GuestInfo, HotplugOutcome, VmBackend, VmConfig,
+    guest_online_vcpus, mem_mib, names_a_declared_network, BackendRegistration, Boot, CreateStage,
+    GuestFilesystem, GuestInfo, HotplugOutcome, VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -2032,6 +2032,19 @@ fn libvirt_cpu_xml(cfg: &VmConfig, node_cell: Option<&str>) -> String {
     }
 }
 
+/// Puts the network the operator NAMED (`--network <name>`) into `bridge`, the
+/// field `libvirt_interface_xml` and `ensure_libvirt_network` read. An explicit
+/// `bridge` wins, and the values that mean "the default network" map to
+/// nothing — the same set Cloud Hypervisor and Proxmox use, via
+/// [`names_a_declared_network`]. Excluding only `"default"` here (#866) sent
+/// `ingress` — what every `vm create` without `--network` carries — to libvirt
+/// as a network name, and the domain failed to start. **Pure.**
+fn map_declared_network(cfg: &mut VmConfig) {
+    if cfg.bridge.is_none() && names_a_declared_network(&cfg.network) {
+        cfg.bridge = Some(cfg.network.clone());
+    }
+}
+
 /// Generates the libvirt domain's `<interface>` from the YAML `net_mode` — so the
 /// network is 100% abstracted (no hand-written XML). **Pure function** — tested without a daemon.
 fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
@@ -2660,9 +2673,7 @@ impl VmBackend for LibvirtBackend {
         // which is the behaviour `network_of`'s doc-comment records as found
         // live. Mapping it here (and not in `libvirt_interface_xml`) keeps the
         // XML generator pure and leaves ONE place that decides the network.
-        if cfg.bridge.is_none() && !cfg.network.is_empty() && cfg.network != "default" {
-            cfg.bridge = Some(cfg.network.clone());
-        }
+        map_declared_network(&mut cfg);
         let cfg = &cfg;
         if let Some(ip) = cfg.static_ip.as_deref() {
             if !matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
@@ -4776,6 +4787,35 @@ mod tests {
         c.bridge = Some("br0".into());
         let br = libvirt_interface_xml(&c, "52:54:00:00:00:01");
         assert!(br.contains("type='bridge'") && br.contains("source bridge='br0'"));
+    }
+    #[test]
+    fn the_default_network_values_never_reach_libvirt_as_a_name() {
+        // Measured 2026-10-21 on main: `vm create --backend libvirt` without
+        // `--network` failed with "no network with matching name 'ingress'",
+        // because only "default" was excluded and `ingress` is what the bin
+        // puts in `network` when the flag is absent.
+        for default in ["", "ingress", "bridge", "default"] {
+            let mut c = hpc_cfg();
+            c.network = default.into();
+            c.net_mode = Some("nat".into());
+            super::map_declared_network(&mut c);
+            assert_eq!(c.bridge, None, "{default:?}");
+            let xml = libvirt_interface_xml(&c, "52:54:00:00:00:01");
+            assert!(
+                xml.contains("source network='default'"),
+                "{default:?}: {xml}"
+            );
+        }
+        // A name the operator asked for still reaches the domain (#866).
+        let mut c = hpc_cfg();
+        c.network = "lab-net".into();
+        c.net_mode = Some("nat".into());
+        super::map_declared_network(&mut c);
+        assert_eq!(c.bridge.as_deref(), Some("lab-net"));
+        // And an explicit bridge is never overwritten by it.
+        c.bridge = Some("br0".into());
+        super::map_declared_network(&mut c);
+        assert_eq!(c.bridge.as_deref(), Some("br0"));
     }
 }
 
