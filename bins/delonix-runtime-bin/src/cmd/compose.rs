@@ -2061,7 +2061,12 @@ fn check_nested_service_fields(svc: &str, svc_map: &serde_yaml::Mapping) -> Resu
         if let Some(serde_yaml::Value::Mapping(res)) = deploy.get("resources") {
             refuse_unknown_nested(svc, res, "deploy.resources", SUPPORTED_DEPLOY_RESOURCES)?;
             if let Some(serde_yaml::Value::Mapping(limits)) = res.get("limits") {
-                refuse_unknown_nested(svc, limits, "deploy.resources.limits", SUPPORTED_DEPLOY_LIMITS)?;
+                refuse_unknown_nested(
+                    svc,
+                    limits,
+                    "deploy.resources.limits",
+                    SUPPORTED_DEPLOY_LIMITS,
+                )?;
             }
         }
     }
@@ -5130,8 +5135,14 @@ volumes:
         ];
         for (yaml, path) in cases {
             let e = err_of(yaml);
-            assert!(e.contains(path), "the message must name the full path `{path}`: {e}");
-            assert!(e.contains('w') || e.contains("service"), "must name the service: {e}");
+            assert!(
+                e.contains(path),
+                "the message must name the full path `{path}`: {e}"
+            );
+            assert!(
+                e.contains('w') || e.contains("service"),
+                "must name the service: {e}"
+            );
             assert!(
                 e.contains("refused rather than ignored"),
                 "must say refused, not dropped: {e}"
@@ -5304,15 +5315,24 @@ volumes:
             (struct_block("ComposeHealthcheck"), SUPPORTED_HEALTHCHECK),
             (struct_block("ComposeDeploy"), SUPPORTED_DEPLOY),
             (struct_block("ComposeResources"), SUPPORTED_DEPLOY_RESOURCES),
-            (struct_block("ComposeResourceLimits"), SUPPORTED_DEPLOY_LIMITS),
-            (struct_block("ComposeDependsOnEntry"), SUPPORTED_DEPENDS_ON_ENTRY),
+            (
+                struct_block("ComposeResourceLimits"),
+                SUPPORTED_DEPLOY_LIMITS,
+            ),
+            (
+                struct_block("ComposeDependsOnEntry"),
+                SUPPORTED_DEPENDS_ON_ENTRY,
+            ),
             (long_mount, SUPPORTED_VOLUME_MOUNT),
             (variant_block("ComposeBuild", "Full"), SUPPORTED_BUILD),
             (
                 struct_block("ComposeServiceNetworkEntry"),
                 SUPPORTED_SERVICE_NETWORK_ENTRY,
             ),
-            (variant_block("ComposeUlimit", "Pair"), SUPPORTED_ULIMIT_ENTRY),
+            (
+                variant_block("ComposeUlimit", "Pair"),
+                SUPPORTED_ULIMIT_ENTRY,
+            ),
         ];
         let mut bad = Vec::new();
         for (block, allowed) in checks {
