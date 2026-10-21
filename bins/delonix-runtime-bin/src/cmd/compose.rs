@@ -410,6 +410,13 @@ const SUPPORTED_DEPLOY_LIMITS: &[&str] = &["cpus", "memory"];
 const SUPPORTED_DEPENDS_ON_ENTRY: &[&str] = &["condition"];
 /// Long-form volume mount (`- { type: bind, source:, target:, read_only: }`).
 const SUPPORTED_VOLUME_MOUNT: &[&str] = &["type", "source", "target", "read_only"];
+/// Long-form `build:` map (the short form is a bare context string).
+const SUPPORTED_BUILD: &[&str] = &["context", "dockerfile", "args", "target"];
+/// Long-form service `networks: { net: { ipv4_address: ... } }` entry.
+const SUPPORTED_SERVICE_NETWORK_ENTRY: &[&str] = &["ipv4_address"];
+/// Long-form `ulimits: { nofile: { soft:, hard: } }` entry (the short form is a
+/// bare number).
+const SUPPORTED_ULIMIT_ENTRY: &[&str] = &["soft", "hard"];
 
 /// (service key, the flag that already does it) — the engine HAS the capability
 /// and `compose` simply does not wire it through yet.
@@ -2039,8 +2046,9 @@ fn refuse_unknown_nested(
 }
 
 /// Descends the nested service maps the Compose Specification nests one or more
-/// levels deep — `deploy`, `healthcheck`, long-form `depends_on`, and long-form
-/// volume mounts — refusing an unknown sub-key under each by its full path. The
+/// levels deep — `deploy`, `healthcheck`, long-form `depends_on`, long-form
+/// volume mounts, long-form `build`, long-form service `networks` entries and
+/// `ulimits` — refusing an unknown sub-key under each by its full path. The
 /// shallow allowlist of `check_unsupported_value` stops at the service's own
 /// keys; this is what keeps `healthcheck.disable` and friends from being
 /// accepted and dropped.
@@ -2078,6 +2086,41 @@ fn check_nested_service_fields(svc: &str, svc_map: &serde_yaml::Mapping) -> Resu
         for mount in mounts {
             if let serde_yaml::Value::Mapping(m) = mount {
                 refuse_unknown_nested(svc, m, "volumes", SUPPORTED_VOLUME_MOUNT)?;
+            }
+        }
+    }
+    // `build` has two shapes: a short context string and a long map — only the
+    // long form has sub-keys.
+    if let Some(serde_yaml::Value::Mapping(build)) = svc_map.get("build") {
+        refuse_unknown_nested(svc, build, "build", SUPPORTED_BUILD)?;
+    }
+    // Service `networks` short form is a list of names; the long form maps each
+    // network to an entry that is a mapping — or null (`front:`), which has
+    // nothing to check.
+    if let Some(serde_yaml::Value::Mapping(nets)) = svc_map.get("networks") {
+        for (net_name, net_val) in nets {
+            if let serde_yaml::Value::Mapping(entry) = net_val {
+                let nn = net_name.as_str().unwrap_or("?");
+                refuse_unknown_nested(
+                    svc,
+                    entry,
+                    &format!("networks.{nn}"),
+                    SUPPORTED_SERVICE_NETWORK_ENTRY,
+                )?;
+            }
+        }
+    }
+    // A `ulimits` entry is either a single number (no sub-keys) or `{soft, hard}`.
+    if let Some(serde_yaml::Value::Mapping(ulimits)) = svc_map.get("ulimits") {
+        for (ul_name, ul_val) in ulimits {
+            if let serde_yaml::Value::Mapping(entry) = ul_val {
+                let un = ul_name.as_str().unwrap_or("?");
+                refuse_unknown_nested(
+                    svc,
+                    entry,
+                    &format!("ulimits.{un}"),
+                    SUPPORTED_ULIMIT_ENTRY,
+                )?;
             }
         }
     }
@@ -5072,6 +5115,18 @@ volumes:
                 "services:\n  w:\n    image: n\n    volumes:\n      - type: bind\n        source: /a\n        target: /b\n        bind:\n          propagation: rshared\n",
                 "volumes.bind",
             ),
+            (
+                "services:\n  w:\n    build:\n      context: .\n      cache_from: [x]\n",
+                "build.cache_from",
+            ),
+            (
+                "services:\n  w:\n    image: n\n    networks:\n      front:\n        aliases: [a]\nnetworks:\n  front: {}\n",
+                "networks.front.aliases",
+            ),
+            (
+                "services:\n  w:\n    image: n\n    ulimits:\n      nofile:\n        soft: 1024\n        hard: 2048\n        priority: 1\n",
+                "ulimits.nofile.priority",
+            ),
         ];
         for (yaml, path) in cases {
             let e = err_of(yaml);
@@ -5093,9 +5148,30 @@ volumes:
              healthcheck: {test: ['CMD', 'true'], interval: 5s, timeout: 3s, retries: 2, start_period: 1s}\n    \
              deploy: {replicas: 1, resources: {limits: {cpus: '0.5', memory: 1g}}}\n    \
              depends_on:\n      db:\n        condition: service_started\n    \
-             volumes:\n      - {type: bind, source: /a, target: /b, read_only: true}\n  db:\n    image: p\n",
+             volumes:\n      - {type: bind, source: /a, target: /b, read_only: true}\n    \
+             build: {context: ., dockerfile: Dockerfile, args: {A: '1'}, target: dev}\n    \
+             networks:\n      front:\n        ipv4_address: 10.0.0.2\n    \
+             ulimits:\n      nproc: 64\n      nofile: {soft: 1024, hard: 2048}\n  db:\n    image: p\n\
+             networks:\n  front: {}\n",
         )
         .expect("every nested key here is in its allowlist");
+    }
+
+    /// The SHORT forms of `build` (a context string) and service `networks`
+    /// (a list of names) carry no sub-keys — the descent must leave them be,
+    /// as must a `networks:` entry that is simply null (`front:`), and a
+    /// `ulimits:` entry that is a single number.
+    #[test]
+    fn short_and_null_forms_of_nested_maps_are_not_refused() {
+        check_unsupported_fields(
+            "services:\n  w:\n    build: .\n    networks:\n      - front\n    ulimits:\n      nofile: 1024\n\
+             networks:\n  front: {}\n",
+        )
+        .expect("short forms have no sub-keys to refuse");
+        check_unsupported_fields(
+            "services:\n  w:\n    image: n\n    networks:\n      front:\nnetworks:\n  front: {}\n",
+        )
+        .expect("a null networks entry has no sub-keys to refuse");
     }
 
     /// `x-` extension fields are the author's at every level — including inside
@@ -5196,6 +5272,21 @@ volumes:
                 .unwrap()
                 .to_string()
         };
+        // A variant body (`Full {`, `Pair {`) runs from its opening brace to the
+        // first closing one; commas become newlines so a single-line variant
+        // (`Pair { soft: i64, hard: i64 }`) yields one field per line too.
+        let variant_block = |enum_name: &str, variant: &str| -> String {
+            src.split(&format!("enum {enum_name} {{"))
+                .nth(1)
+                .unwrap_or_else(|| panic!("`enum {enum_name}` must exist"))
+                .split(&format!("{variant} {{"))
+                .nth(1)
+                .unwrap_or_else(|| panic!("variant `{variant}` of {enum_name} must exist"))
+                .split('}')
+                .next()
+                .unwrap()
+                .replace(',', "\n")
+        };
         // The long volume mount is an enum variant, not a struct — its body runs
         // from `Long {` to the variant's own closing brace.
         let long_mount = src
@@ -5216,6 +5307,12 @@ volumes:
             (struct_block("ComposeResourceLimits"), SUPPORTED_DEPLOY_LIMITS),
             (struct_block("ComposeDependsOnEntry"), SUPPORTED_DEPENDS_ON_ENTRY),
             (long_mount, SUPPORTED_VOLUME_MOUNT),
+            (variant_block("ComposeBuild", "Full"), SUPPORTED_BUILD),
+            (
+                struct_block("ComposeServiceNetworkEntry"),
+                SUPPORTED_SERVICE_NETWORK_ENTRY,
+            ),
+            (variant_block("ComposeUlimit", "Pair"), SUPPORTED_ULIMIT_ENTRY),
         ];
         let mut bad = Vec::new();
         for (block, allowed) in checks {
