@@ -9,8 +9,8 @@
 use crate::capability::Capability;
 use crate::ports::{LocalDiskImages, SeedBuilder, VmBackends, VmNetwork};
 use crate::vm_backend::{
-    mem_mib, parse_mem_mib, CloudInitIntent, CreateStage, DestroyStage, GuestInfo, HotplugOutcome,
-    MoveOptions, VmBackend, VmConfig,
+    mem_mib, names_a_declared_network, parse_mem_mib, CloudInitIntent, CreateStage, DestroyStage,
+    GuestInfo, HotplugOutcome, MoveOptions, VmBackend, VmConfig,
 };
 use crate::vm_error::{Error, Result};
 use crate::vm_firewall as firewall;
@@ -20,6 +20,28 @@ use delonix_model::records::Status;
 use delonix_node::proc_starttime;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Refuses `network` unless the node's `net` declares it — the refusal
+/// [`VmEngine::create_with`] makes before the overlay, public so a caller that
+/// must answer BEFORE it starts the create (the node API acknowledges an
+/// operation first) says the same thing with the same number.
+///
+/// Fails closed: with no network registered there is nothing to ask, and a
+/// create that cannot check is not one that may go ahead. The caller decides
+/// whether `network` is a question at all ([`names_a_declared_network`]).
+pub fn refuse_undeclared_network(net: Option<&dyn VmNetwork>, network: &str) -> Result<()> {
+    let net = net.ok_or_else(|| Error::Command {
+        context: "vm",
+        message: "no VM network provider is registered in this process".into(),
+    })?;
+    if net.is_declared(network)? {
+        return Ok(());
+    }
+    Err(Error::NetworkNotDeclared(format!(
+        "network '{network}': it is not declared on this node — create it first with \
+         `delonix network create {network}`, or leave --network out for the default network"
+    )))
+}
 
 /// `--disk-size`'s unit, everywhere in this crate: whole GiB.
 const GIB_BYTES: u64 = 1024 * 1024 * 1024;
@@ -165,6 +187,23 @@ where
         // same string the caller wrote — this engine does not get to reinterpret a
         // name that means something on the far node.
         let own_storage = backend.manages_own_storage();
+
+        // A NEW VM on a network nobody declared is refused here, before the
+        // overlay — the first thing that leaves something on disk. Measured
+        // (2026-10-21): `vm create --network cf-nope --backend libvirt` built the
+        // overlay, defined the domain and only then died on libvirt's own «no
+        // network with matching name», after a warning promising a fallback to
+        // `default` that never happened; Cloud Hypervisor instead CREATED the
+        // network on the fly, so a typo became a network. The `--help` and
+        // `kind: VM` (`stack validate`) already said the network must exist.
+        //
+        // Local backends only: a backend that owns its storage speaks the far
+        // node's network vocabulary and refuses what it cannot map itself
+        // (Proxmox). A restart keeps the network its record already has.
+        if restarting.is_none() && !own_storage && names_a_declared_network(&cfg.network) {
+            refuse_undeclared_network(self.network, &cfg.network)?;
+        }
+
         let (disk_path, overlay) = if own_storage {
             (
                 std::path::PathBuf::from(&cfg.disk),
@@ -2160,6 +2199,103 @@ mod tests {
             "{c:?}"
         );
         assert_eq!(e.repo.get("web").unwrap().status, Status::Running);
+    }
+
+    /// A node network that declares exactly `.0`. The attach half is never
+    /// reached by these tests (the fake backend boots without one).
+    struct DeclaredNets(&'static [&'static str]);
+
+    impl VmNetwork for DeclaredNets {
+        fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
+            Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(self.0.contains(&name))
+        }
+        fn attach_tap(
+            &self,
+            _vm: &str,
+            _network: &str,
+            _mac: &str,
+            _namespace: &str,
+        ) -> delonix_model::Result<String> {
+            Ok("tap0".into())
+        }
+        fn lease_ip(&self, _network: &str, _mac: &str) -> Option<String> {
+            None
+        }
+        fn detach_tap(&self, _vm: &str, _lease: Option<&str>) {}
+        fn join_argv(&self) -> Option<Vec<String>> {
+            None
+        }
+    }
+
+    /// A network nobody declared is refused as «not found» (exit 4), naming
+    /// the network and the command that declares it — and BEFORE the overlay:
+    /// the defect was a create that built the disk and defined the domain,
+    /// then died on the hypervisor's own «no network with matching name».
+    #[test]
+    fn an_undeclared_network_is_refused_before_anything_is_built() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let nets = DeclaredNets(&["lab-net"]);
+        let e = VmEngine {
+            network: Some(&nets),
+            ..engine(root.path(), seen.clone())
+        };
+        let err = e
+            .create(&VmConfig {
+                network: "cf-nope".into(),
+                ..cfg("web")
+            })
+            .expect_err("an undeclared network must be refused");
+        assert!(err.is_not_found(), "{err}");
+        let shown = delonix_model::Error::from(err);
+        assert_eq!(shown.number(), 4505, "{shown}");
+        let msg = shown.to_string();
+        assert!(
+            msg.contains("'cf-nope'") && msg.contains("delonix network create cf-nope"),
+            "{msg}"
+        );
+        assert!(calls(&seen).is_empty(), "{:?}", calls(&seen));
+        assert!(e.repo.get("web").is_err(), "no record may be left");
+    }
+
+    /// The declared network goes through; the default-network values are not
+    /// questions at all (#901's set), even in a process with no network
+    /// registered; and a backend that owns its storage is not asked either.
+    #[test]
+    fn only_a_local_create_on_a_named_network_asks_whether_it_is_declared() {
+        let root = tempfile::tempdir().unwrap();
+        let nets = DeclaredNets(&["lab-net"]);
+        let seen = Rc::new(Seen::default());
+        let e = VmEngine {
+            network: Some(&nets),
+            ..engine(root.path(), seen.clone())
+        };
+        e.create(&VmConfig {
+            network: "lab-net".into(),
+            ..cfg("declared")
+        })
+        .expect("a declared network is accepted");
+        for (i, default) in ["", "ingress", "bridge", "default"].iter().enumerate() {
+            let e = engine(root.path(), Rc::new(Seen::default()));
+            e.create(&VmConfig {
+                network: (*default).into(),
+                ..cfg(&format!("d{i}"))
+            })
+            .unwrap_or_else(|err| panic!("{default:?}: {err}"));
+        }
+        let remote = Rc::new(Seen {
+            own_storage: true,
+            ..Default::default()
+        });
+        engine(root.path(), remote)
+            .create(&VmConfig {
+                network: "vmbr9".into(),
+                ..cfg("far")
+            })
+            .expect("a remote backend decides its own network vocabulary");
     }
 
     /// A backend that owns its storage (a remote node) is handed the disk

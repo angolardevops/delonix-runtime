@@ -2375,14 +2375,14 @@ fn libvirt_network_xml(name: &str, cidr: &str) -> Option<String> {
     ))
 }
 
-fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
+fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) -> Result<()> {
     // System connection reachable? (NAT lives in qemu:///system.)
     if capture("virsh", &["-c", uri, "net-list", "--all"]).is_none() {
         eprintln!(
             "warning: cannot reach {uri} for NAT networking — add yourself to the \
 'libvirt' group (`sudo usermod -aG libvirt $USER && newgrp libvirt`) and retry"
         );
-        return;
+        return Ok(());
     }
     let exists = capture("virsh", &["-c", uri, "net-info", "--", net]).is_some();
     // A named network the operator asked for, with a subnet resolved from the
@@ -2391,32 +2391,35 @@ fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
     if !exists && net != "default" {
         match subnet.and_then(|s| libvirt_network_xml(net, s)) {
             Some(xml) => {
-                // SAYS SO when the define fails, instead of `let _`. A swallowed
-                // failure here is the exact bug this function exists to kill: the
-                // network never appears, the domain's NIC falls back to `default`,
-                // and the operator who asked for `--network <name>` gets a cluster
-                // on the shared NAT with nothing in the output to explain it.
-                // Found by testing — the first run after the auto-created network
-                // landed on `default` and there was no message to say why.
-                //
-                // `tracing::warn!` and not `eprintln!`: this is a library crate,
-                // and `arch_fitness`'s `library_prints` ratchet counts a direct
-                // stdout/stderr write as debt. Same channel the anti-spoofing
-                // and cgroup-ceiling warnings in this file already use.
+                // A failed define is an ERROR, not a warning. It used to be a
+                // `tracing::warn!` promising that «the VM will fall back to
+                // libvirt's 'default' network» — there is no such fallback: the
+                // domain names `net`, and `virsh define`/`start` then failed on
+                // «no network with matching name». Stopping here stops BEFORE
+                // the domain is defined.
                 if !virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml) {
-                    tracing::warn!(
-                        network = %net,
-                        "could not define libvirt network — the VM will fall back to libvirt's 'default' network"
-                    );
-                    return;
+                    return Err(Error::Command {
+                        context: "libvirt",
+                        message: format!(
+                            "could not define the libvirt network '{net}' on {uri} \
+                             (`virsh net-define` failed)"
+                        ),
+                    });
                 }
             }
             None => {
-                tracing::warn!(
-                    network = %net,
-                    "network is not defined in libvirt and no usable subnet was resolved for it — the VM will fall back to libvirt's 'default' network"
-                );
-                return;
+                // Reached only past the engine's «is it declared?» refusal, so
+                // the network exists on this node — but no usable subnet came
+                // with it (a caller that did not resolve `network_subnet`, or a
+                // /31–/32). Same honesty as above: the domain cannot get it.
+                return Err(Error::Command {
+                    context: "libvirt",
+                    message: format!(
+                        "network '{net}' is not defined in libvirt and no usable subnet was \
+                         resolved for it, so it cannot be defined there (check \
+                         `delonix network inspect {net}`)"
+                    ),
+                });
             }
         }
     }
@@ -2435,6 +2438,7 @@ fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
     let _ = stable_cmd("virsh")
         .args(["-c", uri, "net-autostart", "--", net])
         .output();
+    Ok(())
 }
 
 /// The `blockcommit` that puts a VM back on its own disk after a live backup.
@@ -2704,7 +2708,7 @@ impl VmBackend for LibvirtBackend {
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             on(CreateStage::Network);
             let net = cfg.bridge.as_deref().unwrap_or("default");
-            ensure_libvirt_network(uri, net, cfg.network_subnet.as_deref());
+            ensure_libvirt_network(uri, net, cfg.network_subnet.as_deref())?;
             // Static IP: DHCP reservation MAC→IP on the libvirt network, BEFORE
             // the domain boots (the guest's DHCP request must already find it).
             if let Some(ip) = cfg.static_ip.as_deref() {
