@@ -466,6 +466,7 @@ caller.
 | `run_host` | `HostRuntime`, the `RunHost` port implementation |
 | `regulate`, `resource_advice`, `workload_view` | resource pressure, host advice, requested-vs-enforced view |
 | `usage` | one sample of a workload's cumulative counters (`cgroup_sample`, `process_sample`), with what could not be read named in `Unmeasured` instead of reported as zero — what MCP's `workload.usage` returns |
+| `pressure` | contention series of one workload read from its cgroup v2 files: `cpu.stat` throttling, `*.pressure` (PSI), `memory.events` OOM; pure parsers, and a `Why` per group that could not be read (`read_cgroup`, `vmm_cgroup`) |
 | `provider_report` | the Linux provider's answer to the capability catalog for containers and pods |
 
 **Main public API**
@@ -818,6 +819,7 @@ so that a crate needing a `Container` type does not compile an OTLP client (crat
 |---|---|
 | `telemetry` | `init` — `fmt` subscriber, plus OTLP when configured |
 | `metrics` | Prometheus counters/gauges and `encode` |
+| `workload` | per-workload contention series (`WorkloadSeries`), rendered at scrape time by a collector |
 
 **Main public API**
 
@@ -825,6 +827,7 @@ so that a crate needing a `Container` type does not compile an OTLP client (crat
 |---|---|---|
 | `telemetry::init` | call once at the start of each binary | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` |
 | `metrics::encode` | text exposition for `/metrics` | `crates/adapters/delonix-telemetry/src/metrics.rs:encode` |
+| `metrics::publish_workloads` | replace the per-workload snapshot before a scrape | `crates/adapters/delonix-telemetry/src/metrics.rs:publish_workloads` |
 
 **Talks to.** No engine crate. OTLP export to a collector when configured.
 
@@ -1167,7 +1170,7 @@ of ADR-0040/0041 rather than these routes.
 | Module | Responsibility |
 |---|---|
 | `lib.rs` | `serve_blocking`, the `axum` router, handlers, `run_cli` |
-| `dashstats` | `DashSummary`, `collect` (counts, memory, network, disk), timeouts, metrics publishing |
+| `dashstats` | `DashSummary`, `collect` (counts, memory, network, disk), `collect_workload_series` (per-workload throttling/pressure/OOM), timeouts, metrics publishing |
 
 **Main public API**
 

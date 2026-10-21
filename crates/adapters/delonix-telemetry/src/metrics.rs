@@ -151,6 +151,11 @@ static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
         storage_bytes_containers.clone(),
     );
 
+    // Per-workload contention series (labels `kind`, `id`, `name`): rendered at
+    // scrape time from the snapshot `publish_workloads` leaves, so a workload
+    // that is gone stops being exported instead of freezing at its last value.
+    registry.register_collector(Box::new(crate::workload::GLOBAL.clone()));
+
     Metrics {
         registry,
         pod_sandboxes_created,
@@ -217,6 +222,12 @@ pub fn set_network(rx_bytes: u64, tx_bytes: u64, unmeasured_containers: u64) {
         .network_unmeasured_containers
         .set(unmeasured_containers as i64);
 }
+/// Replaces the per-workload contention snapshot (CPU throttling, pressure,
+/// OOM; see [`crate::workload`]). Whole-snapshot semantics: a workload not in
+/// `series` is no longer exported. Call it right before a scrape is rendered.
+pub fn publish_workloads(series: Vec<crate::workload::WorkloadSeries>) {
+    crate::workload::GLOBAL.replace(series);
+}
 /// Overwrites the disk-usage gauges (bytes) with a freshly-collected snapshot.
 pub fn set_storage(images: u64, volumes: u64, vm_images: u64, containers: u64) {
     METRICS.storage_bytes_images.set(images as i64);
@@ -246,5 +257,39 @@ mod tests {
         );
         // Prometheus format ends with `# EOF`.
         assert!(out.trim_end().ends_with("# EOF"));
+    }
+
+    #[test]
+    fn publish_workloads_reaches_the_shared_registry_and_is_replaced_whole() {
+        use crate::workload::{CpuThrottle, WorkloadKind, WorkloadSeries};
+        let one = |id: &str| WorkloadSeries {
+            kind: WorkloadKind::Container,
+            id: id.into(),
+            name: "svc".into(),
+            cpu_throttle: Some(CpuThrottle {
+                nr_periods: 10,
+                nr_throttled: 3,
+                throttled_usec: 250_000,
+            }),
+            cpu_pressure: None,
+            memory_pressure: None,
+            io_pressure: None,
+            memory_events: None,
+            unavailable: Vec::new(),
+        };
+        publish_workloads(vec![one("shared-registry-a")]);
+        let out = encode();
+        assert!(
+            out.contains(r#"delonix_workload_cpu_throttled_periods_total{kind="container",id="shared-registry-a",name="svc"} 3"#),
+            "{out}"
+        );
+        // The aggregate metrics are still there next to it.
+        assert!(out.contains("delonix_build_info{version="));
+        publish_workloads(vec![one("shared-registry-b")]);
+        let out = encode();
+        assert!(!out.contains("shared-registry-a"), "{out}");
+        assert!(out.contains("shared-registry-b"));
+        publish_workloads(Vec::new());
+        assert!(!encode().contains("delonix_workload_"));
     }
 }
