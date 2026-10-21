@@ -176,6 +176,13 @@ pub enum Error {
     /// the argument.
     #[error("{0}")]
     CapabilityNotSupported(String),
+    /// The VM's CPU/memory ceilings cannot be enforced on its VMM process: no
+    /// cgroup leaf can exist for it on this host (rootless without a delegated
+    /// base, no leaf provider registered) or a ceiling did not land on it. The
+    /// start is refused before anything is created, instead of a VM that runs
+    /// with no ceiling while its record says it has one.
+    #[error("{0}")]
+    LimitsNotEnforceable(String),
 
     // ---- system failure -----------------------------------------------
     /// An external tool this crate shells out to (`virsh`, `qemu-img`, the
@@ -272,6 +279,7 @@ impl Error {
             Error::NoBackendAvailable(_) => 6502,
             Error::NoFirmware(_) => 6503,
             Error::CapabilityNotSupported(_) => 6507,
+            Error::LimitsNotEnforceable(_) => 6515,
             Error::Command { .. } => 9501,
             Error::CloudHypervisorApi(_) => 9502,
             Error::DiskCorrupted(_) => 9503,
@@ -319,7 +327,8 @@ impl From<Error> for Dx {
             Error::BackendNotConfigured(text)
             | Error::NoBackendAvailable(text)
             | Error::NoFirmware(text)
-            | Error::CapabilityNotSupported(text) => Dx::Unavailable(text),
+            | Error::CapabilityNotSupported(text)
+            | Error::LimitsNotEnforceable(text) => Dx::Unavailable(text),
             Error::Command { context, message } => Dx::Runtime { context, message },
             Error::CloudHypervisorApi(text)
             | Error::DiskCorrupted(text)
@@ -393,6 +402,9 @@ mod tests {
             ),
             Error::NoFirmware(
                 "VM without 'kernel' or 'firmware' and no rust-hypervisor-fw found".into(),
+            ),
+            Error::LimitsNotEnforceable(
+                "VM 'x': its CPU/memory ceilings cannot be enforced on the VMM".into(),
             ),
             Error::Command {
                 context: "vm-tool",

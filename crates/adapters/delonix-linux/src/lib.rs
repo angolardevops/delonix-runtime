@@ -4433,8 +4433,10 @@ fn lchown_one(path: &std::path::Path, uid: u32, gid: u32) {
     }
 }
 
-/// PID limit per container (anti fork-bomb).
-const DEFAULT_PIDS_MAX: &str = "512";
+/// PID limit per container (anti fork-bomb). Defined once, in the compute context,
+/// and re-exported here so a caller of this crate names the engine's number instead
+/// of copying it.
+pub use delonix_compute::DEFAULT_PIDS_MAX;
 
 /// Encodes an eBPF instruction (8 bytes) into a `u64` (little-endian).
 fn bpf_insn(code: u8, dst: u8, src: u8, off: i16, imm: i32) -> u64 {
@@ -5722,7 +5724,7 @@ fn try_delegated_base(
     // reports Running. `1` makes the kill atomic over the whole cgroup, which
     // is what runc/systemd do for exactly this reason.
     let _ = std::fs::write(format!("{leaf}/memory.oom.group"), "1");
-    let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
+    let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX.to_string());
     let Some(cpu_value) = try_cpu_max_value(&c.cpus) else {
         return false;
     };
@@ -5918,19 +5920,254 @@ fn abandon_leaf(leaf: &str) {
 /// being hit 1466 times and then `oom_kill 1`). A memory quota that swap walks around
 /// is not a quota. Same reasoning, same fix, as the container leaf.
 ///
-/// Best-effort by design: a group ceiling that cannot be written must not stop the
-/// container from starting — but it is also why the caller cannot TRUST the ceiling
-/// without reading it back (`memory.max` on the group).
+/// Best-effort on THIS path (rootless, delegated): a group ceiling that cannot be
+/// written does not stop the container from starting — which is why the caller
+/// cannot TRUST the ceiling without reading it back (`memory.max` on the group).
+/// The root path ([`ensure_root_group`]) writes the same files and fails instead.
+///
+/// The values are the normalised ones from [`group_ceiling_files`], never the
+/// caller's raw strings: `setup_cgroup` already refused a container whose ceiling
+/// does not parse, so the `Err` arm here is unreachable in practice.
 fn apply_group_ceiling(parent: &str, gp: &delonix_compute::CgroupParent) {
+    let Ok(files) = group_ceiling_files(gp, &swap_max_value()) else {
+        return;
+    };
+    for f in files {
+        let _ = std::fs::write(format!("{parent}/{}", f.file), f.value);
+    }
+}
+
+/// The files a container GROUP's level gets, normalised, or why the group is
+/// refused. PURE — the decision both privilege modes share, testable without a
+/// cgroupfs.
+///
+/// Refused: a name that is not one safe segment ([`delonix_compute::safe_cgroup_segment`],
+/// the same rule the rootless path always applied), a memory ceiling that is not a
+/// size, a CPU ceiling that is not a number of cores, a process ceiling that is not
+/// a whole number or `max`. The memory value is written as plain bytes for the same
+/// reason the container leaf does it: the kernel takes `64M` and not `64Mi`, and a
+/// raw string it refuses is a ceiling that silently is not there.
+///
+/// `memory.swap.max` travels with the memory ceiling (`swap` is the value the leaf
+/// uses, [`swap_max_value`]) and is the only optional write: swap accounting can be
+/// off on a host. A memory quota that swap walks around is not a quota — measured
+/// on a 64 MiB group, a process allocated 200 MiB until swap was closed.
+fn group_ceiling_files(
+    gp: &delonix_compute::CgroupParent,
+    swap: &str,
+) -> std::result::Result<Vec<delonix_compute::cgroup_leaf::LimitFile>, String> {
+    use delonix_compute::cgroup_leaf::LimitFile;
+    if delonix_compute::safe_cgroup_segment(&gp.name).is_none() {
+        return Err(format!(
+            "cgroup group {:?}: not one safe path segment — use [a-z0-9._-], at most 64 bytes, \
+             not `.`/`..`, not starting with `-`",
+            gp.name
+        ));
+    }
+    let name = gp.name.trim();
+    let mut out = Vec::new();
     if let Some(m) = &gp.memory_max {
-        let _ = std::fs::write(format!("{parent}/memory.max"), m);
-        let _ = std::fs::write(format!("{parent}/memory.swap.max"), swap_max_value());
+        let Some(bytes) = mem_limit_write_value(m) else {
+            return Err(format!(
+                "cgroup group {name}: memory {m:?} is not a size — use bytes or a suffix (1G, 512Mi)"
+            ));
+        };
+        out.push(LimitFile {
+            file: "memory.max",
+            value: bytes,
+            required: true,
+        });
+        out.push(LimitFile {
+            file: "memory.swap.max",
+            value: swap.to_string(),
+            required: false,
+        });
     }
     if let Some(cpus) = &gp.cpus {
-        let _ = std::fs::write(format!("{parent}/cpu.max"), cpu_max_value(cpus));
+        let Some(v) = try_cpu_max_value(cpus) else {
+            return Err(format!(
+                "cgroup group {name}: cpus {cpus:?} is not a number of cores — use a decimal (0.5, 2)"
+            ));
+        };
+        out.push(LimitFile {
+            file: "cpu.max",
+            value: v,
+            required: true,
+        });
     }
     if let Some(p) = &gp.pids_max {
-        let _ = std::fs::write(format!("{parent}/pids.max"), p);
+        let p = p.trim();
+        if p != "max" && !matches!(p.parse::<u64>(), Ok(n) if n > 0) {
+            return Err(format!(
+                "cgroup group {name}: pids {p:?} is not a positive whole number or `max`"
+            ));
+        }
+        out.push(LimitFile {
+            file: "pids.max",
+            value: p.to_string(),
+            required: true,
+        });
+    }
+    Ok(out)
+}
+
+/// ROOT mode: creates the container group `<slice>/<group>` with its aggregate
+/// ceiling and hands the controllers down to it, and returns its path. Every step
+/// that the group's purpose depends on is an ERROR ([`Error::CgroupParentUnavailable`]):
+///
+/// * the group directory itself;
+/// * each ceiling the caller asked for — written BEFORE any container joins, so it
+///   holds from the first allocation, exactly like the leaf's own;
+/// * `memory`, `cpu` and `pids` in the group's `cgroup.subtree_control`, without
+///   which the container leaf below it has no `memory.max`/`cpu.max`/`pids.max`.
+///
+/// Idempotent: a second container of the same group rewrites the same ceiling into
+/// the directory the first one created (the last writer wins if two callers give
+/// the same group different ceilings). The group is never populated directly, so the
+/// no-internal-processes rule never refuses its `subtree_control`.
+///
+/// Before this, root mode ignored the group entirely: every container went to
+/// `delonix.slice/delonix-<id>` and a caller capping a whole group of containers had
+/// no cap as root, with nothing saying so.
+fn ensure_root_group(slice: &str, gp: &delonix_compute::CgroupParent) -> Result<String> {
+    let files = group_ceiling_files(gp, "0").map_err(Error::InvalidCgroupParent)?;
+    let name = gp.name.trim();
+    let group = format!("{slice}/{name}");
+    let unavailable =
+        |what: String| Error::CgroupParentUnavailable(format!("cgroup group {name}: {what}"));
+    std::fs::create_dir_all(&group)
+        .map_err(|e| unavailable(format!("could not create {group}: {e}")))?;
+    for f in files {
+        let path = format!("{group}/{}", f.file);
+        match std::fs::write(&path, &f.value) {
+            Ok(()) => {}
+            Err(_) if !f.required => {}
+            Err(e) => {
+                return Err(unavailable(limit_failure_message(
+                    &group, f.file, &f.value, &e,
+                )));
+            }
+        }
+    }
+    for ctrl in ["memory", "cpu", "pids"] {
+        if let Err(e) = std::fs::write(
+            format!("{group}/cgroup.subtree_control"),
+            format!("+{ctrl}"),
+        ) {
+            return Err(unavailable(format!(
+                "could not hand the `{ctrl}` controller down to {group} ({e}) — the containers \
+                 under it would have no {ctrl} ceiling. Check that {slice} delegates it \
+                 (`cat {slice}/cgroup.subtree_control`)"
+            )));
+        }
+    }
+    // The optional controllers, one by one: a `--cpuset`/`--io-weight`/`--device-*`
+    // on a container of the group needs them, and the leaf-level refusal already
+    // covers the case where one is missing.
+    for ctrl in ["cpuset", "io", "hugetlb"] {
+        let _ = std::fs::write(
+            format!("{group}/cgroup.subtree_control"),
+            format!("+{ctrl}"),
+        );
+    }
+    Ok(group)
+}
+
+// ---------------------------------------------------------------------------
+// Process leaves: a cgroup leaf for a process tree that is not a container
+// ---------------------------------------------------------------------------
+
+pub use delonix_compute::cgroup_leaf::{LeafEvents, LeafLimits, ProcessLeaf};
+
+/// Where a process leaf can be created on THIS host, or `None` when nowhere.
+///
+/// * **Root** (and not inside a user namespace): `delonix.slice`, after
+///   [`ensure_delonix_slice`] — the same parent, with the same aggregate ceiling, as
+///   every root container. A process the engine launches counts against the
+///   engine's budget like the containers do.
+/// * **Rootless**: the escape base `<user@uid.service>/dlx-containers` (see
+///   `user_service_base`), created and given the aggregate ceiling exactly as the
+///   container path does, with the controllers handed down one by one. Only that
+///   candidate, and not the caller's current cgroup: using the current cgroup means
+///   moving the engine itself out of it first (`try_delegated_base`'s `move_self`),
+///   which is the container path's business, not a library call's.
+///
+/// `None` for an SSH session scope (no delegation boundary above it), and for a
+/// process inside a user namespace with no cgroup of its own.
+fn process_leaf_base() -> Option<String> {
+    if !is_rootless() && !in_userns() {
+        ensure_delonix_slice();
+        return Some(delonix_compute::DELONIX_SLICE.to_string());
+    }
+    reveal_cgroup2_if_masked();
+    let base = user_service_base(&current_cgroup_v2()?)?;
+    std::fs::create_dir_all(&base).ok()?;
+    apply_aggregate_ceiling(&base);
+    for ctrl in ["+cpu", "+memory", "+pids", "+io", "+cpuset"] {
+        let _ = std::fs::write(format!("{base}/cgroup.subtree_control"), ctrl);
+    }
+    Some(base)
+}
+
+/// Creates (or reuses) the cgroup leaf `name` for a process tree that is not a
+/// container, with `limits` written BEFORE anything enters it.
+///
+/// * `Ok(Some(leaf))` — the leaf exists and every required ceiling landed
+///   ([`delonix_compute::cgroup_leaf::limit_files`] says which are required).
+/// * `Ok(None)` — no leaf can exist for this process on this host (see
+///   `process_leaf_base`). The caller decides what that means; a caller with
+///   ceilings to enforce refuses.
+/// * `Err` — `name` is refused ([`delonix_compute::cgroup_leaf::valid_leaf_name`]),
+///   the leaf could not be created, or a required ceiling did not land. A leaf whose
+///   ceiling did not land is removed, never handed back half-limited.
+///
+/// The leaf is `<base>/dlx-<name>`. Entering it is the caller's: the reliable way
+/// is the launcher's child entering it before it execs
+/// ([`ProcessLeaf::procs_path`]), so the process never allocates outside it.
+pub fn create_process_leaf(name: &str, limits: &LeafLimits) -> Result<Option<ProcessLeaf>> {
+    use delonix_compute::cgroup_leaf::{leaf_dir_name, limit_files, valid_leaf_name};
+    if !valid_leaf_name(name) {
+        return Err(Error::Engine(delonix_model::Error::Invalid(format!(
+            "process leaf {name:?}: not one safe path segment ([A-Za-z0-9._-], at most 128 bytes)"
+        ))));
+    }
+    let Some(base) = process_leaf_base() else {
+        return Ok(None);
+    };
+    let leaf = format!("{base}/{}", leaf_dir_name(name));
+    std::fs::create_dir_all(&leaf).map_err(|e| Error::Syscall {
+        context: "process leaf",
+        message: format!("could not create {leaf}: {e}"),
+    })?;
+    for f in limit_files(limits) {
+        match std::fs::write(format!("{leaf}/{}", f.file), &f.value) {
+            Ok(()) => {}
+            Err(_) if !f.required => {}
+            Err(e) => {
+                abandon_leaf(&leaf);
+                return Err(Error::Syscall {
+                    context: "process leaf",
+                    message: limit_failure_message(&leaf, f.file, &f.value, &e),
+                });
+            }
+        }
+    }
+    Ok(Some(ProcessLeaf::at(leaf)))
+}
+
+/// [`create_process_leaf`] behind the compute context's
+/// [`delonix_compute::ports::ProcessLeaves`] port, for the composition root to
+/// register (`delonix_compute::vm_registry::set_process_leaves`). A provider crate
+/// may not depend on this adapter; it reaches the leaf through the port.
+pub struct HostProcessLeaves;
+
+impl delonix_compute::ports::ProcessLeaves for HostProcessLeaves {
+    fn create(
+        &self,
+        name: &str,
+        limits: &LeafLimits,
+    ) -> delonix_model::Result<Option<ProcessLeaf>> {
+        create_process_leaf(name, limits).map_err(Into::into)
     }
 }
 
@@ -6104,6 +6341,14 @@ fn setup_cgroup(c: &Container, pid: i32, io_dev: Option<&str>) -> Result<()> {
             c.cpus
         )));
     }
+    // The GROUP is checked here too, in both privilege modes, for the same reason.
+    // The rootless path used to DROP a group whose name was unsafe and start the
+    // container with no group at all — the caller believed its containers were
+    // capped together, and they were not. Its ceiling values went to the kernel raw
+    // and a refused write was discarded. Refused now, before anything is placed.
+    if let Some(gp) = &c.cgroup_parent {
+        group_ceiling_files(gp, "0").map_err(Error::InvalidCgroupParent)?;
+    }
     // Rootless: ALWAYS tries cgroup delegation (cpu/memory/pids) in the user's
     // delegated cgroup (systemd --user with `Delegate=yes`) — it is Podman's model
     // and the way to get REAL limits without root. Before, it was only tried with
@@ -6162,6 +6407,17 @@ fn setup_cgroup(c: &Container, pid: i32, io_dev: Option<&str>) -> Result<()> {
         }
     }
     ensure_delonix_slice(); // the parent-slice with the aggregate limits (robustness)
+
+    // `c.cgroup()` already names `delonix.slice/<group>/delonix-<id>` for a container
+    // of a group. As ROOT the group level is created here, with its ceiling, before
+    // the leaf; failing to is an error (see `ensure_root_group`). Rootless without
+    // delegation falls through to the best-effort arm below exactly as before: the
+    // `create_dir_all` of the leaf fails there and the warning says why.
+    if let Some(gp) = &c.cgroup_parent {
+        if !(is_rootless() || in_userns()) {
+            ensure_root_group(delonix_compute::DELONIX_SLICE, gp)?;
+        }
+    }
     let cgroup = c.cgroup();
     let cg = cgroup.as_str();
     // Rootless (A13): without cgroup delegation (systemd), a non-root cannot
@@ -6219,8 +6475,8 @@ fn setup_cgroup(c: &Container, pid: i32, io_dev: Option<&str>) -> Result<()> {
                                                    // best-effort: the swap controller may be disabled on the system.
     let _ = std::fs::write(format!("{cg}/memory.swap.max"), "0");
     write_limit(cg, "cpu.max", &cpu_max_value(&c.cpus))?; // CPU ceiling
-    write_limit(cg, "pids.max", DEFAULT_PIDS_MAX)?; // anti fork-bomb
-                                                    // --- scheduling / QoS (cgroup v2, best-effort) ---
+    write_limit(cg, "pids.max", &DEFAULT_PIDS_MAX.to_string())?; // anti fork-bomb
+                                                                 // --- scheduling / QoS (cgroup v2, best-effort) ---
     if let Some(w) = &c.cpu_weight {
         let _ = std::fs::write(format!("{cg}/cpu.weight"), w); // CPU priority
     }
@@ -6909,6 +7165,13 @@ fn spawn(
     spec: &RunSpec<'_>,
     replaces_record: bool,
 ) -> Result<Status> {
+    // A cgroup group that `setup_cgroup` would refuse is refused HERE, before the
+    // rootfs is written to or a process cloned: the refusal must not cost a child
+    // that then has to be discarded. `setup_cgroup` keeps its own check — it is the
+    // entry the limits are enforced at — and this is the earlier copy of it.
+    if let Some(gp) = &container.cgroup_parent {
+        group_ceiling_files(gp, "0").map_err(Error::InvalidCgroupParent)?;
+    }
     // `--hostname` (CRI `PodSandboxConfig.hostname`) overrides the container's
     // name in the UTS namespace and in `/etc/hostname`+`/etc/hosts`; without it,
     // the name is used (historical behavior).
@@ -14057,5 +14320,107 @@ mod spawn_step_tests {
         .is_ok());
         // SAFETY: our write end; the read end was consumed by the call.
         unsafe { libc::close(fds[1]) };
+    }
+}
+
+#[cfg(test)]
+mod cgroup_group_tests {
+    use super::{group_ceiling_files, setup_cgroup, Error};
+    use delonix_compute::{CgroupParent, Container};
+
+    fn group(name: &str) -> CgroupParent {
+        CgroupParent {
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    fn files(gp: &CgroupParent) -> Vec<(&'static str, String, bool)> {
+        group_ceiling_files(gp, "0")
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.file, f.value, f.required))
+            .collect()
+    }
+
+    /// The group's ceiling, normalised: memory in plain bytes (the kernel takes
+    /// `64M` and not `64Mi`), CPU as `quota period`, swap closed with the memory.
+    #[test]
+    fn a_group_ceiling_is_normalised_before_it_reaches_the_kernel() {
+        let gp = CgroupParent {
+            name: "build-42".into(),
+            memory_max: Some("1Gi".into()),
+            cpus: Some("2".into()),
+            pids_max: Some("256".into()),
+        };
+        assert_eq!(
+            files(&gp),
+            vec![
+                ("memory.max", "1073741824".to_string(), true),
+                ("memory.swap.max", "0".to_string(), false),
+                ("cpu.max", "200000 100000".to_string(), true),
+                ("pids.max", "256".to_string(), true),
+            ]
+        );
+        assert_eq!(
+            files(&CgroupParent {
+                pids_max: Some("max".into()),
+                ..group("g")
+            }),
+            vec![("pids.max", "max".to_string(), true)]
+        );
+        assert!(
+            files(&group("g")).is_empty(),
+            "no ceiling asked, none written"
+        );
+    }
+
+    /// The same name rule the rootless path always applied, and a ceiling the
+    /// kernel would not take, are refused — never dropped, never written raw.
+    #[test]
+    fn an_unsafe_group_or_an_unreadable_ceiling_is_refused() {
+        for bad in ["..", "../x", "/abs", "a/b", "-rf", "Upper", ""] {
+            assert!(group_ceiling_files(&group(bad), "0").is_err(), "{bad:?}");
+        }
+        for gp in [
+            CgroupParent {
+                memory_max: Some("lots".into()),
+                ..group("g")
+            },
+            CgroupParent {
+                cpus: Some("500m".into()),
+                ..group("g")
+            },
+            CgroupParent {
+                pids_max: Some("0".into()),
+                ..group("g")
+            },
+            CgroupParent {
+                pids_max: Some("-1".into()),
+                ..group("g")
+            },
+        ] {
+            assert!(group_ceiling_files(&gp, "0").is_err(), "{gp:?}");
+        }
+    }
+
+    /// `setup_cgroup` is the one entry every caller passes through, and it refuses
+    /// an unsafe group before touching a single cgroup file — in either privilege
+    /// mode. Before, the rootless path dropped the group and started the container
+    /// with no group at all, and the root path never looked at it.
+    #[test]
+    fn setup_cgroup_refuses_an_unsafe_group_before_placing_anything() {
+        let mut c = Container::new(
+            "00000000deadbeef".into(),
+            "step".into(),
+            "/nonexistent-rootfs".into(),
+            vec!["/bin/true".into()],
+            "64M".into(),
+        );
+        c.cgroup_parent = Some(group("../escape"));
+        match setup_cgroup(&c, 0, None) {
+            Err(Error::InvalidCgroupParent(m)) => assert!(m.contains("../escape"), "{m}"),
+            other => panic!("expected InvalidCgroupParent, got {other:?}"),
+        }
     }
 }
