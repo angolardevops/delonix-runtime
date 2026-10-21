@@ -21,6 +21,13 @@ use delonix_node::proc_starttime;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// The runtime files a backend leaves next to the overlay, as
+/// `vms/<name>.<ext>`: Cloud Hypervisor's api socket (and the lock it takes on
+/// it), the serial capture, the VMM log and pidfile, libvirt's domain XML. ONE
+/// list for the two places that take them back — `destroy` and the undo of a
+/// failed create — so the second cannot miss what the first knows.
+const RUNTIME_LEFTOVERS: [&str; 6] = ["sock", "sock.lock", "serial", "log", "pid", "xml"];
+
 /// `--disk-size`'s unit, everywhere in this crate: whole GiB.
 const GIB_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -175,6 +182,19 @@ where
         let fresh = restarting.is_none();
         let seed_dir = vmdir.join(&cfg.name);
         let seed_dir_is_ours = fresh && !seed_dir.exists();
+        // Same rule for the backend's runtime files: a boot that fails after
+        // the VMM started leaves its log, pidfile and api socket (Cloud
+        // Hypervisor: `<name>.log/.pid/.sock/.sock.lock`, measured after #906),
+        // and only the ones this call brought into being are taken back.
+        let runtime_files_ours: Vec<PathBuf> = if fresh {
+            RUNTIME_LEFTOVERS
+                .iter()
+                .map(|ext| vmdir.join(format!("{}.{ext}", cfg.name)))
+                .filter(|p| !p.exists())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let undo = |overlay: &Path| {
             if !fresh {
                 return;
@@ -192,6 +212,9 @@ where
             }
             if seed_dir_is_ours {
                 let _ = std::fs::remove_dir_all(&seed_dir);
+            }
+            for f in &runtime_files_ours {
+                let _ = std::fs::remove_file(f);
             }
         };
         let (disk_path, overlay) = if own_storage {
@@ -502,7 +525,7 @@ where
                 out.removed.push(format!("{name}/"));
             }
         }
-        let leftovers = ["sock", "sock.lock", "serial", "log", "pid", "xml"];
+        let leftovers = RUNTIME_LEFTOVERS;
         if leftovers
             .iter()
             .any(|e| vmdir.join(format!("{name}.{e}")).exists())
@@ -1957,7 +1980,7 @@ mod tests {
         }
         fn boot(
             &self,
-            _vmdir: &Path,
+            vmdir: &Path,
             cfg: &VmConfig,
             overlay: &str,
             _on: &dyn Fn(CreateStage),
@@ -1966,6 +1989,13 @@ mod tests {
                 .calls
                 .borrow_mut()
                 .push(format!("boot {} {overlay} seed={:?}", cfg.name, cfg.seed));
+            if self.0.fail_boot && self.0.writes_files {
+                // What Cloud Hypervisor leaves when the VMM starts and dies:
+                // its log, its pidfile, its api socket and the lock on it.
+                for ext in ["log", "pid", "sock", "sock.lock"] {
+                    std::fs::write(vmdir.join(format!("{}.{ext}", cfg.name)), b"x").unwrap();
+                }
+            }
             if self.0.fail_boot {
                 return Err(delonix_model::Error::Invalid(
                     "failed to start the domain".into(),
@@ -2362,8 +2392,39 @@ mod tests {
         let vms = root.path().join("vms");
         assert!(!vms.join("web.qcow2").exists(), "overlay left behind");
         assert!(!vms.join("web").exists(), "seed directory left behind");
+        // The VMM's runtime files too: with no record, `rm` (4501 below)
+        // never would take them.
+        for ext in ["log", "pid", "sock", "sock.lock"] {
+            assert!(
+                !vms.join(format!("web.{ext}")).exists(),
+                "web.{ext} left behind"
+            );
+        }
         assert!(e.repo.get("web").is_err());
         assert_eq!(e.remove("web").unwrap_err().number(), 4501);
+    }
+
+    /// A runtime file that was there BEFORE the create — the log of an earlier
+    /// attempt someone is reading — is not this create's to remove.
+    #[test]
+    fn a_failed_boot_keeps_a_runtime_file_that_was_already_there() {
+        let root = tempfile::tempdir().unwrap();
+        let vms = root.path().join("vms");
+        std::fs::create_dir_all(&vms).unwrap();
+        std::fs::write(vms.join("web.log"), b"earlier attempt").unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen);
+        e.create(&cfg("web")).expect_err("the boot fails");
+        assert!(
+            vms.join("web.log").exists(),
+            "a log this call did not create"
+        );
+        assert!(!vms.join("web.pid").exists());
+        assert!(!vms.join("web.sock").exists());
     }
 
     /// A seed that fails after it wrote its directory takes the overlay built a
