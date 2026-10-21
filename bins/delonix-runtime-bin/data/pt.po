@@ -5351,8 +5351,8 @@ msgstr "Nome do cluster (usado nos nomes de VM `<nome>-cp1`/`<nome>-w1` e no con
 msgid "Device/export (`nfs` driver)"
 msgstr "Dispositivo/export (driver `nfs`)"
 
-msgid "Don't apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run"
-msgstr "Não aplica nada — imprime o manifesto completo com todos os defaults preenchidos (como o `kubectl apply --dry-run=client -o yaml`). Os stacks são expandidos e os Kinds canonicalizados, por isso vês exactamente o que CORRERIA"
+msgid "Don't apply anything — print the full manifest with every default filled in, then plan it against the machine and refuse what `apply` would refuse, with the same exit (like `kubectl apply --dry-run=server -o yaml`). A resource another stack owns exits 5 (DX-5601). Nothing is applied; `manifest render` is the offline view"
+msgstr "Não aplica nada — imprime o manifesto completo com todos os defaults preenchidos, depois planeia-o contra a máquina e recusa o que o `apply` recusaria, com a mesma saída (como o `kubectl apply --dry-run=server -o yaml`). Um recurso que outra stack possui sai com 5 (DX-5601). Nada é aplicado; o `manifest render` é a vista sem a máquina"
 
 msgid "Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`)"
 msgstr "Export/partilha: caminho NFS (`/mnt/pool/media`), nome da partilha CIFS (`media`), ou o caminho no URL WebDAV (`/remote.php/dav/...`)"
@@ -15091,8 +15091,8 @@ msgstr "Passa `--restart` para o parar, mover e arrancar no destino, ou `--with-
 msgid "a resource the manifest declares is held by someone else — nothing was changed"
 msgstr "um recurso que o manifesto declara pertence a outrem — nada foi alterado"
 
-msgid "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, and `stack plan --detailed-exitcode` exits with this code instead of 0 or 2. No flag authorises it."
-msgstr "O plano tem um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o `stack apply` recusa o apply inteiro antes de se tocar em qualquer coisa, e o `stack plan --detailed-exitcode` sai com este código em vez de 0 ou 2. Nenhuma flag o autoriza."
+msgid "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, `stack apply --dry-run` exits with this code after printing the manifest, and `stack plan --detailed-exitcode` exits with it instead of 0 or 2. No flag authorises it."
+msgstr "O plano tem um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o `stack apply` recusa o apply inteiro antes de se tocar em qualquer coisa, o `stack apply --dry-run` sai com este código depois de imprimir o manifesto, e o `stack plan --detailed-exitcode` sai com ele em vez de 0 ou 2. Nenhuma flag o autoriza."
 
 msgid "Apply it from the stack that owns it, remove it there first, or rename it in this manifest; `stack plan` names the owner."
 msgstr "Aplica-o a partir da stack que é dona dele, remove-o lá primeiro, ou muda-lhe o nome neste manifesto; o `stack plan` diz quem é o dono."

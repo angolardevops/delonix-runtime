@@ -118,8 +118,10 @@ pub enum StackCmd {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Don't apply anything — print the full manifest with every default
-        /// filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are
-        /// expanded and Kinds canonicalized, so you see exactly what WOULD run.
+        /// filled in, then plan it against the machine and refuse what `apply`
+        /// would refuse, with the same exit (like `kubectl apply
+        /// --dry-run=server -o yaml`). A resource another stack owns exits 5
+        /// (DX-5601). Nothing is applied; `manifest render` is the offline view.
         #[arg(long = "dry-run")]
         dry_run: bool,
         /// Authorize DESTROYING and recreating a resource whose change does not
@@ -359,16 +361,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             reboot,
             prune,
             plan_digest,
-        } => {
-            if dry_run {
-                let path = manifest::resolve_path(file)?;
-                let docs = manifest::load(&path)?;
-                print!("{}", manifest::render_with_defaults(&docs)?);
-                Ok(())
-            } else {
-                apply(file, name, replace, reboot, prune, plan_digest)
-            }
-        }
+        } => apply(file, name, dry_run, replace, reboot, prune, plan_digest),
         StackCmd::Plan {
             file,
             name,
@@ -1840,6 +1833,7 @@ fn count_of_kinds(docs: &[manifest::ManifestDoc]) -> std::collections::BTreeMap<
 fn apply(
     file: Option<PathBuf>,
     name: Option<String>,
+    dry_run: bool,
     replace: Vec<String>,
     reboot: Vec<String>,
     do_prune: bool,
@@ -1878,7 +1872,23 @@ fn apply(
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
-    refuse_stale_plan(&docs, &stack_name(&path, name.as_deref()), &plan_digests)?;
+    let stack = stack_name(&path, name.as_deref());
+    refuse_stale_plan(&docs, &stack, &plan_digests)?;
+    // `--dry-run` used to stop at the render and answer 0 without reading the
+    // machine, so a plan the apply refuses (another stack's resource, a
+    // Replace nobody authorised) previewed as fine. It now decides exactly
+    // what the apply decides before its first write, and exits as it would.
+    if dry_run {
+        print!("{}", manifest::render_with_defaults(&docs)?);
+        decide(
+            &docs,
+            &stack,
+            &replace,
+            &reboot,
+            super::gitops::Applier::Operator,
+        )?;
+        return Ok(());
+    }
     apply_docs(
         &docs,
         &path,
@@ -2020,6 +2030,85 @@ pub(crate) fn refuse_stale_plan(
     Ok(())
 }
 
+/// Everything `stack apply` decides before its first write: the guards, the
+/// graph check, the plan, the `--replace`/`--reboot` typos and the refusal of
+/// what the flags do not authorise. Reads the machine, writes nothing — the
+/// one path the apply and its `--dry-run` share, so the preview cannot answer
+/// differently from the apply.
+fn decide(
+    docs: &[manifest::ManifestDoc],
+    stack: &str,
+    replace: &[String],
+    reboot: &[String],
+    by: super::gitops::Applier,
+) -> Result<Vec<Change>> {
+    // A bootstrap stack that is also the stack the source's passes apply
+    // into would declare only the source, and plan everything the passes
+    // applied for deletion. Refused before anything else is read.
+    super::gitops::refuse_self_target(docs, stack, by)?;
+    // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
+    // rollback, so a broken reference (an `Ingress` pointing to a container that
+    // nobody declares) must stop everything BEFORE the first creation, not halfway
+    // with half the stack already in the kernel.
+    let issues = validate_graph(docs);
+    if !issues.is_empty() {
+        for i in &issues {
+            eprintln!("  ✗ {i}");
+        }
+        return Err(delonix_model::Error::Invalid(super::po::tf(
+            "stack apply aborted: {what} (fix the manifest or use `stack validate`)",
+            &[(
+                "what",
+                &issues_summary(
+                    issues.len(),
+                    shape_issue_count(docs),
+                    spec_issue_count(docs),
+                ),
+            )],
+        )));
+    }
+    // Decide EVERYTHING before changing anything, and refuse up front what this
+    // invocation is not allowed to do (a conflict, or a recreation nobody asked
+    // for). Only then start creating.
+    let changes = build_plan(docs, stack)?;
+    // A `--replace` that names nothing in this manifest is a typo, and a typo in
+    // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
+    // this, `--replace Container/wev` reads as authorised, the recreate is then
+    // refused downstream, and the error the user reads names the resource — never
+    // the misspelling that caused it.
+    if !replace.iter().any(|r| r == "all") {
+        for r in replace {
+            // The same predicate `refuse_unallowed` authorises with. This check
+            // used to be raw equality against the canonical `Kind/name`, so
+            // `--replace container/web` — which `replace_matches` accepts — was
+            // refused here as a typo before it could authorise anything.
+            let hits = changes.iter().any(|c| replace_matches(r, c));
+            if !hits {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--replace '{value}': no resource with that name in this manifest \
+                     (`stack plan` lists them)",
+                    &[("value", r)],
+                )));
+            }
+        }
+    }
+    // Same for `--reboot`: a value naming nothing here is a typo, loudly.
+    if !reboot.iter().any(|r| r == "all") {
+        for r in reboot {
+            if !changes.iter().any(|c| replace_matches(r, c)) {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--reboot '{value}': no resource with that name in this manifest \
+                     (`stack plan` lists them)",
+                    &[("value", r)],
+                )));
+            }
+        }
+    }
+    let changes = promote_named_replaces(changes, replace)?;
+    refuse_unallowed(&changes, replace, reboot)?;
+    Ok(changes)
+}
+
 /// The apply itself, on documents already in hand.
 ///
 /// Split out of `apply` so `rollback` can replay a recorded revision through
@@ -2047,70 +2136,7 @@ pub(crate) fn apply_docs(
     by: super::gitops::Applier,
 ) -> Result<()> {
     let stack = stack_name(path, stack_override);
-    // A bootstrap stack that is also the stack the source's passes apply
-    // into would declare only the source, and plan everything the passes
-    // applied for deletion. Refused before anything else is read.
-    super::gitops::refuse_self_target(docs, &stack, by)?;
-    // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
-    // rollback, so a broken reference (an `Ingress` pointing to a container that
-    // nobody declares) must stop everything BEFORE the first creation, not halfway
-    // with half the stack already in the kernel.
-    let issues = validate_graph(docs);
-    if !issues.is_empty() {
-        for i in &issues {
-            eprintln!("  ✗ {i}");
-        }
-        return Err(delonix_model::Error::Invalid(super::po::tf(
-            "stack apply aborted: {what} (fix the manifest or use `stack validate`)",
-            &[(
-                "what",
-                &issues_summary(
-                    issues.len(),
-                    shape_issue_count(docs),
-                    spec_issue_count(docs),
-                ),
-            )],
-        )));
-    }
-    // Decide EVERYTHING before changing anything, and refuse up front what this
-    // invocation is not allowed to do (a conflict, or a recreation nobody asked
-    // for). Only then start creating.
-    let changes = build_plan(docs, &stack)?;
-    // A `--replace` that names nothing in this manifest is a typo, and a typo in
-    // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
-    // this, `--replace Container/wev` reads as authorised, the recreate is then
-    // refused downstream, and the error the user reads names the resource — never
-    // the misspelling that caused it.
-    if !replace.iter().any(|r| r == "all") {
-        for r in &replace {
-            // The same predicate `refuse_unallowed` authorises with. This check
-            // used to be raw equality against the canonical `Kind/name`, so
-            // `--replace container/web` — which `replace_matches` accepts — was
-            // refused here as a typo before it could authorise anything.
-            let hits = changes.iter().any(|c| replace_matches(r, c));
-            if !hits {
-                return Err(delonix_model::Error::Invalid(super::po::tf(
-                    "--replace '{value}': no resource with that name in this manifest \
-                     (`stack plan` lists them)",
-                    &[("value", r)],
-                )));
-            }
-        }
-    }
-    // Same for `--reboot`: a value naming nothing here is a typo, loudly.
-    if !reboot.iter().any(|r| r == "all") {
-        for r in &reboot {
-            if !changes.iter().any(|c| replace_matches(r, c)) {
-                return Err(delonix_model::Error::Invalid(super::po::tf(
-                    "--reboot '{value}': no resource with that name in this manifest \
-                     (`stack plan` lists them)",
-                    &[("value", r)],
-                )));
-            }
-        }
-    }
-    let changes = promote_named_replaces(changes, &replace)?;
-    refuse_unallowed(&changes, &replace, &reboot)?;
+    let changes = decide(docs, &stack, &replace, &reboot, by)?;
     // A resource that has to be recreated is destroyed FIRST, so the normal
     // creation pass below builds it fresh. Doing it in this order means there is
     // exactly one creation path (the one that has always existed), instead of a
@@ -4249,6 +4275,33 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         assert_eq!(spec_issue_count(&doc("ext::sh -c id")), 1);
         let ok = validate_graph_with(&doc("file:///srv/repo.git"), &[], &[], &[], &[]);
         assert!(ok.is_empty(), "{ok:?}");
+    }
+
+    /// `apply --dry-run` answers what the apply would: it used to render and
+    /// return 0 without deciding anything, so a manifest the apply refuses
+    /// previewed as fine. The guard here refuses before the machine is read,
+    /// which keeps the test off the host's registries; the ownership conflict
+    /// (DX-5601) takes the same `decide` and is checked live in `e2e.sh`.
+    #[test]
+    fn a_dry_run_is_refused_where_the_apply_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("source.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: cfgs\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n  stack: cfgs\n",
+        )
+        .unwrap();
+        let e = apply(
+            Some(file),
+            Some("cfgs".into()),
+            true,
+            Vec::new(),
+            Vec::new(),
+            false,
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(e.number(), 1601, "{e}");
     }
 
     /// G1 (ADR-0021): a hand-run plan, prune, apply or validate of the stack a

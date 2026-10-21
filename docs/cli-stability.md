@@ -95,6 +95,15 @@ Concretamente, garante-se:
 > gate dar `2` com recursos que saíram do manifesto passa a precisar de
 > `--prune`. O `action` continua `delete`, e o `planDigest` não muda.
 
+> **Alteração de contrato depois da v5.1.1 (3).** O `stack apply --dry-run` só
+> imprimia o manifesto com os defaults e respondia `0` sem ler a máquina — um
+> plano que o `apply` recusa passava na pré-visualização. Continua a imprimir o
+> mesmo manifesto no stdout, mas agora decide tudo o que o `apply` decide antes
+> da primeira escrita e sai como ele sairia: `5` (`DX-5601`) com um recurso de
+> outra stack, `1` (`DX-1000`) com um Replace ou um Reboot sem `--replace` ou
+> `--reboot`, ou uma gralha nessas flags. Nenhum recurso é criado nem mudado.
+> Quem queria só o manifesto, sem a máquina, tem o `delonix manifest render`.
+
 | código | significado |
 |---|---|
 | `0` | sucesso |
@@ -102,7 +111,7 @@ Concretamente, garante-se:
 | `2` | uso inválido (o do `clap`) — e, em `stack plan --detailed-exitcode`, «há alterações» |
 | `3` | o recurso existe mas **não está a correr** |
 | `4` | **não existe** esse recurso |
-| `5` | **conflito** — o nome já está tomado; e, em `stack plan --detailed-exitcode`, um plano com um recurso que outra stack carimbou (`DX-5601`) |
+| `5` | **conflito** — o nome já está tomado; e, em `stack plan --detailed-exitcode` e `stack apply --dry-run`, um plano com um recurso que outra stack carimbou (`DX-5601`) |
 | `69` | **capacidade que este host não tem** — uma ferramenta por instalar, um backend indisponível |
 | `74` | **o sistema de ficheiros disse que não** — disco cheio, caminho impossível |
 | `77` | **permissão negada** — o remédio é uma permissão, e depois repetir |

@@ -399,7 +399,7 @@ Options:
           
 
       --dry-run
-          Don&#x27;t apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run
+          Don&#x27;t apply anything — print the full manifest with every default filled in, then plan it against the machine and refuse what `apply` would refuse, with the same exit (like `kubectl apply --dry-run=server -o yaml`). A resource another stack owns exits 5 (DX-5601). Nothing is applied; `manifest render` is the offline view
 
       --replace &lt;KIND/NAME&gt;
           Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace &lt;Kind&gt;/&lt;name&gt;` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing. A `&lt;Kind&gt;/&lt;name&gt;` also recreates that resource when the plan shows no change for it (a field the plan does not compare, like `env`)
