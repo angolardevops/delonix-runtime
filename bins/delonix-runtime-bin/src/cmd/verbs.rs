@@ -279,6 +279,16 @@ pub(crate) fn get(
                     .into(),
             ));
         }
+        // `describe` is a table. Routing `-o json` to it printed that table
+        // with rc 0 — the accepted-and-ignored format refused below for the
+        // list. A Kind whose named read has JSON answers it; every other one
+        // refuses before printing anything.
+        if output != OutputFormat::Table {
+            return match f.kind {
+                k if k == kinds::VM => super::vm::cmd_get_json(&super::util::state_root(), names),
+                _ => Err(named_json_refusal(f)),
+            };
+        }
         return describe(kind, names);
     }
     // Only Kinds whose own `ls` already accepts a namespace do anything with
@@ -597,6 +607,22 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
     }
 }
 
+/// The refusal for `get <kind> <name> -o json` on a Kind with no JSON for one
+/// resource: the list has it (when `get` routes the Kind and it is not
+/// table-only), so that is where it points.
+fn named_json_refusal(f: &KindFacts) -> Error {
+    let list = if GET_ROUTES.contains(&f.kind) && !NO_JSON_YET.contains(&f.kind) {
+        format!(" — `get {} -o json` lists them all", f.plural)
+    } else {
+        String::new()
+    };
+    Error::Invalid(format!(
+        "`get {} <name> -o json` has no JSON for one resource yet{list}; \
+         `describe {} <name>` is the detail view",
+        f.plural, f.plural
+    ))
+}
+
 fn refuse_if_unreachable(f: &'static KindFacts) -> Result<()> {
     let why = no_verb_reason(f.kind);
     if why.is_empty() {
@@ -632,6 +658,28 @@ mod tests {
                 f.kind
             );
         }
+    }
+
+    /// `get <kind> <name> -o json` printed `describe`'s table with rc 0 for
+    /// every Kind (measured on `get vm <name> -o json`). A Kind without JSON for
+    /// one resource now refuses — before any I/O, so this needs no state root.
+    #[test]
+    fn a_named_get_never_answers_json_with_a_table() {
+        for kind in ["pods", "networks", "volumes", "images", "clusters"] {
+            let e = get(kind, &["x".into()], OutputFormat::Json, None)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("<name> -o json"), "{kind}: {e}");
+        }
+        // The pointer to the list is only there when the list has JSON.
+        let e = get("pods", &["x".into()], OutputFormat::Json, None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("`get pods -o json`"), "{e}");
+        let e = get("clusters", &["x".into()], OutputFormat::Json, None)
+            .unwrap_err()
+            .to_string();
+        assert!(!e.contains("-o json` lists"), "{e}");
     }
 
     /// A Kind listed as table-only has to be a Kind `get` actually routes —

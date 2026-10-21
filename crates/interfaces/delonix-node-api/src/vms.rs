@@ -163,11 +163,18 @@ pub fn message(vm: &delonix_compute::Vm) -> VirtualMachine {
             // means "not measured", the same meaning the proto gives create.
             memory_bytes: (delonix_compute::vm_backend::mem_mib(&vm.memory) as i64) * 1024 * 1024,
             disk_bytes: 0,
-            networks: vec![NetworkAttachment {
-                network: vm.network.clone(),
-                ipv4_address: vm.ip.clone().unwrap_or_default(),
-                aliases: vec![],
-            }],
+            // The network the VM is ON, as `vm describe` shows it: a libvirt
+            // VM created without one sits in libvirt's `default`, and was
+            // reported on `ingress` (the engine-wide default it was asked for).
+            // A user-mode NIC is attached to no network, so no attachment.
+            networks: delonix_compute::vm::attached_network(vm)
+                .map(|network| NetworkAttachment {
+                    network,
+                    ipv4_address: vm.ip.clone().unwrap_or_default(),
+                    aliases: vec![],
+                })
+                .into_iter()
+                .collect(),
             cloud_init: None,
             provider: vm.backend.clone(),
             required_capabilities: vec![],
@@ -373,6 +380,41 @@ mod tests {
             .unwrap();
         }
         (dir, "fake-vms-read")
+    }
+
+    /// A libvirt VM created without a network (record: `network: ingress`,
+    /// `tap: nat`) runs in libvirt's `default`; the GET said `ingress`.
+    #[test]
+    fn a_libvirt_vm_is_reported_on_the_network_its_domain_is_on() {
+        let mut vm = delonix_compute::Vm::new(
+            "lv".into(),
+            "/d.qcow2".into(),
+            "/o.qcow2".into(),
+            1,
+            "256M".into(),
+            "ingress".into(),
+            "nat".into(),
+            "52:54:00:bd:15:b5".into(),
+            String::new(),
+        );
+        vm.backend = "libvirt".into();
+        let nets = |vm: &delonix_compute::Vm| -> Vec<String> {
+            message(vm)
+                .spec
+                .unwrap()
+                .networks
+                .into_iter()
+                .map(|n| n.network)
+                .collect()
+        };
+        assert_eq!(nets(&vm), vec!["default".to_string()]);
+        // A user-mode NIC is on no network: no attachment, not `ingress`.
+        vm.tap = "user".into();
+        assert!(nets(&vm).is_empty());
+        // Cloud Hypervisor is on the engine's `ingress` bridge.
+        vm.backend = "cloud-hypervisor".into();
+        vm.tap = "dlxtap0".into();
+        assert_eq!(nets(&vm), vec!["ingress".to_string()]);
     }
 
     #[test]

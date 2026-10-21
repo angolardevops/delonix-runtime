@@ -1558,8 +1558,8 @@ msgstr "--network-alias é gravado mas o DNS interno ainda não resolve aliases 
 msgid "Remove the local state even if the libvirt cleanup fails."
 msgstr "Remove o estado local mesmo que a limpeza no libvirt falhe."
 
-msgid "the VM record was kept; `delonix delete vms {name} --force` discards it anyway"
-msgstr "o registo da VM foi preservado; `delonix delete vms {name} --force` descarta-o na mesma"
+msgid "the VM record was kept; `delonix delete vm {name} --force` discards it anyway"
+msgstr "o registo da VM foi preservado; `delonix delete vm {name} --force` descarta-o na mesma"
 
 msgid "Remove inbound rule(s) matching `[proto/]port` (all protos if none given)."
 msgstr "Remove regra(s) de entrada que casem `[proto/]porta` (todos os protos se omitido)."
@@ -2511,8 +2511,8 @@ msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (esperava '{legacy}
 msgid "{kind} '{name}': invalid spec"
 msgstr "{kind} '{name}': spec inválido"
 
-msgid "WARNING: {kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)"
-msgstr "AVISO: {kind} '{name}': campo desconhecido '{key}' no spec — ignorado (verifica a ortografia)"
+msgid "WARNING: {kind} '{name}': unknown field '{key}' in spec (check the spelling)"
+msgstr "AVISO: {kind} '{name}': campo desconhecido '{key}' no spec (verifica a ortografia)"
 
 msgid "mounting '{ty}' requires CAP_SYS_ADMIN — run as root or in a privileged session; in rootless the mount is best-effort and fails"
 msgstr "montar '{ty}' precisa de CAP_SYS_ADMIN — corre como root ou numa sessão privilegiada; em rootless o mount é best-effort e falha"
@@ -4203,11 +4203,11 @@ msgstr "Storage '{name}': o spec tem de ser uma mapping"
 msgid "a volume declares more than one network share ({kinds}) — a volume is one mount"
 msgstr "um volume declara mais do que uma partilha de rede ({kinds}) — um volume é uma montagem"
 
-msgid "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)"
-msgstr "{kind} '{name}': campo desconhecido '{key}' no spec — ignorado (verifica a ortografia)"
+msgid "{kind} '{name}': unknown field '{key}' in spec (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' no spec (verifica a ortografia)"
 
-msgid "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)"
-msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado (verifica a escrita)"
+msgid "{kind} '{name}': unknown field '{key}' in spec.{block} (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} (verifica a escrita)"
 
 # forma-Pod do kind: Container, depreciada mas NAO reescrita (fase A4)
 
@@ -16825,3 +16825,21 @@ msgstr "Um VMM do Cloud Hypervisor arranca dentro da sua própria folha de cgrou
 
 msgid "Run the engine where it can create cgroups: as root, or rootless under a delegated scope (`systemd-run --user --scope -p Delegate=yes -- delonix vm create ...`). To start the VM without ceilings on purpose, set DELONIX_ALLOW_UNENFORCED_LIMITS=1."
 msgstr "Corre o motor onde ele possa criar cgroups: como root, ou rootless num scope delegado (`systemd-run --user --scope -p Delegate=yes -- delonix vm create ...`). Para arrancar a VM sem tectos de propósito, define DELONIX_ALLOW_UNENFORCED_LIMITS=1."
+
+msgid "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.containers[{i}] (verifica a escrita)"
+
+msgid "{path}: nothing was applied — {n} field(s) not understood: {fields}; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to apply without them"
+msgstr "{path}: nada foi aplicado — {n} campo(s) não reconhecido(s): {fields}; corrige a escrita, ou define DELONIX_MANIFEST_LENIENT=1 para aplicar sem eles"
+
+msgid "{path}: {n} field(s) not understood, ignored (DELONIX_MANIFEST_LENIENT=1): {fields}"
+msgstr "{path}: {n} campo(s) não reconhecido(s), ignorado(s) (DELONIX_MANIFEST_LENIENT=1): {fields}"
+
+msgid "<none> (user-mode NIC: egress only)"
+msgstr "<nenhuma> (NIC em modo utilizador: só saída)"
+
+msgid "{name} (host bridge)"
+msgstr "{name} (bridge do host)"
+
+msgid "{name} (libvirt network)"
+msgstr "{name} (rede do libvirt)"
