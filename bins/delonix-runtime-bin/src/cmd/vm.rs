@@ -4450,7 +4450,8 @@ struct VmLsRow {
 
 /// One `vm ls -o json` element, without the parts read from elsewhere
 /// (`services`, from the proxy) or only asked of `ls` (`--credentials`,
-/// `--ports`). **Pure.**
+/// `--ports`). `get vm <name> -o json` emits the same element, so the list and
+/// the named read cannot drift into two shapes. **Pure.**
 fn ls_row(vm: &delonix_compute::Vm) -> VmLsRow {
     VmLsRow {
         name: vm.name.clone(),
@@ -4470,6 +4471,21 @@ fn ls_row(vm: &delonix_compute::Vm) -> VmLsRow {
         services: Vec::new(),
         credentials: None,
     }
+}
+
+/// `get vm <name…> -o json`: the `vm ls -o json` element of each named VM, in
+/// the order asked, as the array ADR-0005 promises (one element for one name).
+/// A name with no VM is the same not-found `describe` gives.
+pub(crate) fn cmd_get_json(base: &std::path::Path, names: &[String]) -> Result<()> {
+    let svc_index = super::svc::SvcIndex::load();
+    let mut rows = Vec::with_capacity(names.len());
+    for name in names {
+        let vm = delonix_vm::status(base, name)?;
+        let mut row = ls_row(&vm);
+        row.services = svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref());
+        rows.push(row);
+    }
+    output::print_json(&rows)
 }
 
 /// IMAGE column: the base disk's file stem (`…/truenas-scale_25.10.qcow2` →
