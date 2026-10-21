@@ -1705,16 +1705,41 @@ fn anonymous_volume_names(
         .collect()
 }
 
-/// Reads a top-level `secrets:`/`configs:` entry's content. `what` is
+/// Where a resolved `secrets:`/`configs:` entry gets its bytes. Carries the
+/// decision made at translate time, so the actual read can wait until the ONE
+/// command that needs the content (`up`) — see `PendingSecretDoc`.
+enum SecretSource {
+    /// An absolute path, already joined against the project base dir.
+    File(PathBuf),
+    /// A process environment variable, read at materialize time.
+    Environment(String),
+}
+
+/// A `kind: Secret` document resolved down to its name, data key and source —
+/// everything EXCEPT the content, which is read only when `up` materializes it
+/// (see `read_secret_source`). `config` never materializes these, so it honours
+/// its `docker compose config` equivalence: it renders the project without ever
+/// opening a secret/config file (a missing/unreadable/binary `file:` fails only
+/// an `up`, the one command that actually delivers the bytes).
+struct PendingSecretDoc {
+    real_name: String,
+    data_key: String,
+    source: SecretSource,
+}
+
+/// Validates a top-level `secrets:`/`configs:` entry and resolves WHERE its
+/// content comes from — WITHOUT reading it. Every refusal that does not depend
+/// on the content lives here (`external:`, and "neither `file:` nor
+/// `environment:`"), so `config` still catches them. `what` is
 /// "secret"/"config", used only in the error text.
-fn resolve_secret_content(
+fn resolve_secret_source(
     what: &str,
     name: &str,
     file: Option<&Path>,
     environment: Option<&str>,
     external: bool,
     base_dir: &Path,
-) -> Result<String> {
+) -> Result<SecretSource> {
     if external {
         return Err(Error::Invalid(format!(
             "compose: {what} '{name}': `external: true` is not supported in v1 — this \
@@ -1728,20 +1753,10 @@ fn resolve_secret_content(
         )));
     }
     if let Some(f) = file {
-        let path = base_dir.join(f);
-        return std::fs::read_to_string(&path).map_err(|e| {
-            Error::Invalid(format!(
-                "compose: {what} '{name}': reading {}: {e}",
-                path.display()
-            ))
-        });
+        return Ok(SecretSource::File(base_dir.join(f)));
     }
     if let Some(var) = environment {
-        return std::env::var(var).map_err(|_| {
-            Error::Invalid(format!(
-                "compose: secret '{name}': `environment: {var}` is not set in this shell"
-            ))
-        });
+        return Ok(SecretSource::Environment(var.to_string()));
     }
     Err(Error::Invalid(format!(
         "compose: {what} '{name}' needs `file:`{} — neither was given",
@@ -1751,6 +1766,42 @@ fn resolve_secret_content(
             ""
         }
     )))
+}
+
+/// Reads a resolved source into the secret's content. This is where the one
+/// filesystem/env access happens, so it is also where the content-dependent
+/// refusals live: a `file:` that is unreadable, and one that is not UTF-8.
+///
+/// The engine mounts secret bytes verbatim, so binary secrets (keystores, DER
+/// certs, gzipped configs) are ordinary; this v1 cannot carry them, because the
+/// `kind: Secret` it emits delivers the content through `stringData`, which is
+/// UTF-8 text. Rather than let `read_to_string`'s raw io error ("stream did not
+/// contain valid UTF-8") leak — reading like file corruption — it is refused by
+/// name, the same register as the other v1 limitations in this module.
+fn read_secret_source(what: &str, name: &str, source: &SecretSource) -> Result<String> {
+    match source {
+        SecretSource::File(path) => {
+            let bytes = std::fs::read(path).map_err(|e| {
+                Error::Invalid(format!(
+                    "compose: {what} '{name}': reading {}: {e}",
+                    path.display()
+                ))
+            })?;
+            String::from_utf8(bytes).map_err(|_| {
+                Error::Invalid(format!(
+                    "compose: {what} '{name}': {} is not valid UTF-8 — v1 creates a {what} \
+                     only from text (delivered through a `kind: Secret`'s `stringData`); \
+                     binary {what} files are not supported",
+                    path.display()
+                ))
+            })
+        }
+        SecretSource::Environment(var) => std::env::var(var).map_err(|_| {
+            Error::Invalid(format!(
+                "compose: secret '{name}': `environment: {var}` is not set in this shell"
+            ))
+        }),
+    }
 }
 
 #[derive(Serialize)]
@@ -1795,7 +1846,7 @@ fn secret_doc(real_name: &str, data_key: &str, content: &str) -> ManifestDoc {
 /// `(kind: Secret` documents, compose secret name -> delonix name, compose
 /// config name -> delonix name)`.
 type ComposeSecrets = (
-    Vec<ManifestDoc>,
+    Vec<PendingSecretDoc>,
     BTreeMap<String, String>,
     BTreeMap<String, String>,
 );
@@ -1838,7 +1889,7 @@ fn resolve_compose_secrets(
                  top-level `secrets:`)"
             ))
         })?;
-        let content = resolve_secret_content(
+        let source = resolve_secret_source(
             "secret",
             key,
             def.file.as_deref(),
@@ -1850,7 +1901,11 @@ fn resolve_compose_secrets(
             .name
             .clone()
             .unwrap_or_else(|| compose_scoped_name(project, &format!("secret-{key}")));
-        docs.push(secret_doc(&real, key, &content));
+        docs.push(PendingSecretDoc {
+            real_name: real.clone(),
+            data_key: key.clone(),
+            source,
+        });
         secret_names.insert(key.clone(), real);
     }
     let mut config_names = BTreeMap::new();
@@ -1861,7 +1916,7 @@ fn resolve_compose_secrets(
                  top-level `configs:`)"
             ))
         })?;
-        let content = resolve_secret_content(
+        let source = resolve_secret_source(
             "config",
             key,
             def.file.as_deref(),
@@ -1873,10 +1928,32 @@ fn resolve_compose_secrets(
             .name
             .clone()
             .unwrap_or_else(|| compose_scoped_name(project, &format!("config-{key}")));
-        docs.push(secret_doc(&real, key, &content));
+        docs.push(PendingSecretDoc {
+            real_name: real.clone(),
+            data_key: key.clone(),
+            source,
+        });
         config_names.insert(key.clone(), real);
     }
     Ok((docs, secret_names, config_names))
+}
+
+/// Materializes the resolved-but-unread secret/config docs into `kind: Secret`
+/// documents, reading each source NOW. Only `up` calls this — `config` renders
+/// the project without it, so a project whose secret `file:` is absent,
+/// unreadable or binary still passes `config` (as it does under
+/// `docker compose config`) and fails only at `up`, where the bytes are
+/// actually delivered. `what` for the error text is recovered from whether the
+/// doc came from the secrets or configs pass; both land in the same store, so
+/// "secret" is the honest noun for the unified delivery error.
+fn materialize_secret_docs(pending: &[PendingSecretDoc]) -> Result<Vec<ManifestDoc>> {
+    pending
+        .iter()
+        .map(|p| {
+            let content = read_secret_source("secret", &p.data_key, &p.source)?;
+            Ok(secret_doc(&p.real_name, &p.data_key, &content))
+        })
+        .collect()
 }
 
 /// Refuses every key this implementation does not read — against the RAW parsed
@@ -2170,7 +2247,10 @@ struct Translated {
     image_docs: Vec<ManifestDoc>,
     network_docs: Vec<ManifestDoc>,
     volume_docs: Vec<ManifestDoc>,
-    secret_docs: Vec<ManifestDoc>,
+    /// Resolved but UNREAD — `cmd_up` materializes them with
+    /// `materialize_secret_docs`; `cmd_config` leaves them untouched so it never
+    /// opens a secret/config file. See `PendingSecretDoc`.
+    pending_secret_docs: Vec<PendingSecretDoc>,
     /// One entry per REPLICA, in replica order — `[0]` is the "canonical"
     /// container (`<project>-<service>`, or `container_name:` if given,
     /// which `deploy.replicas>1` refuses precisely so this stays unambiguous)
@@ -2270,7 +2350,7 @@ fn translate(
         volume_docs.push(simple_doc(k::VOLUME, &volume_names[key]));
     }
 
-    let (secret_docs, secret_names, config_names) =
+    let (pending_secret_docs, secret_names, config_names) =
         resolve_compose_secrets(project, compose, &active, base_dir)?;
 
     let mut image_docs: Vec<ManifestDoc> = Vec::new();
@@ -2360,7 +2440,7 @@ fn translate(
         image_docs,
         network_docs,
         volume_docs,
-        secret_docs,
+        pending_secret_docs,
         containers,
         extra_networks: extras,
         order,
@@ -3527,6 +3607,10 @@ fn cmd_up(
     let project = project.unwrap_or(default_project);
     let translated = translate(&compose, &project, &base_dir, &profile)?;
 
+    // `up` is the one command that delivers secret/config bytes, so it is the
+    // one that reads them — `config` renders the project without this step.
+    let secret_docs = materialize_secret_docs(&translated.pending_secret_docs)?;
+
     if dry_run {
         println!("# compose project: {project}");
         for doc in translated
@@ -3534,7 +3618,7 @@ fn cmd_up(
             .iter()
             .chain(&translated.volume_docs)
             .chain(&translated.image_docs)
-            .chain(&translated.secret_docs)
+            .chain(&secret_docs)
         {
             println!(
                 "---\n{}",
@@ -3560,7 +3644,7 @@ fn cmd_up(
     super::image::apply(&translated.image_docs)?;
     super::network::apply(&translated.network_docs)?;
     super::volume::apply(&translated.volume_docs)?;
-    super::secret::apply(&translated.secret_docs, &base_dir)?;
+    super::secret::apply(&secret_docs, &base_dir)?;
 
     let (images, store) = open_stores()?;
     for name in &translated.order {
@@ -4265,7 +4349,9 @@ services:
     /// The success path end-to-end: a `file:` source becomes a `kind: Secret`
     /// document holding exactly the secret's own name as key, and the
     /// referencing service's `RunOpts` picks it up with `secret_files: true`
-    /// (Compose secrets are always file-mounted, never env vars).
+    /// (Compose secrets are always file-mounted, never env vars). The content
+    /// is read when `up` materializes the doc, not by `translate` — so this
+    /// test materializes just as `cmd_up` does.
     #[test]
     fn secret_file_source_becomes_a_secret_doc_and_flows_into_run_opts() {
         let tmp = tempfile::tempdir().unwrap();
@@ -4283,8 +4369,8 @@ services:
         assert_eq!(opts.secret.len(), 1);
         let secret_name = &opts.secret[0];
 
-        let doc = t
-            .secret_docs
+        let secret_docs = materialize_secret_docs(&t.pending_secret_docs).unwrap();
+        let doc = secret_docs
             .iter()
             .find(|d| &d.metadata.name == secret_name)
             .expect("a secret doc must exist for the referenced secret");
@@ -4328,31 +4414,80 @@ services:
         assert!(opts.secret.is_empty());
     }
 
-    /// `environment:` reads the PROCESS environment at translate time —
-    /// `PATH` is used here specifically to avoid `std::env::set_var` (unsafe
-    /// in this toolchain, and shared mutable state across parallel tests);
-    /// it is a variable every test process already has, for free.
+    /// `environment:` reads the PROCESS environment when the source is
+    /// materialized — `PATH` is used here specifically to avoid
+    /// `std::env::set_var` (unsafe in this toolchain, and shared mutable state
+    /// across parallel tests); it is a variable every test process already has,
+    /// for free.
     #[test]
     fn secret_environment_source_reads_the_process_env() {
-        let content =
-            resolve_secret_content("secret", "s", None, Some("PATH"), false, Path::new("/tmp"))
-                .unwrap();
+        let content = read_secret_source(
+            "secret",
+            "s",
+            &SecretSource::Environment("PATH".to_string()),
+        )
+        .unwrap();
         assert_eq!(content, std::env::var("PATH").unwrap());
     }
 
     #[test]
     fn secret_environment_source_missing_var_is_a_clear_error() {
-        let e = resolve_secret_content(
+        let e = read_secret_source(
             "secret",
             "s",
-            None,
-            Some("DLX_COMPOSE_TEST_VAR_THAT_DOES_NOT_EXIST_XYZ"),
-            false,
-            Path::new("/tmp"),
+            &SecretSource::Environment("DLX_COMPOSE_TEST_VAR_THAT_DOES_NOT_EXIST_XYZ".to_string()),
         )
         .unwrap_err()
         .to_string();
         assert!(e.contains("is not set"), "{e}");
+    }
+
+    /// `compose config` honours its `docker compose config` equivalence: it
+    /// renders the resolved project WITHOUT opening any secret/config `file:`.
+    /// A referenced secret whose file does not exist would fail an `up` (which
+    /// materializes the content), but `translate` — the whole of what `config`
+    /// runs — never touches it, so it resolves cleanly.
+    #[test]
+    fn config_does_not_read_a_referenced_secret_file() {
+        let yaml =
+            "secrets:\n  db_password:\n    file: /no/such/secret/file/at/all\nservices:\n  web:\n    image: x\n    secrets:\n      - db_password\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        // `translate` is the entirety of what `cmd_config` does — if it opened
+        // the missing file this would be an Err. It must resolve.
+        let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"][0];
+        assert_eq!(
+            opts.secret.len(),
+            1,
+            "the reference still resolves to a name"
+        );
+        // And the read the missing file WOULD have triggered is exactly what
+        // `up` does, where it now fails — the content really is required there.
+        let err = materialize_secret_docs(&t.pending_secret_docs).unwrap_err();
+        assert!(err.to_string().contains("reading"), "{err}");
+    }
+
+    /// A non-UTF-8 `file:` is refused by name at materialize time — the engine
+    /// would mount the bytes verbatim, but this v1 delivers a secret through a
+    /// `kind: Secret`'s `stringData` (text), so binary cannot be carried. The
+    /// refusal must name the limitation, not leak `read_to_string`'s raw
+    /// "stream did not contain valid UTF-8".
+    #[test]
+    fn non_utf8_secret_file_is_refused_as_binary_not_as_io_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("keystore.p12");
+        std::fs::write(&path, [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        let yaml = format!(
+            "secrets:\n  ks:\n    file: {}\nservices:\n  web:\n    image: x\n    secrets:\n      - ks\n",
+            path.display()
+        );
+        let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
+        let err = materialize_secret_docs(&t.pending_secret_docs)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not valid UTF-8"), "{err}");
+        assert!(err.contains("binary"), "{err}");
     }
 
     /// `translate()`'s `Result<Translated, _>` cannot use `.unwrap_err()`
