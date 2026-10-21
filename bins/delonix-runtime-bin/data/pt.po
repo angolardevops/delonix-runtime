@@ -4064,6 +4064,9 @@ msgstr "{key}: {reason} — passa `--replace {key}` (ou `--replace all`) para o 
 msgid "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)"
 msgstr "stack apply recusado: {n} recurso(s) precisam de uma decisão explícita (nada foi alterado)"
 
+msgid "stack apply refused: {n} resource(s) belong to another stack or only to the provider (nothing was changed)"
+msgstr "stack apply recusado: {n} recurso(s) pertencem a outra stack ou só ao provider (nada foi alterado)"
+
 msgid "{kind}/{name}: recreating"
 msgstr "{kind}/{name}: a recriar"
 
@@ -15043,6 +15046,16 @@ msgstr "O `systemcontainer move` foi recusado antes de qualquer coisa se mover: 
 
 msgid "Pass `--restart` to stop it, move it and start it on the target, or `--with-local-disks` to let the node copy its volumes, or pick a node the precheck allows."
 msgstr "Passa `--restart` para o parar, mover e arrancar no destino, ou `--with-local-disks` para deixar o nó copiar os volumes, ou escolhe um nó que a verificação prévia permita."
+
+# DX-5601 — stack apply recusado por um conflito de posse
+msgid "a resource the manifest declares is held by someone else — nothing was changed"
+msgstr "um recurso que o manifesto declara pertence a outrem — nada foi alterado"
+
+msgid "`stack apply` planned a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so the whole apply is refused before anything is touched. No flag authorises it."
+msgstr "O `stack apply` planeou um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o apply inteiro é recusado antes de se tocar em qualquer coisa. Nenhuma flag o autoriza."
+
+msgid "Apply it from the stack that owns it, remove it there first, or rename it in this manifest; `stack plan` names the owner."
+msgstr "Aplica-o a partir da stack que é dona dele, remove-o lá primeiro, ou muda-lhe o nome neste manifesto; o `stack plan` diz quem é o dono."
 
 msgid "a copy of the container as it was at a snapshot"
 msgstr "uma cópia do container tal como estava num snapshot"

@@ -1691,10 +1691,32 @@ fn refuse_unallowed(changes: &[Change], replace: &[String], reboot: &[String]) -
     for b in &blocked {
         eprintln!("  ✗ {b}");
     }
-    Err(delonix_model::Error::Invalid(super::po::tf(
+    Err(refusal(changes, blocked.len()))
+}
+
+/// The error a refused apply answers with. A `Conflict` is not a decision the
+/// operator forgot to pass — no flag authorises it —, so it exits with the
+/// conflict class like every other «someone else holds it» refusal of the CLI,
+/// and outranks a `--replace`/`--reboot` the same plan also lacks. Pure.
+fn refusal(changes: &[Change], blocked: usize) -> delonix_model::Error {
+    let conflicts = changes
+        .iter()
+        .filter(|c| c.action == Action::Conflict)
+        .count();
+    if conflicts > 0 {
+        return delonix_model::Error::coded(
+            5601,
+            delonix_model::Error::Conflict(super::po::tf(
+                "stack apply refused: {n} resource(s) belong to another stack or only to the \
+                 provider (nothing was changed)",
+                &[("n", &conflicts.to_string())],
+            )),
+        );
+    }
+    delonix_model::Error::Invalid(super::po::tf(
         "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)",
-        &[("n", &blocked.len().to_string())],
-    )))
+        &[("n", &blocked.to_string())],
+    ))
 }
 
 /// One line per change the flags do not authorise. Pure.
@@ -4364,6 +4386,42 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         )
         .unwrap();
         assert!(refuse_unallowed(&out, &r, &[]).is_err());
+    }
+
+    /// A resource another stack owns is a conflict, whatever its Kind, and the
+    /// refusal exits with the conflict class (5) under its own number — not the
+    /// generic «invalid argument» (rc 1, DX-1000) it used to answer with, which
+    /// told a script to fix an argument when no argument was wrong.
+    #[test]
+    fn a_conflict_refuses_with_the_conflict_class_for_every_kind() {
+        for kind in ["Container", "Network", "Volume", "VirtualMachine"] {
+            let mut c = with_action(a_change(kind, "x"), Action::Conflict);
+            c.owner = Some("stk".into());
+            let e = refuse_unallowed(&[c], &["all".into()], &["all".into()]).unwrap_err();
+            assert_eq!(e.number(), 5601, "{kind}: {e}");
+            assert_eq!(delonix_model::exitcode::for_error(&e), 5, "{kind}: {e}");
+        }
+    }
+
+    /// A conflict next to a recreate nobody authorised still answers as a
+    /// conflict: passing `--replace` would not unblock it, so «invalid
+    /// argument» would send the operator after the wrong flag.
+    #[test]
+    fn a_conflict_outranks_a_missing_replace() {
+        let changes = vec![
+            with_action(a_change("Container", "web"), Action::Conflict),
+            a_change("Container", "db"),
+        ];
+        let e = refuse_unallowed(&changes, &[], &[]).unwrap_err();
+        assert_eq!(e.number(), 5601);
+    }
+
+    /// Without a conflict, a missing `--replace` stays what it was.
+    #[test]
+    fn a_missing_replace_alone_keeps_the_invalid_argument_class() {
+        let e = refuse_unallowed(&[a_change("Container", "db")], &[], &[]).unwrap_err();
+        assert_eq!(e.number(), 1000);
+        assert_eq!(delonix_model::exitcode::for_error(&e), 1);
     }
 
     /// A flag that reads as obeyed and changes nothing is the defect itself —
