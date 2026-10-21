@@ -250,6 +250,19 @@ pub struct VmConfig {
     pub libvirt_xml: Option<String>,
 }
 
+/// Whether `VmConfig.network` names a network the operator asked for, as
+/// opposed to one of the values that mean "the default network": `""`,
+/// `"ingress"` (what `vm create` puts there when `--network` is absent),
+/// `"bridge"` and `"default"`. Pure.
+///
+/// ONE set for every backend. Each used to carry its own copy, and the copies
+/// drifted: libvirt (#866) excluded only `"default"`, so every VM created
+/// without `--network` asked libvirt for a network literally called `ingress`
+/// and failed to start with "no network with matching name 'ingress'".
+pub fn names_a_declared_network(network: &str) -> bool {
+    !matches!(network, "" | "ingress" | "bridge" | "default")
+}
+
 /// The memory size `s` names, in MiB, or `None` when it does not parse.
 ///
 /// The one parser of the memory syntax (`512M`, `4G`, the k8s-style `4Gi`, a
@@ -1018,6 +1031,16 @@ impl std::fmt::Debug for BackendRegistration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_real_name_is_a_declared_network() {
+        for default in ["", "ingress", "bridge", "default"] {
+            assert!(!super::names_a_declared_network(default), "{default:?}");
+        }
+        for named in ["lab-net", "k8s-net", "ingress2"] {
+            assert!(super::names_a_declared_network(named), "{named:?}");
+        }
+    }
+
     #[test]
     fn unsupported_snapshot_names_the_backend_and_op() {
         let e = super::unsupported_snapshot("cloud-hypervisor", "restore").to_string();

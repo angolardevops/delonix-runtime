@@ -18,7 +18,8 @@ use delonix_compute::capability::{
 use delonix_compute::cgroup_leaf::{leaf_dir_name, LeafLimits, ProcessLeaf};
 use delonix_compute::vm::{console_socket, serial_log_path, vm_namespace_of};
 use delonix_compute::vm_backend::{
-    mem_mib, BackendRegistration, Boot, CreateStage, HotplugOutcome, VmBackend, VmConfig,
+    mem_mib, names_a_declared_network, BackendRegistration, Boot, CreateStage, HotplugOutcome,
+    VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -715,7 +716,7 @@ fn boot_on_network(
     // Own private network when named (≠ shared ingress): ensures its
     // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
     on(CreateStage::Network);
-    if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
+    if names_a_declared_network(&cfg.network) {
         // Not `let _`: a network that could not be created (or recorded) used to
         // surface one step later as a bare "no such network" from the attach.
         delonix_compute::vm_registry::network()?.ensure_network(&cfg.network)?;
