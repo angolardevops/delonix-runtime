@@ -2590,6 +2590,18 @@ fn libvirt_network_of(vm: &Vm) -> Option<&str> {
     recorded_libvirt_network(vm.boot.bridge.as_deref(), &vm.network)
 }
 
+/// Whether any of `records` — `(boot.bridge, network)` of each VM record left
+/// — is on the libvirt network `net`, by the same mapping as
+/// [`libvirt_network_of`]. **Pure.**
+fn still_on_network<'a>(
+    net: &str,
+    records: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+) -> bool {
+    records
+        .into_iter()
+        .any(|(bridge, network)| recorded_libvirt_network(bridge, network) == Some(net))
+}
+
 /// [`libvirt_network_of`] over the two record fields it reads. **Pure.**
 fn recorded_libvirt_network<'a>(bridge: Option<&'a str>, network: &'a str) -> Option<&'a str> {
     bridge.or_else(|| names_a_declared_network(network).then_some(network))
@@ -3533,10 +3545,22 @@ impl VmBackend for LibvirtBackend {
         Ok(())
     }
 
-    fn release_network(&self, vm: &Vm) -> delonix_model::Result<()> {
+    fn release_network(&self, vm: &Vm, remaining: &[Vm]) -> delonix_model::Result<()> {
         let Some(net) = libvirt_network_of(vm) else {
             return Ok(()); // libvirt's own `default`: never ours to remove
         };
+        // A record still on it — by `--network` or by `--bridge`, running or
+        // stopped — keeps it. Comparing `network` fields alone missed a VM put
+        // on it with `--bridge <name>` (recorded as `network: ingress`): the
+        // `rm` of the other one removed the network and its `start` failed.
+        if still_on_network(
+            net,
+            remaining
+                .iter()
+                .map(|o| (o.boot.bridge.as_deref(), o.network.as_str())),
+        ) {
+            return Ok(());
+        }
         let uri = libvirt_uri_for(Some(vm.tap.as_str()));
         if release_owned_network(uri, net)? {
             tracing::debug!(network = %net, "libvirt network removed with its last VM");
@@ -4230,6 +4254,23 @@ mod tests {
             recorded_libvirt_network(Some("br-lab"), "ingress"),
             Some("br-lab")
         );
+    }
+
+    /// BUG-1 of the cli-tester's run on 2026-10-21: VM A on `--network ct-x`,
+    /// VM B on `--net-mode nat --bridge ct-x` (recorded as `network: ingress,
+    /// bridge: ct-x`), B stopped, `vm rm A` — and the network went, because
+    /// the count compared `network` fields only; `vm start B` then failed
+    /// with «Network not found». B's record keeps it now.
+    #[test]
+    fn a_vm_on_the_network_by_bridge_keeps_it() {
+        let b = (Some("ct-x"), "ingress");
+        assert!(still_on_network("ct-x", [b]));
+        assert!(still_on_network("ct-x", [(None, "ct-x")]));
+        assert!(!still_on_network(
+            "ct-x",
+            [(None, "ingress"), (None, "ct-y")]
+        ));
+        assert!(!still_on_network("ct-x", []));
     }
 
     /// REGRESSION (the whole point of the `network_subnet` field): with the

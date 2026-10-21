@@ -4641,18 +4641,27 @@ a rede noutra sub-rede e criar uma VM nela dava rc 0 com a VM na sub-rede ANTIGA
   (do operador incluído, parado incluído) está nela; em tudo o resto recusa com
   **DX-5508** (classe 5). Uma rede sem marca deixada por um binário anterior também
   recusa — não se distingue de uma do operador, e a mensagem diz o `virsh` a usar.
-- **A libertação é do caso de uso, não do hipervisor.** `VmBackend::release_network`
-  (default: nada) é chamado pelo `remove` quando nenhum outro registo do mesmo backend
-  nomeia a rede. Perguntar só ao libvirt contaria uma VM PARADA como ausente (o `stop`
-  faz undefine do domínio) e tirava-lhe a rede de baixo do próximo `start`, que não a
-  sabe redefinir (o `network_subnet` não se persiste). Um `boot` que falha depois de
-  definir a rede leva-a consigo.
+- **Quem conta os utilizadores é o caso de uso; quem diz em que rede está cada um é o
+  backend.** `VmBackend::release_network(vm, remaining)` (default: nada) recebe, em cada
+  `rm`, os registos do mesmo backend que ficam — parados incluídos: perguntar só ao
+  libvirt contaria uma VM PARADA como ausente (o `stop` faz undefine do domínio). A
+  primeira versão comparava `o.network == vm.network` no caso de uso, e o cli-tester
+  apanhou-a (BUG-1): uma VM posta na rede por `--bridge X` fica com `network: ingress`,
+  não contava, e o `rm` da outra tirava a rede de baixo do `start` dela. O libvirt decide
+  com o mesmo mapeamento do `boot` (`bridge` antes de `network`, `still_on_network`).
+- **O `start` leva a sub-rede declarada AGORA** (`VmEngine::restart_config`, pelo novo
+  `VmNetwork::subnet_of`). Um root não vê os registos de outro, e o `qemu:///system` é
+  partilhado: o último `rm` de um root pode tirar a rede de que uma VM parada de outro
+  root precisa (BUG-1b). Com a sub-rede, o `start` define-a outra vez — e julga uma que
+  tenha ficado noutra sub-rede, como o `create`. Um `boot` que falha depois de definir a
+  rede leva-a consigo.
 - De caminho: o `destroy` libertava a reserva de IP estático do `default` numa VM com
   `--network`, porque o `boot` mapeia a rede para `bridge` e o registo não o guarda.
 - **Gate**: secção «a rede libvirt de uma rede declarada…» no `scripts/e2e.sh`, dentro do
   `libvirt_system_usable`, com as redes e o domínio «alheios» definidos pela própria secção
-  e nunca arrancados. 12/12 com a correcção, 4/12 com o binário anterior (que ainda deixou
-  a rede para trás).
+  e nunca arrancados. 17/17 com a correcção; 14/17 com a versão que contava por `network`
+  (os três do BUG-1 e do `start`); 4/12 com o binário anterior a tudo isto (que ainda
+  deixou a rede para trás).
 
 ## VM↔container por IP directo (`vm bridge`) — EXPERIMENTAL, privilegiado, opt-in
 

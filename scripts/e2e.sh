@@ -5050,9 +5050,9 @@ section "vm: a rede libvirt de uma rede declarada tem a sub-rede declarada, e sa
 # definidos por esta secção (sem `net-start`: nem bridge nem rota no host).
 if libvirt_system_usable; then
   LNET="lvn-$PFX"; LSTALE="lvs-$PFX"; LFOR="lvf-$PFX"; LDOM="lvd-$PFX"
-  LV1="lvn1-$PFX"; LV2="lvn2-$PFX"; LV3="lvn3-$PFX"; LV4="lvn4-$PFX"
+  LV1="lvn1-$PFX"; LV2="lvn2-$PFX"; LV3="lvn3-$PFX"; LV4="lvn4-$PFX"; LV5="lvn5-$PFX"
   LMARK='delonix.io/xmlns/libvirt/network/1'
-  for v in "$LV1" "$LV2" "$LV3" "$LV4"; do qemu-img create -f qcow2 "$OUT/$v.qcow2" 64M >/dev/null 2>&1; done
+  for v in "$LV1" "$LV2" "$LV3" "$LV4" "$LV5"; do qemu-img create -f qcow2 "$OUT/$v.qcow2" 64M >/dev/null 2>&1; done
   lv_net_has() { virsh -c qemu:///system net-dumpxml "$1" 2>/dev/null | grep -q "$2"; }
   lv_net_gone() { ! virsh -c qemu:///system net-info "$1" >/dev/null 2>&1; }
   lv_create() { "$BIN" vm create "$1" --disk "$OUT/$1.qcow2" --backend libvirt --memory 256M --network "$2"; }
@@ -5068,19 +5068,35 @@ if libvirt_system_usable; then
   }
 
   # 1. O caminho do motor: define com a marca, partilha, e sai com o ÚLTIMO
-  #    registo — uma VM parada (o `stop` faz undefine do domínio) ainda conta.
+  #    registo — uma VM parada (o `stop` faz undefine do domínio) ainda conta,
+  #    e uma posta na rede por `--bridge` (registo `network: ingress`) também:
+  #    o cli-tester mediu (2026-10-21, BUG-1) o `rm` da outra a tirar a rede e o
+  #    `start` desta a falhar com «Network not found».
   "$BIN" network create "$LNET" --subnet 10.231.91.0/24 >/dev/null 2>&1
   if check_then "vm create libvirt numa rede declarada (posse)" ok lv_create "$LV1" "$LNET"; then
     check "a rede libvirt que o motor define leva a marca de posse e a sub-rede declarada" ok bash -c \
       "$(declare -f lv_net_has); lv_net_has '$LNET' '$LMARK' && lv_net_has '$LNET' \"address='10.231.91.1'\""
     check "uma segunda VM na mesma rede declarada" ok lv_create "$LV2" "$LNET"
+    check "uma terceira VM na mesma rede, por --bridge" ok bash -c \
+      "'$BIN' vm create '$LV5' --disk '$OUT/$LV5.qcow2' --backend libvirt --memory 256M --net-mode nat --bridge '$LNET' >/dev/null && virsh -c qemu:///system domiflist '$LV5' | grep -q ' $LNET '"
     check "vm stop (posse)" ok "$BIN" vm stop "$LV1"
+    check "vm stop (posse, --bridge)" ok "$BIN" vm stop "$LV5"
     check "vm rm com outra VM (parada) na mesma rede deixa a rede libvirt" ok bash -c \
       "'$BIN' vm rm '$LV2' >/dev/null && virsh -c qemu:///system net-info '$LNET' >/dev/null"
+    check "vm rm com uma VM (parada) na rede por --bridge deixa a rede libvirt" ok bash -c \
+      "'$BIN' vm rm '$LV1' >/dev/null && virsh -c qemu:///system net-info '$LNET' >/dev/null"
+    check "vm start da VM por --bridge depois do rm da outra" ok bash -c \
+      "'$BIN' vm start '$LV5' >/dev/null && virsh -c qemu:///system domiflist '$LV5' | grep -q ' $LNET '"
+    # A rede desapareceu entretanto (o último `rm` de OUTRO root a tirou, ou à
+    # mão): o `start` resolve a sub-rede declarada e define-a outra vez.
+    "$BIN" vm stop "$LV5" >/dev/null 2>&1
+    lv_undefine_net "$LNET"
+    check "vm start define outra vez a rede que desapareceu, com a marca e a sub-rede declarada" ok bash -c \
+      "$(declare -f lv_net_has); '$BIN' vm start '$LV5' >/dev/null && lv_net_has '$LNET' '$LMARK' && lv_net_has '$LNET' \"address='10.231.91.1'\""
     check "vm rm do último utilizador tira a rede libvirt que o motor definiu" ok bash -c \
-      "$(declare -f lv_net_gone); '$BIN' vm rm '$LV1' >/dev/null && lv_net_gone '$LNET'"
+      "$(declare -f lv_net_gone); '$BIN' vm rm '$LV5' >/dev/null && lv_net_gone '$LNET'"
   fi
-  "$BIN" vm rm "$LV1" -f >/dev/null 2>&1; "$BIN" vm rm "$LV2" -f >/dev/null 2>&1
+  for v in "$LV1" "$LV2" "$LV5"; do "$BIN" vm rm "$v" -f >/dev/null 2>&1; done
   e2e_net_rm "$LNET"
   lv_net_has "$LNET" "$LMARK" && lv_undefine_net "$LNET"
 
@@ -5124,7 +5140,7 @@ if libvirt_system_usable; then
   "$BIN" vm rm "$LV4" -f >/dev/null 2>&1
   e2e_net_rm "$LFOR"
   lv_undefine_net "$LFOR"
-  for v in "$LV1" "$LV2" "$LV3" "$LV4" "$LSTALE" "$LFOR" "$LDOM"; do
+  for v in "$LV1" "$LV2" "$LV3" "$LV4" "$LV5" "$LSTALE" "$LFOR" "$LDOM"; do
     rm -f "$OUT/$v.qcow2" "$OUT/$v.xml"
   done
 else
