@@ -1727,6 +1727,41 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["network ipam prune", "network diagnose", "network inspect"],
     },
     Entry {
+        path: "network vip-pool",
+        group: "Advanced",
+        examples: &[
+            ("set the range `type: VirtualIP` Services draw their VIP from", "delonix network vip-pool set 10.90.0.0/16"),
+            ("what is in force, and where it came from", "delonix network vip-pool show"),
+        ],
+        see_also: &["network ipam ls", "network create", "network diagnose"],
+    },
+    Entry {
+        path: "network vip-pool set",
+        group: "Lifecycle",
+        examples: &[
+            ("one private prefix nothing on this node uses", "delonix network vip-pool set 10.90.0.0/16"),
+            ("two pools at once", "delonix network vip-pool set 10.90.0.0/24,10.91.0.0/24"),
+        ],
+        see_also: &["network vip-pool show", "network vip-pool clear"],
+    },
+    Entry {
+        path: "network vip-pool clear",
+        group: "Lifecycle",
+        examples: &[
+            ("remove the pool; VIPs already held stay", "delonix network vip-pool clear"),
+        ],
+        see_also: &["network vip-pool set", "network vip-pool show"],
+    },
+    Entry {
+        path: "network vip-pool show",
+        group: "Inspect",
+        examples: &[
+            ("the pool in force and its source", "delonix network vip-pool show"),
+            ("the same, for a script", "delonix network vip-pool show -o json"),
+        ],
+        see_also: &["network vip-pool set", "network ipam ls"],
+    },
+    Entry {
         path: "network ipam prune",
         group: "Maintenance",
         examples: &[
@@ -2240,6 +2275,50 @@ pub static ENTRIES: &[Entry] = &[
             ("get it back, orphan container directories included", "delonix system prune -f"),
         ],
         see_also: &["dashboard", "system events", "container stats", "image ls"],
+    },
+    Entry {
+        path: "gitops",
+        group: "Declarative",
+        examples: &[
+            ("stop the passes of a source while you act by hand", "delonix gitops suspend production -n production"),
+            ("run one pass now, without waiting for the timer", "delonix gitops reconcile production -n production"),
+            ("what each source last saw, and what is running", "delonix gitops status"),
+        ],
+        see_also: &["gitops reconcile", "gitops status", "gitops suspend", "stack apply"],
+    },
+    Entry {
+        path: "gitops reconcile",
+        group: "Lifecycle",
+        examples: &[
+            ("fetch, verify, plan and apply the source's ref once, then exit", "delonix gitops reconcile production -n production"),
+            ("a source in the default namespace", "delonix gitops reconcile web"),
+        ],
+        see_also: &["gitops status", "stack plan", "stack history"],
+    },
+    Entry {
+        path: "gitops status",
+        group: "Inspect",
+        examples: &[
+            ("every source: the commit it looked at, the commit applied, and why", "delonix gitops status"),
+            ("one source, for a script", "delonix gitops status production -n production -o json"),
+        ],
+        see_also: &["gitops reconcile", "get gitopssources", "system events"],
+    },
+    Entry {
+        path: "gitops suspend",
+        group: "Configure",
+        examples: &[
+            ("stop the passes during an incident, without a commit", "delonix gitops suspend production -n production"),
+        ],
+        see_also: &["gitops resume", "gitops status"],
+    },
+    Entry {
+        path: "gitops resume",
+        group: "Configure",
+        examples: &[
+            ("let the next fire fetch again", "delonix gitops resume production -n production"),
+        ],
+        see_also: &["gitops suspend", "gitops reconcile"],
     },
     Entry {
         path: "backup",

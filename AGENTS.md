@@ -5350,6 +5350,9 @@ senão um documento removido do manifesto nunca aparecia como candidato a
 
 ## `kind: Service` — descoberta por selector, round-robin por DNS, sem VIP (ADR-0032, 2026-09-05)
 
+> **Desde 2026-10-12 «sem VIP» vale só para `type: DNS`** (a omissão): `type: VirtualIP` dá um
+> endereço L4 com prontidão — ver «kind: Service type VirtualIP» mais abaixo.
+
 Fecha a Kind que faltava para as «12 Kinds operáveis» do plano de
 restruturação da CLI. Desenho completo em
 `docs/adr/0032-service-kind-dns-round-robin.md`; esta secção regista o que
@@ -10031,6 +10034,90 @@ correr, nada disto deve ser lido como «funciona».
 trabalho de outras sessões): o `--extra-package` é descartado em silêncio no caminho
 offline da build da golden, e o `k8s_repo_version` tem um default independente
 (`stable:/v1.31`) que discorda do `DEFAULT_K8S_VERSION` (1.36).
+
+## `kind: GitOpsSource` — a passagem de pull sem daemon (ADR-0021, 2026-10-12)
+
+- **Uma passagem, sem processo residente**: um timer systemd de utilizador por fonte
+  (`delonix-gitops-<ns>.<nome>`, `Type=oneshot`, com atraso aleatório) corre `gitops reconcile`:
+  fetch `--depth=1` do ref, verificação, `stack plan`, guarda, apply com os digests do plano,
+  registo do commit aplicado e um evento. Um segundo disparo com a passagem anterior viva SALTA
+  (`flock` não bloqueante por fonte) e di-lo. Verbos: `gitops reconcile|status|suspend|resume`;
+  `suspend` é uma marca local, fora do spec.
+- **Um commit recusado não aplica NADA e fica registado**: YAML com chave duplicada, um grafo
+  partido, um documento proibido ou uma acção que a política não permite (DX-1602/1604) deixam
+  a stack como estava, com o último commit aplicado intacto. Medido: quatro commits recusados,
+  o mesmo PID e o mesmo `memory.max`.
+- **A fonte é entrada não confiável** — a passagem de segurança está escrita no ADR-0021. O git
+  corre com `env_clear()`, HOME privado, sem config de sistema nem global, sem hooks, só
+  `file`/`https`/`ssh`, `fsckObjects`, sem redirects nem credential helpers, tecto de 120 s. Nada
+  é checked out: a árvore lê-se por `ls-tree`/`cat-file` e só ficheiros regulares passam
+  (symlinks, submódulos, ponteiros LFS e chaves privadas recusam o commit). Tectos: 4096
+  entradas, 256 manifestos, 1 MiB por ficheiro, 8 MiB no total, 512 documentos, 256 MiB de
+  espelho. Assinaturas só SSH (`allowed_signers`); GPG é recusado.
+- **O que um repo pode declarar**: `RuntimePolicy`, `Secret`, `App` e `Image` com `build:` nunca;
+  VM, SystemContainer, NetworkZone, NetworkGateway, StoragePool, Gateway e IPPool só listados em
+  `safety.kinds`. Um container não pede privilégio, rede/PID/IPC do host, bind mounts,
+  dispositivos, GPU, `capAdd`, perfis unconfined nem `envFile`; um Volume é local simples e uma
+  Network é bridge. Os documentos aterram na namespace da fonte. **Um container vindo de uma
+  fonte tem de nomear uma rede**: a forma plana sem rede é `host`, que a guarda recusa.
+- **Política do plano**: `Create`/`Update`/`NoOp` por omissão; `Adopt`/`Replace`/`Reboot` só com
+  `safety.allow`; `Conflict` sempre recusado; `Delete` só com `prune: true`, abaixo de
+  `maximumDeletes` e nunca sobre `protectedResources`. Uma fonte só se declara a si própria, e o
+  repo só lhe muda `ref`/`path`/`interval`; uma passagem nunca poda uma fonte. `Conflict` sempre
+  recusado, com UMA excepção: o registo da própria fonte, quando o repo se declara a si próprio
+  (ver a stack de bootstrap, abaixo).
+- **A stack de bootstrap e a das passagens são duas, nunca a mesma (2026-10-14).** Medido antes:
+  com a fonte aplicada por `stack apply --name <fonte>` e a stack das passagens a chamar-se, por
+  omissão, como a fonte, o `stack plan` dava rc=2 para sempre e um `apply --prune` apagava o
+  Volume que a passagem seguinte recriava VAZIO. Agora `spec.stack` vale, por omissão,
+  `gitops.<namespace>.<nome>` (um rótulo DNS não tem pontos, logo nenhum `spec.stack` nem um
+  `--name` normal o escrevem), e `stack apply`/`plan`/`prune`/`rollback`/`validate` recusam com
+  DX-1601, antes de ler a máquina, um manifesto que declare uma fonte cujas passagens caiam na
+  stack em que o comando age. Só a passagem fica isenta, por argumento explícito
+  (`Applier::Pass`), nunca por variável de ambiente. Quando o repo se declara a si próprio, a
+  passagem toma o registo da fonte à stack do bootstrap («taken over from stack …») e devolve-o se
+  o segundo olhar recusar o commit; daí em diante o bootstrap não é dono de nada, e mudar um campo
+  não mutável de uma fonte auto-gerida é `delete gitopssources` e voltar a fazer o bootstrap.
+- **Não validado**: um timer systemd real a disparar, a recuperação depois de um reboot, a
+  validação numa VM golden, e fetches `ssh://`/`https://` de ponta a ponta. Por fazer (recusados
+  como campos desconhecidos): `selfHeal`, `wait`, `healthTimeout`, backoff, métricas Prometheus,
+  e os verbos `gitops bootstrap`/`rm`/`history` do ADR.
+
+## `kind: Service type VirtualIP` — o VIP L4 com prontidão (ADR-0066, 2026-10-12)
+
+- **`type: DNS|VirtualIP`** (omissão `DNS`, que compara só `matchLabels`/`port` como antes). Um
+  `VirtualIP` aluga um endereço do pool (`<root>/ingress/vip-pool`, ou `DELONIX_SERVICE_VIP_CIDR`;
+  `network vip-pool set|clear|show`) como lease `svc:<ns>/<nome>` no IPAM, e o DNS responde UM
+  registo A — o VIP. `type`/`vip`/`readiness`/`publish` são campos QUENTES: mudar reescreve o
+  registo e o dataplane, sem recriar nada.
+- **O pool é recusado antes de servir**: IPv4 privado, `/16`–`/29`, bits de host a zero, sem
+  sobreposição com outro pool, com redes do motor, `subnet`s CNI, `podSubnet`/`serviceSubnet` do
+  kind, endereços e rotas do host (VPN e wg incluídos), o slirp `10.0.2.0/24` nem o `delonix0`
+  (DX-5360). Sem pool, DX-6360; VIP fora do pool, DX-1361; sem `bridge-nf-call-iptables`,
+  DX-6361 (o hairpin depende dele). A verificação de sobreposição corre no `apply`, não no `plan`.
+- **Quatro chains próprias no holder**, ao lado da ordem que já existia (`fwguard` -20,
+  `fwprivate` -15, `fwdeny` -10, `fwcont` -5, política 0): `svcpre`/`svcout` (nat, -101) fazem o
+  DNAT do VIP para os backends PRONTOS, `vipguard`/`vipguardout` (filter, -20) recusam o que o VIP
+  não serve. Reescritas com `flush` num só `nft -f`. Isolamento de namespace e anti-spoof
+  continuam a valer para o tráfego do VIP (medido: forjar a origem dá `svcpre` +0).
+- **Prontidão fail-closed**: um prober no processo de controlo (500 ms) lê os registos de
+  container em cada ronda e aplica `readiness.tcp` com `successThreshold`/`failureThreshold`;
+  só entra em rotação um backend `Running`, `healthy` se tiver health check, e com a porta a
+  responder. **Desvio do ADR (D7)**: a releitura de 500 ms substitui o disparo por evento. Verbos
+  do holder: `svcsync` e `svc-state` (só leitura); o `nsleave` tira o endereço de todos os mapas
+  antes de um detach devolver. Sem backend pronto o VIP recusa logo (RST), nunca pendura.
+- **`spec.publish`** leva portas do host ao mesmo conjunto de backends; o `start_slirp` volta a
+  publicá-las depois de um respawn.
+- **BREAKING para quem usa o `delonix-sdn` como biblioteca (D9)**: saíram `lbset`/`lbclear`,
+  `set_service_lb*`, `clear_service_lb` e `service_vip` (também no `delonix-net-rules`), e os
+  códigos DX-1329/DX-1330 (substituídos pelo DX-1361).
+- **Medido ao vivo** (roots isolados, backends busybox httpd): espalhamento 34/26 em 60 ligações,
+  `counter packets 60` no `svcpre`; porta fechada → ejectado em 2,6–3,9 s e 0/60 depois;
+  readmitido 0,66 s depois de reabrir; `container rm` → 0/60; plano de controlo morto → 30/30
+  servidos pelo ruleset do pin. Cenário de caos `service_lb`.
+- **Não validado**: a bateria inteira (só a secção nova), uma VM golden, o caminho `svcout` para um
+  cliente no próprio holder (o proxy L7). **ADR-0065 (IPv6) não começou**: a P1 passa todas as
+  regras a `table inet` e precisa de sessão própria.
 
 ## O grupo de cgroup também vale como root, e o VMM do Cloud Hypervisor nasce numa folha (ADR-0079, proposto)
 

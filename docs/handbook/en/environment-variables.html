@@ -500,6 +500,13 @@ and how to tear the isolated infra down, is in
 <td>Must name an existing file — never falls back to another one. The first file found is the configuration; files are never merged. A file that cannot be read makes a VM request without <code>--backend</code> fail instead of guessing a provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_SERVICE_VIP_CIDR</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/service_lb.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>service_lb.<wbr>rs:configured_pools</code></a></td>
+<td>The VIP pool <code>kind: Service</code> <code>type: VirtualIP</code> draws from, for one process (ADR-0066 D2), instead of the node's <code>&lt;root&gt;/<wbr>ingress/<wbr>vip-pool</code>.</td>
+<td>A comma list of private IPv4 prefixes between /16 and /29. Unset or empty: the node's file.</td>
+<td>Validated like <code>network vip-pool set</code>; an invalid value is an error, never «no pool». The holder never sees it: its reject guard covers the file's pools plus each recorded VIP.</td>
+</tr>
+<tr>
 <td><code>DELONIX_SSH_KNOWN_HOSTS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/remote.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>remote.<wbr>rs:conn_args</code></a> (<code>host_key_opts</code>)</td>
 <td>Pins SSH host-key trust for <code>cluster apply</code>/<code>vm migrate</code> to a known_hosts file instead of the default trust-on-first-use.</td>
