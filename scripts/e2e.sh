@@ -2443,6 +2443,21 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
   check "baseline: a --masked-path list that drops the defaults is refused" ok refused --masked-path /x
   check "baseline: an ordinary container with an allowed capability and a named volume runs" ok \
     "$BIN" container run --rm --net none --cap-add NET_BIND_SERVICE -v "ws-vol-$PFX":/d "$IMG" true
+  # The CRI's capability ceiling re-states the engine's whole default set as
+  # `--cap-drop ALL` plus one `--cap-add` each (NET_RAW and NET_BROADCAST
+  # included, which the PSS list does not have). That is what a plain run
+  # gets, so it must run, with the same effective set; measured refused on
+  # 2026-10-21 before `ContainerHardening::default_caps`, and no pod could
+  # start on a baseline node. A capability beyond both lists still is not.
+  DEFCAPS=(--cap-drop ALL)
+  for c in CHOWN DAC_OVERRIDE FOWNER FSETID KILL SETGID SETUID SETPCAP NET_BIND_SERVICE \
+           NET_BROADCAST NET_RAW SYS_CHROOT AUDIT_WRITE SETFCAP; do DEFCAPS+=(--cap-add "$c"); done
+  check "baseline: the CRI's re-stated default capability set runs, with the plain run's CapEff" ok bash -c "
+    plain=\$('$BIN' container run --rm --net none '$IMG' grep CapEff /proc/self/status 2>/dev/null)
+    stated=\$('$BIN' container run --rm --net none ${DEFCAPS[*]} '$IMG' grep CapEff /proc/self/status 2>/dev/null)
+    [[ -n \$plain && \$plain == \"\$stated\" ]]"
+  check "baseline: …and SYS_ADMIN next to the default set is still refused" ok \
+    refused "${DEFCAPS[@]}" --cap-add SYS_ADMIN
   if "$BIN" container run -d --name "$WS" --net none "$IMG" sleep 900 >/dev/null 2>&1; then
     check "baseline: update --volume-add of a host path is refused" ok bash -c \
       "'$BIN' container update '$WS' --volume-add /etc:/hostetc:ro 2>&1 | grep -q 'workloadSecurity: baseline'"
