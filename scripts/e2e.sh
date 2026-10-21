@@ -4747,7 +4747,11 @@ fi
 # removed is the one this block saw absent and then created.
 if libvirt_system_usable && [[ -x "$NODEBIN" ]]; then
   NVNET="nv-$PFX"; NVVM="nvvm-$PFX"; NVDISK="$OUT/$NVVM.qcow2"; NVOCT=""
-  for _o in $(seq 20 250); do
+  # The walk starts at an offset of this run's PID, so two batteries in
+  # parallel do not both pick the first free octet before either one's
+  # libvirt network has a route (measured: the second define is refused).
+  for _i in $(seq 0 230); do
+    _o=$(( 20 + ($$ + _i) % 231 ))
     ip -4 route | grep -q "^10\.237\.$_o\." || { NVOCT=$_o; break; }
   done
   if [[ -z "$NVOCT" ]]; then
@@ -4759,7 +4763,7 @@ if libvirt_system_usable && [[ -x "$NODEBIN" ]]; then
     "$BIN" serve node-api --addr "unix://$NODESOCK" >>"$OUT/node-api.log" 2>&1 &
     NODEPID=$!
     for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
-    if check_then "network create $NVNET --subnet 10.237.$NVOCT.0/24 (node API, libvirt)" ok \
+    if check_then "network create --subnet de uma rede para uma VM libvirt da API de nó" ok \
          "$BIN" network create "$NVNET" --subnet "10.237.$NVOCT.0/24"; then
       check "node API: CreateVirtualMachine libvirt numa rede declarada sem rede libvirt prévia termina SUCCEEDED" ok \
         env NODESOCK="$NODESOCK" NVVM="$NVVM" NVNET="$NVNET" NVDISK="$NVDISK" python3 -c '
@@ -4776,11 +4780,16 @@ deadline=time.time()+180
 while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") and time.time()<deadline:
     time.sleep(1); op=call("GET","/v1/operations/"+op["id"])
 assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op'
-      check "node API: a rede libvirt $NVNET nasce com a sub-rede declarada (virsh net-dumpxml)" ok bash -c \
+      check "node API: a rede libvirt nasce com a sub-rede declarada (virsh net-dumpxml)" ok bash -c \
         "virsh -c qemu:///system net-dumpxml '$NVNET' | grep -q \"address='10.237.$NVOCT.1' netmask='255.255.255.0'\""
     fi
     "$BIN" delete vm "$NVVM" -f >/dev/null 2>&1
     kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+    # By hand, and that is a KNOWN defect, not the design: neither the
+    # node API's DELETE nor `network rm` removes the libvirt network the
+    # provider defined, and a later declaration with another subnet reuses
+    # the stale one (cli-tester, 2026-10-21). When teardown owns it, this
+    # becomes a check that `net-info` fails after `network rm`.
     if virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
       virsh -c qemu:///system net-destroy "$NVNET" >/dev/null 2>&1
       virsh -c qemu:///system net-undefine "$NVNET" >/dev/null 2>&1
@@ -4788,7 +4797,7 @@ assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op'
     e2e_net_rm "$NVNET"
     rm -f "$NVDISK"
   fi
-  unset _o
+  unset _o _i
 else
   skip "node API: VM libvirt numa rede declarada" "sem libvirt de sistema utilizável ou sem delonix-node-api"
 fi

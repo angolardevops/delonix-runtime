@@ -120,6 +120,15 @@ fn network_of(networks: &[NetworkAttachment]) -> Result<(String, Option<String>)
                     "network aliases are not supported for virtual machines on the node API",
                 ));
             }
+            // The name becomes a path under the registry (`declared_subnet`),
+            // so it is held to the registry's own alphabet BEFORE anything
+            // reads the disk: `../x` or `/etc/hostname` read a file outside
+            // it. Same rule `CreateNetwork` applies; the reserved default is
+            // a valid attachment, it just has no record.
+            if !n.network.is_empty() && n.network != delonix_sdn::DEFAULT_NET {
+                delonix_sdn::NetworkStore::validate_name(&n.network)
+                    .map_err(|e| Status::invalid_argument(format!("networks[0].network: {e}")))?;
+            }
             Ok((
                 n.network.clone(),
                 (!n.ipv4_address.is_empty()).then(|| n.ipv4_address.clone()),
@@ -1121,5 +1130,38 @@ mod tests {
             None,
             "the reserved default has no record: its subnet is the engine's bridge"
         );
+    }
+
+    /// cli-tester, 2026-10-21: the attachment's name is joined onto the
+    /// registry's directory, and `../outside` read a record from outside it
+    /// (its subnet reached the provider) while `/etc/hostname` answered 500.
+    /// A name the registry would not accept is an invalid argument, refused
+    /// before any operation exists and before the disk is read.
+    #[test]
+    fn a_network_name_outside_the_registry_alphabet_is_invalid_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("networks")).unwrap();
+        // A record-shaped file beside the registry, where `networks/../outside`
+        // lands: read, its subnet would reach the provider.
+        std::fs::write(root.join("outside"), "cidr=10.237.143.0/24\n").unwrap();
+        for bad in ["../outside", "/etc/hostname", "a/b", "a b"] {
+            let err = config_from_spec(
+                &root,
+                "web",
+                None,
+                &VirtualMachineSpec {
+                    image: "golden".into(),
+                    provider: "libvirt".into(),
+                    networks: vec![NetworkAttachment {
+                        network: bad.into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect_err(bad);
+            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{bad}: {err:?}");
+        }
     }
 }
