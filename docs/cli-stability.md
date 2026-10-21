@@ -95,14 +95,24 @@ Concretamente, garante-se:
 > gate dar `2` com recursos que saíram do manifesto passa a precisar de
 > `--prune`. O `action` continua `delete`, e o `planDigest` não muda.
 
-> **Alteração de contrato depois da v5.1.1 (3).** O `stack apply --dry-run` só
-> imprimia o manifesto com os defaults e respondia `0` sem ler a máquina — um
-> plano que o `apply` recusa passava na pré-visualização. Continua a imprimir o
-> mesmo manifesto no stdout, mas agora decide tudo o que o `apply` decide antes
-> da primeira escrita e sai como ele sairia: `5` (`DX-5601`) com um recurso de
-> outra stack, `1` (`DX-1000`) com um Replace ou um Reboot sem `--replace` ou
-> `--reboot`, ou uma gralha nessas flags. Nenhum recurso é criado nem mudado.
-> Quem queria só o manifesto, sem a máquina, tem o `delonix manifest render`.
+> **Alteração de contrato depois da v5.1.1 (3).** O `stack apply --dry-run` (e o
+> `delonix apply --dry-run`, o mesmo caminho) só imprimia o manifesto com os
+> defaults e respondia `0` sem ler a máquina — um plano que o `apply` recusa
+> passava na pré-visualização. Continua a imprimir o mesmo manifesto no stdout,
+> mas agora corre tudo o que o `apply` corre antes da primeira escrita e sai
+> como ele sairia:
+>
+> * `5` (`DX-5601`) com um recurso que outra stack carimbou;
+> * `5` (`DX-5390`) com um `--plan-digest` que já não é o plano;
+> * `1` (`DX-1000`) com um Replace ou um Reboot sem `--replace` ou `--reboot`,
+>   com uma gralha nessas flags, ou com um valor que não tem a forma
+>   `<Kind>/<nome>`, nome ou `all`;
+> * `77` (`DX-7000`) quando o root do estado não se deixa ler e preparar.
+>
+> Nenhum recurso é criado nem mudado e nenhuma revisão é gravada. Mas o root
+> não fica intocado: os stores criam as suas directorias e a chave do keyring
+> dos túneis, como o `stack validate` já fazia. Quem queria só o manifesto, sem
+> a máquina, tem o `delonix manifest render`, que continua a responder `0`.
 
 | código | significado |
 |---|---|

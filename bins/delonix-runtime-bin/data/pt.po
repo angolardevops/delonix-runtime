@@ -10147,8 +10147,8 @@ msgstr "Verifica um manifesto contra o schema, as referências e o grafo"
 msgid "Print the manifest as the engine will read it, with defaults filled in"
 msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos"
 
-msgid "Print the manifest as the engine will read it, with defaults filled in.\n\nThe spelling the CLI restructuring asks for is `render`; what it does is what `stack apply --dry-run` already did — round-trip every document through its typed spec so the `#[serde(default)]` values become visible. Secrets are NOT resolved: a rendered manifest is meant to be read by a person and pasted into a review."
-msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos.\n\nA grafia que a reestruturação da CLI pede é `render`; o que ele faz é o que o `stack apply --dry-run` já fazia — passar cada documento pela sua spec tipada para os valores `#[serde(default)]` ficarem visíveis. Os segredos NÃO são resolvidos: um manifesto renderizado é para ser lido por uma pessoa e colado numa revisão."
+msgid "Print the manifest as the engine will read it, with defaults filled in.\n\nThe spelling the CLI restructuring asks for is `render`: round-trip every document through its typed spec so the `#[serde(default)]` values become visible — the manifest `stack apply --dry-run` prints, without the plan it then runs against the machine. Secrets are NOT resolved: a rendered manifest is meant to be read by a person and pasted into a review."
+msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos.\n\nA grafia que a reestruturação da CLI pede é `render`: passar cada documento pela sua spec tipada para os valores `#[serde(default)]` ficarem visíveis — o manifesto que o `stack apply --dry-run` imprime, sem o plano que ele corre depois contra a máquina. Os segredos NÃO são resolvidos: um manifesto renderizado é para ser lido por uma pessoa e colado numa revisão."
 
 msgid "The JSON Schema, generated from the Rust types (ADR-0007)"
 msgstr "O JSON Schema, gerado dos tipos Rust (ADR-0007)"
@@ -10156,8 +10156,8 @@ msgstr "O JSON Schema, gerado dos tipos Rust (ADR-0007)"
 msgid "Stack name to own the resources with (`delonix.io/stack`)"
 msgstr "Nome da stack que fica dona dos recursos (`delonix.io/stack`)"
 
-msgid "Print what would be applied, and apply nothing"
-msgstr "Imprime o que seria aplicado, e não aplica nada"
+msgid "Print what would be applied, and apply nothing — exiting as the apply would refuse (5 for a resource another stack owns, DX-5601)"
+msgstr "Imprime o que seria aplicado, e não aplica nada — saindo como o apply recusaria (5 para um recurso que outra stack possui, DX-5601)"
 
 msgid "Authorize the recreate of a resource whose cold field changed"
 msgstr "Autoriza a recriação de um recurso cujo campo frio mudou"

@@ -3603,6 +3603,12 @@ sys.exit(0 if got==[(\"Network\",sys.argv[4]),(\"Volume\",sys.argv[3])] else 1)'
     cat '$CFWORK/dry.err'
     [[ \$rc == 5 ]] && { ! grep -q DX-5601 '$CFWORK/dry.err' || ! grep -q '^kind: Volume' <<<\"\$out\"; } && exit 99
     exit \$rc"
+  # O `manifest render` é a vista sem a máquina: o mesmo manifesto, com o
+  # conflito por baixo, sai 0. Foi implementado como `apply --dry-run` e herdou
+  # a recusa quando o dry-run passou a planear; o cli-tester apanhou-o.
+  check "conflito de posse: o manifest render do mesmo manifesto sai 0, com o manifesto" ok bash -c "
+    out=\$('$BIN' manifest render -f '$CFWORK/a.yaml') || exit \$?
+    grep -q '^kind: Volume' <<<\"\$out\" || { echo 'sem o manifesto no stdout'; exit 99; }"
   check "…e nada mudou: os dois registos iguais, a stk-b sem revisão, a stk-a sem deriva" ok bash -c "
     s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN') || { echo 'um registo desapareceu'; exit 1; }
     [[ -n '$CF_A' && \"\$s\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }

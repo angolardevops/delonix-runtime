@@ -1879,7 +1879,7 @@ fn apply(
     // Replace nobody authorised) previewed as fine. It now decides exactly
     // what the apply decides before its first write, and exits as it would.
     if dry_run {
-        print!("{}", manifest::render_with_defaults(&docs)?);
+        print_rendered(&docs)?;
         decide(
             &docs,
             &stack,
@@ -1899,6 +1899,18 @@ fn apply(
         None,
         super::gitops::Applier::Operator,
     )
+}
+
+/// `manifest render`: the manifest with every default filled in, and nothing
+/// else — no plan, nothing read from the machine or written to it.
+pub(crate) fn render(file: Option<PathBuf>) -> Result<()> {
+    let path = manifest::resolve_path(file)?;
+    print_rendered(&manifest::load(&path)?)
+}
+
+fn print_rendered(docs: &[manifest::ManifestDoc]) -> Result<()> {
+    print!("{}", manifest::render_with_defaults(docs)?);
+    Ok(())
 }
 
 /// The shapes an authorisation token can take: `all`, `<Kind>/<name>`, or a
@@ -4302,6 +4314,38 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         )
         .unwrap_err();
         assert_eq!(e.number(), 1601, "{e}");
+    }
+
+    /// `manifest render` is the view without the machine: the same manifest the
+    /// dry-run above refuses renders with 0. It used to BE `apply --dry-run`,
+    /// and inherited the refusal when the dry-run started to plan. The stack is
+    /// the directory's (`render` has no `--name`), so the source targets it.
+    #[test]
+    fn manifest_render_does_not_take_the_dry_runs_refusals() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cfgs");
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("delonix-manifest.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: cfgs\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n  stack: cfgs\n",
+        )
+        .unwrap();
+        let dry = apply(
+            Some(file.clone()),
+            None,
+            true,
+            Vec::new(),
+            Vec::new(),
+            false,
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(dry.number(), 1601, "{dry}");
+        super::super::manifestcmd::run(super::super::manifestcmd::ManifestCmd::Render {
+            file: Some(file),
+        })
+        .unwrap();
     }
 
     /// G1 (ADR-0021): a hand-run plan, prune, apply or validate of the stack a
