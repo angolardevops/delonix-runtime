@@ -224,6 +224,15 @@ recusaria, e ganha ao <code>2</code>. Um gate escrito como «<code>0</code> pass
 resto é erro» fica certo sem mudança; quem só testava <code>[ $? -eq 0 ]</code> passa a ver
 vermelho exactamente onde o <code>apply</code> ia falhar. Sem a flag, o <code>plan</code> continua a
 responder <code>0</code>.</p>
+<p><strong>Alteração de contrato depois da v5.1.1 (2).</strong> O <code>stack plan</code> (e o <code>plan</code>)
+ganhou <code>--prune</code>, e passou a planear com as flags do <code>apply</code>. Sem <code>--prune</code>, um
+recurso que esta stack possui e o manifesto já não declara continua listado
+(<code>-</code>), mas como <strong>mantido</strong>: <code>changed: false</code> no <code>-o json</code> e fora do
+<code>--detailed-exitcode</code>. Antes contava como alteração, e um gate de deriva sem
+poda respondia <code>2</code> para sempre, porque o <code>apply</code> que o acompanha nunca o remove.
+Com <code>--prune</code> responde como antes: a remoção é uma alteração (<code>2</code>). Quem fazia o
+gate dar <code>2</code> com recursos que saíram do manifesto passa a precisar de
+<code>--prune</code>. O <code>action</code> continua <code>delete</code>, e o <code>planDigest</code> não muda.</p>
 </blockquote>
 <table>
 <thead>

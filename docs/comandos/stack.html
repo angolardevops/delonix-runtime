@@ -464,6 +464,9 @@ Options:
       --detailed-exitcode
           Exit 2 when there are changes, 5 when the plan holds a conflict `stack apply` would refuse (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate
 
+      --prune
+          Plan what `stack apply --prune` would do: what this stack owns and the manifest no longer declares counts as a change, to remove. Without it, it is listed as KEPT — `apply` removes nothing without `--prune` — and does not count for `--detailed-exitcode`
+
       --fields
           Print WHICH fields the plan compares, per Kind, and exit. Answers &quot;why is my change not showing up?&quot; without reading the source
 
@@ -476,6 +479,10 @@ EXAMPLES:
 
   # a drift gate in CI: exit 2 means the machine no longer matches the file
   delonix stack plan -f prod.yaml --detailed-exitcode
+
+  # the same gate when the pipeline applies with --prune: what left the file
+  # counts as a removal
+  delonix stack plan -f prod.yaml --prune --detailed-exitcode
 
   # machine-readable, for a bot to comment on a pull request
   delonix stack plan -f prod.yaml -o json
