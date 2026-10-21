@@ -635,7 +635,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Declarative",
         examples: &[
             ("what an apply would change", "delonix plan -f delonix-manifest.yaml"),
-            ("a drift gate for CI: 0 none, 2 changes, 1 error", "delonix plan -f delonix-manifest.yaml --detailed-exitcode"),
+            ("a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would refuse, 1 error", "delonix plan -f delonix-manifest.yaml --detailed-exitcode"),
             ("which fields are compared, per Kind", "delonix plan --fields"),
         ],
         see_also: &["apply", "wait", "manifest validate"],

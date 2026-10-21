@@ -1095,4 +1095,5 @@ delonix vm bridge <rede> [--apply] · vm unbridge <rede>    # root
 ```
 
 **Códigos de saída:** `0` sucesso · `1` erro genérico · `2` argumentos inválidos (ou
-«há alterações» no `plan --detailed-exitcode`) · `4` não existe · `5` conflito.
+«há alterações» no `plan --detailed-exitcode`) · `4` não existe · `5` conflito (também no
+`plan --detailed-exitcode`, quando o plano tem um recurso de outra stack).

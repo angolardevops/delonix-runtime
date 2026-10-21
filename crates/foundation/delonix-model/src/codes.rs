@@ -1299,7 +1299,7 @@ pub static CATALOG: &[Code] = &[
         "Pass `--restart` to stop it, move it and start it on the target, or `--with-local-disks` to let the node copy its volumes, or pick a node the precheck allows."),
     code!(5601, "stack.resource_conflict", Conflict, Stack, 5,
         "a resource the manifest declares is held by someone else — nothing was changed",
-        "`stack apply` planned a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so the whole apply is refused before anything is touched. No flag authorises it.",
+        "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, and `stack plan --detailed-exitcode` exits with this code instead of 0 or 2. No flag authorises it.",
         "Apply it from the stack that owns it, remove it there first, or rename it in this manifest; `stack plan` names the owner."),
     code!(6000, "unavailable", Unavailable, Engine, 69,
         "unavailable on this host",
