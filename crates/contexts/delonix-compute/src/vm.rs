@@ -199,8 +199,19 @@ where
         //
         // Local backends only: a backend that owns its storage speaks the far
         // node's network vocabulary and refuses what it cannot map itself
-        // (Proxmox). A restart keeps the network its record already has.
-        if restarting.is_none() && !own_storage && names_a_declared_network(&cfg.network) {
+        // (Proxmox).
+        //
+        // A create over a STOPPED record asks too, unless it names the network
+        // the record already has: the recover path boots with `cfg`, not with
+        // the record, so `vm create <stopped> --network <typo>` moved the VM and
+        // Cloud Hypervisor created the typo (found by the cli-tester on this
+        // very change). Only the unchanged network is spared — a VM that already
+        // booted on it keeps booting, even on a network an older version made.
+        let changes_network = match &restarting {
+            Some(ex) => ex.network != cfg.network,
+            None => true,
+        };
+        if changes_network && !own_storage && names_a_declared_network(&cfg.network) {
             refuse_undeclared_network(self.network, &cfg.network)?;
         }
 
@@ -2259,6 +2270,50 @@ mod tests {
         );
         assert!(calls(&seen).is_empty(), "{:?}", calls(&seen));
         assert!(e.repo.get("web").is_err(), "no record may be left");
+    }
+
+    /// A create over a STOPPED VM that names a different, undeclared network
+    /// is refused like a new one — the recover path boots with the new `cfg`,
+    /// so skipping the question there moved the VM onto the typo (and Cloud
+    /// Hypervisor created it). The record's own network is not asked again.
+    #[test]
+    fn a_stopped_vm_is_not_recovered_onto_an_undeclared_network() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let declared = DeclaredNets(&["lab-net"]);
+        let e = VmEngine {
+            network: Some(&declared),
+            ..engine(root.path(), seen.clone())
+        };
+        let on_lab = VmConfig {
+            network: "lab-net".into(),
+            ..cfg("web")
+        };
+        e.create(&on_lab).expect("create on a declared network");
+        *seen.running.borrow_mut() = false; // stopped
+        let boots = |s: &Seen| calls(s).iter().filter(|c| c.starts_with("boot ")).count();
+        let before = boots(&seen);
+
+        let err = e
+            .create(&VmConfig {
+                network: "cf-nope".into(),
+                ..cfg("web")
+            })
+            .expect_err("a stopped VM must not be recovered onto an undeclared network");
+        assert_eq!(delonix_model::Error::from(err).number(), 4505);
+        assert_eq!(boots(&seen), before, "{:?}", calls(&seen));
+        assert_eq!(e.repo.get("web").unwrap().network, "lab-net");
+
+        // Its own network is not a question — even once it is no longer
+        // declared (a network an older version made, adopted on boot).
+        let none = DeclaredNets(&[]);
+        let e = VmEngine {
+            network: Some(&none),
+            ..e
+        };
+        e.create(&on_lab)
+            .expect("recovering on the record's own network");
+        assert_eq!(boots(&seen), before + 1, "{:?}", calls(&seen));
     }
 
     /// The declared network goes through; the default-network values are not

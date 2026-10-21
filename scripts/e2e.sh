@@ -7001,7 +7001,8 @@ if command -v qemu-img >/dev/null 2>&1 \
     [ \$rc -eq 4 ] || { echo \"rc=\$rc: \$out\"; exit 1; }
     case \"\$out\" in *DX-4505*'delonix network create un-nope-$PFX'*) ;; *) echo \"\$out\"; exit 1;; esac
     ls \"\$DELONIX_ROOT/vms\" 2>/dev/null | grep -q 'un-$PFX' && { echo 'a VM artifact was left'; exit 1; }
-    \"$BIN\" network ls 2>/dev/null | grep -q 'un-nope-$PFX' && { echo 'the network was created'; exit 1; }
+    nl=\$(\"$BIN\" network ls 2>&1) || { echo \"network ls failed: \$nl\"; exit 1; }
+    case \"\$nl\" in *'un-nope-$PFX'*) echo 'the network was created'; exit 1;; esac
     exit 0"
 else
   skip "vm create: undeclared network" "no qemu-img, or no VM backend (cloud-hypervisor/virsh) to select"
