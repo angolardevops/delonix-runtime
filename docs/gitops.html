@@ -314,6 +314,10 @@ serve-o directamente — mesmo contrato do <code>terraform plan -detailed-exitco
 <td>há alterações (= deriva, se o ficheiro não mudou)</td>
 </tr>
 <tr>
+<td><code>5</code></td>
+<td>o plano tem um <strong>conflito de posse</strong> (<code>DX-5601</code>) — o <code>stack apply</code> recusá-lo-ia inteiro</td>
+</tr>
+<tr>
 <td><code>1</code></td>
 <td>o comando falhou</td>
 </tr>
@@ -326,6 +330,12 @@ em <a href="cli-stability.md">cli-stability.md</a>). Os dois sinais positivos n�
 <code>2</code>. Um gate escrito como «<code>0</code> passa, <code>2</code> falha por deriva, <strong>o resto</strong> falha
 por erro» continua correcto; um escrito com <code>elif [ $? -eq 1 ]</code> para o erro
 passa a precisar de <code>else</code>.</p>
+<p>O <code>5</code> existe desde que um conflito deixou de passar por limpo: um recurso que
+outra stack já carimbou não é uma alteração (o <code>changed</code> dele é <code>false</code>), e até
+aqui o plano respondia <code>0</code> — o gate ficava verde e o <code>apply</code> a seguir recusava
+com <code>5</code>. O conflito ganha às alterações: com um conflito no plano a resposta é
+<code>5</code> mesmo que haja também recursos a mudar, porque o <code>apply</code> não aplicaria
+nenhum deles.</p>
 <pre><code class="language-yaml">  drift:
     runs-on: ubuntu-latest
     steps:
