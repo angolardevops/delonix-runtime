@@ -165,6 +165,35 @@ where
         // same string the caller wrote — this engine does not get to reinterpret a
         // name that means something on the far node.
         let own_storage = backend.manages_own_storage();
+        // A create of a NEW VM that fails takes back what it wrote: with no
+        // record, nothing else ever will — `vm ls` does not list the leftovers
+        // and `rm` answers «no such VM» and keeps them (it deletes nothing it
+        // cannot prove is a VM's, see `remove_inner`). The per-VM directory is
+        // taken back only if this call brought it into being: one already there
+        // holds a `--user-data` seed the caller packaged, or what an earlier
+        // attempt left, and is not this call's to remove.
+        let fresh = restarting.is_none();
+        let seed_dir = vmdir.join(&cfg.name);
+        let seed_dir_is_ours = fresh && !seed_dir.exists();
+        let undo = |overlay: &Path| {
+            if !fresh {
+                return;
+            }
+            // Only when WE made it. With `manages_own_storage`, `overlay` IS
+            // `cfg.disk` verbatim — the name the caller wrote for something on
+            // the far node — and removing it means this engine deleting a file
+            // it did not create. For today's Proxmox backend that name is
+            // `local-lvm:8` and the unlink simply fails, but the rule cannot
+            // rest on the spelling a backend happens to use: a remote backend
+            // whose disk reference IS a local path would lose the user's base
+            // image on a failed boot.
+            if !own_storage {
+                let _ = std::fs::remove_file(overlay);
+            }
+            if seed_dir_is_ours {
+                let _ = std::fs::remove_dir_all(&seed_dir);
+            }
+        };
         let (disk_path, overlay) = if own_storage {
             (
                 std::path::PathBuf::from(&cfg.disk),
@@ -192,7 +221,10 @@ where
         // ISO nobody reads, on a drive that changes the guest's device list.
         let realized;
         let cfg = if cfg.seed.is_none() && cfg.cloud_init != Some(false) && !own_storage {
-            let iso = self.seed.seed(self.root, cfg)?;
+            let iso = self
+                .seed
+                .seed(self.root, cfg)
+                .inspect_err(|_| undo(&overlay))?;
             realized = VmConfig {
                 seed: Some(iso.to_string_lossy().into_owned()),
                 ..cfg.clone()
@@ -219,17 +251,7 @@ where
             None => match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
                 Ok(b) => b,
                 Err(e) => {
-                    // Clean up the overlay only when WE made it. With
-                    // `manages_own_storage`, `overlay` IS `cfg.disk` verbatim — the name
-                    // the caller wrote for something on the far node — and removing it
-                    // means this engine deleting a file it did not create. For today's
-                    // Proxmox backend that name is `local-lvm:8` and the unlink simply
-                    // fails, but the rule cannot rest on the spelling a backend happens
-                    // to use: a remote backend whose disk reference IS a local path
-                    // would lose the user's base image on a failed boot.
-                    if restarting.is_none() && !own_storage {
-                        let _ = std::fs::remove_file(&overlay);
-                    }
+                    undo(&overlay);
                     return Err(e.into());
                 }
             },
@@ -1885,6 +1907,15 @@ mod tests {
         resized: RefCell<Option<Vm>>,
         /// Makes `hotplug_add_disk` fail after it reported the attachment.
         fail_after_attach: RefCell<bool>,
+        /// Makes the overlay and the seed land on disk where the real ports
+        /// put them (`vms/<name>.qcow2`, `vms/<name>/`), so a test can see
+        /// what a failed create leaves behind.
+        writes_files: bool,
+        /// Makes the seed fail after it wrote its directory, the way
+        /// `cloud-localds` failing leaves `user-data` and `meta-data`.
+        fail_seed: bool,
+        /// Makes `boot` fail, the way a libvirt domain that does not start does.
+        fail_boot: bool,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1913,6 +1944,11 @@ mod tests {
                 .calls
                 .borrow_mut()
                 .push(format!("boot {} {overlay} seed={:?}", cfg.name, cfg.seed));
+            if self.0.fail_boot {
+                return Err(delonix_model::Error::Invalid(
+                    "failed to start the domain".into(),
+                ));
+            }
             *self.0.running.borrow_mut() = true;
             Ok(Boot {
                 pid: None,
@@ -2100,7 +2136,11 @@ mod tests {
             _on: &dyn Fn(CreateStage),
         ) -> delonix_model::Result<(PathBuf, PathBuf)> {
             self.0.calls.borrow_mut().push(format!("overlay {name}"));
-            Ok((PathBuf::from(base), vmdir.join(format!("{name}.qcow2"))))
+            let overlay = vmdir.join(format!("{name}.qcow2"));
+            if self.0.writes_files {
+                std::fs::write(&overlay, b"qcow2").unwrap();
+            }
+            Ok((PathBuf::from(base), overlay))
         }
     }
 
@@ -2109,7 +2149,17 @@ mod tests {
     impl SeedBuilder for FakeSeed {
         fn seed(&self, root: &Path, cfg: &VmConfig) -> delonix_model::Result<PathBuf> {
             self.0.calls.borrow_mut().push(format!("seed {}", cfg.name));
-            Ok(root.join(format!("{}-seed.iso", cfg.name)))
+            if !self.0.writes_files {
+                return Ok(root.join(format!("{}-seed.iso", cfg.name)));
+            }
+            let dir = root.join("vms").join(&cfg.name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("user-data"), b"#cloud-config\n").unwrap();
+            if self.0.fail_seed {
+                return Err(delonix_model::Error::Invalid("cloud-localds failed".into()));
+            }
+            std::fs::write(dir.join("seed.iso"), b"iso").unwrap();
+            Ok(dir.join("seed.iso"))
         }
     }
 
@@ -2238,6 +2288,100 @@ mod tests {
         assert!(e.create(&cfg("../escape")).is_err());
         assert!(calls(&seen).is_empty());
         assert!(e.repo.list().unwrap().is_empty());
+    }
+
+    /// A NEW VM whose boot fails takes back everything its create wrote: the
+    /// overlay AND the per-VM seed directory. The directory used to stay —
+    /// with `user-data` holding the injected key — and with no record, `vm ls`
+    /// did not list it and `rm` answered «no such VM» (4501) and kept it.
+    #[test]
+    fn a_failed_boot_of_a_new_vm_removes_the_overlay_and_the_seed_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("web")).expect_err("the boot fails");
+        let vms = root.path().join("vms");
+        assert!(!vms.join("web.qcow2").exists(), "overlay left behind");
+        assert!(!vms.join("web").exists(), "seed directory left behind");
+        assert!(e.repo.get("web").is_err());
+        assert_eq!(e.remove("web").unwrap_err().number(), 4501);
+    }
+
+    /// A seed that fails after it wrote its directory takes the overlay built a
+    /// moment earlier with it — the next create of the name would otherwise
+    /// reuse that overlay whatever base image it asks for.
+    #[test]
+    fn a_failed_seed_removes_the_overlay_and_what_the_seed_wrote() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_seed: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("web")).expect_err("the seed fails");
+        let vms = root.path().join("vms");
+        assert!(!vms.join("web.qcow2").exists(), "overlay left behind");
+        assert!(!vms.join("web").exists(), "seed directory left behind");
+        assert!(
+            !calls(&seen).iter().any(|c| c.starts_with("boot ")),
+            "{:?}",
+            calls(&seen)
+        );
+    }
+
+    /// A per-VM directory that was there BEFORE the create — a `--user-data`
+    /// seed the caller packaged into it, or what an earlier attempt left — is
+    /// not this create's to remove, even when its boot fails.
+    #[test]
+    fn a_failed_boot_keeps_a_seed_directory_that_was_already_there() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("vms").join("web");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("caller-file"), b"keep").unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("web")).expect_err("the boot fails");
+        assert!(dir.join("caller-file").exists());
+        assert!(!root.path().join("vms").join("web.qcow2").exists());
+    }
+
+    /// A RESTART whose boot fails deletes nothing: the overlay and the seed
+    /// are the recorded VM's, and the record stays to be started again.
+    #[test]
+    fn a_failed_restart_keeps_the_vms_overlay_and_seed() {
+        let root = tempfile::tempdir().unwrap();
+        let ok = Rc::new(Seen {
+            writes_files: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), ok.clone());
+        e.create(&cfg("web")).expect("create");
+        e.stop("web").expect("stop");
+        let failing = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let again = VmEngine {
+            backends: FakeBackends(failing.clone()),
+            disks: FakeDisks(failing.clone()),
+            seed: FakeSeed(failing),
+            ..e
+        };
+        again.create(&cfg("web")).expect_err("the restart fails");
+        let vms = root.path().join("vms");
+        assert!(vms.join("web.qcow2").exists());
+        assert!(vms.join("web").join("seed.iso").exists());
+        assert_eq!(again.repo.get("web").unwrap().status, Status::Stopped);
     }
 
     /// `stop` of a name no record describes asks the backends for an
