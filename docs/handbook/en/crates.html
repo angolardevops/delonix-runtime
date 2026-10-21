@@ -1317,6 +1317,10 @@ caller.</p>
 <td>one sample of a workload's cumulative counters (<code>cgroup_sample</code>, <code>process_sample</code>), with what could not be read named in <code>Unmeasured</code> instead of reported as zero — what MCP's <code>workload.usage</code> returns</td>
 </tr>
 <tr>
+<td><code>pressure</code></td>
+<td>contention series of one workload read from its cgroup v2 files: <code>cpu.stat</code> throttling, <code>*.pressure</code> (PSI), <code>memory.events</code> OOM; pure parsers, and a <code>Why</code> per group that could not be read (<code>read_cgroup</code>, <code>vmm_cgroup</code>)</td>
+</tr>
+<tr>
 <td><code>provider_report</code></td>
 <td>the Linux provider's answer to the capability catalog for containers and pods</td>
 </tr>
@@ -1978,6 +1982,10 @@ so that a crate needing a <code>Container</code> type does not compile an OTLP c
 <td><code>metrics</code></td>
 <td>Prometheus counters/gauges and <code>encode</code></td>
 </tr>
+<tr>
+<td><code>workload</code></td>
+<td>per-workload contention series (<code>WorkloadSeries</code>), rendered at scrape time by a collector</td>
+</tr>
 </tbody>
 </table></div>
 <p><strong>Main public API</strong></p>
@@ -1999,6 +2007,11 @@ so that a crate needing a <code>Container</code> type does not compile an OTLP c
 <td><code>metrics::encode</code></td>
 <td>text exposition for <code>/metrics</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>metrics.<wbr>rs:encode</code></a></td>
+</tr>
+<tr>
+<td><code>metrics::<wbr>publish_workloads</code></td>
+<td>replace the per-workload snapshot before a scrape</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>metrics.<wbr>rs:publish_workloads</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -2506,7 +2519,7 @@ of ADR-0040/0041 rather than these routes.</p>
 </tr>
 <tr>
 <td><code>dashstats</code></td>
-<td><code>DashSummary</code>, <code>collect</code> (counts, memory, network, disk), timeouts, metrics publishing</td>
+<td><code>DashSummary</code>, <code>collect</code> (counts, memory, network, disk), <code>collect_workload_series</code> (per-workload throttling/pressure/OOM), timeouts, metrics publishing</td>
 </tr>
 </tbody>
 </table></div>

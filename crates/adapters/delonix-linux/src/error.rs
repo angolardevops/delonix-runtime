@@ -116,6 +116,12 @@ pub enum Error {
     #[error("{0}")]
     KubeCgroupNeedsRoot(String),
 
+    /// A container's cgroup group (`cgroup_parent`) whose name is not one safe path
+    /// segment, or whose aggregate ceiling does not parse. Refused in both
+    /// privilege modes, before the container is placed.
+    #[error("{0}")]
+    InvalidCgroupParent(String),
+
     // ---- not running / already running -------------------------------------
     /// The container exists but is not running, and the operation needs it
     /// running. Converts straight into the shared
@@ -131,6 +137,13 @@ pub enum Error {
     /// is to wait and retry, not to start it.
     #[error("{0}")]
     MountPending(String),
+
+    /// Root mode: the container's cgroup group could not be created, limited, or
+    /// given the controllers its children need. A group without its ceiling would
+    /// hold nothing, so the container is not started (class «unavailable»: the
+    /// host, not the argument, is what has to change).
+    #[error("{0}")]
+    CgroupParentUnavailable(String),
 
     // ---- not found ----------------------------------------------------
     /// A CDI device name is not declared by any discovered CDI spec.
@@ -226,11 +239,13 @@ impl Error {
             Error::LiveUnmountFailed(_) => 1113,
             Error::InvalidCdiDeviceName(_) => 1114,
             Error::KubeCgroupNeedsRoot(_) => 1115,
+            Error::InvalidCgroupParent(_) => 1116,
             Error::NotRunning(_) => 3101,
             Error::CdiDeviceNotFound(_) => 4102,
             Error::AlreadyRunning(_) => 5101,
             Error::StillExiting(_) => 8101,
             Error::MountPending(_) => 6101,
+            Error::CgroupParentUnavailable(_) => 6102,
             Error::ApparmorUnavailable(_) => 1901,
             Error::NoCdiSpec(_) => 1902,
             Error::Syscall { .. } => 9901,
@@ -272,13 +287,14 @@ impl From<Error> for Dx {
             | Error::LiveUnmountFailed(t)
             | Error::InvalidCdiDeviceName(t)
             | Error::KubeCgroupNeedsRoot(t)
+            | Error::InvalidCgroupParent(t)
             | Error::ApparmorUnavailable(t)
             | Error::NoCdiSpec(t) => Dx::Invalid(t),
             Error::NotRunning(t) => Dx::NotRunning(t),
             Error::CdiDeviceNotFound(t) => Dx::NotFound(t),
             Error::AlreadyRunning(t) => Dx::Conflict(t),
             Error::StillExiting(t) => Dx::Timeout(t),
-            Error::MountPending(t) => Dx::Unavailable(t),
+            Error::MountPending(t) | Error::CgroupParentUnavailable(t) => Dx::Unavailable(t),
             Error::Syscall { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
         };
@@ -317,7 +333,11 @@ mod tests {
                  hierarchy needs the root runtime"
                     .into(),
             ),
+            Error::InvalidCgroupParent("cgroup group \"../x\": not one safe path segment".into()),
             Error::NotRunning("web".into()),
+            Error::CgroupParentUnavailable(
+                "cgroup group build-1: could not write memory.max".into(),
+            ),
             Error::MountPending("container web has not finished mounting".into()),
             Error::CdiDeviceNotFound(
                 "'nvidia.com/gpu=7': not found in any discovered CDI spec".into(),

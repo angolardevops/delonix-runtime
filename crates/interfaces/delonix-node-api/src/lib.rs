@@ -104,8 +104,9 @@ pub use service::{
 /// The node API's composition root: the ports this process registers before it
 /// serves anything, once.
 ///
-/// Today one: the node's VM network ([`delonix_sdn::vm_network::HostVmNetwork`]),
-/// the same registration the CLI's `main` makes. Without it a
+/// Today two: the node's VM network ([`delonix_sdn::vm_network::HostVmNetwork`])
+/// and the cgroup leaf provider ([`delonix_linux::HostProcessLeaves`]), the same
+/// registrations the CLI's `main` makes. Without it a
 /// `CreateVirtualMachine` that names a network attachment on Cloud Hypervisor
 /// reached the backend and failed with «no VM network provider is registered
 /// in this process» (plan 68 item N3): `delonix-vm` seeds its own backends, but
@@ -117,6 +118,10 @@ pub fn compose() {
         delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
             state_root: node::state_root(),
         }));
+        // The cgroup leaf a Cloud Hypervisor VMM starts in, with the VM's
+        // ceilings — the same registration the CLI's `main` makes. Without it a
+        // `CreateVirtualMachine` on Cloud Hypervisor is refused (DX-6515).
+        delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
     });
 }
 

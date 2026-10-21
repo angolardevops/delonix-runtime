@@ -705,7 +705,88 @@ metric names and types, fast enough for the scrape timeout.</p>
   <code>metrics</code>). Cheap fields are computed per scrape; expensive ones (disk walk) are refreshed in
   the background so scrapes stay fast.</li>
 <li>Both handlers serve <code>application/openmetrics-text; version=1.0.0; charset=utf-8</code>.</li>
+<li><strong>Per-workload contention series</strong> (<code>delonix-mgmt</code> only; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/workload.rs</code></a>,
+  read by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/pressure.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/pressure.rs</code></a>). They answer "did this workload get the
+  CPU and memory its limits promised?", one series set per running container or VM, labelled
+  <code>kind</code> (<code>container</code>/<code>vm</code>), <code>id</code> and <code>name</code>, and never per process:</li>
 </ul>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Metric (prefix <code>delonix_</code>)</th>
+<th>Type</th>
+<th>Source</th>
+<th>Extra labels</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workload_cpu_periods_total</code></td>
+<td>counter</td>
+<td><code>cpu.stat</code> <code>nr_periods</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>workload_cpu_throttled_periods_total</code></td>
+<td>counter</td>
+<td><code>cpu.stat</code> <code>nr_throttled</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>workload_cpu_throttled_seconds_total</code></td>
+<td>counter</td>
+<td><code>cpu.stat</code> <code>throttled_usec</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>workload_pressure_avg10_percent</code></td>
+<td>gauge</td>
+<td><code>{cpu,memory,io}.<wbr>pressure</code> <code>avg10</code></td>
+<td><code>resource</code>, <code>stall</code> (<code>some</code>/<code>full</code>)</td>
+</tr>
+<tr>
+<td><code>workload_pressure_stall_seconds_total</code></td>
+<td>counter</td>
+<td><code>{cpu,memory,io}.<wbr>pressure</code> <code>total</code></td>
+<td><code>resource</code>, <code>stall</code></td>
+</tr>
+<tr>
+<td><code>workload_memory_oom_events_total</code></td>
+<td>counter</td>
+<td><code>memory.events.local</code> (else <code>memory.events</code>) <code>oom</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>workload_memory_oom_kills_total</code></td>
+<td>counter</td>
+<td><code>memory.events.local</code> (else <code>memory.events</code>) <code>oom_kill</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>workload_series_unavailable</code></td>
+<td>gauge, always 1</td>
+<td></td>
+<td><code>group</code>, <code>reason</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>All of it is plain reads of files in the workload's own cgroup directory: no new privilege, no
+  subprocess. <strong>A file the host cannot provide gives no series, never a zero</strong>, and one
+  <code>workload_series_unavailable{group,reason}</code> sample says why. <code>group</code> is one of <code>cpu_throttle</code>,
+  <code>cpu_pressure</code>, <code>memory_pressure</code>, <code>io_pressure</code>, <code>memory_events</code>; <code>reason</code> is one of
+  <code>cgroup_missing</code>, <code>not_cgroup_v2</code> (cgroup v1), <code>file_missing</code> (controller not delegated, PSI
+  compiled out or <code>cgroup_disable=pressure</code>), <code>psi_disabled</code> (<code>psi=0</code>), <code>unreadable</code>, <code>incomplete</code>
+  (file present but lacking the fields) and <code>shared_cgroup</code>. <code>full</code> is absent where the kernel does
+  not write it (<code>cpu.pressure</code> on older kernels).
+- <strong>VMs.</strong> The engine creates no cgroup for a VMM, which runs in whatever cgroup its launcher was
+  in. A VM's series are therefore exported only when the VMM is the sole process of its cgroup
+  (for example a hypervisor that gives each domain a scope); otherwise they are absent with
+  <code>reason="shared_cgroup"</code>, because a shared cgroup's numbers are not the VM's. <strong>Steal time is not
+  exported</strong>: it is a guest-side counter (<code>/proc/stat</code> in the guest, from the paravirtual clock),
+  and the host's closest equivalent, the run-queue delay of the VMM threads in
+  <code>/proc/&lt;pid&gt;/task/*/schedstat</code>, is a different quantity (it also counts non-vCPU threads and is
+  not monotonic when threads exit), so presenting it as steal would mislead. Collect steal inside
+  the guest.</p>
 <p><strong>Conformance status / gaps.</strong> No <code>promtool check metrics</code> run is recorded. The expensive gauges
 can be up to one refresh interval stale; the notes in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> explain why that trade was
 chosen.</p>

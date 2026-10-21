@@ -10118,3 +10118,40 @@ offline da build da golden, e o `k8s_repo_version` tem um default independente
 - **Não validado**: a bateria inteira (só a secção nova), uma VM golden, o caminho `svcout` para um
   cliente no próprio holder (o proxy L7). **ADR-0065 (IPv6) não começou**: a P1 passa todas as
   regras a `table inet` e precisa de sessão própria.
+
+## O grupo de cgroup também vale como root, e o VMM do Cloud Hypervisor nasce numa folha (ADR-0079, proposto)
+
+**Dois tectos aceites e não aplicados, ambos com rc=0.** O `cgroup_parent` (ADR-0015) só existia
+no caminho rootless delegado: em modo root o `setup_cgroup` usava `Container::cgroup()` =
+`delonix.slice/delonix-<id>` e nunca lia o grupo — quem punha todos os passos de um trabalho sob
+um grupo para os limitar em conjunto não tinha tecto nenhum como root. E o VMM do Cloud
+Hypervisor corria no cgroup de quem o lançou: os vCPUs e a memória da VM não eram `cpu.max`/
+`memory.max` de ninguém.
+
+- **`Container::cgroup()` passou a ser `delonix.slice/<grupo>/delonix-<id>`** (`root_cgroup_path`,
+  pura). Como root, `ensure_root_group` cria o grupo, escreve o tecto (normalizado: `64Mi` vira
+  bytes) e passa `memory cpu pids` aos filhos ANTES da folha; qualquer falha é `DX-6102`. Como o
+  caminho estático mudou, a remoção, as estatísticas do CRI e o `container_pids` seguem sozinhos.
+- **Um grupo inválido é RECUSADO nos dois modos** (`DX-1116`), no topo do `spawn` (nada clonado)
+  e outra vez no `setup_cgroup`. Antes, o rootless DESCARTAVA o nome inseguro e arrancava o
+  container sem grupo — o teste `an_unsafe_group_name_*` mudou de «não escapa» para «é recusado».
+- **`DEFAULT_PIDS_MAX` é público** (`delonix_compute`, reexportado pelo `delonix-linux`).
+- **Folha de processo** (`delonix_compute::cgroup_leaf` + `delonix_linux::create_process_leaf`):
+  `Ok(None)` quando não há onde a criar (sessão SSH sem delegação), erro quando um tecto exigido
+  não pega (a folha é apagada). O provider chega-lhe pela porta `ProcessLeaves`, registada no
+  `main` da CLI e no `compose` da node API — um provider não pode depender do adaptador.
+- **O VMM entra na folha entre o `fork` e o `exec`** do lançador (`pre_exec`, um `write` num fd
+  aberto pelo pai): nasce lá dentro, nada do que aloca é cobrado noutro sítio. Tectos: vCPUs (ou
+  `vcpus_max`) em cores inteiros, memória (ou `memory_max_mib`) + 128 MiB, pids
+  `max(512, 2×vCPUs+64)`. Medido no CH v53.0: o VMM ocupa ~7 MiB com 256 MiB ou 2 GiB de guest,
+  7 threads para 2 vCPUs.
+- **Sem folha, a VM é RECUSADA antes da rede** (`DX-6515`, saída 69). Válvula: a mesma
+  `DELONIX_ALLOW_UNENFORCED_LIMITS` dos containers. **Mudança de comportamento:** uma VM CH
+  rootless numa sessão SSH sem `systemd-run --user --scope -p Delegate=yes` deixa de arrancar.
+
+**Por fazer:** libvirt de sessão (o QEMU é filho do daemon; o caminho limpo parece ser
+`virsh start --paused` → mover o pid → `resume`, por medir), rate limiters e filas do CH
+(`bw_*`/`ops_*`, `--rate-limit-group`, `num_queues`/`queue_size` existem no v53.0, mas exigem campo
+persistido para o `vm start`, campo de manifesto e flag), e o `OOMKilled` de uma VM. Provas por
+correr: `tests/cgroup_parent.rs` (`root_mode_*`, com sudo) e `tests/process_leaf.rs` (root ou
+scope delegado).
