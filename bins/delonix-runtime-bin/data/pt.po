@@ -1558,8 +1558,8 @@ msgstr "--network-alias é gravado mas o DNS interno ainda não resolve aliases 
 msgid "Remove the local state even if the libvirt cleanup fails."
 msgstr "Remove o estado local mesmo que a limpeza no libvirt falhe."
 
-msgid "the VM record was kept; `delonix delete vms {name} --force` discards it anyway"
-msgstr "o registo da VM foi preservado; `delonix delete vms {name} --force` descarta-o na mesma"
+msgid "the VM record was kept; `delonix delete vm {name} --force` discards it anyway"
+msgstr "o registo da VM foi preservado; `delonix delete vm {name} --force` descarta-o na mesma"
 
 msgid "Remove inbound rule(s) matching `[proto/]port` (all protos if none given)."
 msgstr "Remove regra(s) de entrada que casem `[proto/]porta` (todos os protos se omitido)."

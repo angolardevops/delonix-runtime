@@ -5706,7 +5706,7 @@ pub(crate) fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<(
     Ok(())
 }
 
-/// `vm rm`'s old body — now also the target of the generic `delete vms`.
+/// `vm rm`'s old body — now also the target of the generic `delete vm`.
 pub(crate) fn cmd_rm(base: &std::path::Path, name: &str, force: bool) -> Result<()> {
     let res = if force {
         delonix_vm::remove_force(base, name)
@@ -5719,7 +5719,7 @@ pub(crate) fn cmd_rm(base: &std::path::Path, name: &str, force: bool) -> Result<
         // force it, instead of leaving them in a dead end.
         if !force && e.number() != 4501 {
             output::warn(&super::po::tf(
-                "the VM record was kept; `delonix delete vms {name} --force` discards it anyway",
+                "the VM record was kept; `delonix delete vm {name} --force` discards it anyway",
                 &[("name", name)],
             ));
         }
