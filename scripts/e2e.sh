@@ -355,7 +355,9 @@ ch_missing() {  # the SKIP reason when `ch_usable` is false: the absent piece
   command -v qemu-img >/dev/null || m+=("qemu-img")
   [[ -r /dev/kvm && -w /dev/kvm ]] || m+=("/dev/kvm legível e gravável")
   (( ${#m[@]} )) || m+=("um firmware de DEFAULT_CH_FIRMWARES")
-  local IFS=,; printf 'sem %s' "${m[*]}"
+  local out="${m[0]}" i
+  for i in "${m[@]:1}"; do out+=", $i"; done
+  printf 'sem %s' "$out"
 }
 
 # The host hands this user a subordinate uid range, which is what lets a
