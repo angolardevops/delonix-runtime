@@ -2635,7 +2635,7 @@ fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) -> Result<
                         ),
                     });
                 }
-                tracing::info!(network = %net, "libvirt network redefined on its declared subnet");
+                tracing::debug!(network = %net, "libvirt network redefined on its declared subnet");
                 defined_here = true;
             }
             NetPlan::Define(xml) => {
@@ -3539,7 +3539,7 @@ impl VmBackend for LibvirtBackend {
         };
         let uri = libvirt_uri_for(Some(vm.tap.as_str()));
         if release_owned_network(uri, net)? {
-            tracing::info!(network = %net, "libvirt network removed with its last VM");
+            tracing::debug!(network = %net, "libvirt network removed with its last VM");
         }
         Ok(())
     }
