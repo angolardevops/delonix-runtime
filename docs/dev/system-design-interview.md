@@ -454,7 +454,8 @@ sequenceDiagram
   the label.
 - **Actions** are `Create`, `Adopt`, `Update` (hot, same PID), `Replace` (refused unless
   `--replace <Kind>/<name>` is given, checked before anything is created), `NoOp`, `Delete`,
-  `Conflict`, `NotConverged`. `plan --detailed-exitcode` answers 0/2/1 for a CI drift gate.
+  `Conflict`, `NotConverged`. `plan --detailed-exitcode` answers 0/2/1 for a CI drift gate, and 5 when the plan holds a
+  `Conflict` the apply would refuse.
 - **One table of Kind facts** (domain, form, whether it converges, has teardown, is namespaced,
   how presence is observed) governs the planner, apply order and teardown order, instead of lists
   kept in sync by hand.
