@@ -3478,6 +3478,100 @@ check "…e o destroy desse nome leva o que ele criou" ok \
   "$BIN" stack destroy -f "$OWORK/m.yaml" --name "own-$PFX"
 check "…e já não está" fail "$BIN" volume inspect "ov-$PFX"
 
+# `stack apply` de um recurso que OUTRA stack possui: classe de conflito (rc 5,
+# DX-5601), e nada mudado. Até ao #902 saía rc 1/DX-1000 — «argumento
+# inválido», o mesmo de um `--replace` em falta —, e quem lê o rc ia atrás da
+# flag errada: nenhuma flag autoriza um conflito. Os três testes unitários do
+# `refusal()` provam a função; só este prova que o binário a usa no caminho
+# real do apply, contra registos reais.
+#
+# O rc sozinho não chega: uma recusa com 5 DEPOIS de mexer no recurso passaria.
+# Por isso cada recusa exige também o código DX na saída, e a seguir mede-se o
+# registo de cada recurso (é nele que vive o carimbo `delonix.io/stack`) contra
+# o que estava antes, e que a stack recusada não ganhou revisão — contada antes
+# e depois, nunca contra um 0 fixo: o `stack destroy` não apaga a história. O
+# rc gravado no JSONL é o do `apply`; 99 quer dizer rc certo e código DX errado.
+CFWORK="$WORK/conflito-$PFX"; mkdir -p "$CFWORK"
+CSA="stk-a-$PFX"; CSB="stk-b-$PFX"; CFV="cfv-$PFX"; CFN="cfn-$PFX"; CFB="cfb-$PFX"
+# O root como o motor o resolve (`delonix-state`, `Store::root`): sem
+# DELONIX_ROOT, `$XDG_DATA_HOME/delonix` antes de `~/.local/share/delonix`.
+CROOT="${DELONIX_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/delonix}"
+cat >"$CFWORK/a.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: $CFV }
+spec: {}
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: $CFN }
+spec: {}
+YAML
+# Um volume que é MESMO da stk-b, e o mesmo com `mountOptions` declarado: não
+# converge a quente, logo é um Replace que nenhum `--replace` autorizou. Um
+# volume e não uma rede com a `subnet` mudada, e a primeira versão era a rede:
+# a subnet automática da `$CFN` deriva do nome, e numa corrida calhou em
+# 10.238.0.0/16 — por cima da subnet fixa, e o apply da stk-b saiu DX-5303.
+printf 'apiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: {}\n' "$CFB" >"$CFWORK/b.yaml"
+printf 'apiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: { mountOptions: noatime }\n' "$CFB" \
+  >"$CFWORK/b2.yaml"
+{ cat "$CFWORK/b2.yaml"; printf -- '---\napiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: {}\n' "$CFV"; } \
+  >"$CFWORK/misto.yaml"
+# Sem `2>&1`, e de propósito: um registo em falta (layout mudado, CROOT errado)
+# dava a MESMA mensagem de erro antes e depois, e a comparação passava sem ter
+# medido nada. Assim o baseline fica vazio e o check chumba pelo rc.
+cf_sums() { (cd "$CROOT" && sha256sum "volumes/$CFV/meta.json" "networks/$CFN" "$@"); }
+cf_revs() { "$BIN" stack history --name "$1" -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+if check_then "conflito de posse: a stk-a aplica um volume e uma rede" ok \
+     "$BIN" stack apply -f "$CFWORK/a.yaml" --name "$CSA"; then
+  CF_A=$(cf_sums); CF_AREVS=$(cf_revs "$CSB")
+  check "conflito de posse: o mesmo manifesto sob outra stack sai 5 com DX-5601" 5 bash -c "
+    out=\$('$BIN' stack apply -f '$CFWORK/a.yaml' --name '$CSB' 2>&1); rc=\$?
+    printf '%s\n' \"\$out\"
+    [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+    exit \$rc"
+  check "…e nada mudou: os dois registos iguais, a stk-b sem revisão, a stk-a sem deriva" ok bash -c "
+    s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN') || { echo 'um registo desapareceu'; exit 1; }
+    [[ -n '$CF_A' && \"\$s\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }
+    n=\$('$BIN' stack history --name '$CSB' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+    [[ \$n =~ ^[0-9]+\$ && \$n == '$CF_AREVS' ]] || { echo \"a $CSB passou de '$CF_AREVS' para '\$n' revisões\"; exit 1; }
+    '$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSA' --detailed-exitcode"
+  if check_then "conflito de posse: a stk-b aplica um volume seu" ok \
+       "$BIN" stack apply -f "$CFWORK/b.yaml" --name "$CSB"; then
+    CF_B=$(cf_sums "volumes/$CFB/meta.json"); CF_BREVS=$(cf_revs "$CSB")
+    # O conflito ganha a um Replace por autorizar: passar `--replace` não o
+    # desbloquearia, e «argumento inválido» mandava o operador atrás dele.
+    check "conflito + Replace por autorizar continua 5 com DX-5601" 5 bash -c "
+      out=\$('$BIN' stack apply -f '$CFWORK/misto.yaml' --name '$CSB' 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+      exit \$rc"
+    # ...e sem conflito, o Replace por autorizar continua a ser o que era.
+    check "um Replace por autorizar sozinho continua 1 com DX-1000" 1 bash -c "
+      out=\$('$BIN' stack apply -f '$CFWORK/b2.yaml' --name '$CSB' 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 1 ]] && { ! grep -q DX-1000 <<<\"\$out\" || grep -q DX-5601 <<<\"\$out\"; } && exit 99
+      exit \$rc"
+    check "…e nada mudou: os três registos iguais, a stk-b sem revisão nova" ok bash -c "
+      s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN' 'volumes/$CFB/meta.json') || { echo 'um registo desapareceu'; exit 1; }
+      [[ -n '$CF_B' && \"\$s\" == '$CF_B' ]] || { echo 'o registo mudou'; exit 1; }
+      n=\$('$BIN' stack history --name '$CSB' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+      [[ \$n =~ ^[0-9]+\$ && \$n == '$CF_BREVS' ]] || { echo \"a $CSB passou de '$CF_BREVS' para '\$n' revisões\"; exit 1; }"
+    "$BIN" stack destroy -f "$CFWORK/b.yaml" --name "$CSB" >/dev/null 2>&1
+  fi
+  "$BIN" stack destroy -f "$CFWORK/a.yaml" --name "$CSA" >/dev/null 2>&1
+  check "conflito de posse: as duas stacks levaram o que criaram" ok bash -c "
+    ! '$BIN' volume inspect '$CFV' >/dev/null 2>&1 && ! '$BIN' network inspect '$CFN' >/dev/null 2>&1 \
+      && ! '$BIN' volume inspect '$CFB' >/dev/null 2>&1"
+fi
+# Só apanha alguma coisa quando um check acima chumbou (um apply que adoptou o
+# recurso alheio deixa-o carimbado com a stack errada, e o destroy dessa não o
+# leva): o FAIL já está no relatório, e o root não fica com restos.
+"$BIN" volume rm "$CFV" >/dev/null 2>&1
+"$BIN" network rm "$CFN" >/dev/null 2>&1
+"$BIN" volume rm "$CFB" >/dev/null 2>&1
+rm -rf "$CFWORK"
+
 # `stack rollback` — o CICLO, e não os comandos um a um.
 #
 # Cada passo isolado devolve 0 com e sem a funcionalidade a funcionar; o que
