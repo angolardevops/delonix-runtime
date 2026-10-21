@@ -120,6 +120,15 @@ fn network_of(networks: &[NetworkAttachment]) -> Result<(String, Option<String>)
                     "network aliases are not supported for virtual machines on the node API",
                 ));
             }
+            // The name becomes a path under the registry (`declared_subnet`),
+            // so it is held to the registry's own alphabet BEFORE anything
+            // reads the disk: `../x` or `/etc/hostname` read a file outside
+            // it. Same rule `CreateNetwork` applies; the reserved default is
+            // a valid attachment, it just has no record.
+            if !n.network.is_empty() && n.network != delonix_sdn::DEFAULT_NET {
+                delonix_sdn::NetworkStore::validate_name(&n.network)
+                    .map_err(|e| Status::invalid_argument(format!("networks[0].network: {e}")))?;
+            }
             Ok((
                 n.network.clone(),
                 (!n.ipv4_address.is_empty()).then(|| n.ipv4_address.clone()),
@@ -157,6 +166,29 @@ fn mib_ceil(bytes: i64, field: &str) -> Result<Option<u64>, Status> {
     Ok(Some((bytes as u64).div_ceil(1024 * 1024)))
 }
 
+/// The subnet of `network` as this node's registry records it, for
+/// `VmConfig::network_subnet` — the same resolution the CLI does
+/// (`subnet_of` in `bins/delonix-runtime-bin/src/cmd/network.rs`), on this
+/// side because a provider does not read the registry
+/// (`docs/discovery/61`): without it the libvirt provider has no subnet to
+/// define a network that libvirt does not know yet, and the VM's create
+/// FAILS with "no network with matching name".
+///
+/// Only a DECLARED record resolves. No attachment (or the reserved default
+/// network) has no record, and its subnet is the engine's own bridge, which
+/// must not become a libvirt network. A record that exists and cannot be
+/// read is refused before any operation exists, not dropped into the same
+/// fallback a missing one gets.
+fn declared_subnet(root: &Path, network: &str) -> Result<Option<String>, Status> {
+    if network.is_empty() || !crate::network_ops::declared(root, network) {
+        return Ok(None);
+    }
+    let net = delonix_sdn::NetworkStore::open(root)
+        .and_then(|store| store.get(network))
+        .map_err(|e| Status::internal(format!("reading network '{network}': {e}")))?;
+    Ok((!net.subnet.is_empty()).then_some(net.subnet))
+}
+
 /// The engine's `VmConfig` from the contract's `VirtualMachineSpec` — the
 /// node API's own resolution (see the module doc comment's "known gap").
 /// Everything that can be decided here is decided before any operation is
@@ -177,6 +209,7 @@ fn config_from_spec(
         ));
     }
     let (network, static_ip) = network_of(&spec.networks)?;
+    let network_subnet = declared_subnet(root, &network)?;
     // "0 = image default, then 1" (the contract's own comment): look up the
     // image's own recommendation ONCE, reuse it for whichever of
     // vcpus/memory/backend the request left unspecified.
@@ -204,6 +237,7 @@ fn config_from_spec(
         disk: delonix_vm::store_image_disk(root, &spec.image),
         vcpus,
         memory,
+        network_subnet,
         network,
         namespace,
         static_ip,
@@ -1041,5 +1075,93 @@ mod tests {
         .unwrap();
         assert_eq!(unregistered.vcpus, 1);
         assert_eq!(unregistered.memory, "1G");
+    }
+
+    /// REGRESSION (cli-tester, 2026-10-21): a VM attached to a network the
+    /// node declared (`delonix network create cf-net2 --subnet ...`) reached
+    /// the libvirt provider with no subnet, the provider could not define a
+    /// network libvirt did not know, and the create FAILED with DX-9501 "no
+    /// network with matching name". The CLI resolves the subnet; this side
+    /// must too. A network with no record, and no attachment at all, still
+    /// carry none — the engine's own bridge is not a libvirt network.
+    #[test]
+    fn a_declared_network_carries_its_subnet_to_the_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        delonix_sdn::NetworkStore::open(dir.path())
+            .unwrap()
+            .create_with_cidr(
+                "cf-net2",
+                delonix_sdn::Cidr::parse("10.231.78.0/24").unwrap(),
+            )
+            .unwrap();
+        let on = |network: &str| {
+            config_from_spec(
+                dir.path(),
+                "web",
+                None,
+                &VirtualMachineSpec {
+                    image: "golden".into(),
+                    provider: "libvirt".into(),
+                    networks: if network.is_empty() {
+                        vec![]
+                    } else {
+                        vec![NetworkAttachment {
+                            network: network.into(),
+                            ..Default::default()
+                        }]
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+
+        let declared = on("cf-net2");
+        assert_eq!(declared.network, "cf-net2");
+        assert_eq!(
+            declared.network_subnet.as_deref(),
+            Some("10.231.78.0/24"),
+            "the registry's subnet, so the provider can define the libvirt network"
+        );
+        assert_eq!(on("not-declared").network_subnet, None);
+        assert_eq!(on("").network_subnet, None, "no attachment, no subnet");
+        assert_eq!(
+            on("bridge").network_subnet,
+            None,
+            "the reserved default has no record: its subnet is the engine's bridge"
+        );
+    }
+
+    /// cli-tester, 2026-10-21: the attachment's name is joined onto the
+    /// registry's directory, and `../outside` read a record from outside it
+    /// (its subnet reached the provider) while `/etc/hostname` answered 500.
+    /// A name the registry would not accept is an invalid argument, refused
+    /// before any operation exists and before the disk is read.
+    #[test]
+    fn a_network_name_outside_the_registry_alphabet_is_invalid_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("networks")).unwrap();
+        // A record-shaped file beside the registry, where `networks/../outside`
+        // lands: read, its subnet would reach the provider.
+        std::fs::write(root.join("outside"), "cidr=10.237.143.0/24\n").unwrap();
+        for bad in ["../outside", "/etc/hostname", "a/b", "a b"] {
+            let err = config_from_spec(
+                &root,
+                "web",
+                None,
+                &VirtualMachineSpec {
+                    image: "golden".into(),
+                    provider: "libvirt".into(),
+                    networks: vec![NetworkAttachment {
+                        network: bad.into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect_err(bad);
+            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{bad}: {err:?}");
+        }
     }
 }
