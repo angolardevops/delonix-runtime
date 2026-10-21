@@ -1939,8 +1939,11 @@ check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(
 if check_then "container rename: o container de prova arranca" ok \
      "$BIN" container run -d --net none --name "rnp-$PFX" "$IMG" sleep 600; then
   check "container rename" ok "$BIN" container rename "rnp-$PFX" "rnp2-$PFX"
+  # The old name must be GONE (class 4, DX-4101), not merely unreadable: a bare
+  # `!` would also pass on a DX-8101 or an unreadable root.
   check "container rename: o nome novo responde e o antigo já não existe" ok bash -c \
-    "'$BIN' container inspect 'rnp2-$PFX' >/dev/null && ! '$BIN' container inspect 'rnp-$PFX' >/dev/null 2>&1"
+    "'$BIN' container inspect 'rnp2-$PFX' >/dev/null || exit 1
+     '$BIN' container inspect 'rnp-$PFX' >/dev/null 2>&1; [ \$? -eq 4 ]"
 fi
 e2e_rm "rnp-$PFX" "rnp2-$PFX"
 
