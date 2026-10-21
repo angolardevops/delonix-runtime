@@ -34,7 +34,7 @@ use std::process::{Command, Stdio};
 // callers: no call site in this crate had to change.
 pub(crate) use delonix_net_rules::fnv32;
 pub use delonix_net_rules::{
-    bridge_name, derive_ip_in, in_vm_dhcp_pool, matches_labels, parse_overlay_peer, service_vip,
+    bridge_name, derive_ip_in, in_vm_dhcp_pool, matches_labels, parse_overlay_peer,
     valid_ip_in_subnet, vm_dhcp_lease_ip, vm_dhcp_pool, Cidr,
 };
 
@@ -54,6 +54,7 @@ pub mod policy_nft;
 pub mod provider_report;
 pub mod route_plan;
 pub mod run_network;
+pub mod service_lb;
 pub mod vm_network;
 pub mod wg;
 

@@ -74,6 +74,10 @@
 ~	drift
 =	explain
 ~	get
+~	gitops reconcile
+~	gitops resume
+~	gitops status
+~	gitops suspend
 ~	hosts sync
 ~	image apply
 ~	image describe
@@ -153,6 +157,9 @@
 ~	network rm
 ~	network route
 ~	network vlan
+~	network vip-pool clear
+~	network vip-pool set
+~	network vip-pool show
 ~	plan
 ~	pod attach
 ~	pod cp

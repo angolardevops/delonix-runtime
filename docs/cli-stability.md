@@ -473,6 +473,11 @@ networkDefaults:
   desapareceu, que era a fonte real da confusão que o parágrafo anterior já
   andava a explicar por escrito. Corte limpo: a forma antiga falha com
   «unrecognized subcommand».
+* **`gitops`** (`reconcile`/`status`/`suspend`/`resume`, ADR-0021) — grupo novo
+  a 2026-10-12, NÃO estável. Age sobre uma `kind: GitOpsSource` que já existe;
+  a fonte declara-se com `stack apply`, como qualquer outro Kind. O registo e o
+  estado de cada passagem em `$DELONIX_ROOT/gitops/` são estado interno (lê-se
+  com `gitops status -o json`, nunca do disco).
 * **Tudo o que começa por `net netns`** — plumbing interno exposto por
   conveniência de depuração.
 * **O formato dos ficheiros de estado** em `$DELONIX_ROOT`. Lê-se pelo `inspect`,

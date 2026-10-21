@@ -429,6 +429,15 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::rbackup::BackupCmd,
     },
+    /// Pull sources: one reconcile pass, status, suspend and resume (ADR-0021).
+    ///
+    /// A source is declared with `kind: GitOpsSource` and `stack apply`; this
+    /// group acts on one that already exists. Nothing here runs in the
+    /// background: a pass fetches, verifies, plans and applies, and exits.
+    Gitops {
+        #[command(subcommand)]
+        action: cmd::gitops::GitopsCmd,
+    },
     /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
     ///
     /// Idempotent `kubeadm` bootstrap over SSH (`kind: KubernetesCluster`), full VM
@@ -1112,6 +1121,7 @@ fn run() -> Result<()> {
         }
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Backup { action } => cmd::rbackup::cmd_backup(action),
+        Cmd::Gitops { action } => cmd::gitops::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Compatibility { action } => cmd::compatibility::run(action),
@@ -1701,6 +1711,7 @@ mod cli_stability_classification_tests {
         "drift",
         "explain",
         "get",
+        "gitops",
         "hosts",
         "init",
         "man",
