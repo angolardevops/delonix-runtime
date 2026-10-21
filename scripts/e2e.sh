@@ -247,16 +247,23 @@ check() {
   else
     [[ $rc -eq "$expect" ]] && verdict=PASS
   fi
-  python3 - "$name" "$verdict" "$rc" "$out" "$*" >>"$OUT/results.jsonl" <<'PY'
+  # The output goes in on STDIN, never as an argument: one argument is capped at
+  # 128 KiB (MAX_ARG_STRLEN), and the 150 KB of `manifest schema` made python3
+  # fail with «Argument list too long» — the check printed PASS and its line
+  # never reached results.jsonl (cli-tester, 2026-10-21: 1459 PASS in the log,
+  # 1458 in the JSONL).
+  printf '%s' "$out" | python3 -c '
 import json,sys
-name,verdict,rc,out,cmd=sys.argv[1:6]
+name,verdict,rc,cmd=sys.argv[1:5]
+out=sys.stdin.read()
 # The END of the output is where a failing step says why (the `virsh` error
 # under a `vm create`, the last line of a build), so a long output keeps its
 # head and its tail, never only its head.
 if len(out) > 4000:
     out = out[:1000] + "\n[... %d chars cut ...]\n" % (len(out) - 4000) + out[-3000:]
 print(json.dumps({"name":name,"verdict":verdict,"rc":int(rc),"cmd":cmd,"output":out}))
-PY
+' "$name" "$verdict" "$rc" "$*" >>"$OUT/results.jsonl" \
+    || log "  !!    $name: a linha do results.jsonl não foi escrita"
   if [[ $verdict == PASS ]]; then
     PASS=$((PASS+1)); log "  PASS  $name"
   else
@@ -268,7 +275,7 @@ PY
     local n; n=$(wc -l <<<"$out")
     if (( n > 16 )); then
       sed 's/^/        | /' <<<"$out" | head -6
-      log "        | [… $((n - 12)) linhas cortadas — a saída está em results.jsonl …]"
+      log "        | [… $((n - 12)) linhas cortadas — a cabeça e a cauda ficam em results.jsonl …]"
       sed 's/^/        | /' <<<"$out" | tail -6
     else
       sed 's/^/        | /' <<<"$out"
@@ -7889,23 +7896,47 @@ else
   check "VirtualIP: sem conjunto de VIP é recusado com a classe 69" 69 \
     env -u DELONIX_SERVICE_VIP_CIDR "$BIN" apply -f "$(vsvc vweb "$VNS" vweb)"
   check "VirtualIP: um conjunto público é recusado (DX-1360)" 1 "$BIN" network vip-pool set 8.8.8.0/24
-  if "$BIN" image pull "$VIMG" >/dev/null 2>&1 && "$BIN" network create "$VN" --subnet 10.232.0.0/16 >/dev/null 2>&1; then
+  # The image is the host's half (a registry this host reaches, or the image
+  # already in the store — the same rule as the `image` section's guard); the
+  # network is the engine's, and judged.
+  if ! grep -qF "$VIMG " <<<"$("$BIN" image ls 2>&1)" && ! "$BIN" image pull "$VIMG" >/dev/null 2>&1; then
+    skip "VirtualIP: o resto da secção" "sem rede (ou registo inalcançável) e $VIMG não está no store"
+  elif check_then "VirtualIP: a rede dos backends cria-se" ok "$BIN" network create "$VN" --subnet 10.232.0.0/16; then
     check "VirtualIP: um conjunto sobreposto a uma rede declarada é recusado e nomeia-a" ok bash -c \
       "out=\$('$BIN' network vip-pool set 10.232.4.0/24 2>&1); rc=\$?; [ \$rc -eq 5 ] && grep -q 'engine network $VN' <<<\"\$out\""
-    if ! "$BIN" network vip-pool set "$VPOOL" >/dev/null 2>&1; then
-      skip "VirtualIP: o resto da secção" "o conjunto $VPOOL sobrepõe-se a algo neste host (E2E_VIP_POOL muda-o)"
+    # Overlap with the HOST's routes is read here, before the engine is asked;
+    # a refusal on a pool no host route touches is the engine's, and a FAIL.
+    _vclash=$(ip -4 route 2>/dev/null | python3 -c '
+import ipaddress, sys
+pool = ipaddress.ip_network(sys.argv[1])
+for line in sys.stdin:
+    try:
+        net = ipaddress.ip_network(line.split()[0], strict=False)
+    except (ValueError, IndexError):
+        continue
+    if net.prefixlen and net.overlaps(pool):
+        print(net, end=" ")' "$VPOOL")
+    if [[ -n "$_vclash" ]]; then
+      skip "VirtualIP: o resto da secção" "o conjunto $VPOOL sobrepõe-se a rotas deste host: $_vclash(E2E_VIP_POOL muda-o)"
+    elif ! check_then "VirtualIP: vip-pool set $VPOOL" ok "$BIN" network vip-pool set "$VPOOL"; then
+      :  # já é um FAIL, com a recusa do motor
     else
       check "VirtualIP: vip-pool show nomeia o conjunto e o ficheiro do nó de onde vem" ok bash -c \
         "env -u DELONIX_SERVICE_VIP_CIDR '$BIN' network vip-pool show -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d[\"pools\"]==[\"$VPOOL\"] and d[\"source\"].endswith(\"ingress/vip-pool\") else 1)'"
       check "VirtualIP: vip-pool show diz quando a variável do processo se sobrepõe ao ficheiro" ok bash -c \
         "out=\$(DELONIX_SERVICE_VIP_CIDR=10.233.250.0/24 '$BIN' network vip-pool show); grep -q '^10.233.250.0/24\$' <<<\"\$out\" && grep -q 'source: DELONIX_SERVICE_VIP_CIDR' <<<\"\$out\""
+      # Judged, not silent: a backend that did not start used to surface only
+      # as a spread check FAILing far from its cause.
       for b in v1 v2; do
-        "$BIN" container run -d --name "$b-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
-          -v "$VW/$b:/www" "$VIMG" httpd -f -p 8080 -h /www >/dev/null 2>&1
+        check "VirtualIP: o backend $b arranca" ok "$BIN" container run -d --name "$b-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
+          -v "$VW/$b:/www" "$VIMG" httpd -f -p 8080 -h /www
       done
-      "$BIN" container run -d --name "vc-$PFX" --net "$VN" --namespace "$VNS" "$VIMG" sleep 900 >/dev/null 2>&1
-      "$BIN" container run -d --name "vx-$PFX" --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
-      "$BIN" container run -d --name "vs-$PFX" --cap-add NET_ADMIN --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
+      check "VirtualIP: o cliente da mesma namespace arranca" ok \
+        "$BIN" container run -d --name "vc-$PFX" --net "$VN" --namespace "$VNS" "$VIMG" sleep 900
+      check "VirtualIP: o cliente de outra namespace arranca" ok \
+        "$BIN" container run -d --name "vx-$PFX" --net "$VN" --namespace "$VNB" "$VIMG" sleep 900
+      check "VirtualIP: o contentor que forja origens arranca" ok \
+        "$BIN" container run -d --name "vs-$PFX" --cap-add NET_ADMIN --net "$VN" --namespace "$VNB" "$VIMG" sleep 900
       # D5 before any VIP exists: once one does, the holder puts the sysctl
       # back to 1 on its next round.
       nsenter -t "$(vpin)" -U -n --preserve-credentials sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null
@@ -7985,8 +8016,6 @@ else
         "'$BIN' delete services $VNS/vweb >/dev/null 2>&1; ! '$BIN' network ipam ls 2>/dev/null | grep -q 'svc:$VNS/vweb'"
       check "VirtualIP: o delete tira a porta publicada do host" 7 curl -s -m 3 "http://127.0.0.1:$VHP/"
     fi
-  else
-    skip "VirtualIP: o resto da secção" "não foi possível puxar $VIMG ou criar a rede"
   fi
   for c in v1 v2 vh vc vx vs; do "$BIN" container rm -f "$c-$PFX" >/dev/null 2>&1; done
   "$BIN" delete services $VNS/vweb $VNS/vbr >/dev/null 2>&1
