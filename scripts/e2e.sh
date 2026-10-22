@@ -8760,6 +8760,32 @@ YAML
 fi
 
 ########################################
+section "cluster kind, ao vivo (E2E_CLUSTER=1)"
+########################################
+# Um cluster kind REAL de ponta a ponta: `cluster create` single-node a Ready, e
+# a 1ª ligação cross-namespace de um pod NOVO no instante da prontidão (#736/#737).
+# A lógica vive em `scripts/e2e_cluster_kind.sh`, que corre sozinho contra
+# qualquer binário e sai 0/1/77 (ver o seu cabeçalho). FORA da bateria por
+# omissão: o bring-up demora ~2m45s e um nó kind + imagem comem disco — só corre
+# com `E2E_CLUSTER=1`. Corre contra o root REAL (onde a imagem `kindest/node`
+# está em cache), nunca o root isolado desta corrida, e destrói o seu cluster.
+_ckname="repro de #736: control-plane Ready e 1ª ligação cross-namespace (podIP + Service/DNS) no instante da prontidão de um pod novo"
+if [[ "${E2E_CLUSTER:-0}" == "1" ]]; then
+  if command -v kubectl >/dev/null; then
+    _out=$(DELONIX_ROOT="$REAL_ROOT" bash "$(dirname "$0")/e2e_cluster_kind.sh" "$BIN" "ck$PFX" 2>&1); _rc=$?
+    if [[ $_rc -eq 77 ]]; then
+      skip "$_ckname" "$_out"
+    else
+      check "$_ckname" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
+    fi
+  else
+    skip "$_ckname" "sem kubectl no host"
+  fi
+else
+  skip "$_ckname" "E2E_CLUSTER!=1 (bring-up ~2m45s + disco; opcional por desenho)"
+fi
+
+########################################
 section "guarda: o results.jsonl tem uma linha por veredicto"
 ########################################
 # The totals below come from the shell counters; the ratchet and every reader
