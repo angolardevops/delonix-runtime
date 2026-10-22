@@ -658,7 +658,7 @@ egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决�
 <li><strong>动作</strong>有 <code>Create</code>、<code>Adopt</code>、<code>Update</code>（热更新，同一个 PID）、<code>Replace</code>（除非给出了
   <code>--replace &lt;Kind&gt;/&lt;name&gt;</code>，否则会被拒绝，且这一点会在创建任何东西之前就被检查）、<code>NoOp</code>、
   <code>Delete</code>、<code>Conflict</code>、<code>NotConverged</code>。<code>plan --detailed-exitcode</code> 会为一个 CI 漂移门禁
-  回答 0/2/1。</li>
+  回答 0/2/1；当计划中含有 apply 会拒绝的 <code>Conflict</code> 时回答 5。</li>
 <li><strong>一张 Kind 事实表</strong>（domain、form、是否收敛、有没有 teardown、是否 namespaced、如何
   观测是否存在）统管规划器、apply 的顺序和 teardown 的顺序，而不是靠人手动去保持多份列表
   同步。</li>

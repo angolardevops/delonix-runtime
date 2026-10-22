@@ -1,4 +1,4 @@
-<!-- translated-from: system-design-interview.md sha256:4dc968058b2bad04dcabc1a8e8808533f5108d7fcee9df62ff8cb70bda00af79 -->
+<!-- translated-from: system-design-interview.md sha256:2aa684bf763ff432abe940b618378dffaf9c6c1111db9c9501bc08e6a9ba9759 -->
 # System Design Interview — o Delonix Engine
 
 **Antes de leres:** [Arquitectura](architecture.md) e [As crates](crates.md) — esta página defende
@@ -470,7 +470,7 @@ sequenceDiagram
 - **As acções** são `Create`, `Adopt`, `Update` (a quente, mesmo PID), `Replace` (recusado a menos
   que seja dado `--replace <Kind>/<name>`, verificado antes de qualquer coisa ser criada), `NoOp`,
   `Delete`, `Conflict`, `NotConverged`. O `plan --detailed-exitcode` responde 0/2/1 para um gate de
-  deriva em CI.
+  deriva em CI, e 5 quando o plano tem um `Conflict` que o apply recusaria.
 - **Uma única tabela de factos dos Kinds** (domínio, forma, se converge, se tem teardown, se é
   namespaced, como é observada a presença) governa o planeador, a ordem de apply e a ordem de
   teardown, em vez de listas mantidas em sincronia à mão.

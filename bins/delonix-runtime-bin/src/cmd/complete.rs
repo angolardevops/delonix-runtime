@@ -317,6 +317,7 @@ const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
     // record (`VolumeStore::list` deliberately does NOT see the scoped ones).
     (k::VOLUME, NsSource::Store(ns_from_volumes)),
     (k::SERVICE, NsSource::Store(ns_from_services)),
+    (k::GITOPS_SOURCE, NsSource::Store(ns_from_gitops_sources)),
     (
         k::POD,
         NsSource::Via(
@@ -362,6 +363,10 @@ fn ns_from_vms(root: &std::path::Path) -> Vec<String> {
 /// function ignores — in every real caller the two already agree, since both
 /// come from the same process environment; only a test that deliberately
 /// diverges them would notice, and none here does.
+fn ns_from_gitops_sources(root: &std::path::Path) -> Vec<String> {
+    super::gitops::namespaces(root)
+}
+
 fn ns_from_services(_root: &std::path::Path) -> Vec<String> {
     delonix_sdn::infra::service_list()
         .into_iter()

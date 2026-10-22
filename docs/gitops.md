@@ -16,7 +16,7 @@ fluxo completo.
 ## Os cinco comandos
 
 ```bash
-delonix stack plan       # o que mudaria — não muda nada
+delonix stack plan       # o que mudaria — não muda nada (`--prune`: o que o apply --prune faria)
 delonix stack apply      # converge
 delonix stack apply --prune   # converge e remove o que saiu do manifesto
 delonix stack wait       # bloqueia até estar mesmo de pé
@@ -36,7 +36,7 @@ mexe).
 | `+~` | existe, não pertence a stack nenhuma — vai ser **adoptado** |
 | `~` | converge **a quente**, sem recriar e sem mudar o PID |
 | `-/+` | tem de ser **destruído e recriado** — o `apply` recusa sem `--replace` |
-| `-` | pertence a esta stack e saiu do manifesto — só sai com `--prune` |
+| `-` | pertence a esta stack e saiu do manifesto — só sai com `--prune`. Num `plan` sem `--prune` aparece como **mantido** e não conta para o `--detailed-exitcode` |
 | `=` | já bate certo |
 | `✗` | pertence a **outra** stack — nunca é tocado |
 | `!` | este Kind não converge nesta versão |
@@ -149,7 +149,17 @@ serve-o directamente — mesmo contrato do `terraform plan -detailed-exitcode`:
 |---|---|
 | `0` | nada a fazer |
 | `2` | há alterações (= deriva, se o ficheiro não mudou) |
+| `5` | o plano tem um **conflito de posse** (`DX-5601`) — o `stack apply` recusá-lo-ia inteiro |
 | `1` | o comando falhou |
+
+**O gate planeia com as flags do `apply` que o acompanha.** O `plan` responde
+pelo que esse `apply` faria, e um `apply` sem `--prune` não remove nada. Por isso,
+sem `--prune`, um recurso que saiu do manifesto aparece como **mantido** e não
+conta: o gate fica verde, porque o `apply` também o deixa ficar. Um pipeline que
+aplica com `--prune`, como o de cima, planeia com `stack plan --prune
+--detailed-exitcode`, e aí a remoção conta como alteração (`2`). Até aqui o `plan`
+não tinha `--prune`, contava sempre a remoção, e um gate sem poda ficava a `2`
+para sempre.
 
 Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de `1` — `4` se o
 manifesto nomear um recurso que não existe, por exemplo (a tabela completa está
@@ -159,12 +169,19 @@ em [cli-stability.md](cli-stability.md)). Os dois sinais positivos não mudam:
 por erro» continua correcto; um escrito com `elif [ $? -eq 1 ]` para o erro
 passa a precisar de `else`.
 
+O `5` existe desde que um conflito deixou de passar por limpo: um recurso que
+outra stack já carimbou não é uma alteração (o `changed` dele é `false`), e até
+aqui o plano respondia `0` — o gate ficava verde e o `apply` a seguir recusava
+com `5`. O conflito ganha às alterações: com um conflito no plano a resposta é
+`5` mesmo que haja também recursos a mudar, porque o `apply` não aplicaria
+nenhum deles.
+
 ```yaml
   drift:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: delonix stack plan --detailed-exitcode
+      - run: delonix stack plan --prune --detailed-exitcode
 ```
 
 ```yaml
@@ -224,7 +241,8 @@ No terminal:
 delonix explain Container
 delonix explain Container.ports
 delonix explain Pod.containers.image
-delonix stack apply --dry-run   # o manifesto com TODOS os defaults preenchidos
+delonix manifest render         # o manifesto com TODOS os defaults preenchidos, sem ler a máquina
+delonix stack apply --dry-run   # o mesmo, e sai como o apply sairia (5 num conflito de posse)
 ```
 
 ## Validado ao vivo, com um container real
@@ -250,12 +268,36 @@ container como o Docker faria.
 
 ## O que este fluxo não faz
 
-* **Não reconcilia continuamente.** Converge quando lhe chamas. O repositório
-  não é consultado por ninguém no nó — quem corre o `apply` é o CI ou o
-  operador, e o que aqui existe é um gate de deriva. Fechar essa metade sem
-  trazer um daemon é o que o [ADR-0021](adr/0021-gitops-pull-reconciler.md)
-  propõe (`delonix gitops`, por timer e opt-in); enquanto estiver *Proposed*,
-  esta linha continua a ser o estado do motor.
+* **Não reconcilia continuamente por omissão.** Converge quando lhe chamas.
+  A metade pull existe desde 2026-10-12 e é opt-in: uma `kind: GitOpsSource`
+  ([ADR-0021](adr/0021-gitops-pull-reconciler.md),
+  `examples/full-gitopssource.yaml`) nomeia um repositório, uma ref e um
+  caminho, e com `sync.automated: true` um temporizador systemd corre UMA
+  passagem e sai — o motor continua sem daemon. `delonix gitops reconcile`
+  corre uma passagem à mão, `delonix gitops status` diz o commit que cada fonte
+  viu e o que está aplicado. Um commit que a guarda ou a política de segurança
+  recusam deixa a stack em execução intacta.
+
+  **São duas stacks, e nunca a mesma.** A stack que aplica a fonte à mão (o
+  bootstrap) declara só a fonte; a stack em que as passagens aplicam o
+  repositório é `spec.stack`, por omissão `gitops.<namespace>.<nome>`. Se fossem
+  a mesma, um `stack plan` do bootstrap daria rc=2 para sempre e um
+  `stack apply --prune` apagaria o que a passagem aplicou (e a passagem seguinte
+  recriava-o vazio). Por isso `stack apply`, `plan`, `prune`, `rollback` e
+  `validate` recusam (DX-1601) um manifesto que declare uma fonte cujas passagens
+  caiam na stack em que o comando age — dá outro `--name` ao bootstrap, ou
+  outra `spec.stack` à fonte:
+
+  ```bash
+  delonix stack apply -f source.yaml --name bootstrap   # regista a fonte
+  delonix gitops reconcile production --namespace production
+  delonix stack plan -f source.yaml --name bootstrap --detailed-exitcode   # 0
+  ```
+
+  Se o repositório se declarar a si próprio, a primeira passagem toma o registo
+  da fonte à stack do bootstrap («taken over from stack 'bootstrap'»), e a partir
+  daí é a stack das passagens que declara tudo; o bootstrap deixa de ser dono de
+  nada.
 * **Não tem rollback transaccional** (ver acima).
 * **Não gere frota.** É um runtime de nó: um manifesto, uma máquina. Vários nós
   são várias corridas.

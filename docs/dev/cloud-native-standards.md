@@ -560,6 +560,39 @@ metric names and types, fast enough for the scrape timeout.
   `metrics`). Cheap fields are computed per scrape; expensive ones (disk walk) are refreshed in
   the background so scrapes stay fast.
 - Both handlers serve `application/openmetrics-text; version=1.0.0; charset=utf-8`.
+- **Per-workload contention series** (`delonix-mgmt` only; `crates/adapters/delonix-telemetry/src/workload.rs`,
+  read by `crates/adapters/delonix-linux/src/pressure.rs`). They answer "did this workload get the
+  CPU and memory its limits promised?", one series set per running container or VM, labelled
+  `kind` (`container`/`vm`), `id` and `name`, and never per process:
+
+  | Metric (prefix `delonix_`) | Type | Source | Extra labels |
+  |---|---|---|---|
+  | `workload_cpu_periods_total` | counter | `cpu.stat` `nr_periods` | |
+  | `workload_cpu_throttled_periods_total` | counter | `cpu.stat` `nr_throttled` | |
+  | `workload_cpu_throttled_seconds_total` | counter | `cpu.stat` `throttled_usec` | |
+  | `workload_pressure_avg10_percent` | gauge | `{cpu,memory,io}.pressure` `avg10` | `resource`, `stall` (`some`/`full`) |
+  | `workload_pressure_stall_seconds_total` | counter | `{cpu,memory,io}.pressure` `total` | `resource`, `stall` |
+  | `workload_memory_oom_events_total` | counter | `memory.events.local` (else `memory.events`) `oom` | |
+  | `workload_memory_oom_kills_total` | counter | `memory.events.local` (else `memory.events`) `oom_kill` | |
+  | `workload_series_unavailable` | gauge, always 1 | | `group`, `reason` |
+
+  All of it is plain reads of files in the workload's own cgroup directory: no new privilege, no
+  subprocess. **A file the host cannot provide gives no series, never a zero**, and one
+  `workload_series_unavailable{group,reason}` sample says why. `group` is one of `cpu_throttle`,
+  `cpu_pressure`, `memory_pressure`, `io_pressure`, `memory_events`; `reason` is one of
+  `cgroup_missing`, `not_cgroup_v2` (cgroup v1), `file_missing` (controller not delegated, PSI
+  compiled out or `cgroup_disable=pressure`), `psi_disabled` (`psi=0`), `unreadable`, `incomplete`
+  (file present but lacking the fields) and `shared_cgroup`. `full` is absent where the kernel does
+  not write it (`cpu.pressure` on older kernels).
+- **VMs.** The engine creates no cgroup for a VMM, which runs in whatever cgroup its launcher was
+  in. A VM's series are therefore exported only when the VMM is the sole process of its cgroup
+  (for example a hypervisor that gives each domain a scope); otherwise they are absent with
+  `reason="shared_cgroup"`, because a shared cgroup's numbers are not the VM's. **Steal time is not
+  exported**: it is a guest-side counter (`/proc/stat` in the guest, from the paravirtual clock),
+  and the host's closest equivalent, the run-queue delay of the VMM threads in
+  `/proc/<pid>/task/*/schedstat`, is a different quantity (it also counts non-vCPU threads and is
+  not monotonic when threads exit), so presenting it as steal would mislead. Collect steal inside
+  the guest.
 
 **Conformance status / gaps.** No `promtool check metrics` run is recorded. The expensive gauges
 can be up to one refresh interval stale; the notes in `AGENTS.md` explain why that trade was

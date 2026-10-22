@@ -250,6 +250,54 @@ pub struct VmConfig {
     pub libvirt_xml: Option<String>,
 }
 
+/// Whether `VmConfig.network` names a network the operator asked for, as
+/// opposed to one of the values that mean "the default network": `""`,
+/// `"ingress"` (what `vm create` puts there when `--network` is absent),
+/// `"bridge"` and `"default"`. Pure.
+///
+/// ONE set for every backend. Each used to carry its own copy, and the copies
+/// drifted: libvirt (#866) excluded only `"default"`, so every VM created
+/// without `--network` asked libvirt for a network literally called `ingress`
+/// and failed to start with "no network with matching name 'ingress'".
+pub fn names_a_declared_network(network: &str) -> bool {
+    !matches!(network, "" | "ingress" | "bridge" | "default")
+}
+
+/// What a libvirt guest's primary NIC is plugged into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibvirtNic {
+    /// `<interface type='network'>`: a libvirt network, by name.
+    Network(String),
+    /// `<interface type='bridge'>`: a host bridge, by name.
+    Bridge(String),
+    /// `<interface type='user'>`: user-mode networking (SLIRP/passt). Egress
+    /// only, and on no network at all.
+    User,
+}
+
+/// The ONE answer to "what is this libvirt NIC attached to", from the three
+/// fields that decide it: the net mode (`VmConfig.net_mode`, which a libvirt
+/// `Vm` record keeps in `tap`), an explicit bridge or libvirt network
+/// (`bridge`), and the engine network the VM was asked for (`network`). An
+/// explicit `bridge` wins; a declared `network` comes next; otherwise libvirt's
+/// own default (`default` for a NAT network, `virbr0` for a bridge). **Pure.**
+///
+/// The domain XML is generated from this, and so is what `vm describe`, `vm ls
+/// -o json` and the node API report — so the two cannot disagree. They did: a
+/// VM created without `--network` carries `network: "ingress"`, the
+/// engine-wide default, and was reported on `ingress` while its domain sat in
+/// `<source network='default'>`.
+pub fn libvirt_nic(net_mode: Option<&str>, bridge: Option<&str>, network: &str) -> LibvirtNic {
+    let named = bridge
+        .filter(|b| !b.is_empty())
+        .or_else(|| names_a_declared_network(network).then_some(network));
+    match net_mode.unwrap_or("user") {
+        "nat" | "network" => LibvirtNic::Network(named.unwrap_or("default").to_string()),
+        "bridge" => LibvirtNic::Bridge(named.unwrap_or("virbr0").to_string()),
+        _ => LibvirtNic::User,
+    }
+}
+
 /// The memory size `s` names, in MiB, or `None` when it does not parse.
 ///
 /// The one parser of the memory syntax (`512M`, `4G`, the k8s-style `4Gi`, a
@@ -560,6 +608,25 @@ pub trait VmBackend {
     /// this alone.
     fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         self.stop(vmdir, vm)
+    }
+
+    /// Releases what this backend defined in the HYPERVISOR for the network
+    /// `vm` was on, when none of `remaining` — every record of this backend
+    /// still on the node, stopped VMs included — is on it. The use case calls
+    /// it after the record is gone: it is the one that sees every record, and a
+    /// libvirt `stop` undefines the domain, so the hypervisor alone would count
+    /// a stopped VM as gone and pull the network from under its next `start`.
+    /// Which network a record is on is the backend's to say (libvirt: an
+    /// explicit `bridge` before `network`), which is why it gets the records
+    /// and not a yes/no.
+    ///
+    /// Default: nothing to release. libvirt overrides it because `vm create
+    /// --network <name>` defines a libvirt network of that name, which outlived
+    /// every `rm` (its bridge and route stayed on the host). An implementation
+    /// removes only what it can prove it defined, never an object the operator
+    /// made.
+    fn release_network(&self, _vm: &Vm, _remaining: &[Vm]) -> delonix_model::Result<()> {
+        Ok(())
     }
 
     /// Suspends a RUNNING VM's vCPUs, guest memory intact — the same notion
@@ -1018,6 +1085,46 @@ impl std::fmt::Debug for BackendRegistration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_libvirt_nic_is_the_default_network_unless_one_was_named() {
+        use super::{libvirt_nic, LibvirtNic::*};
+        // `vm create --backend libvirt` without `--network`: the record says
+        // `ingress`, libvirt runs it in `default`.
+        for default in ["", "ingress", "bridge", "default"] {
+            assert_eq!(
+                libvirt_nic(Some("nat"), None, default),
+                Network("default".into()),
+                "{default:?}"
+            );
+            assert_eq!(
+                libvirt_nic(Some("bridge"), None, default),
+                Bridge("virbr0".into()),
+                "{default:?}"
+            );
+        }
+        assert_eq!(
+            libvirt_nic(Some("network"), None, "lab-net"),
+            Network("lab-net".into())
+        );
+        // An explicit bridge wins over the declared network.
+        assert_eq!(
+            libvirt_nic(Some("bridge"), Some("br0"), "lab-net"),
+            Bridge("br0".into())
+        );
+        assert_eq!(libvirt_nic(Some("user"), Some("br0"), "lab-net"), User);
+        assert_eq!(libvirt_nic(None, None, "ingress"), User);
+    }
+
+    #[test]
+    fn only_a_real_name_is_a_declared_network() {
+        for default in ["", "ingress", "bridge", "default"] {
+            assert!(!super::names_a_declared_network(default), "{default:?}");
+        }
+        for named in ["lab-net", "k8s-net", "ingress2"] {
+            assert!(super::names_a_declared_network(named), "{named:?}");
+        }
+    }
+
     #[test]
     fn unsupported_snapshot_names_the_backend_and_op() {
         let e = super::unsupported_snapshot("cloud-hypervisor", "restore").to_string();

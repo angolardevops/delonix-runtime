@@ -1,10 +1,10 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: 2026-10-16, this host, isolated root DELONIX_ROOT=/tmp/e2e-868b/root DELONIX_NET_RUNTIME_DIR=/tmp/e2e-868b/run, scripts/e2e.sh invoked with target/release/delonix so the five binaries are side by side: PASS=1324 FAIL=0 SKIP=18; the 18 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg absent, no VM images in the isolated store, boot units outside the root, CRI root/CNI path)
-# commit: e5be0903
-# executed: 254
-# leaves: 273
+# recorded: 2026-10-21, this host, isolated root DELONIX_ROOT=~/.cache/dlxsk/d4/root DELONIX_NET_RUNTIME_DIR=~/.cache/dlxsk/nd4, scripts/e2e.sh invoked with target/debug/delonix and the four siblings side by side (built at 6dc31582, whose scripts/e2e.sh is byte-identical to this commit's): PASS=1537 FAIL=0 SKIP=15, one results.jsonl line per verdict; the 15 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg and virt-customize present, no VM images in the isolated store, boot units outside the root, CRI root/CNI path, no DELONIX_UPGRADE_FROM, template ports 8080/8443 held by the host's nginx)
+# commit: 6dc31582
+# executed: 268
+# leaves: 280
 api-resources
 apply
 backup create
@@ -79,6 +79,10 @@ diff
 drift
 explain
 get
+gitops reconcile
+gitops resume
+gitops status
+gitops suspend
 hosts sync
 image apply
 image describe
@@ -128,9 +132,14 @@ net ingress rm
 net ingress unpublish
 net l4guard status
 net netns attach
+net netns detach
 net netns down
+net netns exec
+net netns firewall
 net netns gc
+net netns publish
 net netns status
+net netns unpublish
 net netns up
 net tunnel apply
 net tunnel expose
@@ -148,6 +157,9 @@ network node init
 network node key
 network rm
 network route
+network vip-pool clear
+network vip-pool set
+network vip-pool show
 network vlan
 plan
 pod attach
@@ -229,6 +241,7 @@ vm init
 vm ls
 vm migrate
 vm move
+vm pause
 vm prune
 vm reach
 vm resize
@@ -241,6 +254,7 @@ vm ssh
 vm start
 vm stop
 vm unbridge
+vm unpause
 vm update
 vm vnc
 volume apply

@@ -83,6 +83,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::NETWORK => cmd::network::spec_with_defaults(doc),
         k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
         k::SERVICE => cmd::service::spec_with_defaults(doc),
+        k::GITOPS_SOURCE => cmd::gitops::spec_with_defaults(doc),
         k::IPPOOL => cmd::ippool::spec_with_defaults(doc),
         k::STORAGE_POOL => cmd::storage_pool::spec_with_defaults(doc),
         k::VOLUME => cmd::volume::spec_with_defaults(doc),
@@ -390,15 +391,12 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::POD => Some(crate::cmd::container::POD_SPEC_FIELDS),
         k::VM => Some(crate::cmd::vm::VM_SPEC_FIELDS),
         k::VOLUME => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
-        k::STORAGE => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),
         k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
         k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
         k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
         k::APP => Some(crate::cmd::app::APP_SPEC_FIELDS),
-        // `Ingress` is the k8s-shaped L7 Ingress (→ HTTPRoute); the L4 firewall
-        // keeps `Egress`/`FirewallPolicy`.
         k::INGRESS => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
-        k::EGRESS | k::FIREWALL_POLICY => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+        k::FIREWALL_POLICY => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
         k::NETWORK_ACCESS_RULE => {
             Some(crate::cmd::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS)
         }
@@ -409,10 +407,10 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
         k::SERVICE => Some(crate::cmd::service::SERVICE_SPEC_FIELDS),
+        k::GITOPS_SOURCE => Some(crate::cmd::gitops::GITOPS_SOURCE_SPEC_FIELDS),
         k::IPPOOL => Some(crate::cmd::ippool::IPPOOL_SPEC_FIELDS),
         k::STORAGE_POOL => Some(crate::cmd::storage_pool::STORAGE_POOL_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
-        k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
         k::STACK => Some(stack_spec_fields()),
         k::CLUSTER => Some(crate::cmd::cluster::CLUSTER_SPEC_FIELDS),
@@ -488,9 +486,9 @@ fn check_unknown_fields(doc: &ManifestDoc) {
         _ => Vec::new(),
     };
     for key in nested {
-        count_unknown_field_warning();
+        count_unknown_field_warning(doc, &format!("spec.{key}"));
         super::output::warn(&super::po::tf(
-            "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
+            "{kind} '{name}': unknown field '{key}' in spec (check the spelling)",
             &[
                 ("kind", &doc.kind),
                 ("name", &doc.metadata.name),
@@ -511,7 +509,7 @@ fn check_unknown_fields(doc: &ManifestDoc) {
 /// cannot disagree.
 pub fn plan_name(doc: &ManifestDoc) -> String {
     match doc.kind.as_str() {
-        k::CONTAINER | k::SERVICE => scoped_plan_name(
+        k::CONTAINER | k::SERVICE | k::GITOPS_SOURCE => scoped_plan_name(
             doc.metadata.namespace.as_deref().unwrap_or_default(),
             &doc.metadata.name,
         ),
@@ -555,9 +553,9 @@ fn check_pod_members(doc: &ManifestDoc) {
             if super::container::POD_CONTAINER_FIELDS.contains(&key) {
                 continue;
             }
-            count_unknown_field_warning();
+            count_unknown_field_warning(doc, &format!("spec.containers[{i}].{key}"));
             super::output::warn(&super::po::tf(
-                "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] — ignored (check the spelling)",
+                "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] (check the spelling)",
                 &[
                     ("kind", &doc.kind),
                     ("name", &doc.metadata.name),
@@ -577,16 +575,31 @@ fn check_pod_members(doc: &ManifestDoc) {
 /// diffs a manifest arrives here, so the refusal happens before any effect.
 /// `DELONIX_MANIFEST_LENIENT=1` restores the old behaviour for a manifest written
 /// for a newer binary; `stack validate` uses [`load_lenient`] so it can report.
+///
+/// The refusal NAMES the fields. It used to say «listed above», and above it
+/// each field's warning said «— ignored»: two lines that contradicted each
+/// other, among the other warnings of the same load, with the cause left for
+/// the reader to pick out.
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
-    let before = thread_unknown_fields();
+    let before = thread_unknown_fields().len();
     let docs = load_lenient(path)?;
-    let ignored = thread_unknown_fields() - before;
-    if ignored > 0 && !manifest_lenient() {
+    let unknown = thread_unknown_fields().split_off(before);
+    if unknown.is_empty() {
+        return Ok(docs);
+    }
+    let path = path.display().to_string();
+    let n = unknown.len().to_string();
+    let fields = unknown.join(", ");
+    if !manifest_lenient() {
         return Err(Error::Invalid(super::po::tf(
-            "{path}: {n} field(s) not understood (listed above) — nothing was applied; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to ignore them",
-            &[("path", &path.display().to_string()), ("n", &ignored.to_string())],
+            "{path}: nothing was applied — {n} field(s) not understood: {fields}; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to apply without them",
+            &[("path", &path), ("n", &n), ("fields", &fields)],
         )));
     }
+    super::output::warn(&super::po::tf(
+        "{path}: {n} field(s) not understood, ignored (DELONIX_MANIFEST_LENIENT=1): {fields}",
+        &[("path", &path), ("n", &n), ("fields", &fields)],
+    ));
     Ok(docs)
 }
 
@@ -595,11 +608,12 @@ fn manifest_lenient() -> bool {
 }
 
 thread_local! {
-    static THREAD_UNKNOWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static THREAD_UNKNOWN: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-fn thread_unknown_fields() -> usize {
-    THREAD_UNKNOWN.with(|c| c.get())
+/// Every unknown field this thread has counted, in order.
+fn thread_unknown_fields() -> Vec<String> {
+    THREAD_UNKNOWN.with(|c| c.borrow().clone())
 }
 
 /// [`load`] without the refusal: unknown fields are warned about and counted.
@@ -787,9 +801,9 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what
     // this replaces and why one place instead of fifteen.
     //
-    // After the lowering on purpose: by now `Egress` is already `FirewallPolicy`
-    // and the two share one list, so a Kind is checked against the fields it will
-    // actually be parsed with rather than the ones it was written as.
+    // After the lowering on purpose: a lowered Kind (e.g. a `Dependency` folded
+    // into a policy) is checked against the fields it will actually be parsed
+    // with rather than the ones it was written as.
     warn_sunset_kinds(&docs);
     Ok(docs)
 }
@@ -925,9 +939,9 @@ pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
         if known.contains(&key) {
             continue;
         }
-        count_unknown_field_warning();
+        count_unknown_field_warning(doc, &format!("spec.{block}.{key}"));
         super::output::warn(&super::po::tf(
-            "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)",
+            "{kind} '{name}': unknown field '{key}' in spec.{block} (check the spelling)",
             &[
                 ("kind", &doc.kind),
                 ("name", &doc.metadata.name),
@@ -953,19 +967,28 @@ pub fn unknown_field_warnings() -> usize {
     UNKNOWN_FIELD_WARNINGS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub(crate) fn count_unknown_field_warning() {
-    THREAD_UNKNOWN.with(|c| c.set(c.get() + 1));
+/// Counts one unknown field, and keeps where it was (`<Kind> '<name>'
+/// spec.<path>`) for the refusal [`load`] ends on.
+pub(crate) fn count_unknown_field_warning(doc: &ManifestDoc, path: &str) {
+    THREAD_UNKNOWN.with(|c| {
+        c.borrow_mut()
+            .push(format!("{} '{}' {path}", doc.kind, doc.metadata.name))
+    });
     UNKNOWN_FIELD_WARNINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
-        count_unknown_field_warning();
+        count_unknown_field_warning(doc, &format!("spec.{key}"));
         eprintln!(
             "{}",
             super::po::tf(
-                "WARNING: {kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
-                &[("kind", &doc.kind), ("name", &doc.metadata.name), ("key", &key)],
+                "WARNING: {kind} '{name}': unknown field '{key}' in spec (check the spelling)",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("key", &key)
+                ],
             )
         );
     }
@@ -997,9 +1020,10 @@ mod tests {
     ///
     /// An alias is SILENT, unlike a deprecation. A rename changes nothing about
     /// what the document means, so there is nothing for the writer to migrate;
-    /// a MERGE (`Egress`→`FirewallPolicy`) does warn, because the semantics
-    /// moved. Warning on a pure rename would train people to ignore warnings.
-    /// Os três Kinds removidos recusam NOMEANDO o substituto.
+    /// a SUNSET Kind does warn, because a successor exists. Warning on a pure
+    /// rename would train people to ignore warnings.
+    /// Os três Kinds removidos (`Storage`/`ShareVolume`/`Egress`) recusam
+    /// NOMEANDO o substituto.
     ///
     /// Uma remoção que caísse no «unknown kind» genérico faria um manifesto
     /// correcto-até-ontem parecer um erro de escrita, e quem o apanha não
@@ -1026,6 +1050,28 @@ mod tests {
         )
         .unwrap();
         assert!(lower_legacy_kind(&mut ok).is_ok());
+    }
+
+    /// A removed Kind has NO field allowlist. `lower_legacy_kind` refuses it
+    /// before `check_unknown_fields` ever runs, so an arm in `spec_fields_for`
+    /// for one of these would be unreachable — and `SHAREVOLUME_SPEC_FIELDS`
+    /// proved the cost: it listed `storageRef/quota/alertPct` long after the
+    /// live `share:` block became `from`, a second field-list drifting from the
+    /// resource it claimed to describe. This guard keeps a dead arm from
+    /// growing back: the fields of `Storage`/`ShareVolume`/`Egress` live on
+    /// `Volume`/`NetworkPolicy`, not on the removed spelling.
+    #[test]
+    fn a_removed_kind_has_no_field_allowlist() {
+        for kind in ["Storage", "ShareVolume", "Egress"] {
+            assert!(
+                removed_kind_hint(kind).is_some(),
+                "{kind} should be a removed Kind"
+            );
+            assert!(
+                spec_fields_for(kind).is_none(),
+                "{kind} is refused at load — a `spec_fields_for` arm for it is dead code"
+            );
+        }
     }
 
     #[test]
@@ -1471,6 +1517,11 @@ spec: {}
         .unwrap();
         let err = load(&p).unwrap_err().to_string();
         assert!(err.contains("not understood"), "{err}");
+        // The refusal names the field itself: «listed above» pointed at a
+        // warning that said «ignored», next to «nothing was applied».
+        assert!(err.contains("Container 'web' spec.memroy"), "{err}");
+        assert!(err.contains("nothing was applied"), "{err}");
+        assert!(!err.contains("listed above"), "{err}");
         assert!(load_lenient(&p).is_ok());
         std::fs::write(
             &p,
@@ -1525,6 +1576,10 @@ spec: {}
         .unwrap();
         let err = load(&p).unwrap_err().to_string();
         assert!(err.contains("not understood"), "{err}");
+        assert!(
+            err.contains("Pod 'p' spec.containers[0].readinessProbe"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1556,11 +1611,11 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             "apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  campoInexistente: 1\n",
         )
         .unwrap();
-        let antes = super::thread_unknown_fields();
+        let antes = super::thread_unknown_fields().len();
         super::load_lenient(&p).unwrap();
         assert_eq!(
-            super::thread_unknown_fields(),
-            antes + 1,
+            super::thread_unknown_fields()[antes..],
+            ["Network 'n' spec.campoInexistente".to_string()],
             "carregar um manifesto com um campo inventado tem de contar UM aviso"
         );
     }
@@ -1716,6 +1771,10 @@ spec: { image: nginx }
             "networkGateways" => ("{ provider: opnsense }", "NetworkGateway"),
             "httpRoutes" => ("{ rules: [] }", "HTTPRoute"),
             "gateways" => ("{ provider: pinggy, localPort: 80 }", "Gateway"),
+            "gitopsSources" => (
+                "{ source: { url: 'file:///srv/infra.git' } }",
+                "GitOpsSource",
+            ),
             // Lowered on the way out: a Workload into the Kind its `type` names,
             // a Dependency into the NetworkPolicy that carries its allow.
             "workloads" => (

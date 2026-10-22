@@ -289,12 +289,22 @@ async fn ping() -> &'static str {
 /// over a minute on a host with heavy containers). Those two are published by
 /// `spawn_expensive_metrics_refresh`'s background loop instead — the gauges it
 /// owns are stale by up to its refresh interval, never absent.
+///
+/// The per-workload contention series (CPU throttling, pressure, OOM) are also
+/// refreshed inline: a few small cgroup file reads per running workload, and the
+/// whole set is replaced so a stopped workload stops being exported.
 async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
     let base = s.base.clone();
-    let summary =
-        tokio::task::spawn_blocking(move || dashstats::collect(&base, false, false)).await;
-    if let Ok(summary) = summary {
+    let collected = tokio::task::spawn_blocking(move || {
+        (
+            dashstats::collect(&base, false, false),
+            dashstats::collect_workload_series(&base),
+        )
+    })
+    .await;
+    if let Ok((summary, workloads)) = collected {
         dashstats::publish_to_metrics(&summary);
+        dashstats::publish_workloads_to_metrics(workloads);
     }
     (
         [(
@@ -493,7 +503,11 @@ async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Res
 /// a leading `-` — otherwise the CLI's `clap` would interpret the id as a flag (e.g. an
 /// id `--rm`). The CLI args do not suffer shell injection (`Command::args`, not a
 /// string), but they can be read as options — hence the barrier against `-`.
-fn valid_arg(s: &str) -> bool {
+///
+/// Public so the OTHER surface that spawns the same CLI with a caller-supplied
+/// name — `delonix-mcp` (`logs.query`, `container.restart`) — validates with the
+/// exact same rule instead of a second copy that can drift (G-017).
+pub fn valid_arg(s: &str) -> bool {
     valid_name(s) && !s.starts_with('-')
 }
 

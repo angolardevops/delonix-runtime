@@ -597,6 +597,20 @@ impl DelonixMcp {
         &self,
         Parameters(LogsQueryParams { name, tail }): Parameters<LogsQueryParams>,
     ) -> Result<String, ErrorData> {
+        if !delonix_mgmt::valid_arg(&name) {
+            self.log(
+                "logs.query",
+                "error",
+                &json!({ "name": name, "tail": tail }),
+                Some(name.clone()),
+                None,
+                Some("invalid name".to_string()),
+            );
+            return Err(typed_err(
+                "VALIDATION_FAILED",
+                format!("invalid name: {name}"),
+            ));
+        }
         let mut args = vec!["container".to_string(), "logs".to_string()];
         if let Some(t) = tail {
             args.push("--tail".to_string());
@@ -675,6 +689,20 @@ impl DelonixMcp {
     ) -> Result<String, ErrorData> {
         let risk = risk_of("container.restart");
         let args = json!({ "name": name, "confirm": confirm });
+        if !delonix_mgmt::valid_arg(&name) {
+            self.log(
+                "container.restart",
+                "denied",
+                &args,
+                Some(name.clone()),
+                None,
+                Some("invalid name".to_string()),
+            );
+            return Err(typed_err(
+                "VALIDATION_FAILED",
+                format!("invalid name: {name}"),
+            ));
+        }
         if risk.requires_confirm() && !confirm {
             self.log(
                 "container.restart",
@@ -1246,5 +1274,63 @@ mod tests {
         assert_eq!(events[0]["tool"], "audit.query");
         assert_eq!(events[0]["result"], "ok");
         assert_eq!(events[0]["risk"], "READ");
+    }
+
+    // G-017: the two tools that forward a caller-supplied `name` to the CLI as a
+    // positional argument (`container.restart`, `logs.query`) must refuse an
+    // unsafe name with the SAME rule `delonix-mgmt` already enforces — a leading
+    // `-` would be read by the CLI's clap as a flag, a `/` or `..` would escape
+    // the store. Before this guard, only `delonix-mgmt` checked; the MCP paths
+    // forwarded the name verbatim.
+    #[test]
+    fn container_restart_refuses_an_unsafe_name_before_spawning() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = DelonixMcp::new(dir.path().to_path_buf()).unwrap();
+        for bad in ["--root", "-rf", "../escape", "a/b", "", ".."] {
+            let err = server
+                .container_restart(Parameters(ContainerRestartParams {
+                    name: bad.to_string(),
+                    // confirm is true: the validation must fire regardless, and
+                    // BEFORE the confirm gate — a `-` name is refused, not run.
+                    confirm: true,
+                }))
+                .expect_err(&format!("name {bad:?} must be refused"));
+            assert_eq!(err.code, ErrorCode::INVALID_PARAMS, "name {bad:?}");
+        }
+        // Every refusal is audited as a denial, and none reached the task spawn.
+        let events = server.audit.tail(20);
+        assert_eq!(events.len(), 6);
+        assert!(events.iter().all(|e| e["result"] == "error"), "{events:?}");
+        assert!(
+            events.iter().all(|e| e["task_id"].is_null()),
+            "a refused restart must not spawn a task: {events:?}"
+        );
+    }
+
+    #[test]
+    fn logs_query_refuses_an_unsafe_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = DelonixMcp::new(dir.path().to_path_buf()).unwrap();
+        for bad in ["--tail", "-n", "../../etc/passwd", "a/b", ""] {
+            let err = server
+                .logs_query(Parameters(LogsQueryParams {
+                    name: bad.to_string(),
+                    tail: Some(5),
+                }))
+                .expect_err(&format!("name {bad:?} must be refused"));
+            assert_eq!(err.code, ErrorCode::INVALID_PARAMS, "name {bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_normal_name_still_passes_the_guard() {
+        // The guard must not reject legitimate ids — dots, dashes-in-the-middle,
+        // underscores and digits are all valid container names.
+        assert!(delonix_mgmt::valid_arg("web-1"));
+        assert!(delonix_mgmt::valid_arg("alpine_3.20"));
+        assert!(delonix_mgmt::valid_arg("abc123"));
+        assert!(!delonix_mgmt::valid_arg("-web"));
+        assert!(!delonix_mgmt::valid_arg("a/b"));
+        assert!(!delonix_mgmt::valid_arg(".."));
     }
 }

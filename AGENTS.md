@@ -1289,7 +1289,10 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   `--replace <Kind>/<nome>`, antes da primeira criação (o apply é fail-fast sem rollback — recusar
   a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
-- **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
+- **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI; um
+  plano com um `Conflict` sai **5** (`DX-5601`, o erro do `apply`) e ganha ao 2.
+  O `plan` planeia com as flags do `apply`: sem `--prune`, um `Delete` fica listado mas
+  **mantido** (`changed: false`, fora do exit code — `mark_unpruned`); `plan --prune` conta-o.
 - **Âmbito: 12 dos 13 Kinds convergem** (`CONVERGING_KINDS`) — Network/NetworkRoute/Volume/
   ShareVolume/Image/VirtualMachine/Container/Pod/NetworkPolicy/HTTPRoute/Ingress/Gateway. **Esta
   linha já esteve errada duas vezes** (dizia 8, depois 11 de 12 quando o `KINDS` já tinha 13, e
@@ -1742,7 +1745,15 @@ manifesto mudou de significado.
 - **Ciclo de vida** (`ensure_running`/`stop`): idempotente (vivo → SIGHUP; morto → spawn + publish),
   com **guarda de identidade do PID** (`/proc/<pid>/cmdline` contém `ingress-proxy`, para um PID
   reciclado não levar SIGHUP/SIGTERM), confirmação de arranque (não declara "a servir" se o proxy
-  caiu no bind) e publish idempotente. `httproute rm` mata o proxy + despublica.
+  caiu no bind) e publish idempotente. `httproute rm` mata o proxy + despublica — e **diz só o
+  que observou**: lê `is_running` das duas instâncias ANTES do `clear_manual` (ver `rm_report`),
+  porque a ausência de proxy DEPOIS do clear é um estado que o próprio comando produz. Sem isso
+  anunciava «proxy parado e portas despublicadas» também quando o `spawn_proxy` do `apply` tinha
+  falhado, quando o proxy já tinha morrido, e para a instância do netns do host, que liga ao
+  loopback directamente e nunca publica porta nenhuma. Pela mesma razão, um proxy a correr DEPOIS
+  do clear também não prova que corria antes: com rotas auto-registadas a sobreviver, o `rebuild`
+  salta o `stop` e o `ensure_running` faz `spawn_proxy` se não houver pid vivo — ou seja o `rm`
+  ARRANCA o proxy e publica as portas, e aí diz isso em vez de «proxy mantém-se».
 - **Segurança:** `host`/`path`/`backend.service` passam por `valid_host`/`valid_path_prefix`/
   `valid_service` antes de qualquer uso; headers **hop-by-hop** (Connection/Transfer-Encoding/
   Upgrade/…) removidos nos dois sentidos (anti-smuggling); timeouts anti-slowloris (handshake TLS,
@@ -3411,6 +3422,84 @@ tem a secção «On the internet without a public IP», e o fim do `--up` aponta
   Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
   ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
 
+## Um projecto gerado nasce como repositório (2026-10-15)
+
+Pedido do dono: o projecto do `init` deve nascer pronto para git, para que o
+passo seguinte seja acrescentar o remote e empurrar, e não quatro comandos de
+preparação. `git_init` (`cmd/scaffold.rs`) corre depois de o projecto estar
+completo — ficheiros e certificado — e **nunca em modo de adopção**, porque
+esse projecto tem história sua.
+
+**Quatro recusas, cada uma porque o contrário é pior**: sem `git` no PATH
+diz-o e segue (um scaffold não falha por uma ferramenta que o projecto não
+precisa para construir); sobre um `.git` que já existe não toca em nada;
+**dentro de uma work tree existente** recusa criar um repositório aninhado — num
+subdirectório de monorepo essa armadilha só aparece quando alguém empurra e os
+ficheiros não estão lá, e `git rev-parse --is-inside-work-tree` é a única forma
+honesta de perguntar; e sem autor configurado deixa tudo STAGED e imprime os
+dois `git config`, em vez de inventar um nome e um endereço que ficariam na
+história de todos os projectos gerados aqui. O `--initial-branch` precisa de
+git 2.28; sem ele, `git init` + `symbolic-ref`.
+
+**E `.git` é metadados, não conteúdo gerado — todo o walker sobre um projecto
+tem de concordar com isso.** Dois testes chumbaram no instante em que o
+repositório passou a existir: um lê cada ficheiro do projecto como UTF-8 (os
+objectos do git são binários) e o outro compara ficheiro a ficheiro o que dois
+templates geram (os objectos diferem byte a byte entre duas corridas do MESMO
+template). Os dois walkers saltam `.git`. O `grep -r` de tokens por substituir
+da bateria não foi afectado — medido, não suposto.
+
+**Empurrar para uma plataforma NÃO entra aqui**, e a razão é o portão: o
+`CONSUMER_NAMES` do `scripts/arch_fitness.py` recusa `delonixctl`,
+`ngolacloud` e `paas` em `crates/`, `bins/` e `proto/` — e os templates vivem em
+`bins/delonix-runtime-bin/templates/`, com `.md`/`.yaml`/`.sh` dentro da
+varredura. O que o motor entrega é a precondição (o repositório em `main` com
+um commit); o nome do remote e a plataforma pertencem a quem o consome.
+
+**O portão funcional recusou a primeira versão, e cinco dos seis achados eram
+reais.** O mais grave com consequência de credencial: o `odoo` era o **único**
+dos onze sem `.gitignore`, e tanto o README como o comentário do manifesto
+mandam mover a password da base de dados para `.secrets.env`, «a file you keep
+OUT of git». Enquanto não havia repositório a promessa era só imprecisa; com o
+repositório a existir desde o primeiro segundo, quem a seguisse punha a
+password num ficheiro que o git já estava a ver. **O `.dockerignore` mantém um
+ficheiro fora de uma IMAGEM — não é o mesmo ficheiro nem a mesma promessa.**
+Gate: `no_template_tells_you_to_keep_a_secret_in_a_file_git_is_watching`
+(verificado a chumbar com o `.gitignore` do odoo removido).
+
+Os outros quatro, todos corrigidos e medidos:
+
+- **Culpava o autor por QUALQUER falha de commit.** Uma chave de assinatura
+  ausente, um hook herdado do `init.templateDir`, um object store só de leitura
+  — todos davam «the commit needs an author» e dois `git config` que não
+  resolvem nada. Mesma família do «o ENOENT de um `Command::status()` não é um
+  ficheiro em falta». Agora o autor só é nomeado quando falta mesmo, e nos
+  outros casos citam-se as palavras do próprio git (medido: `fatal: cannot
+  exec '/nao/existe'`).
+- **O scaffold genérico (sem `-t`) ficava de fora.** Escreve o mesmo tipo de
+  artefacto e não ganhava repositório, sem uma linha a dizê-lo.
+- **O `--help` dos `init` não prometia nada disto**, e é o oráculo: o comando
+  passa a criar `.git/` e um commit no directório de quem chama.
+- **A sonda do `git --version` lia o `Err` do spawn e não o estado de saída** —
+  respondia «o git arranca», não «o git serve».
+
+E as cinco mensagens novas não tinham entrada no `pt.po`. O
+`help_i18n_tests::todo_o_help_de_comando_tem_traducao_pt` apanhou a mudança do
+`--help` sozinho; as mensagens de `po::t` **não têm portão** — é a lacuna que
+o próprio relatório nomeia, e fica escrita aqui.
+
+**Por fazer, pedido no mesmo dia**: um `VMfile` por template, com unit systemd
+activada no arranque, para `delonix vm build` produzir uma VM que já corre o
+projecto. A gramática serve (`FROM`/`SIZE`/`RUN`/`COPY`/`USER`/`CLOUDINIT`/
+`VCPUS`, sem `CMD` porque uma VM arranca um init, e `COPY <dir>` copia os
+FILHOS para o destino), mas três coisas precisam de medição antes de escrever
+onze receitas: o runtime da distro contra o pin do template (o Ubuntu 24.04 traz
+Go 1.22 e os templates pinam 1.26, logo um `go build` chumba em `go.mod requires
+go >= 1.26`), o `tls/` que um `COPY .` levaria para DENTRO da imagem — o oposto
+do que estes templates prometem, e a saída é uma unit one-shot que gera o
+certificado no primeiro arranque de cada VM — e a validação, que é um
+`vm build --network` por template.
+
 ## Os 11 templates revistos, e o contrato passou a ter portão (2026-10-15)
 
 A seguir ao bug da porta privilegiada, os ONZE templates foram gerados com a
@@ -4536,6 +4625,46 @@ no publish), e separa "alcançáveis a partir de VMs" (endereço:porta) dos
 seguro. Parsers puros e testados (`parse_ip_gateways_pega_so_as_virbr`,
 `parse_ss_binds_classifica_loopback_vs_gateway`).
 
+### A rede libvirt de uma rede declarada: posse marcada, sub-rede verificada (2026-10-21)
+
+Desde o #866 o `vm create --network <rede declarada>` define em `qemu:///system` uma rede
+NAT libvirt com o mesmo nome. Medido pelo cli-tester, em root isolado: **nada a removia**
+(`vm rm`, `network rm`, `stack destroy` deixavam a rede, o virbrN e a rota no host), e o
+`ensure_libvirt_network` **confiava no nome** — com essa rede deixada para trás, redeclarar
+a rede noutra sub-rede e criar uma VM nela dava rc 0 com a VM na sub-rede ANTIGA, e o
+`stack plan`/`drift` calados.
+
+- **A posse lê-se do objecto, nunca do nome.** A rede que o motor define leva um
+  `<metadata>` no namespace `https://delonix.io/xmlns/libvirt/network/1` (o libvirt
+  guarda-o; medido no 10.0, devolvido com `"`). Só uma rede com a marca se redefine ou
+  remove; o host tem redes do operador com nomes que uma rede do delonix também pode ter.
+- **`libvirt_network_plan` (pura, tabela testada):** usa-se só na sub-rede declarada (ou
+  sem nada declarado para comparar); fora dela, redefine-se se é nossa E nenhum domínio
+  (do operador incluído, parado incluído) está nela; em tudo o resto recusa com
+  **DX-5508** (classe 5). Uma rede sem marca deixada por um binário anterior também
+  recusa — não se distingue de uma do operador, e a mensagem diz o `virsh` a usar.
+- **Quem conta os utilizadores é o caso de uso; quem diz em que rede está cada um é o
+  backend.** `VmBackend::release_network(vm, remaining)` (default: nada) recebe, em cada
+  `rm`, os registos do mesmo backend que ficam — parados incluídos: perguntar só ao
+  libvirt contaria uma VM PARADA como ausente (o `stop` faz undefine do domínio). A
+  primeira versão comparava `o.network == vm.network` no caso de uso, e o cli-tester
+  apanhou-a (BUG-1): uma VM posta na rede por `--bridge X` fica com `network: ingress`,
+  não contava, e o `rm` da outra tirava a rede de baixo do `start` dela. O libvirt decide
+  com o mesmo mapeamento do `boot` (`bridge` antes de `network`, `still_on_network`).
+- **O `start` leva a sub-rede declarada AGORA** (`VmEngine::restart_config`, pelo novo
+  `VmNetwork::subnet_of`). Um root não vê os registos de outro, e o `qemu:///system` é
+  partilhado: o último `rm` de um root pode tirar a rede de que uma VM parada de outro
+  root precisa (BUG-1b). Com a sub-rede, o `start` define-a outra vez — e julga uma que
+  tenha ficado noutra sub-rede, como o `create`. Um `boot` que falha depois de definir a
+  rede leva-a consigo.
+- De caminho: o `destroy` libertava a reserva de IP estático do `default` numa VM com
+  `--network`, porque o `boot` mapeia a rede para `bridge` e o registo não o guarda.
+- **Gate**: secção «a rede libvirt de uma rede declarada…» no `scripts/e2e.sh`, dentro do
+  `libvirt_system_usable`, com as redes e o domínio «alheios» definidos pela própria secção
+  e nunca arrancados. 17/17 com a correcção; 14/17 com a versão que contava por `network`
+  (os três do BUG-1 e do `start`); 4/12 com o binário anterior a tudo isto (que ainda
+  deixou a rede para trás).
+
 ## VM↔container por IP directo (`vm bridge`) — EXPERIMENTAL, privilegiado, opt-in
 
 A ÚNICA coisa que o modelo rootless não faz sozinho: dar a uma VM libvirt (em
@@ -5263,6 +5392,9 @@ senão um documento removido do manifesto nunca aparecia como candidato a
 `Delete` para o `--prune` — a própria razão de existir deste Kind.
 
 ## `kind: Service` — descoberta por selector, round-robin por DNS, sem VIP (ADR-0032, 2026-09-05)
+
+> **Desde 2026-10-12 «sem VIP» vale só para `type: DNS`** (a omissão): `type: VirtualIP` dá um
+> endereço L4 com prontidão — ver «kind: Service type VirtualIP» mais abaixo.
 
 Fecha a Kind que faltava para as «12 Kinds operáveis» do plano de
 restruturação da CLI. Desenho completo em
@@ -9945,3 +10077,124 @@ correr, nada disto deve ser lido como «funciona».
 trabalho de outras sessões): o `--extra-package` é descartado em silêncio no caminho
 offline da build da golden, e o `k8s_repo_version` tem um default independente
 (`stable:/v1.31`) que discorda do `DEFAULT_K8S_VERSION` (1.36).
+
+## `kind: GitOpsSource` — a passagem de pull sem daemon (ADR-0021, 2026-10-12)
+
+- **Uma passagem, sem processo residente**: um timer systemd de utilizador por fonte
+  (`delonix-gitops-<ns>.<nome>`, `Type=oneshot`, com atraso aleatório) corre `gitops reconcile`:
+  fetch `--depth=1` do ref, verificação, `stack plan`, guarda, apply com os digests do plano,
+  registo do commit aplicado e um evento. Um segundo disparo com a passagem anterior viva SALTA
+  (`flock` não bloqueante por fonte) e di-lo. Verbos: `gitops reconcile|status|suspend|resume`;
+  `suspend` é uma marca local, fora do spec.
+- **Um commit recusado não aplica NADA e fica registado**: YAML com chave duplicada, um grafo
+  partido, um documento proibido ou uma acção que a política não permite (DX-1602/1604) deixam
+  a stack como estava, com o último commit aplicado intacto. Medido: quatro commits recusados,
+  o mesmo PID e o mesmo `memory.max`.
+- **A fonte é entrada não confiável** — a passagem de segurança está escrita no ADR-0021. O git
+  corre com `env_clear()`, HOME privado, sem config de sistema nem global, sem hooks, só
+  `file`/`https`/`ssh`, `fsckObjects`, sem redirects nem credential helpers, tecto de 120 s. Nada
+  é checked out: a árvore lê-se por `ls-tree`/`cat-file` e só ficheiros regulares passam
+  (symlinks, submódulos, ponteiros LFS e chaves privadas recusam o commit). Tectos: 4096
+  entradas, 256 manifestos, 1 MiB por ficheiro, 8 MiB no total, 512 documentos, 256 MiB de
+  espelho. Assinaturas só SSH (`allowed_signers`); GPG é recusado.
+- **O que um repo pode declarar**: `RuntimePolicy`, `Secret`, `App` e `Image` com `build:` nunca;
+  VM, SystemContainer, NetworkZone, NetworkGateway, StoragePool, Gateway e IPPool só listados em
+  `safety.kinds`. Um container não pede privilégio, rede/PID/IPC do host, bind mounts,
+  dispositivos, GPU, `capAdd`, perfis unconfined nem `envFile`; um Volume é local simples e uma
+  Network é bridge. Os documentos aterram na namespace da fonte. **Um container vindo de uma
+  fonte tem de nomear uma rede**: a forma plana sem rede é `host`, que a guarda recusa.
+- **Política do plano**: `Create`/`Update`/`NoOp` por omissão; `Adopt`/`Replace`/`Reboot` só com
+  `safety.allow`; `Conflict` sempre recusado; `Delete` só com `prune: true`, abaixo de
+  `maximumDeletes` e nunca sobre `protectedResources`. Uma fonte só se declara a si própria, e o
+  repo só lhe muda `ref`/`path`/`interval`; uma passagem nunca poda uma fonte. `Conflict` sempre
+  recusado, com UMA excepção: o registo da própria fonte, quando o repo se declara a si próprio
+  (ver a stack de bootstrap, abaixo).
+- **A stack de bootstrap e a das passagens são duas, nunca a mesma (2026-10-14).** Medido antes:
+  com a fonte aplicada por `stack apply --name <fonte>` e a stack das passagens a chamar-se, por
+  omissão, como a fonte, o `stack plan` dava rc=2 para sempre e um `apply --prune` apagava o
+  Volume que a passagem seguinte recriava VAZIO. Agora `spec.stack` vale, por omissão,
+  `gitops.<namespace>.<nome>` (um rótulo DNS não tem pontos, logo nenhum `spec.stack` nem um
+  `--name` normal o escrevem), e `stack apply`/`plan`/`prune`/`rollback`/`validate` recusam com
+  DX-1601, antes de ler a máquina, um manifesto que declare uma fonte cujas passagens caiam na
+  stack em que o comando age. Só a passagem fica isenta, por argumento explícito
+  (`Applier::Pass`), nunca por variável de ambiente. Quando o repo se declara a si próprio, a
+  passagem toma o registo da fonte à stack do bootstrap («taken over from stack …») e devolve-o se
+  o segundo olhar recusar o commit; daí em diante o bootstrap não é dono de nada, e mudar um campo
+  não mutável de uma fonte auto-gerida é `delete gitopssources` e voltar a fazer o bootstrap.
+- **Não validado**: um timer systemd real a disparar, a recuperação depois de um reboot, a
+  validação numa VM golden, e fetches `ssh://`/`https://` de ponta a ponta. Por fazer (recusados
+  como campos desconhecidos): `selfHeal`, `wait`, `healthTimeout`, backoff, métricas Prometheus,
+  e os verbos `gitops bootstrap`/`rm`/`history` do ADR.
+
+## `kind: Service type VirtualIP` — o VIP L4 com prontidão (ADR-0066, 2026-10-12)
+
+- **`type: DNS|VirtualIP`** (omissão `DNS`, que compara só `matchLabels`/`port` como antes). Um
+  `VirtualIP` aluga um endereço do pool (`<root>/ingress/vip-pool`, ou `DELONIX_SERVICE_VIP_CIDR`;
+  `network vip-pool set|clear|show`) como lease `svc:<ns>/<nome>` no IPAM, e o DNS responde UM
+  registo A — o VIP. `type`/`vip`/`readiness`/`publish` são campos QUENTES: mudar reescreve o
+  registo e o dataplane, sem recriar nada.
+- **O pool é recusado antes de servir**: IPv4 privado, `/16`–`/29`, bits de host a zero, sem
+  sobreposição com outro pool, com redes do motor, `subnet`s CNI, `podSubnet`/`serviceSubnet` do
+  kind, endereços e rotas do host (VPN e wg incluídos), o slirp `10.0.2.0/24` nem o `delonix0`
+  (DX-5360). Sem pool, DX-6360; VIP fora do pool, DX-1361; sem `bridge-nf-call-iptables`,
+  DX-6361 (o hairpin depende dele). A verificação de sobreposição corre no `apply`, não no `plan`.
+- **Quatro chains próprias no holder**, ao lado da ordem que já existia (`fwguard` -20,
+  `fwprivate` -15, `fwdeny` -10, `fwcont` -5, política 0): `svcpre`/`svcout` (nat, -101) fazem o
+  DNAT do VIP para os backends PRONTOS, `vipguard`/`vipguardout` (filter, -20) recusam o que o VIP
+  não serve. Reescritas com `flush` num só `nft -f`. Isolamento de namespace e anti-spoof
+  continuam a valer para o tráfego do VIP (medido: forjar a origem dá `svcpre` +0).
+- **Prontidão fail-closed**: um prober no processo de controlo (500 ms) lê os registos de
+  container em cada ronda e aplica `readiness.tcp` com `successThreshold`/`failureThreshold`;
+  só entra em rotação um backend `Running`, `healthy` se tiver health check, e com a porta a
+  responder. **Desvio do ADR (D7)**: a releitura de 500 ms substitui o disparo por evento. Verbos
+  do holder: `svcsync` e `svc-state` (só leitura); o `nsleave` tira o endereço de todos os mapas
+  antes de um detach devolver. Sem backend pronto o VIP recusa logo (RST), nunca pendura.
+- **`spec.publish`** leva portas do host ao mesmo conjunto de backends; o `start_slirp` volta a
+  publicá-las depois de um respawn.
+- **BREAKING para quem usa o `delonix-sdn` como biblioteca (D9)**: saíram `lbset`/`lbclear`,
+  `set_service_lb*`, `clear_service_lb` e `service_vip` (também no `delonix-net-rules`), e os
+  códigos DX-1329/DX-1330 (substituídos pelo DX-1361).
+- **Medido ao vivo** (roots isolados, backends busybox httpd): espalhamento 34/26 em 60 ligações,
+  `counter packets 60` no `svcpre`; porta fechada → ejectado em 2,6–3,9 s e 0/60 depois;
+  readmitido 0,66 s depois de reabrir; `container rm` → 0/60; plano de controlo morto → 30/30
+  servidos pelo ruleset do pin. Cenário de caos `service_lb`.
+- **Não validado**: a bateria inteira (só a secção nova), uma VM golden, o caminho `svcout` para um
+  cliente no próprio holder (o proxy L7). **ADR-0065 (IPv6) não começou**: a P1 passa todas as
+  regras a `table inet` e precisa de sessão própria.
+
+## O grupo de cgroup também vale como root, e o VMM do Cloud Hypervisor nasce numa folha (ADR-0079, proposto)
+
+**Dois tectos aceites e não aplicados, ambos com rc=0.** O `cgroup_parent` (ADR-0015) só existia
+no caminho rootless delegado: em modo root o `setup_cgroup` usava `Container::cgroup()` =
+`delonix.slice/delonix-<id>` e nunca lia o grupo — quem punha todos os passos de um trabalho sob
+um grupo para os limitar em conjunto não tinha tecto nenhum como root. E o VMM do Cloud
+Hypervisor corria no cgroup de quem o lançou: os vCPUs e a memória da VM não eram `cpu.max`/
+`memory.max` de ninguém.
+
+- **`Container::cgroup()` passou a ser `delonix.slice/<grupo>/delonix-<id>`** (`root_cgroup_path`,
+  pura). Como root, `ensure_root_group` cria o grupo, escreve o tecto (normalizado: `64Mi` vira
+  bytes) e passa `memory cpu pids` aos filhos ANTES da folha; qualquer falha é `DX-6102`. Como o
+  caminho estático mudou, a remoção, as estatísticas do CRI e o `container_pids` seguem sozinhos.
+- **Um grupo inválido é RECUSADO nos dois modos** (`DX-1116`), no topo do `spawn` (nada clonado)
+  e outra vez no `setup_cgroup`. Antes, o rootless DESCARTAVA o nome inseguro e arrancava o
+  container sem grupo — o teste `an_unsafe_group_name_*` mudou de «não escapa» para «é recusado».
+- **`DEFAULT_PIDS_MAX` é público** (`delonix_compute`, reexportado pelo `delonix-linux`).
+- **Folha de processo** (`delonix_compute::cgroup_leaf` + `delonix_linux::create_process_leaf`):
+  `Ok(None)` quando não há onde a criar (sessão SSH sem delegação), erro quando um tecto exigido
+  não pega (a folha é apagada). O provider chega-lhe pela porta `ProcessLeaves`, registada no
+  `main` da CLI e no `compose` da node API — um provider não pode depender do adaptador.
+- **O VMM entra na folha entre o `fork` e o `exec`** do lançador (`pre_exec`, um `write` num fd
+  aberto pelo pai): nasce lá dentro, nada do que aloca é cobrado noutro sítio. Tectos: vCPUs (ou
+  `vcpus_max`) em cores inteiros, memória (ou `memory_max_mib`) + 128 MiB, pids
+  `max(512, 2×vCPUs+64)`. Medido no CH v53.0: o VMM ocupa ~7 MiB com 256 MiB ou 2 GiB de guest,
+  7 threads para 2 vCPUs.
+- **Sem folha, a VM é RECUSADA antes da rede** (`DX-6515`, saída 69). Válvula: a mesma
+  `DELONIX_ALLOW_UNENFORCED_LIMITS` dos containers. **Mudança de comportamento:** uma VM CH
+  rootless numa sessão SSH sem `systemd-run --user --scope -p Delegate=yes` deixa de arrancar.
+
+**Por fazer:** libvirt de sessão (o QEMU é filho do daemon; o caminho limpo parece ser
+`virsh start --paused` → mover o pid → `resume`, por medir), rate limiters e filas do CH
+(`bw_*`/`ops_*`, `--rate-limit-group`, `num_queues`/`queue_size` existem no v53.0, mas exigem campo
+persistido para o `vm start`, campo de manifesto e flag), e o `OOMKilled` de uma VM. Provas por
+correr: `tests/cgroup_parent.rs` (`root_mode_*`, com sudo) e `tests/process_leaf.rs` (root ou
+scope delegado).

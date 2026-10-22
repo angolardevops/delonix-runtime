@@ -20,18 +20,6 @@ use serde::{Deserialize, Serialize};
 
 use super::util::state_root;
 
-/// Names accepted in the `kind: Storage` `spec`, for the unknown-field warning.
-pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
-    "type",
-    "server",
-    "share",
-    "username",
-    "password",
-    "passwordSecret",
-    "readOnly",
-    "mountOptions",
-];
-
 /// A network share, as declared inside a `kind: Volume` (`spec.nfs`,
 /// `spec.cifs`, `spec.webdav`).
 ///

@@ -5,6 +5,7 @@
 
 pub mod capability;
 pub mod capability_host;
+pub mod cgroup_leaf;
 pub mod credentials;
 pub mod launch;
 pub mod network;

@@ -35,6 +35,7 @@
 #   networkAccessRules  NetworkAccessRule  full-networkaccessrule.yaml
 #   httpRoutes          HTTPRoute          full-httproute.yaml
 #   gateways            Gateway            full-gateway.yaml
+#   gitopsSources       GitOpsSource       full-gitopssource.yaml
 #   workloads           Workload           full-workload.yaml   (lowered at load)
 #   dependencies        Dependency         full-dependency.yaml (lowered at load)
 #
@@ -280,3 +281,14 @@ spec:
       spec:
         provider: pinggy
         localPort: 8080
+
+  # A pull source (kind: GitOpsSource, ADR-0021): a repository this stack
+  # reconciles from. `sync.automated: false` registers it without a timer;
+  # `delonix gitops reconcile web-infra` runs one pass by hand.
+  gitopsSources:
+    - name: web-infra
+      spec:
+        source:
+          url: file:///srv/git/web-infra.git
+          ref: refs/heads/main
+          path: environments/production

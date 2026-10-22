@@ -87,8 +87,11 @@ pub const WORKLOAD: &str = "Workload";
 pub const DEPENDENCY: &str = "Dependency";
 pub const SHARE_VOLUME: &str = "ShareVolume";
 pub const STORAGE: &str = "Storage";
-pub const EGRESS: &str = "Egress";
 pub const STACK: &str = "Stack";
+/// A pull source a node reconciles from on a timer (ADR-0021): a git
+/// repository, a ref and a path, applied by a short-lived pass — never a
+/// resident process.
+pub const GITOPS_SOURCE: &str = "GitOpsSource";
 /// The three Kinds a `Workload` becomes, in the slash spelling `lowers_to`
 /// splits on. A `const` and not a literal for the same reason as the names it
 /// joins: it stopped being true the moment `Vm` was renamed, and only a test
@@ -636,6 +639,27 @@ const FACTS: &[KindFacts] = &[
         converges: true,
         teardown: false,
         namespaced: Namespaced::Never,
+        presence: Presence::Registry,
+    },
+    KindFacts {
+        // ADR-0021. LAST in apply order, after everything it could pull: the
+        // timer it installs may fire as soon as it is written, and the stack it
+        // reconciles into should already be what this same apply declared.
+        // `destroy` reverses the order, so the timer goes first and nothing
+        // reconciles while the rest of the stack comes down.
+        kind: GITOPS_SOURCE,
+        plural: "gitopssources",
+        short: &["gos"],
+        api_version: "gitops.delonix.io/v1alpha1",
+        domain: Domain::Composition,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "gitopsSources",
+        converges: true,
+        teardown: true,
+        // A source applies INTO a namespace, and two tenants may each name
+        // theirs `production`.
+        namespaced: Namespaced::Always,
         presence: Presence::Registry,
     },
     // --- Not resources of the stack: they become one of the above, or are not
