@@ -2226,6 +2226,64 @@ flag's text VERBATIM, so the two can never disagree.""",
 }
 
 
+# ---- Docker/Podman root-verb aliases (run/create/ps/start/stop/…) ----
+# Each is a TRUE alias of a `container <verb>` / `image pull` command: the SAME
+# clap Args struct and the SAME handler (bins/delonix-runtime-bin/src/main.rs).
+# They are real top-level commands, so `docs_cli_gate.py` requires one page per
+# name — but duplicating the group's reference would be the divergence the alias
+# design exists to avoid. So each page is a short stub that links to the
+# canonical group and embeds the verb's OWN real `--help`; the content is shared
+# through `_root_alias_*`, so the ten pages cannot drift from one another.
+_ROOT_VERB_ALIASES = {
+    "run": ("container", "container run"),
+    "create": ("container", "container create"),
+    "ps": ("container", "container ps"),
+    "start": ("container", "container start"),
+    "stop": ("container", "container stop"),
+    "restart": ("container", "container restart"),
+    "rm": ("container", "container rm"),
+    "exec": ("container", "container exec"),
+    "logs": ("container", "container logs"),
+    "pull": ("image", "image pull"),
+}
+
+
+def _root_alias_pt(verb, group, canonical):
+    return {
+        "title": f"delonix {verb}",
+        "tagline": f"Atalho de raiz para `delonix {canonical}` — a mesma struct de flags e o mesmo handler.",
+        "intro": (
+            f'<code>delonix {verb}</code> é um <strong>alias de topo</strong> de '
+            f'<a href="{group}.html"><code>delonix {canonical}</code></a>: carrega a MESMA '
+            f'struct de flags e despacha para o MESMO handler — para quem vem de Docker/Podman '
+            f'trocar só o executável e manter o fluxo. O bloco abaixo é o <code>--help</code> '
+            f'real de <code>delonix {verb}</code>; a referência completa das flags vive na '
+            f'<a href="{group}.html">página do grupo</a>.'
+        ),
+        "subs": {},
+    }
+
+
+def _root_alias_en(verb, group, canonical):
+    return {
+        "tagline": f"Root shortcut for `delonix {canonical}` — the same flag struct and the same handler.",
+        "intro": (
+            f'<code>delonix {verb}</code> is a <strong>root alias</strong> of '
+            f'<a href="{group}.html"><code>delonix {canonical}</code></a>: it carries the SAME '
+            f'flag struct and dispatches into the SAME handler, so a Docker/Podman user changes '
+            f'only the executable name. The block below is the real <code>--help</code> of '
+            f'<code>delonix {verb}</code>; the full flag reference lives on the '
+            f'<a href="{group}.html">group page</a>.'
+        ),
+    }
+
+
+for _v, (_grp, _canon) in _ROOT_VERB_ALIASES.items():
+    GROUPS[_v] = _root_alias_pt(_v, _grp, _canon)
+    GROUPS_EN[_v] = _root_alias_en(_v, _grp, _canon)
+    SOURCE_FILES.setdefault(_v, f"{_grp}.rs")
+
+
 def lab_challenge_html(entry):
     """Secção "Laboratório"/"Desafio" bilingue de uma página de referência
     CLI: um exercício guiado com comandos reais desse grupo, e um desafio

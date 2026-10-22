@@ -312,6 +312,12 @@ below, or when a table names a path that no longer exists.</p>
 <td><a href="environment.html">Preparing your environment</a></td>
 </tr>
 <tr>
+<td><code>.cargo/</code></td>
+<td>Cargo config (<code>config.toml</code>): sets <code>RUST_MIN_STACK</code> so <code>cargo test</code>'s spawned threads get the same stack the shipped binary's main thread has — the large <code>delonix</code> clap tree overflows the default 2 MiB test stack while parsing. Affects test threads only, no runtime behaviour.</td>
+<td>Rarely; when a parse test overflows the test-thread stack.</td>
+<td><a href="build-and-test.html">Clone, build and test</a></td>
+</tr>
+<tr>
 <td><code>buf.yaml</code></td>
 <td><code>buf</code> v2 configuration: the <code>proto/</code> module (linted) and the vendored <code>third_party/googleapis</code> module (not linted), with the written lint exceptions.</td>
 <td>Whoever changes the node contract rules.</td>

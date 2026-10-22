@@ -44,6 +44,7 @@
 =	container attach
 =	container commit
 =	container cp
+=	container create
 =	container describe
 =	container diff
 =	container exec
@@ -67,11 +68,13 @@
 =	container unpause
 =	container update
 =	container wait
+~	create
 ~	dashboard
 ~	delete
 ~	describe
 ~	diff
 ~	drift
+~	exec
 =	explain
 ~	get
 ~	gitops reconcile
@@ -98,6 +101,7 @@
 =	image tag
 =	image verify
 =	init
+~	logs
 =	man
 ~	manifest render
 ~	manifest schema
@@ -174,6 +178,11 @@
 ~	provider describe
 ~	provider ls
 ~	provider matrix
+~	ps
+~	pull
+~	restart
+~	rm
+~	run
 ~	secret apply
 =	secret create
 ~	secret inspect
@@ -198,6 +207,8 @@
 →	stack rollback
 ~	stack validate
 ~	stack wait
+~	start
+~	stop
 ~	system boot disable
 ~	system boot enable
 ~	system boot status
