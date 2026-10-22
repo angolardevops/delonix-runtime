@@ -130,6 +130,12 @@ pub enum Error {
     #[error("{0}")]
     SnapshotNotFound(String),
 
+    /// A create named a network (`--network`, `spec.network`) that is not
+    /// declared on this node. Refused before the overlay is built, so nothing
+    /// is left behind to clean.
+    #[error("{0}")]
+    NetworkNotDeclared(String),
+
     // ---- conflict -------------------------------------------------------
     /// A VM record already exists under this name, from the other (direct-QEMU)
     /// VM subsystem that shares the same `vms/` folder.
@@ -270,6 +276,7 @@ impl Error {
             Error::InvalidMoveTarget(_) => 1538,
             Error::VmNotFound(_) => 4501,
             Error::SnapshotNotFound(_) => 4502,
+            Error::NetworkNotDeclared(_) => 4505,
             Error::RecordConflict(_) => 5501,
             Error::SnapshotTaken(_) => 5502,
             Error::ResizeNeedsStopped(_) => 5505,
@@ -318,7 +325,7 @@ impl From<Error> for Dx {
         }
         let number = e.number();
         let class = match e {
-            Error::SnapshotNotFound(text) => Dx::NotFound(text),
+            Error::SnapshotNotFound(text) | Error::NetworkNotDeclared(text) => Dx::NotFound(text),
             Error::RecordConflict(text)
             | Error::SnapshotTaken(text)
             | Error::ResizeNeedsStopped(text)
@@ -388,6 +395,7 @@ mod tests {
             ),
             Error::VmNotFound("dev".into()),
             Error::SnapshotNotFound("snapshot of VM 'x': s1".into()),
+            Error::NetworkNotDeclared("network 'n' is not declared on this node".into()),
             Error::RecordConflict(
                 "a VM 'x' created by `vm run` (direct-QEMU) already exists".into(),
             ),

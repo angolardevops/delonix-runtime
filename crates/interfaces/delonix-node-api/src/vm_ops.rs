@@ -120,6 +120,15 @@ fn network_of(networks: &[NetworkAttachment]) -> Result<(String, Option<String>)
                     "network aliases are not supported for virtual machines on the node API",
                 ));
             }
+            // The name becomes a path under the registry (`declared_subnet`),
+            // so it is held to the registry's own alphabet BEFORE anything
+            // reads the disk: `../x` or `/etc/hostname` read a file outside
+            // it. Same rule `CreateNetwork` applies; the reserved default is
+            // a valid attachment, it just has no record.
+            if !n.network.is_empty() && n.network != delonix_sdn::DEFAULT_NET {
+                delonix_sdn::NetworkStore::validate_name(&n.network)
+                    .map_err(|e| Status::invalid_argument(format!("networks[0].network: {e}")))?;
+            }
             Ok((
                 n.network.clone(),
                 (!n.ipv4_address.is_empty()).then(|| n.ipv4_address.clone()),
@@ -157,6 +166,29 @@ fn mib_ceil(bytes: i64, field: &str) -> Result<Option<u64>, Status> {
     Ok(Some((bytes as u64).div_ceil(1024 * 1024)))
 }
 
+/// The subnet of `network` as this node's registry records it, for
+/// `VmConfig::network_subnet` — the same resolution the CLI does
+/// (`subnet_of` in `bins/delonix-runtime-bin/src/cmd/network.rs`), on this
+/// side because a provider does not read the registry
+/// (`docs/discovery/61`): without it the libvirt provider has no subnet to
+/// define a network that libvirt does not know yet, and the VM's create
+/// FAILS with "no network with matching name".
+///
+/// Only a DECLARED record resolves. No attachment (or the reserved default
+/// network) has no record, and its subnet is the engine's own bridge, which
+/// must not become a libvirt network. A record that exists and cannot be
+/// read is refused before any operation exists, not dropped into the same
+/// fallback a missing one gets.
+fn declared_subnet(root: &Path, network: &str) -> Result<Option<String>, Status> {
+    if network.is_empty() || !crate::network_ops::declared(root, network) {
+        return Ok(None);
+    }
+    let net = delonix_sdn::NetworkStore::open(root)
+        .and_then(|store| store.get(network))
+        .map_err(|e| Status::internal(format!("reading network '{network}': {e}")))?;
+    Ok((!net.subnet.is_empty()).then_some(net.subnet))
+}
+
 /// The engine's `VmConfig` from the contract's `VirtualMachineSpec` — the
 /// node API's own resolution (see the module doc comment's "known gap").
 /// Everything that can be decided here is decided before any operation is
@@ -177,6 +209,7 @@ fn config_from_spec(
         ));
     }
     let (network, static_ip) = network_of(&spec.networks)?;
+    let network_subnet = declared_subnet(root, &network)?;
     // "0 = image default, then 1" (the contract's own comment): look up the
     // image's own recommendation ONCE, reuse it for whichever of
     // vcpus/memory/backend the request left unspecified.
@@ -204,6 +237,7 @@ fn config_from_spec(
         disk: delonix_vm::store_image_disk(root, &spec.image),
         vcpus,
         memory,
+        network_subnet,
         network,
         namespace,
         static_ip,
@@ -403,6 +437,10 @@ pub fn create_with_fn(
             req.name
         )));
     }
+    // A network this node never declared is `NOT_FOUND` now, not an operation
+    // that is acknowledged and then fails inside — the engine makes the same
+    // refusal before the overlay, this only moves it ahead of the `begin`.
+    delonix_vm::refuse_undeclared_network(&cfg).map_err(|e| status_of(&e.into()))?;
     let rec = match operations::begin(root, "create", &target, &req.request_id, &fp)? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
@@ -725,6 +763,65 @@ mod tests {
         }
     }
 
+    /// A LOCAL backend (it does not own its storage), so the engine asks it
+    /// the network question. Never booted: the tests that use it are refused
+    /// before the overlay.
+    struct LocalFake;
+    impl VmBackend for LocalFake {
+        fn id(&self) -> &'static str {
+            LOCAL
+        }
+        fn available(&self) -> bool {
+            true
+        }
+        fn boot(
+            &self,
+            _vmdir: &Path,
+            cfg: &VmConfig,
+            _overlay: &str,
+            _on: &dyn Fn(CreateStage),
+        ) -> delonix_model::Result<Boot> {
+            panic!("'{}' reached boot: the refusal must come first", cfg.name)
+        }
+        fn is_running(&self, _vm: &delonix_compute::Vm) -> bool {
+            false
+        }
+        fn ip(&self, _vm: &delonix_compute::Vm) -> Option<String> {
+            None
+        }
+        fn stop(&self, _vmdir: &Path, _vm: &delonix_compute::Vm) -> delonix_model::Result<()> {
+            Ok(())
+        }
+    }
+    const LOCAL: &str = "fake-vm-local";
+
+    /// The node's network for this test binary: it declares `lab-net` only.
+    struct LabNet;
+    impl delonix_compute::ports::VmNetwork for LabNet {
+        fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
+            Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(name == "lab-net")
+        }
+        fn attach_tap(
+            &self,
+            _vm: &str,
+            _network: &str,
+            _mac: &str,
+            _namespace: &str,
+        ) -> delonix_model::Result<String> {
+            Ok("tap0".into())
+        }
+        fn lease_ip(&self, _network: &str, _mac: &str) -> Option<String> {
+            None
+        }
+        fn detach_tap(&self, _vm: &str, _lease: Option<&str>) {}
+        fn join_argv(&self) -> Option<Vec<String>> {
+            None
+        }
+    }
+
     /// `register_backend` is process-global, like every other `delonix-vm`
     /// test that seeds one (see `vms.rs`): registering twice with the same
     /// id is refused, so this runs once per test binary. Tests share the
@@ -756,8 +853,82 @@ mod tests {
                 }),
             })
             .unwrap();
+            delonix_vm::register_backend(BackendRegistration {
+                id: LOCAL,
+                aliases: &[],
+                auto_selectable: false,
+                new: Box::new(|| Ok(Box::new(LocalFake) as Box<dyn VmBackend>)),
+                report: Box::new(|| {
+                    ProviderReport::build(
+                        LOCAL,
+                        ProviderKind::Compute,
+                        true,
+                        ProviderHealth {
+                            status: HealthStatus::Healthy,
+                            reason: "Test",
+                            message: String::new(),
+                        },
+                        |_| CapabilityState::NotImplemented,
+                    )
+                }),
+            })
+            .unwrap();
+            delonix_vm::set_network(Box::new(LabNet));
         }
         "fake-vm-ops"
+    }
+
+    /// A network this node never declared is `NOT_FOUND`, with DX-4505 and the
+    /// command that declares it — and NOTHING is acknowledged: no operation,
+    /// no `vms/`. Before, the create was accepted and failed inside, after the
+    /// overlay and the domain, on the hypervisor's own «no network with
+    /// matching name».
+    #[test]
+    fn an_undeclared_network_is_not_found_before_anything_is_acknowledged() {
+        seeded();
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = create_req("web-net", "");
+        let spec = req.spec.as_mut().unwrap();
+        spec.provider = LOCAL.into();
+        spec.networks = vec![NetworkAttachment {
+            network: "cf-nope".into(),
+            ..Default::default()
+        }];
+        let err = create_in(dir.path(), &req).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound, "{err:?}");
+        assert!(
+            err.message().contains("'cf-nope'")
+                && err.message().contains("delonix network create cf-nope"),
+            "{}",
+            err.message()
+        );
+        assert_eq!(
+            err.metadata().get(crate::network_ops::DX_METADATA).unwrap(),
+            "4505"
+        );
+        assert_eq!(operations_on_disk(dir.path()), 0);
+        // `exists` opens the store, so `vms/` may be there — empty: no record,
+        // no overlay, no seed.
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("vms"))
+            .map(|d| d.map(|e| e.unwrap().file_name()).collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// The same request on a backend that owns its storage is not refused
+    /// here: a remote node maps (or refuses) a network name itself.
+    #[test]
+    fn a_remote_backend_is_not_asked_whether_this_node_declares_its_network() {
+        let remote = seeded();
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = create_req("web-net-far", "");
+        req.spec.as_mut().unwrap().networks = vec![NetworkAttachment {
+            network: "vmbr9".into(),
+            ..Default::default()
+        }];
+        assert_eq!(req.spec.as_ref().unwrap().provider, remote);
+        let op = create_in(dir.path(), &req).unwrap();
+        assert_eq!(op.state, OperationState::Succeeded as i32);
     }
 
     fn create_req(name: &str, request_id: &str) -> CreateVirtualMachineRequest {
@@ -1041,5 +1212,93 @@ mod tests {
         .unwrap();
         assert_eq!(unregistered.vcpus, 1);
         assert_eq!(unregistered.memory, "1G");
+    }
+
+    /// REGRESSION (cli-tester, 2026-10-21): a VM attached to a network the
+    /// node declared (`delonix network create cf-net2 --subnet ...`) reached
+    /// the libvirt provider with no subnet, the provider could not define a
+    /// network libvirt did not know, and the create FAILED with DX-9501 "no
+    /// network with matching name". The CLI resolves the subnet; this side
+    /// must too. A network with no record, and no attachment at all, still
+    /// carry none — the engine's own bridge is not a libvirt network.
+    #[test]
+    fn a_declared_network_carries_its_subnet_to_the_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        delonix_sdn::NetworkStore::open(dir.path())
+            .unwrap()
+            .create_with_cidr(
+                "cf-net2",
+                delonix_sdn::Cidr::parse("10.231.78.0/24").unwrap(),
+            )
+            .unwrap();
+        let on = |network: &str| {
+            config_from_spec(
+                dir.path(),
+                "web",
+                None,
+                &VirtualMachineSpec {
+                    image: "golden".into(),
+                    provider: "libvirt".into(),
+                    networks: if network.is_empty() {
+                        vec![]
+                    } else {
+                        vec![NetworkAttachment {
+                            network: network.into(),
+                            ..Default::default()
+                        }]
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+
+        let declared = on("cf-net2");
+        assert_eq!(declared.network, "cf-net2");
+        assert_eq!(
+            declared.network_subnet.as_deref(),
+            Some("10.231.78.0/24"),
+            "the registry's subnet, so the provider can define the libvirt network"
+        );
+        assert_eq!(on("not-declared").network_subnet, None);
+        assert_eq!(on("").network_subnet, None, "no attachment, no subnet");
+        assert_eq!(
+            on("bridge").network_subnet,
+            None,
+            "the reserved default has no record: its subnet is the engine's bridge"
+        );
+    }
+
+    /// cli-tester, 2026-10-21: the attachment's name is joined onto the
+    /// registry's directory, and `../outside` read a record from outside it
+    /// (its subnet reached the provider) while `/etc/hostname` answered 500.
+    /// A name the registry would not accept is an invalid argument, refused
+    /// before any operation exists and before the disk is read.
+    #[test]
+    fn a_network_name_outside_the_registry_alphabet_is_invalid_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("networks")).unwrap();
+        // A record-shaped file beside the registry, where `networks/../outside`
+        // lands: read, its subnet would reach the provider.
+        std::fs::write(root.join("outside"), "cidr=10.237.143.0/24\n").unwrap();
+        for bad in ["../outside", "/etc/hostname", "a/b", "a b"] {
+            let err = config_from_spec(
+                &root,
+                "web",
+                None,
+                &VirtualMachineSpec {
+                    image: "golden".into(),
+                    provider: "libvirt".into(),
+                    networks: vec![NetworkAttachment {
+                        network: bad.into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect_err(bad);
+            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{bad}: {err:?}");
+        }
     }
 }

@@ -490,9 +490,9 @@ fn check_unknown_fields(doc: &ManifestDoc) {
         _ => Vec::new(),
     };
     for key in nested {
-        count_unknown_field_warning();
+        count_unknown_field_warning(doc, &format!("spec.{key}"));
         super::output::warn(&super::po::tf(
-            "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
+            "{kind} '{name}': unknown field '{key}' in spec (check the spelling)",
             &[
                 ("kind", &doc.kind),
                 ("name", &doc.metadata.name),
@@ -557,9 +557,9 @@ fn check_pod_members(doc: &ManifestDoc) {
             if super::container::POD_CONTAINER_FIELDS.contains(&key) {
                 continue;
             }
-            count_unknown_field_warning();
+            count_unknown_field_warning(doc, &format!("spec.containers[{i}].{key}"));
             super::output::warn(&super::po::tf(
-                "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] — ignored (check the spelling)",
+                "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] (check the spelling)",
                 &[
                     ("kind", &doc.kind),
                     ("name", &doc.metadata.name),
@@ -579,16 +579,31 @@ fn check_pod_members(doc: &ManifestDoc) {
 /// diffs a manifest arrives here, so the refusal happens before any effect.
 /// `DELONIX_MANIFEST_LENIENT=1` restores the old behaviour for a manifest written
 /// for a newer binary; `stack validate` uses [`load_lenient`] so it can report.
+///
+/// The refusal NAMES the fields. It used to say «listed above», and above it
+/// each field's warning said «— ignored»: two lines that contradicted each
+/// other, among the other warnings of the same load, with the cause left for
+/// the reader to pick out.
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
-    let before = thread_unknown_fields();
+    let before = thread_unknown_fields().len();
     let docs = load_lenient(path)?;
-    let ignored = thread_unknown_fields() - before;
-    if ignored > 0 && !manifest_lenient() {
+    let unknown = thread_unknown_fields().split_off(before);
+    if unknown.is_empty() {
+        return Ok(docs);
+    }
+    let path = path.display().to_string();
+    let n = unknown.len().to_string();
+    let fields = unknown.join(", ");
+    if !manifest_lenient() {
         return Err(Error::Invalid(super::po::tf(
-            "{path}: {n} field(s) not understood (listed above) — nothing was applied; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to ignore them",
-            &[("path", &path.display().to_string()), ("n", &ignored.to_string())],
+            "{path}: nothing was applied — {n} field(s) not understood: {fields}; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to apply without them",
+            &[("path", &path), ("n", &n), ("fields", &fields)],
         )));
     }
+    super::output::warn(&super::po::tf(
+        "{path}: {n} field(s) not understood, ignored (DELONIX_MANIFEST_LENIENT=1): {fields}",
+        &[("path", &path), ("n", &n), ("fields", &fields)],
+    ));
     Ok(docs)
 }
 
@@ -597,11 +612,12 @@ fn manifest_lenient() -> bool {
 }
 
 thread_local! {
-    static THREAD_UNKNOWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static THREAD_UNKNOWN: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-fn thread_unknown_fields() -> usize {
-    THREAD_UNKNOWN.with(|c| c.get())
+/// Every unknown field this thread has counted, in order.
+fn thread_unknown_fields() -> Vec<String> {
+    THREAD_UNKNOWN.with(|c| c.borrow().clone())
 }
 
 /// [`load`] without the refusal: unknown fields are warned about and counted.
@@ -927,9 +943,9 @@ pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
         if known.contains(&key) {
             continue;
         }
-        count_unknown_field_warning();
+        count_unknown_field_warning(doc, &format!("spec.{block}.{key}"));
         super::output::warn(&super::po::tf(
-            "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)",
+            "{kind} '{name}': unknown field '{key}' in spec.{block} (check the spelling)",
             &[
                 ("kind", &doc.kind),
                 ("name", &doc.metadata.name),
@@ -955,19 +971,28 @@ pub fn unknown_field_warnings() -> usize {
     UNKNOWN_FIELD_WARNINGS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub(crate) fn count_unknown_field_warning() {
-    THREAD_UNKNOWN.with(|c| c.set(c.get() + 1));
+/// Counts one unknown field, and keeps where it was (`<Kind> '<name>'
+/// spec.<path>`) for the refusal [`load`] ends on.
+pub(crate) fn count_unknown_field_warning(doc: &ManifestDoc, path: &str) {
+    THREAD_UNKNOWN.with(|c| {
+        c.borrow_mut()
+            .push(format!("{} '{}' {path}", doc.kind, doc.metadata.name))
+    });
     UNKNOWN_FIELD_WARNINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
-        count_unknown_field_warning();
+        count_unknown_field_warning(doc, &format!("spec.{key}"));
         eprintln!(
             "{}",
             super::po::tf(
-                "WARNING: {kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
-                &[("kind", &doc.kind), ("name", &doc.metadata.name), ("key", &key)],
+                "WARNING: {kind} '{name}': unknown field '{key}' in spec (check the spelling)",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("key", &key)
+                ],
             )
         );
     }
@@ -1473,6 +1498,11 @@ spec: {}
         .unwrap();
         let err = load(&p).unwrap_err().to_string();
         assert!(err.contains("not understood"), "{err}");
+        // The refusal names the field itself: «listed above» pointed at a
+        // warning that said «ignored», next to «nothing was applied».
+        assert!(err.contains("Container 'web' spec.memroy"), "{err}");
+        assert!(err.contains("nothing was applied"), "{err}");
+        assert!(!err.contains("listed above"), "{err}");
         assert!(load_lenient(&p).is_ok());
         std::fs::write(
             &p,
@@ -1527,6 +1557,10 @@ spec: {}
         .unwrap();
         let err = load(&p).unwrap_err().to_string();
         assert!(err.contains("not understood"), "{err}");
+        assert!(
+            err.contains("Pod 'p' spec.containers[0].readinessProbe"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1558,11 +1592,11 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             "apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  campoInexistente: 1\n",
         )
         .unwrap();
-        let antes = super::thread_unknown_fields();
+        let antes = super::thread_unknown_fields().len();
         super::load_lenient(&p).unwrap();
         assert_eq!(
-            super::thread_unknown_fields(),
-            antes + 1,
+            super::thread_unknown_fields()[antes..],
+            ["Network 'n' spec.campoInexistente".to_string()],
             "carregar um manifesto com um campo inventado tem de contar UM aviso"
         );
     }

@@ -26,7 +26,7 @@
 //! | 2    | invalid usage — clap's, and `stack plan --detailed-exitcode`'s «there are changes» |
 //! | 3    | the resource exists but is NOT RUNNING    |
 //! | 4    | no such resource                          |
-//! | 5    | conflict — it already exists              |
+//! | 5    | conflict — it already exists, and `stack plan --detailed-exitcode`'s plan another stack owns part of |
 //! | 69   | a capability this host does not have      |
 //! | 124  | the deadline passed                       |
 //!

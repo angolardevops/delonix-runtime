@@ -247,11 +247,22 @@ check() {
   else
     [[ $rc -eq "$expect" ]] && verdict=PASS
   fi
-  python3 - "$name" "$verdict" "$rc" "$out" "$*" >>"$OUT/results.jsonl" <<'PY'
+  # The output and the command go through files, never argv: one argv string
+  # is capped at 128 KiB (MAX_ARG_STRLEN), and on 2026-10-21 `manifest schema`
+  # printed more than that — python3 never started («Argument list too long»),
+  # the check still counted as PASS, and its line was missing from the JSONL. A
+  # FAIL with a long output would have vanished the same way. `printf` is a
+  # builtin, so writing the files has no such limit.
+  local tmp="$OUT/.check.$BASHPID"
+  printf '%s' "$out" >"$tmp.out"; printf '%s' "$*" >"$tmp.cmd"
+  python3 - "$name" "$verdict" "$rc" "$tmp.out" "$tmp.cmd" >>"$OUT/results.jsonl" <<'PY'
 import json,sys
-name,verdict,rc,out,cmd=sys.argv[1:6]
+name,verdict,rc,outf,cmdf=sys.argv[1:6]
+out=open(outf,encoding="utf-8",errors="replace").read()
+cmd=open(cmdf,encoding="utf-8",errors="replace").read()
 print(json.dumps({"name":name,"verdict":verdict,"rc":int(rc),"cmd":cmd,"output":out[:4000]}))
 PY
+  rm -f "$tmp.out" "$tmp.cmd"
   if [[ $verdict == PASS ]]; then
     PASS=$((PASS+1)); log "  PASS  $name"
   else
@@ -370,10 +381,60 @@ section() { log ""; log "=== $1 ==="; }
 # The teardown helpers (`e2e_rm`, `e2e_net_rm`) live in their own file so the
 # scenario that proves them under a real DX-8101 sources the very same code.
 source "$(dirname "$0")/e2e_teardown.sh"
+# shellcheck source=scripts/e2e_ports.sh
+source "$(dirname "$0")/e2e_ports.sh"
 
 [[ -x "$BIN" ]] || { log "binário não executável: $BIN"; exit 1; }
 log "binário: $BIN"
 log "versão:  $("$BIN" --version 2>&1)"
+
+########################################
+section "guarda: as portas que a bateria publica"
+########################################
+# Cada porta que a bateria publica no host vem do `e2e_port` (scripts/
+# e2e_ports.sh). Antes vinham de `BASE + RANDOM % N`, e a base 51800 caía dentro
+# do intervalo efémero: a 2026-10-21 saiu 51814, que era a ponta local de uma
+# ligação de saída do host (127.0.0.1:51814↔:5433); o motor recusou bem o publish
+# (EADDRINUSE) e isso deu 7 FAIL em cascata que nada tinham a ver com o diff. Um
+# picker que erra assim volta a dar FAIL alheios, por isso prova-se aqui, antes
+# de qualquer secção depender dele — e o segundo check reconstrói o caso exacto:
+# uma porta presa por um socket LIGADO, não por um que escuta.
+EPORTS="$(cd "$(dirname "$0")" && pwd)/e2e_ports.sh"
+cat >"$OUT/ports-window.sh" <<'EOF'
+source "$1"; log() { printf '%s\n' "$*" >&2; }
+read -r lo hi </proc/sys/net/ipv4/ip_local_port_range
+e2e_port p
+# A host whose ephemeral range leaves no window (1024–65535) gets a kernel port.
+(( lo - 20000 < 1000 && 65535 - hi < 1000 )) || (( p < lo || p > hi )) || { echo "p=$p dentro de $lo–$hi"; exit 1; }
+_e2e_port_free "$p" || { echo "p=$p não está livre"; exit 1; }
+EOF
+check "e2e_port: a porta fica fora do intervalo efémero do host e está livre" ok bash "$OUT/ports-window.sh" "$EPORTS"
+cat >"$OUT/ports-held.sh" <<'EOF'
+source "$1"; log() { printf '%s\n' "$*" >&2; }
+e2e_port h
+ready="$2/ports-held.ready"; rm -f "$ready"
+# The client end of a connection bound to $h, with a listener on a kernel port.
+python3 -I -c '
+import socket, sys, time
+srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(1)
+cli = socket.socket(); cli.bind(("127.0.0.1", int(sys.argv[1]))); cli.connect(srv.getsockname())
+open(sys.argv[2], "w").close(); time.sleep(60)' "$h" "$ready" & holder=$!
+trap 'kill $holder 2>/dev/null; rm -f "$ready"' EXIT
+for _ in $(seq 1 50); do [[ -e "$ready" ]] && break; sleep 0.1; done
+[[ -e "$ready" ]] || { echo "o socket ligado a $h não chegou a existir"; exit 1; }
+_e2e_port_free "$h" && { echo "a sonda deu $h por livre com uma ligação nele"; exit 1; }
+E2E_PORT_MIN=$h E2E_PORT_MAX=$h e2e_port q
+[[ "$q" != "$h" ]] || { echo "e2e_port devolveu $h, que está preso"; exit 1; }
+EOF
+check "e2e_port: uma porta presa por uma ligação de saída é saltada" ok bash "$OUT/ports-held.sh" "$EPORTS" "$OUT"
+cat >"$OUT/ports-distinct.sh" <<'EOF'
+source "$1"; log() { printf '%s\n' "$*" >&2; }
+e2e_port a
+E2E_PORT_MIN=$a E2E_PORT_MAX=$((a + 1))
+E2E_PORTS_GIVEN=" "; e2e_port x; e2e_port y; e2e_port z
+[[ "$x" != "$y" && "$z" != "$x" && "$z" != "$y" ]] || { echo "repetida: $x $y $z"; exit 1; }
+EOF
+check "e2e_port: a mesma corrida nunca recebe a mesma porta duas vezes" ok bash "$OUT/ports-distinct.sh" "$EPORTS"
 
 ########################################
 section "guarda: o irmão SERVIDO é da release do \$BIN"
@@ -898,10 +959,14 @@ fi
 
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
-check "container describe de inexistente recusa" fail "$BIN" container describe naoexiste-$PFX
-check "container inspect de inexistente recusa" fail "$BIN" container inspect naoexiste-$PFX
-check "volume inspect de inexistente recusa" fail "$BIN" volume inspect naoexiste-$PFX
-check "network inspect de inexistente recusa" fail "$BIN" network inspect naoexiste-$PFX
+# Um recurso que não existe afirma-se pela CLASSE (4, «no such …»), nunca por
+# `fail` nem por `!`: esses também passam num DX-8101, num root ilegível ou num
+# binário que rebenta. Medido a 2026-10-21: container/volume/network/workload/
+# secret inspect|describe e gitops status dizem todos 4 sobre um nome inexistente.
+check "container describe de inexistente recusa" 4 "$BIN" container describe naoexiste-$PFX
+check "container inspect de inexistente recusa" 4 "$BIN" container inspect naoexiste-$PFX
+check "volume inspect de inexistente recusa" 4 "$BIN" volume inspect naoexiste-$PFX
+check "network inspect de inexistente recusa" 4 "$BIN" network inspect naoexiste-$PFX
 check "container update sem mudanças recusa" fail "$BIN" container update naoexiste-$PFX
 check "container stop de inexistente recusa" fail "$BIN" container stop naoexiste-$PFX
 check "container rm de inexistente recusa" fail "$BIN" container rm naoexiste-$PFX
@@ -1559,8 +1624,8 @@ rm -rf "$_bmin"
 section "container: ciclo de vida + hot reconfig"
 ########################################
 C="c-$PFX"
-# Porta alta e improvável de colidir com o que já corre na máquina.
-P1=$((29500 + RANDOM % 300)); P2=$((29900 + RANDOM % 90))
+# Portas livres e fora do intervalo efémero do host (`e2e_port`, scripts/e2e_ports.sh).
+e2e_port P1; e2e_port P2
 
 # Um passo que se ANUNCIA tem de se FECHAR, e o caminho rápido não anuncia nada.
 #
@@ -1870,6 +1935,22 @@ e2e_rm "rs-$PFX"
 sleep 2
 check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 0 ]"
 
+# O `rename` simples, sem corrida de tempos. Até 2026-10-21 a folha só era
+# executada pelo check da espera entre reinícios, logo abaixo, que salta quando
+# não apanha o container parado — e cada corrida que não o apanhava descia o
+# ratchet de execução de 266 para 265 sem nada ter mudado no motor. Uma folha
+# não pode depender de uma janela de tempo para ser executada.
+if check_then "container rename: o container de prova arranca" ok \
+     "$BIN" container run -d --net none --name "rnp-$PFX" "$IMG" sleep 600; then
+  check "container rename" ok "$BIN" container rename "rnp-$PFX" "rnp2-$PFX"
+  # The old name must be GONE (class 4, DX-4101), not merely unreadable: a bare
+  # `!` would also pass on a DX-8101 or an unreadable root.
+  check "container rename: o nome novo responde e o antigo já não existe" ok bash -c \
+    "'$BIN' container inspect 'rnp2-$PFX' >/dev/null || exit 1
+     '$BIN' container inspect 'rnp-$PFX' >/dev/null 2>&1; [ \$? -eq 4 ]"
+fi
+e2e_rm "rnp-$PFX" "rnp2-$PFX"
+
 # Um `rename` feito na espera entre reinícios fica. O supervisor arrancava da
 # cópia do registo que trazia desde o primeiro arranque, e o `create_with` grava o
 # registo inteiro: o reinício seguinte repunha o nome antigo.
@@ -2111,11 +2192,10 @@ section "publish: o endereço de bind é REGISTADO e sobrevive a um start"
 # de ser através de um `stop`+`start`, porque cada passo isolado devolve 0 mesmo
 # com o defeito. Um check pelo rc ficaria verde sobre o bug.
 CPB="cpb-$PFX"
-# Portas altas e pouco prováveis; se alguma estiver ocupada o troço salta com
-# razão audível em vez de chumbar por causa de um vizinho.
-P_LOOP=51081
-P_SPEC=51082
-P_ENVV=51083
+# Portas livres e fora do intervalo efémero (`e2e_port`); se alguma for ocupada
+# entretanto o troço salta com razão audível em vez de chumbar por causa de um
+# vizinho. (Eram 51081–51083 fixas, dentro do intervalo efémero por omissão.)
+e2e_port P_LOOP; e2e_port P_SPEC; e2e_port P_ENVV
 if ss -tulnH 2>/dev/null | grep -qE ":($P_LOOP|$P_SPEC|$P_ENVV) "; then
   skip "endereço de bind persistido" "uma das portas $P_LOOP/$P_SPEC/$P_ENVV já está ocupada neste host"
 elif ! "$BIN" container run -d --name "$CPB" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
@@ -2411,7 +2491,7 @@ fi
 if [[ "$E2E_ISOLATED" == 1 ]]; then
   PE="pe-$PFX"; PC="pc-$PFX"; POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
   HIP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
-  HPORT=$((20000 + $$ % 20000))
+  e2e_port HPORT
   is_private() { python3 -c 'import ipaddress,sys; a=ipaddress.ip_address(sys.argv[1]); sys.exit(0 if any(a in ipaddress.ip_network(n) for n in ("10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","100.64.0.0/10")) else 1)' "$1" 2>/dev/null; }
   if [[ -n "$HIP" ]] && is_private "$HIP" \
      && { python3 -m http.server --bind "$HIP" "$HPORT" >/dev/null 2>&1 & HSRV=$!; sleep 1; kill -0 "$HSRV" 2>/dev/null; } \
@@ -2551,7 +2631,7 @@ check "stack destroy --dry-run" ok "$BIN" stack destroy -f "$WORK/delonix-manife
 check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
 # O destroy levou o que a stack possui — o `describe` a seguir tem de correr na
 # mesma (parte do ficheiro, não de um registo), mas os recursos já não existem.
-check "volume describe depois do destroy recusa" fail "$BIN" volume describe "sv-$PFX"
+check "volume describe depois do destroy recusa" 4 "$BIN" volume describe "sv-$PFX"
 "$BIN" volume rm "sv-$PFX" >/dev/null 2>&1
 e2e_net_rm "sn-$PFX"
 
@@ -3427,7 +3507,150 @@ check "…e o history desse nome vê a revisão" ok \
 # carimbado o directório, e um destroy sob `own-…` não encontraria nada.
 check "…e o destroy desse nome leva o que ele criou" ok \
   "$BIN" stack destroy -f "$OWORK/m.yaml" --name "own-$PFX"
-check "…e já não está" fail "$BIN" volume inspect "ov-$PFX"
+check "…e já não está" 4 "$BIN" volume inspect "ov-$PFX"
+
+# `stack apply` de um recurso que OUTRA stack possui: classe de conflito (rc 5,
+# DX-5601), e nada mudado. Até ao #902 saía rc 1/DX-1000 — «argumento
+# inválido», o mesmo de um `--replace` em falta —, e quem lê o rc ia atrás da
+# flag errada: nenhuma flag autoriza um conflito. Os três testes unitários do
+# `refusal()` provam a função; só este prova que o binário a usa no caminho
+# real do apply, contra registos reais.
+#
+# O rc sozinho não chega: uma recusa com 5 DEPOIS de mexer no recurso passaria.
+# Por isso cada recusa exige também o código DX na saída, e a seguir mede-se o
+# registo de cada recurso (é nele que vive o carimbo `delonix.io/stack`) contra
+# o que estava antes, e que a stack recusada não ganhou revisão — contada antes
+# e depois, nunca contra um 0 fixo: o `stack destroy` não apaga a história. O
+# rc gravado no JSONL é o do `apply`; 99 quer dizer rc certo e código DX errado.
+CFWORK="$WORK/conflito-$PFX"; mkdir -p "$CFWORK"
+CSA="stk-a-$PFX"; CSB="stk-b-$PFX"; CFV="cfv-$PFX"; CFN="cfn-$PFX"; CFB="cfb-$PFX"
+# O root como o motor o resolve (`delonix-state`, `Store::root`): sem
+# DELONIX_ROOT, `$XDG_DATA_HOME/delonix` antes de `~/.local/share/delonix`.
+CROOT="${DELONIX_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/delonix}"
+cat >"$CFWORK/a.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: $CFV }
+spec: {}
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: $CFN }
+spec: {}
+YAML
+# Um volume que é MESMO da stk-b, e o mesmo com `mountOptions` declarado: não
+# converge a quente, logo é um Replace que nenhum `--replace` autorizou. Um
+# volume e não uma rede com a `subnet` mudada, e a primeira versão era a rede:
+# a subnet automática da `$CFN` deriva do nome, e numa corrida calhou em
+# 10.238.0.0/16 — por cima da subnet fixa, e o apply da stk-b saiu DX-5303.
+printf 'apiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: {}\n' "$CFB" >"$CFWORK/b.yaml"
+printf 'apiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: { mountOptions: noatime }\n' "$CFB" \
+  >"$CFWORK/b2.yaml"
+{ cat "$CFWORK/b2.yaml"; printf -- '---\napiVersion: delonix.io/v1\nkind: Volume\nmetadata: { name: %s }\nspec: {}\n' "$CFV"; } \
+  >"$CFWORK/misto.yaml"
+# Sem `2>&1`, e de propósito: um registo em falta (layout mudado, CROOT errado)
+# dava a MESMA mensagem de erro antes e depois, e a comparação passava sem ter
+# medido nada. Assim o baseline fica vazio e o check chumba pelo rc.
+cf_sums() { (cd "$CROOT" && sha256sum "volumes/$CFV/meta.json" "networks/$CFN" "$@"); }
+cf_revs() { "$BIN" stack history --name "$1" -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+if check_then "conflito de posse: a stk-a aplica um volume e uma rede" ok \
+     "$BIN" stack apply -f "$CFWORK/a.yaml" --name "$CSA"; then
+  CF_A=$(cf_sums); CF_AREVS=$(cf_revs "$CSB")
+  check "conflito de posse: o mesmo manifesto sob outra stack sai 5 com DX-5601" 5 bash -c "
+    out=\$('$BIN' stack apply -f '$CFWORK/a.yaml' --name '$CSB' 2>&1); rc=\$?
+    printf '%s\n' \"\$out\"
+    [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+    exit \$rc"
+  # O `plan --detailed-exitcode` sobre o MESMO conflito. Até ao #911 saía 0
+  # (o `Conflict` vinha com `changed: false` e o plano só olhava para isso): um
+  # portão de deriva em CI ficava verde e o `apply` a seguir recusava com 5. O
+  # #911 só tinha testes unitários; isto prova o binário no caminho real, contra
+  # registos com o carimbo de outra stack. Corre ANTES do «nada mudou» abaixo,
+  # que assim prova também que o plano não escreveu nada.
+  check "conflito de posse: stack plan --detailed-exitcode sai 5 com DX-5601, como o apply" 5 bash -c "
+    out=\$('$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+    printf '%s\n' \"\$out\"
+    [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+    exit \$rc"
+  # Com `-o json` o stdout continua a ser o plano, JSON válido e com os dois
+  # conflitos a nomear o dono; o DX vai para o stderr. Um 5 com o stdout partido
+  # rebentava o `jq` do portão que o lê.
+  check "…com -o json: sai 5, o stdout é o plano em JSON e o DX-5601 vai para o stderr" 5 bash -c "
+    js=\$('$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSB' -o json --detailed-exitcode 2>'$CFWORK/plan.err'); rc=\$?
+    printf '%s\n' \"\$js\"; cat '$CFWORK/plan.err'
+    [[ \$rc == 5 ]] || exit \$rc
+    grep -q DX-5601 '$CFWORK/plan.err' || { echo 'sem DX-5601 no stderr'; exit 99; }
+    python3 -c 'import json,sys
+p=json.loads(sys.argv[1])
+got=sorted((r[\"kind\"],r[\"name\"]) for r in p if r[\"action\"]==\"conflict\" and r.get(\"owner\")==sys.argv[2])
+sys.exit(0 if got==[(\"Network\",sys.argv[4]),(\"Volume\",sys.argv[3])] else 1)' \"\$js\" '$CSA' '$CFV' '$CFN' \
+      || { echo 'o stdout não é o plano com os dois conflitos da $CSA'; exit 99; }
+    exit 5"
+  check "…o plan de topo responde o mesmo 5" 5 bash -c "
+    out=\$('$BIN' plan -f '$CFWORK/a.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+    printf '%s\n' \"\$out\"
+    [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+    exit \$rc"
+  # Sem a flag, o contrato do `plan` não muda: mostra o conflito e sai 0.
+  check "…e sem --detailed-exitcode o plano do conflito continua a sair 0" ok \
+    "$BIN" stack plan -f "$CFWORK/a.yaml" --name "$CSB"
+  check "…e nada mudou: os dois registos iguais, a stk-b sem revisão, a stk-a sem deriva" ok bash -c "
+    s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN') || { echo 'um registo desapareceu'; exit 1; }
+    [[ -n '$CF_A' && \"\$s\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }
+    n=\$('$BIN' stack history --name '$CSB' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+    [[ \$n =~ ^[0-9]+\$ && \$n == '$CF_AREVS' ]] || { echo \"a $CSB passou de '$CF_AREVS' para '\$n' revisões\"; exit 1; }
+    '$BIN' stack plan -f '$CFWORK/a.yaml' --name '$CSA' --detailed-exitcode"
+  if check_then "conflito de posse: a stk-b aplica um volume seu" ok \
+       "$BIN" stack apply -f "$CFWORK/b.yaml" --name "$CSB"; then
+    CF_B=$(cf_sums "volumes/$CFB/meta.json"); CF_BREVS=$(cf_revs "$CSB")
+    # Um plano com um conflito E uma alteração saía 2, «há o que aplicar», e o
+    # apply não aplicaria nada. O conflito ganha ao 2.
+    check "conflito + alteração: o stack plan --detailed-exitcode sai 5, não 2" 5 bash -c "
+      out=\$('$BIN' stack plan -f '$CFWORK/misto.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+      exit \$rc"
+    # ...e sem conflito, a mesma alteração continua a ser 2. O 2 é também o rc
+    # de um erro de uso do clap (`docs/cli-stability.md`): só conta se a saída
+    # for um plano que nomeia o volume, e não a ajuda de uma flag recusada.
+    check "…e a mesma alteração sem conflito continua 2" 2 bash -c "
+      out=\$('$BIN' stack plan -f '$CFWORK/b2.yaml' --name '$CSB' --detailed-exitcode 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 2 ]] && { grep -q 'Usage:' <<<\"\$out\" || ! grep -q 'Volume/$CFB' <<<\"\$out\"; } && exit 99
+      exit \$rc"
+    # O conflito ganha a um Replace por autorizar: passar `--replace` não o
+    # desbloquearia, e «argumento inválido» mandava o operador atrás dele.
+    check "conflito + Replace por autorizar continua 5 com DX-5601" 5 bash -c "
+      out=\$('$BIN' stack apply -f '$CFWORK/misto.yaml' --name '$CSB' 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 5 ]] && ! grep -q DX-5601 <<<\"\$out\" && exit 99
+      exit \$rc"
+    # ...e sem conflito, o Replace por autorizar continua a ser o que era.
+    check "um Replace por autorizar sozinho continua 1 com DX-1000" 1 bash -c "
+      out=\$('$BIN' stack apply -f '$CFWORK/b2.yaml' --name '$CSB' 2>&1); rc=\$?
+      printf '%s\n' \"\$out\"
+      [[ \$rc == 1 ]] && { ! grep -q DX-1000 <<<\"\$out\" || grep -q DX-5601 <<<\"\$out\"; } && exit 99
+      exit \$rc"
+    check "…e nada mudou: os três registos iguais, a stk-b sem revisão nova" ok bash -c "
+      s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN' 'volumes/$CFB/meta.json') || { echo 'um registo desapareceu'; exit 1; }
+      [[ -n '$CF_B' && \"\$s\" == '$CF_B' ]] || { echo 'o registo mudou'; exit 1; }
+      n=\$('$BIN' stack history --name '$CSB' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+      [[ \$n =~ ^[0-9]+\$ && \$n == '$CF_BREVS' ]] || { echo \"a $CSB passou de '$CF_BREVS' para '\$n' revisões\"; exit 1; }"
+    "$BIN" stack destroy -f "$CFWORK/b.yaml" --name "$CSB" >/dev/null 2>&1
+  fi
+  "$BIN" stack destroy -f "$CFWORK/a.yaml" --name "$CSA" >/dev/null 2>&1
+  check "conflito de posse: as duas stacks levaram o que criaram" ok bash -c "
+    '$BIN' volume inspect '$CFV' >/dev/null 2>&1; [ \$? -eq 4 ] || exit 1
+    '$BIN' network inspect '$CFN' >/dev/null 2>&1; [ \$? -eq 4 ] || exit 1
+    '$BIN' volume inspect '$CFB' >/dev/null 2>&1; [ \$? -eq 4 ]"
+fi
+# Só apanha alguma coisa quando um check acima chumbou (um apply que adoptou o
+# recurso alheio deixa-o carimbado com a stack errada, e o destroy dessa não o
+# leva): o FAIL já está no relatório, e o root não fica com restos.
+"$BIN" volume rm "$CFV" >/dev/null 2>&1
+"$BIN" network rm "$CFN" >/dev/null 2>&1
+"$BIN" volume rm "$CFB" >/dev/null 2>&1
+rm -rf "$CFWORK"
 
 # `stack rollback` — o CICLO, e não os comandos um a um.
 #
@@ -3501,7 +3724,7 @@ check "…e o rollback avisa que é preciso --prune para o levar" ok \
   bash -c "'$BIN' stack rollback --to 1 -f '$HWORK/hist.yaml' --dry-run 2>&1 | grep -q -- '--prune'"
 check "rollback --prune leva-o" ok \
   "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --prune
-check "…e agora já não está" fail "$BIN" volume inspect "hv2-$PFX"
+check "…e agora já não está" 4 "$BIN" volume inspect "hv2-$PFX"
 # Um rollback É um apply: ganha revisão própria, e a história diz de qual veio.
 check "a história marca o rollback e diz que revisão replicou" ok \
   bash -c "'$BIN' stack history -f '$HWORK/hist.yaml' | grep -q 'rollback of 1'"
@@ -3903,7 +4126,7 @@ section "workload / pod / secret (leitura)"
 ########################################
 check "workload ls" ok "$BIN" workload ls
 check "workload ls -o json" ok "$BIN" workload ls -o json
-check "workload describe inexistente recusa" fail "$BIN" workload describe "nao-existe-$PFX"
+check "workload describe inexistente recusa" 4 "$BIN" workload describe "nao-existe-$PFX"
 # `pod ls` foi colapsado em `get pods` no B7 (#159) — o grupo `pod` só
 # tem create/logs/attach/cp/exec/port-forward.
 check "get pods" ok "$BIN" get pods
@@ -4107,7 +4330,7 @@ else
   skip "portas de um membro de pod" "o pod create com porta falhou (holder/SDN indisponível)"
 fi
 check "secret ls" ok "$BIN" secret ls
-check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
+check "secret inspect inexistente recusa" 4 "$BIN" secret inspect "nao-existe-$PFX"
 
 # `secret create` sobre um nome que JÁ existe: até 2026-09-10 substituía o
 # segredo inteiro em silêncio (`created (1 key(s))` sobre uma substituição real
@@ -4687,6 +4910,70 @@ if libvirt_system_usable; then
   rm -f "$RDISK"
 else
   skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
+fi
+
+# The NODE API's own create on a network the node declared and libvirt does
+# not know yet (cli-tester, 2026-10-21): `config_from_spec` left the subnet
+# out, the provider had nothing to define the libvirt network from, and the
+# operation FAILED with DX-9501 "no network with matching name" — while the
+# CLI, on the same input, worked. What is read is the libvirt network itself.
+# The subnet is picked off the host's routes, and the only libvirt network
+# removed is the one this block saw absent and then created.
+if libvirt_system_usable && [[ -x "$NODEBIN" ]]; then
+  NVNET="nv-$PFX"; NVVM="nvvm-$PFX"; NVDISK="$OUT/$NVVM.qcow2"; NVOCT=""
+  # The walk starts at an offset of this run's PID, so two batteries in
+  # parallel do not both pick the first free octet before either one's
+  # libvirt network has a route (measured: the second define is refused).
+  for _i in $(seq 0 230); do
+    _o=$(( 20 + ($$ + _i) % 231 ))
+    ip -4 route | grep -q "^10\.237\.$_o\." || { NVOCT=$_o; break; }
+  done
+  if [[ -z "$NVOCT" ]]; then
+    skip "node API: VM libvirt numa rede declarada" "nenhum 10.237.N.0/24 livre nas rotas deste host"
+  elif virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
+    skip "node API: VM libvirt numa rede declarada" "a rede libvirt $NVNET já existe — não é deste teste"
+  else
+    qemu-img create -f qcow2 "$NVDISK" 64M >/dev/null 2>&1
+    "$BIN" serve node-api --addr "unix://$NODESOCK" >>"$OUT/node-api.log" 2>&1 &
+    NODEPID=$!
+    for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
+    if check_then "network create --subnet de uma rede para uma VM libvirt da API de nó" ok \
+         "$BIN" network create "$NVNET" --subnet "10.237.$NVOCT.0/24"; then
+      check "node API: CreateVirtualMachine libvirt numa rede declarada sem rede libvirt prévia termina SUCCEEDED" ok \
+        env NODESOCK="$NODESOCK" NVVM="$NVVM" NVNET="$NVNET" NVDISK="$NVDISK" python3 -c '
+import json,os,subprocess,time
+def call(method, path, body=None):
+    cmd=["curl","-s","-X",method,"--unix-socket",os.environ["NODESOCK"]]
+    if body is not None: cmd+=["-H","content-type: application/json","-d",json.dumps(body)]
+    return json.loads(subprocess.run(cmd+["http://localhost"+path],capture_output=True,text=True).stdout)
+op=call("POST","/v1/namespaces/default/virtualmachines",{"name":os.environ["NVVM"],"spec":{
+    "image":os.environ["NVDISK"],"provider":"libvirt","memory_bytes":268435456,
+    "networks":[{"network":os.environ["NVNET"]}]}})
+assert "id" in op, op
+deadline=time.time()+180
+while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") and time.time()<deadline:
+    time.sleep(1); op=call("GET","/v1/operations/"+op["id"])
+assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op'
+      check "node API: a rede libvirt nasce com a sub-rede declarada (virsh net-dumpxml)" ok bash -c \
+        "virsh -c qemu:///system net-dumpxml '$NVNET' | grep -q \"address='10.237.$NVOCT.1' netmask='255.255.255.0'\""
+    fi
+    "$BIN" delete vm "$NVVM" -f >/dev/null 2>&1
+    kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+    # By hand, and that is a KNOWN defect, not the design: neither the
+    # node API's DELETE nor `network rm` removes the libvirt network the
+    # provider defined, and a later declaration with another subnet reuses
+    # the stale one (cli-tester, 2026-10-21). When teardown owns it, this
+    # becomes a check that `net-info` fails after `network rm`.
+    if virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
+      virsh -c qemu:///system net-destroy "$NVNET" >/dev/null 2>&1
+      virsh -c qemu:///system net-undefine "$NVNET" >/dev/null 2>&1
+    fi
+    e2e_net_rm "$NVNET"
+    rm -f "$NVDISK"
+  fi
+  unset _o _i
+else
+  skip "node API: VM libvirt numa rede declarada" "sem libvirt de sistema utilizável ou sem delonix-node-api"
 fi
 
 # Mesma ressalva de isolamento da secção CH acima: meia-isolação é pior que
@@ -5505,7 +5792,7 @@ check "ingress ls json separa governado de aberto" ok bash -c \
     "$BIN" net egress allow naoexiste-$PFX 80
 
   # --- deny/rm/unpublish: os irmãos de allow/ls/clear que nunca corriam -------
-  NGNET="ngnet-$PFX"; NGC="ngc-$PFX"; NGP=$(( 29300 + RANDOM % 150 ))
+  NGNET="ngnet-$PFX"; NGC="ngc-$PFX"; e2e_port NGP
   if "$BIN" network create "$NGNET" >/dev/null 2>&1 \
      && "$BIN" container run -d --name "$NGC" --net "$NGNET" -p "$NGP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
     check "net ingress deny" ok "$BIN" net ingress deny "$NGC" 80
@@ -6730,7 +7017,9 @@ YAML
 check "plan: before the apply there is something to create (2)" 2 "$BIN" plan -f "$L3/m.yaml" --detailed-exitcode
 check "plan: names the Create and creates nothing" ok bash -c "
   '$BIN' plan -f '$L3/m.yaml' 2>&1 | grep -qE '^ +\+ +Container/l3w-$PFX' || { echo 'the plan does not name the resource'; exit 1; }
-  '$BIN' container inspect 'l3w-$PFX' >/dev/null 2>&1 && { echo 'a plan created the container'; exit 1; }
+  '$BIN' container inspect 'l3w-$PFX' >/dev/null 2>&1; rc=\$?
+  [ \$rc -eq 0 ] && { echo 'a plan created the container'; exit 1; }
+  [ \$rc -eq 4 ] || { echo \"container inspect: rc=\$rc, not 4 (gone)\"; exit 1; }
   true"
 check "stack apply of the plan/wait/diff manifest" ok "$BIN" stack apply -f "$L3/m.yaml"
 check "wait: returns once the manifest's container is Running" ok bash -c "
@@ -6987,6 +7276,27 @@ check "vm console: a VM that does not exist is 4" 4 "$BIN" vm console "l3vm-$PFX
 check "vm ssh: a name that is not a VM is 4" 4 "$BIN" vm ssh "l3vm-$PFX" -- true
 check "vm migrate: a VM that does not exist is 4, before any SSH" 4 "$BIN" vm migrate "l3vm-$PFX" --host e2e@l3.invalid --network l3
 
+# --- vm create on a network nobody declared: 4, before anything is built ----
+# Measured 2026-10-21: libvirt built the overlay, defined the domain and died on
+# its own «no network with matching name» (rc 1), and Cloud Hypervisor CREATED
+# the network instead. The engine now asks first, so no hypervisor is reached;
+# it still needs a backend to select and a disk to name.
+if command -v qemu-img >/dev/null 2>&1 \
+   && { command -v cloud-hypervisor || command -v virsh; } >/dev/null 2>&1; then
+  UNDIR="$OUT/vm-undeclared-net"; mkdir -p "$UNDIR"
+  qemu-img create -f qcow2 "$UNDIR/d.qcow2" 64M >/dev/null 2>&1
+  check "vm create: a network nobody declared is 4 (DX-4505), and nothing is left behind" ok bash -c "
+    out=\$(\"$BIN\" vm create un-$PFX --disk \"$UNDIR/d.qcow2\" --network un-nope-$PFX 2>&1); rc=\$?
+    [ \$rc -eq 4 ] || { echo \"rc=\$rc: \$out\"; exit 1; }
+    case \"\$out\" in *DX-4505*'delonix network create un-nope-$PFX'*) ;; *) echo \"\$out\"; exit 1;; esac
+    ls \"\$DELONIX_ROOT/vms\" 2>/dev/null | grep -q 'un-$PFX' && { echo 'a VM artifact was left'; exit 1; }
+    nl=\$(\"$BIN\" network ls 2>&1) || { echo \"network ls failed: \$nl\"; exit 1; }
+    case \"\$nl\" in *'un-nope-$PFX'*) echo 'the network was created'; exit 1;; esac
+    exit 0"
+else
+  skip "vm create: undeclared network" "no qemu-img, or no VM backend (cloud-hypervisor/virsh) to select"
+fi
+
 # --- mcp serve: one stdio session, and it ENDS with its client ---------------
 # The server is a child process of the AI client for one session, not a daemon:
 # it answers `initialize` and `tools/list` and exits when stdin closes. A
@@ -7106,7 +7416,9 @@ check "cluster destroy: the nodes go, and cluster ls no longer lists it" ok bash
     HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster destroy '$L3K' --force >/dev/null 2>&1 && break
     sleep 2
   done
-  '$BIN' container inspect '$L3K-control-plane' >/dev/null 2>&1 && { echo 'a node survived'; exit 1; }
+  '$BIN' container inspect '$L3K-control-plane' >/dev/null 2>&1; rc=\$?
+  [ \$rc -eq 0 ] && { echo 'a node survived'; exit 1; }
+  [ \$rc -eq 4 ] || { echo \"container inspect: rc=\$rc, not 4 (gone)\"; exit 1; }
   '$BIN' cluster ls 2>&1 | grep -q '$L3K' && { echo 'cluster ls still lists it'; exit 1; }
   true"
 check "cluster destroy: a cluster that does not exist is 4" 4 \
@@ -7159,7 +7471,7 @@ fi
 # a route that asks for names makes the apply itself write the hosts file, and
 # /etc/hosts is the user's. The backend is busybox `nc` in a loop — alpine's
 # busybox has no `httpd`.
-L3HR="hr-$PFX.e2e.test"; L3HP=$(( 29500 + RANDOM % 150 )); L3HF="$L3/hosts"
+L3HR="hr-$PFX.e2e.test"; e2e_port L3HP; L3HF="$L3/hosts"
 # The body's length follows $PFX (the run's pid): a fixed Content-Length cut the
 # answer, and the proxy was right to honour it.
 L3PONG="pong-$PFX"
@@ -7244,7 +7556,7 @@ if [[ -n "$L3AIP" ]] && command -v socat >/dev/null 2>&1; then
   check "net netns firewall --clear: B reaches A again" ok bash -c "
     '$BIN' net netns firewall '$L3A' --clear >/dev/null || exit 1
     for _ in \$(seq 1 10); do $L3REACH && exit 0; sleep 0.3; done; exit 1"
-  L3PP=$(( 29700 + RANDOM % 150 ))
+  e2e_port L3PP
   check "net netns publish: the host port forwards to A's listener" ok bash -c "
     '$BIN' net netns publish '$L3A' '$L3PP:7171' >/dev/null || exit 1
     for _ in \$(seq 1 20); do [ \"\$(nc -w 2 127.0.0.1 $L3PP </dev/null 2>/dev/null)\" = pong-$PFX ] && exit 0; sleep 0.3; done; exit 1"
@@ -7376,7 +7688,7 @@ YAML
 check "pod port-forward: a pod that does not exist is 4" 4 "$BIN" pod port-forward "nao-existe-$PFX" 7070
 if "$BIN" stack apply -f "$L3/pfpod.yaml" >/dev/null 2>&1; then
   check "pod port-forward: a port spec that is not a port is refused (1)" 1 "$BIN" pod port-forward "l3pf$PFX" abc
-  L3FP=$(( 29900 + RANDOM % 90 ))
+  e2e_port L3FP
   check "pod port-forward: 127.0.0.1:<hostPort> reaches the pod's port" ok bash -c "
     timeout -s KILL 60 '$BIN' pod port-forward 'l3pf$PFX' '$L3FP:7070' >/dev/null 2>&1 & pf=\$!
     r=
@@ -7439,7 +7751,7 @@ check "vm apply: a disk that is neither a VM image nor a file is 4, and no VM is
 # needs root and change nothing without `--apply` — and `--apply` without root
 # is refused before the first command runs. 192.0.2.0/24 (TEST-NET-1) stands in
 # for a VM subnet.
-L3RP=$(( 29850 + RANDOM % 100 ))
+e2e_port L3RP
 if "$BIN" container run -d --name "$L3C-pub" --net "$L3N" -p "$L3RP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
   check "vm reach: a port published on the default 127.0.0.1 is reported host-only" ok bash -c "
     '$BIN' vm reach 2>&1 | grep '$L3C-pub' | grep -q '127.0.0.1 (host only)'"
@@ -7482,7 +7794,7 @@ section "container ps sem -a: só os que estão a correr, na CLI e na API Docker
 # ignorava o `all` e devolvia tudo, e perdia as portas publicadas: o parser dela
 # esperava `hostPort:contPort` e o registo guarda `addr:hostPort:contPort/proto`
 # desde 2026-10-07. Medido a 2026-10-11 nos três.
-PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"; PSPORT=$(( 51800 + RANDOM % 150 ))
+PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"; e2e_port PSPORT
 # Creating the three is a CHECK, not a condition: a first version folded it into
 # the `if` and skipped the whole section when one refused to start — which it
 # did, because `-p` with `--net none` is refused (correctly). A gate that skips
@@ -7907,7 +8219,9 @@ YAML
     gox delete gitopssources '$GS' >/dev/null || exit 1
     grep -q 'disable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'timer não desactivado'; exit 1; }
     test ! -e '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'unit ficou'; exit 1; }
-    $GOX gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
+    $GOX gitops status '$GS' >/dev/null 2>&1; rc=\$?
+    [ \$rc -eq 0 ] && { echo 'a fonte ficou'; exit 1; }
+    [ \$rc -eq 4 ] || { echo \"gitops status: rc=\$rc, não 4 (inexistente)\"; exit 1; }"
   cp "$GO/work/env/prod/app.yaml" "$GO/app-destroy.yaml"
   sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
   gox stack destroy -f "$GO/app-destroy.yaml" --name "$GSS" >/dev/null 2>&1 || true
@@ -7915,6 +8229,30 @@ YAML
 fi
 
 ########################################
+section "guarda: o results.jsonl tem uma linha por veredicto"
+########################################
+# The totals below come from the shell counters; the ratchet and every reader
+# after this run come from the JSONL. On 2026-10-21 they disagreed by one (a
+# check whose python3 could not start, see `check`) and nothing said so. Every
+# `check` writes its raw PASS/FAIL line, `xfail`/`xflaky` add an XFAIL/XPASS
+# line after it, and `skip` writes a SKIP line — so the counts must match
+# exactly, measured before this check adds its own line.
+check "o results.jsonl tem uma linha por veredicto contado" ok python3 -I - \
+  "$OUT/results.jsonl" "$((PASS + FAIL + XFAIL + XPASS))" "$SKIP" "$((XFAIL + XPASS))" <<'PY'
+import collections, json, sys
+path, raw, skip, marked = sys.argv[1], *map(int, sys.argv[2:5])
+seen = collections.Counter()
+for n, line in enumerate(open(path, encoding="utf-8"), 1):
+    try:
+        seen[json.loads(line)["verdict"]] += 1
+    except (ValueError, KeyError) as e:
+        sys.exit(f"line {n} is not a verdict: {e}")
+got = (seen["PASS"] + seen["FAIL"], seen["SKIP"], seen["XFAIL"] + seen["XPASS"])
+want = (raw, skip, marked)
+if got != want:
+    sys.exit(f"JSONL (PASS+FAIL, SKIP, XFAIL+XPASS) = {got}, counters = {want}")
+PY
+
 log ""
 log "======================================"
 log " PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP  XFAIL=$XFAIL  XPASS=$XPASS"

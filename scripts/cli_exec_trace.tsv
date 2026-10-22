@@ -1,9 +1,9 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: 2026-10-21, this host, isolated root DELONIX_ROOT=~/.cache/dlxcf-vip/e2e/root DELONIX_NET_RUNTIME_DIR=/tmp/dlxcfv-run, scripts/e2e.sh with the five release binaries side by side, run by the functional gate on the #841 rescue (GitOps + service VIP): PASS=1379 FAIL=0 SKIP=18; 15 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg and virt-customize present, no VM images in the isolated store, no DELONIX_UPGRADE_FROM, CRI root/CNI path, boot units outside the root, stack init --up over 180 s) and 3 are NOT: the libvirt vm create fails with network 'ingress' not found, most likely a main regression from #866, measured against the 5.1.1 binary that creates the same VM
-# commit: 55e21f93
-# executed: 266
+# recorded: 2026-10-21, this host, isolated root OUT=/tmp/dlxpt3 (DELONIX_ROOT=/tmp/dlxpt3/root), scripts/e2e.sh with the five release binaries side by side (commit f4af5a9b7 = origin/main 75cc9c5b + the e2e_port change), run for the ephemeral-port fix: PASS=1440 FAIL=0 SKIP=15; all 15 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg and virt-customize present, no VM images in the isolated store, no DELONIX_UPGRADE_FROM, CRI root/CNI path, boot units outside the root, stack init --up over 180 s); the 3 libvirt vm create SKIPs of the previous trace pass after #901
+# commit: f4af5a9b
+# executed: 268
 # leaves: 280
 api-resources
 apply
@@ -241,6 +241,7 @@ vm init
 vm ls
 vm migrate
 vm move
+vm pause
 vm prune
 vm reach
 vm resize
@@ -253,6 +254,7 @@ vm ssh
 vm start
 vm stop
 vm unbridge
+vm unpause
 vm update
 vm vnc
 volume apply

@@ -89,7 +89,7 @@ fn store(root: &Path) -> Result<delonix_sdn::NetworkStore, Status> {
 
 /// Whether `root` has a declarative record for `name`. Read without opening
 /// the store, which would create its directory.
-fn declared(root: &Path, name: &str) -> bool {
+pub(crate) fn declared(root: &Path, name: &str) -> bool {
     root.join("networks").join(name).is_file()
 }
 
