@@ -29,6 +29,30 @@ e2e_rm() {
   done
 }
 
+# An image removal judged by its effect, for the caller to run under `check`:
+# each name must answer 0 (or 4, already gone — a build that failed never made
+# it) AND be absent from `image ls` afterwards; otherwise it says why and
+# returns 1. Measured 2026-10-22: three teardown lines called `image rm`, which
+# is not a subcommand (`image remove`, no alias — docs/cli-stability.md), with
+# the output sent to /dev/null; clap answered 2, nothing looked, and every run
+# left its test images in the root.
+e2e_image_rm() {
+  local i out rc ls bad=0
+  for i in "$@"; do
+    out=$("$BIN" image remove "$i" 2>&1); rc=$?
+    if (( rc != 0 && rc != 4 )); then
+      echo "image remove $i → rc=$rc: ${out##*$'\n'}"; bad=1; continue
+    fi
+    ls=$("$BIN" image ls 2>&1) || { echo "image ls → rc=$?: ${ls##*$'\n'}"; bad=1; continue; }
+    # A name shows as given or behind a registry prefix (`…/name:tag`).
+    if awk -v n="$i" '{ for (f = 1; f <= NF; f++) if ($f == n || substr($f, length($f) - length(n)) == "/" n) found = 1 }
+                      END { exit !found }' <<<"$ls"; then
+      echo "image remove $i → rc=$rc, but image ls still lists it"; bad=1
+    fi
+  done
+  return "$bad"
+}
+
 # A network removal that fails says why, so a leftover is never silent. Class 4
 # (already gone) is not news.
 e2e_net_rm() {
