@@ -314,6 +314,39 @@ pub(crate) fn unpack_recording_limited<R: Read>(
         }
         let mut file = entry?;
         owners.extend(owner_of(&file));
+        // OCI whiteouts are an instruction to the layer MERGE, not files of the
+        // image. On the per-layer overlay path each layer is its own `lowerdir`,
+        // so a deletion cannot reach a lower layer: the whiteout has to be left
+        // in the form the kernel overlay driver honours — a 0/0 character device
+        // standing where the hidden entry was. Unpacked as the literal
+        // `.wh.<name>` regular file (what this loop used to do), the kernel
+        // ignored it and the "deleted" lower entry stayed visible — e.g. a Debian
+        // image whose build ran `a2dismod mpm_event` booted with the lower
+        // layer's `mpm_event.load` still present and died with "More than one MPM
+        // loaded". `apply_layer_flat` (the flat-bundle path) handles the same
+        // markers by deleting the target instead.
+        if let Some(rel) = file.path().ok().and_then(|p| relative(&p)) {
+            if let Some(base) = rel.file_name().and_then(|s| s.to_str()) {
+                if base == ".wh..wh..opq" {
+                    // An opaque directory needs the `trusted.overlay.opaque`
+                    // xattr (or its userxattr equivalent), which is privileged
+                    // and cannot be set on the rootless path; we at least never
+                    // extract the marker as a visible file. Opaque-dir whiteouts
+                    // in rootless images stay a known gap (they need a userxattr
+                    // mount), but this is the rarer marker.
+                    continue;
+                }
+                if let Some(name) = base.strip_prefix(".wh.") {
+                    let at = rel
+                        .parent()
+                        .map(|p| dst.join(p))
+                        .unwrap_or_else(|| dst.to_path_buf())
+                        .join(name);
+                    write_overlay_whiteout(&at);
+                    continue;
+                }
+            }
+        }
         if file.header().entry_type() == tar::EntryType::Directory {
             directories.push(file);
         } else {
@@ -398,6 +431,24 @@ pub(crate) fn sanitize_special_bits(mode: u32, uid: u64, real_root: bool) -> u32
 /// already wrote the full mode under `set_preserve_permissions`). A no-op unless
 /// [`sanitize_special_bits`] changes the mode, so only the real-root, non-root-uid
 /// setuid case ever touches disk. Never through a symlink, which has no mode.
+/// Writes the kernel-overlay whiteout for an OCI `.wh.<name>` entry: a 0/0
+/// character device at the hidden entry's path, which the overlay driver reads
+/// as "deleted — do not show the lower layers' version". Any entry already at
+/// `at` within this freshly-extracted layer is removed first. Best-effort: on a
+/// host that denies the caller `mknod` of a device node the whiteout is not
+/// created and the lower entry stays visible — exactly the behaviour before this
+/// conversion, never worse.
+fn write_overlay_whiteout(at: &Path) {
+    use nix::sys::stat::{mknod, Mode, SFlag};
+    if let Some(parent) = at.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::remove_file(at);
+    let _ = std::fs::remove_dir_all(at);
+    // Character device, major 0 minor 0 — the overlay whiteout representation.
+    let _ = mknod(at, SFlag::S_IFCHR, Mode::empty(), 0);
+}
+
 fn drop_foreign_setuid<R: Read>(file: &tar::Entry<'_, R>, dst: &Path, real_root: bool) {
     use std::os::unix::fs::PermissionsExt;
     if !real_root || !file.header().entry_type().is_file() {
@@ -681,6 +732,46 @@ mod tests {
             scan(&mut tar::Archive::new(&data[..]), None).unwrap(),
             owners
         );
+    }
+
+    /// A `.wh.<name>` entry is turned into an overlay whiteout (a 0/0 char
+    /// device at `<name>`), never unpacked as a literal `.wh.<name>` file the
+    /// kernel overlay driver would ignore. That literal-file behaviour was the
+    /// bug that let a Debian layer's `a2dismod mpm_event` leave the lower layer's
+    /// `mpm_event.load` visible, so Apache loaded two MPMs and refused to start.
+    #[test]
+    fn a_whiteout_entry_becomes_an_overlay_char_device() {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tar_of(&[
+            ("etc/apache2/mods-enabled/", 0, 0, true),
+            ("etc/apache2/mods-enabled/.wh.mpm_event.load", 0, 0, false),
+        ]);
+        unpack_recording(&mut tar::Archive::new(&data[..]), tmp.path()).unwrap();
+        // The literal marker is never left behind as a visible file — that leak
+        // was exactly what the kernel overlay ignored.
+        assert!(
+            tmp.path()
+                .join("etc/apache2/mods-enabled/.wh.mpm_event.load")
+                .symlink_metadata()
+                .is_err(),
+            "the .wh. marker leaked into the layer as a regular file"
+        );
+        // Where mknod of a device node is permitted (the normal engine host),
+        // the whiteout stands as the 0/0 char device the overlay driver honours.
+        // On a host that denies it, the path is simply absent — no worse than the
+        // old leak, and the assertion above still holds.
+        if let Ok(md) = tmp
+            .path()
+            .join("etc/apache2/mods-enabled/mpm_event.load")
+            .symlink_metadata()
+        {
+            assert!(
+                md.file_type().is_char_device(),
+                "overlay whiteout must be a character device"
+            );
+            assert_eq!(md.rdev(), 0, "overlay whiteout must be device 0:0");
+        }
     }
 
     /// A tar with one file and one directory, with the given modes.
