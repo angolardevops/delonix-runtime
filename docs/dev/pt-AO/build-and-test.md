@@ -327,6 +327,7 @@ holder de rede ou no arranque de VMs funciona — isso precisa de uma corrida ao
 | `lang` | lang ratchet |
 | `capability` | capability ratchet |
 | `cli-exec` | cli execution ratchet |
+| `folhas` | leaf inventory ratchet |
 | `arch` | arch fitness |
 | `contract` | contract gate |
 | `version` | version gate |
