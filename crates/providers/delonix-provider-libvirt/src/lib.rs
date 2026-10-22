@@ -18,8 +18,8 @@ use delonix_compute::capability::{
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
     guest_cpu_outcome as cpu_outcome, guest_memory_outcome as memory_outcome, guest_memory_state,
-    guest_online_vcpus, mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem,
-    GuestInfo, HotplugOutcome, VmBackend, VmConfig,
+    guest_online_vcpus, libvirt_nic, mem_mib, names_a_declared_network, BackendRegistration, Boot,
+    CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome, LibvirtNic, VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -2032,6 +2032,19 @@ fn libvirt_cpu_xml(cfg: &VmConfig, node_cell: Option<&str>) -> String {
     }
 }
 
+/// Puts the network the operator NAMED (`--network <name>`) into `bridge`, the
+/// field `libvirt_interface_xml` and `ensure_libvirt_network` read. An explicit
+/// `bridge` wins, and the values that mean "the default network" map to
+/// nothing — the same set Cloud Hypervisor and Proxmox use, via
+/// [`names_a_declared_network`]. Excluding only `"default"` here (#866) sent
+/// `ingress` — what every `vm create` without `--network` carries — to libvirt
+/// as a network name, and the domain failed to start. **Pure.**
+fn map_declared_network(cfg: &mut VmConfig) {
+    if cfg.bridge.is_none() && names_a_declared_network(&cfg.network) {
+        cfg.bridge = Some(cfg.network.clone());
+    }
+}
+
 /// Generates the libvirt domain's `<interface>` from the YAML `net_mode` — so the
 /// network is 100% abstracted (no hand-written XML). **Pure function** — tested without a daemon.
 fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
@@ -2040,25 +2053,26 @@ fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
         "      <model type='virtio'/>\n{}    </interface>\n",
         libvirt_filterref_xml(cfg.net_mode.as_deref(), cfg.allow_mac_spoofing)
     )[..];
-    match cfg.net_mode.as_deref().unwrap_or("user") {
-        "nat" | "network" => {
+    // The same function `vm describe` and the node API read the record back
+    // with (`delonix_compute::vm::attached_network`), so what is reported is
+    // what this XML says.
+    match libvirt_nic(cfg.net_mode.as_deref(), cfg.bridge.as_deref(), &cfg.network) {
+        LibvirtNic::Network(net) => {
             // NAT network managed by libvirt (DHCP + IP via domifaddr). `bridge` = name
             // of the libvirt network (default "default").
-            let net = cfg.bridge.as_deref().unwrap_or("default");
             format!(
                 "    <interface type='network'>\n      <source network='{}'/>\n      <mac address='{mac}'/>\n{model}",
-                xml_escape(net)
+                xml_escape(&net)
             )
         }
-        "bridge" => {
+        LibvirtNic::Bridge(br) => {
             // attaches to a pre-existing host bridge.
-            let br = cfg.bridge.as_deref().unwrap_or("virbr0");
             format!(
                 "    <interface type='bridge'>\n      <source bridge='{}'/>\n      <mac address='{mac}'/>\n{model}",
-                xml_escape(br)
+                xml_escape(&br)
             )
         }
-        _ => {
+        LibvirtNic::User => {
             // user-mode (SLIRP/passt): egress without a tap — rootless-friendly (default).
             format!("    <interface type='user'>\n      <mac address='{mac}'/>\n{model}")
         }
@@ -2340,70 +2354,333 @@ fn virsh_define_xml(uri: &str, subcommand: &str, tag: &str, xml: &str) -> bool {
 /// a malformed CIDR, or a prefix of /31 or /32, which has no room for a
 /// gateway plus a DHCP range. The caller then leaves the network alone rather
 /// than defining something broken.
+///
+/// The `<metadata>` element is the engine's mark of POSSESSION
+/// ([`NET_OWNER_NS`]): the only networks [`ensure_libvirt_network`] may
+/// redefine and [`release_owned_network`] may remove are the ones carrying it.
+/// libvirt keeps a foreign-namespace metadata element verbatim (measured on
+/// libvirt 10.0: `net-dumpxml` returns it, re-quoted with `"`).
 fn libvirt_network_xml(name: &str, cidr: &str) -> Option<String> {
-    let (addr, prefix) = cidr.split_once('/')?;
-    let prefix: u32 = prefix.parse().ok()?;
+    let (base, prefix) = parse_cidr(cidr)?;
     if prefix > 30 {
         return None;
     }
-    let ip: std::net::Ipv4Addr = addr.parse().ok()?;
     let mask: u32 = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
-    let base = u32::from(ip) & mask;
+    let base = u32::from(base);
     let gateway = std::net::Ipv4Addr::from(base + 1);
     let first = std::net::Ipv4Addr::from(base + 2);
     // `| !mask` is the broadcast; the last usable host is one below it.
     let last = std::net::Ipv4Addr::from((base | !mask) - 1);
     let netmask = std::net::Ipv4Addr::from(mask);
     let n = xml_escape(name);
+    let subnet = std::net::Ipv4Addr::from(base);
     Some(format!(
-        "<network>\n  <name>{n}</name>\n  <forward mode='nat'/>\n  \
+        "<network>\n  <name>{n}</name>\n  \
+         <metadata>\n    <delonix:network xmlns:delonix='{NET_OWNER_NS}' subnet='{subnet}/{prefix}'/>\n  </metadata>\n  \
+         <forward mode='nat'/>\n  \
          <ip address='{gateway}' netmask='{netmask}'>\n    \
          <dhcp><range start='{first}' end='{last}'/></dhcp>\n  </ip>\n</network>\n"
     ))
 }
 
-fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
+/// The XML namespace of the `<metadata>` element that marks a libvirt network
+/// as DEFINED BY THIS ENGINE. Possession is read from the object itself, never
+/// inferred from its name: the host's own networks (`default`, a lab bridge,
+/// another tool's) can carry any name a delonix network also has.
+const NET_OWNER_NS: &str = "https://delonix.io/xmlns/libvirt/network/1";
+
+/// `a.b.c.d/p` → the network address (host bits cleared) and the prefix.
+/// **Pure.** `None` for a malformed CIDR or a prefix above 32.
+fn parse_cidr(cidr: &str) -> Option<(std::net::Ipv4Addr, u32)> {
+    let (addr, prefix) = cidr.trim().split_once('/')?;
+    let prefix: u32 = prefix.parse().ok()?;
+    if prefix > 32 {
+        return None;
+    }
+    let ip: std::net::Ipv4Addr = addr.parse().ok()?;
+    let mask: u32 = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
+    Some((std::net::Ipv4Addr::from(u32::from(ip) & mask), prefix))
+}
+
+/// The value of attribute `name` in one XML start tag, either quote style
+/// (libvirt writes `'` for its own attributes and `"` for metadata ones).
+/// **Pure.**
+fn xml_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = tag;
+    while let Some(i) = rest.find(name) {
+        let before_ok = i == 0 || rest[..i].ends_with(char::is_whitespace);
+        let after = &rest[i + name.len()..];
+        if before_ok {
+            if let Some(v) = after.strip_prefix('=') {
+                let q = v.chars().next()?;
+                if q == '\'' || q == '"' {
+                    let v = &v[1..];
+                    return v.find(q).map(|end| &v[..end]);
+                }
+            }
+        }
+        rest = after;
+    }
+    None
+}
+
+/// What a libvirt network IS, read from its `net-dumpxml`: whether this engine
+/// defined it, and the IPv4 subnet its first `<ip>` element puts it on.
+#[derive(Debug, PartialEq, Eq)]
+struct LiveNetwork {
+    owned: bool,
+    subnet: Option<(std::net::Ipv4Addr, u32)>,
+}
+
+/// **Pure** reader of `virsh net-dumpxml`. The subnet comes from the `<ip>`
+/// element libvirt actually serves (`netmask=` or `prefix=`), not from the
+/// engine's own metadata: an operator's `net-edit` changes the first and not
+/// the second, and the question is where the VM would land.
+fn parse_live_network(xml: &str) -> LiveNetwork {
+    let owned = xml.contains(NET_OWNER_NS);
+    let subnet = xml.match_indices("<ip ").find_map(|(i, _)| {
+        let tag = &xml[i..i + xml[i..].find('>')?];
+        if xml_attr(tag, "family") == Some("ipv6") {
+            return None;
+        }
+        let addr = xml_attr(tag, "address")?;
+        let prefix = match (xml_attr(tag, "prefix"), xml_attr(tag, "netmask")) {
+            (Some(p), _) => p.parse().ok()?,
+            (None, Some(m)) => {
+                let m = u32::from(m.parse::<std::net::Ipv4Addr>().ok()?);
+                // A non-contiguous mask is no subnet at all.
+                if m.leading_ones() + m.trailing_zeros() != 32 {
+                    return None;
+                }
+                m.leading_ones()
+            }
+            (None, None) => return None,
+        };
+        parse_cidr(&format!("{addr}/{prefix}"))
+    });
+    LiveNetwork { owned, subnet }
+}
+
+/// What [`ensure_libvirt_network`] does with a named network.
+#[derive(Debug, PartialEq, Eq)]
+enum NetPlan {
+    /// The network is there and nothing says it is wrong.
+    Use,
+    /// It is not there: define it from this XML.
+    Define(String),
+    /// It is ours, on another subnet, and no domain is on it: replace it.
+    Redefine(String),
+    /// It is on another subnet and may not be replaced. The message says why.
+    Refuse(String),
+    /// It is not there and there is no subnet to define it with.
+    Unresolved,
+}
+
+/// The decision, **pure**: the network `net` the VM asks for, the subnet
+/// `declared` for the delonix network of that name, what libvirt has under that
+/// name (`live`), and — asked only when a replacement is on the table — the
+/// domains attached to it (`None` when they could not be listed).
+///
+/// The rule the test below pins: a network is used only when it is on the
+/// declared subnet (or nothing was declared to compare with); otherwise it is
+/// redefined when it carries the engine's mark AND no domain is on it, and
+/// refused in every other case. Before (#866), an existing name was trusted:
+/// redeclaring `cf-snet` on 10.231.80.0/24 and creating a VM in it gave rc 0
+/// and a guest on the old 10.231.79.0/24, with `stack plan`/`drift` silent.
+fn libvirt_network_plan(
+    net: &str,
+    declared: Option<&str>,
+    live: Option<&LiveNetwork>,
+    users: &dyn Fn() -> Option<Vec<String>>,
+) -> NetPlan {
+    let want = declared.and_then(parse_cidr);
+    let Some(live) = live else {
+        return match declared.and_then(|d| libvirt_network_xml(net, d)) {
+            Some(xml) => NetPlan::Define(xml),
+            None => NetPlan::Unresolved,
+        };
+    };
+    let Some(want) = want else {
+        return NetPlan::Use; // nothing declared to hold it against
+    };
+    if live.subnet == Some(want) {
+        return NetPlan::Use;
+    }
+    let want_s = format!("{}/{}", want.0, want.1);
+    let have = live
+        .subnet
+        .map_or_else(|| "no IPv4 subnet".to_string(), |(a, p)| format!("{a}/{p}"));
+    if !live.owned {
+        return NetPlan::Refuse(format!(
+            "libvirt network '{net}' is on {have}, not on {want_s} as declared for the delonix \
+             network '{net}', and delonix did not define it, so it is left as it is. Give the \
+             delonix network another name, or change the libvirt one (`virsh net-edit {net}`)"
+        ));
+    }
+    match users() {
+        Some(u) if u.is_empty() => match declared.and_then(|d| libvirt_network_xml(net, d)) {
+            Some(xml) => NetPlan::Redefine(xml),
+            None => NetPlan::Use,
+        },
+        Some(u) => NetPlan::Refuse(format!(
+            "libvirt network '{net}' is on {have}, not on {want_s} as declared for the delonix \
+             network '{net}'. delonix defined it, but {} still on it ({}), so it is not redefined \
+             under them. Remove them first, then create this VM again",
+            if u.len() == 1 { "a VM is" } else { "VMs are" },
+            u.join(", ")
+        )),
+        None => NetPlan::Refuse(format!(
+            "libvirt network '{net}' is on {have}, not on {want_s} as declared for the delonix \
+             network '{net}', and the domains on it could not be listed, so it is not redefined"
+        )),
+    }
+}
+
+/// The libvirt networks a domain's interfaces source from, from `virsh
+/// domiflist` (the `Source` column of the `network` rows). **Pure.**
+fn domiflist_networks(out: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|l| {
+            let cols: Vec<&str> = l.split_whitespace().collect();
+            (cols.len() >= 3 && cols[1] == "network").then(|| cols[2].to_string())
+        })
+        .collect()
+}
+
+/// Every domain on `uri`, running or not, with an interface on network `net`.
+/// `None` when the domains could not be listed — a caller about to remove or
+/// replace the network reads that as "in use", never as "free".
+fn domains_on_network(uri: &str, net: &str) -> Option<Vec<String>> {
+    let names = capture("virsh", &["-c", uri, "list", "--all", "--name"])?;
+    let mut on = Vec::new();
+    for d in names.lines().map(str::trim).filter(|d| !d.is_empty()) {
+        let ifs = capture("virsh", &["-c", uri, "domiflist", "--", d])?;
+        if domiflist_networks(&ifs).iter().any(|n| n == net) {
+            on.push(d.to_string());
+        }
+    }
+    Some(on)
+}
+
+/// Removes the libvirt network `net` — only when it carries the engine's mark
+/// and no domain is on it. Returns whether it removed it. A network the
+/// engine did not define is never touched, whatever its name.
+fn release_owned_network(uri: &str, net: &str) -> Result<bool> {
+    let Some(xml) = capture("virsh", &["-c", uri, "net-dumpxml", "--", net]) else {
+        return Ok(false); // already gone
+    };
+    if !parse_live_network(&xml).owned {
+        return Ok(false);
+    }
+    if !domains_on_network(uri, net).is_some_and(|u| u.is_empty()) {
+        return Ok(false);
+    }
+    // An inactive network refuses `net-destroy`; the undefine is what counts.
+    let _ = stable_cmd("virsh")
+        .args(["-c", uri, "net-destroy", "--", net])
+        .output();
+    run_quiet("virsh", &["-c", uri, "net-undefine", "--", net])?;
+    Ok(true)
+}
+
+/// The libvirt network a recorded VM is on: an explicit `bridge`, else the
+/// network it was created with when that names one — the same mapping `boot`
+/// makes with `map_declared_network`. `None` for libvirt's own `default`.
+fn libvirt_network_of(vm: &Vm) -> Option<&str> {
+    recorded_libvirt_network(vm.boot.bridge.as_deref(), &vm.network)
+}
+
+/// Whether any of `records` — `(boot.bridge, network)` of each VM record left
+/// — is on the libvirt network `net`, by the same mapping as
+/// [`libvirt_network_of`]. **Pure.**
+fn still_on_network<'a>(
+    net: &str,
+    records: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+) -> bool {
+    records
+        .into_iter()
+        .any(|(bridge, network)| recorded_libvirt_network(bridge, network) == Some(net))
+}
+
+/// [`libvirt_network_of`] over the two record fields it reads. **Pure.**
+fn recorded_libvirt_network<'a>(bridge: Option<&'a str>, network: &'a str) -> Option<&'a str> {
+    bridge.or_else(|| names_a_declared_network(network).then_some(network))
+}
+
+/// Returns whether it DEFINED the network in this call, so a `boot` that fails
+/// afterwards can take it back with it.
+fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) -> Result<bool> {
     // System connection reachable? (NAT lives in qemu:///system.)
     if capture("virsh", &["-c", uri, "net-list", "--all"]).is_none() {
         eprintln!(
             "warning: cannot reach {uri} for NAT networking — add yourself to the \
 'libvirt' group (`sudo usermod -aG libvirt $USER && newgrp libvirt`) and retry"
         );
-        return;
+        return Ok(false);
     }
-    let exists = capture("virsh", &["-c", uri, "net-info", "--", net]).is_some();
+    let live =
+        capture("virsh", &["-c", uri, "net-dumpxml", "--", net]).map(|x| parse_live_network(&x));
+    let exists = live.is_some();
+    let mut defined_here = false;
     // A named network the operator asked for, with a subnet resolved from the
-    // registry: define it. Without this the name was accepted and dropped, and
-    // the VM silently used `default` instead.
-    if !exists && net != "default" {
-        match subnet.and_then(|s| libvirt_network_xml(net, s)) {
-            Some(xml) => {
-                // SAYS SO when the define fails, instead of `let _`. A swallowed
-                // failure here is the exact bug this function exists to kill: the
-                // network never appears, the domain's NIC falls back to `default`,
-                // and the operator who asked for `--network <name>` gets a cluster
-                // on the shared NAT with nothing in the output to explain it.
-                // Found by testing — the first run after the auto-created network
-                // landed on `default` and there was no message to say why.
-                //
-                // `tracing::warn!` and not `eprintln!`: this is a library crate,
-                // and `arch_fitness`'s `library_prints` ratchet counts a direct
-                // stdout/stderr write as debt. Same channel the anti-spoofing
-                // and cgroup-ceiling warnings in this file already use.
+    // registry: define it — or, when the name is taken on another subnet,
+    // redefine or refuse (`libvirt_network_plan`). Without the define the name
+    // was accepted and dropped, and the VM silently used `default` instead;
+    // without the check, an existing name was trusted whatever its subnet.
+    if net != "default" {
+        let plan =
+            libvirt_network_plan(net, subnet, live.as_ref(), &|| domains_on_network(uri, net));
+        match plan {
+            NetPlan::Use => {}
+            NetPlan::Refuse(why) => return Err(Error::NetworkSubnetConflict(why)),
+            NetPlan::Redefine(xml) => {
+                let _ = stable_cmd("virsh")
+                    .args(["-c", uri, "net-destroy", "--", net])
+                    .output();
+                run_quiet("virsh", &["-c", uri, "net-undefine", "--", net])?;
                 if !virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml) {
-                    tracing::warn!(
-                        network = %net,
-                        "could not define libvirt network — the VM will fall back to libvirt's 'default' network"
-                    );
-                    return;
+                    return Err(Error::Command {
+                        context: "libvirt",
+                        message: format!(
+                            "removed libvirt network '{net}' to put it on its declared subnet, \
+                             and could not define it again (`virsh net-define`)"
+                        ),
+                    });
                 }
+                tracing::debug!(network = %net, "libvirt network redefined on its declared subnet");
+                defined_here = true;
             }
-            None => {
-                tracing::warn!(
-                    network = %net,
-                    "network is not defined in libvirt and no usable subnet was resolved for it — the VM will fall back to libvirt's 'default' network"
-                );
-                return;
+            NetPlan::Define(xml) => {
+                // A failed define is an ERROR, not a warning. It used to be a
+                // `tracing::warn!` promising that «the VM will fall back to
+                // libvirt's 'default' network» — there is no such fallback: the
+                // domain names `net`, and `virsh define`/`start` then failed on
+                // «no network with matching name». Stopping here stops BEFORE
+                // the domain is defined.
+                if !virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml) {
+                    return Err(Error::Command {
+                        context: "libvirt",
+                        message: format!(
+                            "could not define the libvirt network '{net}' on {uri} \
+                             (`virsh net-define` failed)"
+                        ),
+                    });
+                }
+                defined_here = true;
+            }
+            NetPlan::Unresolved => {
+                // Reached only past the engine's «is it declared?» refusal, so
+                // the network exists on this node — but no usable subnet came
+                // with it (a caller that did not resolve `network_subnet`, or a
+                // /31–/32). Same honesty as above: the domain cannot get it.
+                return Err(Error::Command {
+                    context: "libvirt",
+                    message: format!(
+                        "network '{net}' is not defined in libvirt and no usable subnet was \
+                         resolved for it, so it cannot be defined there (check \
+                         `delonix network inspect {net}`)"
+                    ),
+                });
             }
         }
     }
@@ -2422,6 +2699,7 @@ fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
     let _ = stable_cmd("virsh")
         .args(["-c", uri, "net-autostart", "--", net])
         .output();
+    Ok(defined_here)
 }
 
 /// The `blockcommit` that puts a VM back on its own disk after a live backup.
@@ -2660,9 +2938,7 @@ impl VmBackend for LibvirtBackend {
         // which is the behaviour `network_of`'s doc-comment records as found
         // live. Mapping it here (and not in `libvirt_interface_xml`) keeps the
         // XML generator pure and leaves ONE place that decides the network.
-        if cfg.bridge.is_none() && !cfg.network.is_empty() && cfg.network != "default" {
-            cfg.bridge = Some(cfg.network.clone());
-        }
+        map_declared_network(&mut cfg);
         let cfg = &cfg;
         if let Some(ip) = cfg.static_ip.as_deref() {
             if !matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
@@ -2690,14 +2966,27 @@ impl VmBackend for LibvirtBackend {
         // this, `vm create --net-mode nat` failed on installations where the
         // `default` network is not created (minimalist libvirt) or is stopped — the
         // path to a host-pingable IP + SSH.
+        // A network this call defined goes again if the boot does not get as
+        // far as a domain on it — else a failed `vm create` left it behind.
+        let mut net_defined_here: Option<&str> = None;
+        let undo_net = |n: Option<&str>| {
+            if let Some(n) = n {
+                let _ = release_owned_network(uri, n);
+            }
+        };
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             on(CreateStage::Network);
             let net = cfg.bridge.as_deref().unwrap_or("default");
-            ensure_libvirt_network(uri, net, cfg.network_subnet.as_deref());
+            if ensure_libvirt_network(uri, net, cfg.network_subnet.as_deref())? {
+                net_defined_here = Some(net);
+            }
             // Static IP: DHCP reservation MAC→IP on the libvirt network, BEFORE
             // the domain boots (the guest's DHCP request must already find it).
             if let Some(ip) = cfg.static_ip.as_deref() {
-                libvirt_reserve_ip(uri, net, &mac, ip)?;
+                if let Err(e) = libvirt_reserve_ip(uri, net, &mac, ip) {
+                    undo_net(net_defined_here);
+                    return Err(e.into());
+                }
             }
         }
         // The NIC's `<filterref>` is emitted by `libvirt_domain_xml` below, and
@@ -2758,6 +3047,7 @@ impl VmBackend for LibvirtBackend {
             if let Err(e) = run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])
             {
                 let _ = std::fs::remove_file(&xml_path);
+                undo_net(net_defined_here);
                 return Err(e.into());
             }
             // A domain defined here is a domain libvirt has never seen before,
@@ -2793,6 +3083,7 @@ impl VmBackend for LibvirtBackend {
                 // the error below.
                 let _ = libvirt_cleanup(&cfg.name);
                 let _ = std::fs::remove_file(&xml_path);
+                undo_net(net_defined_here);
                 if uri == "qemu:///session" {
                     let cache = std::env::var_os("XDG_CACHE_HOME")
                         .map(PathBuf::from)
@@ -3245,8 +3536,34 @@ impl VmBackend for LibvirtBackend {
         self.stop(vmdir, vm)?;
         if let Some(ip) = vm.boot.static_ip.as_deref() {
             let uri = libvirt_uri_for(Some(vm.tap.as_str()));
-            let net = vm.boot.bridge.as_deref().unwrap_or("default");
+            // The network the reservation went to: `boot` maps a declared
+            // `--network` into `bridge`, which the record does not keep, so
+            // `boot.bridge` alone sent this release to `default`.
+            let net = libvirt_network_of(vm).unwrap_or("default");
             libvirt_release_ip(uri, net, &vm.mac, ip);
+        }
+        Ok(())
+    }
+
+    fn release_network(&self, vm: &Vm, remaining: &[Vm]) -> delonix_model::Result<()> {
+        let Some(net) = libvirt_network_of(vm) else {
+            return Ok(()); // libvirt's own `default`: never ours to remove
+        };
+        // A record still on it — by `--network` or by `--bridge`, running or
+        // stopped — keeps it. Comparing `network` fields alone missed a VM put
+        // on it with `--bridge <name>` (recorded as `network: ingress`): the
+        // `rm` of the other one removed the network and its `start` failed.
+        if still_on_network(
+            net,
+            remaining
+                .iter()
+                .map(|o| (o.boot.bridge.as_deref(), o.network.as_str())),
+        ) {
+            return Ok(());
+        }
+        let uri = libvirt_uri_for(Some(vm.tap.as_str()));
+        if release_owned_network(uri, net)? {
+            tracing::debug!(network = %net, "libvirt network removed with its last VM");
         }
         Ok(())
     }
@@ -3643,10 +3960,7 @@ impl LibvirtBackend {
     /// one, so this is queried rather than assumed.
     fn network_of(uri: &str, name: &str) -> Option<String> {
         let out = capture("virsh", &["-c", uri, "domiflist", "--", name])?;
-        out.lines().find_map(|l| {
-            let cols: Vec<&str> = l.split_whitespace().collect();
-            (cols.len() >= 3 && cols[1] == "network").then(|| cols[2].to_string())
-        })
+        domiflist_networks(&out).into_iter().next()
     }
 
     /// IP via `virsh net-dhcp-leases`, scoped to this VM's OWN mac and
@@ -3761,6 +4075,202 @@ mod tests {
         assert!(libvirt_network_xml("n", "10.0.0.0").is_none());
         assert!(libvirt_network_xml("n", "not-a-cidr/16").is_none());
         assert!(libvirt_network_xml("n", "10.0.0.0/abc").is_none());
+    }
+
+    /// What `net-dumpxml` returned for a network defined from
+    /// `libvirt_network_xml`, measured 2026-10-21 on libvirt 10.0: the
+    /// metadata comes back re-quoted with `"`, and libvirt adds the bridge,
+    /// the MAC and the uuid.
+    const LIVE_OWNED: &str = r#"<network>
+  <name>cf-snet</name>
+  <uuid>eb08f0ea-3f71-43fd-81ef-9052b0aa122f</uuid>
+  <metadata>
+    <delonix:network xmlns:delonix="https://delonix.io/xmlns/libvirt/network/1" subnet="10.231.79.0/24"/>
+  </metadata>
+  <forward mode='nat'/>
+  <bridge name='virbr2' stp='on' delay='0'/>
+  <mac address='52:54:00:66:64:6c'/>
+  <ip address='10.231.79.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='10.231.79.2' end='10.231.79.254'/>
+    </dhcp>
+  </ip>
+</network>
+"#;
+
+    /// The host's own `default`, as distros ship it: no mark.
+    const LIVE_FOREIGN: &str = "<network>\n  <name>default</name>\n  <forward mode='nat'/>\n  \
+        <bridge name='virbr0' stp='on' delay='0'/>\n  \
+        <ip address='192.168.122.1' netmask='255.255.255.0'>\n  </ip>\n</network>\n";
+
+    fn cidr(s: &str) -> Option<(std::net::Ipv4Addr, u32)> {
+        parse_cidr(s)
+    }
+
+    /// The network the engine defines carries its mark, and reading it back
+    /// (in either quote style) gives the subnet it was defined on.
+    #[test]
+    fn a_network_the_engine_defines_reads_back_as_its_own() {
+        let x = libvirt_network_xml("cf-snet", "10.231.80.7/24").expect("valid");
+        assert!(x.contains(NET_OWNER_NS), "{x}");
+        assert!(x.contains("subnet='10.231.80.0/24'"), "{x}");
+        let live = parse_live_network(&x);
+        assert_eq!(
+            live,
+            LiveNetwork {
+                owned: true,
+                subnet: cidr("10.231.80.0/24")
+            }
+        );
+        assert_eq!(
+            parse_live_network(LIVE_OWNED),
+            LiveNetwork {
+                owned: true,
+                subnet: cidr("10.231.79.0/24")
+            }
+        );
+        assert_eq!(
+            parse_live_network(LIVE_FOREIGN),
+            LiveNetwork {
+                owned: false,
+                subnet: cidr("192.168.122.0/24")
+            }
+        );
+    }
+
+    /// `prefix=` instead of `netmask=`, an IPv6 element before the IPv4 one,
+    /// a network with no address at all (a host-bridge forward), and a mask
+    /// that is no subnet.
+    #[test]
+    fn the_live_subnet_is_the_first_ipv4_element() {
+        let x = "<network><ip family='ipv6' address='fd00::1' prefix='64'/>\
+                 <ip address='10.9.8.1' prefix='16'/></network>";
+        assert_eq!(parse_live_network(x).subnet, cidr("10.9.0.0/16"));
+        let x = "<network><forward mode='bridge'/><bridge name='br0'/></network>";
+        assert_eq!(parse_live_network(x).subnet, None);
+        let x = "<network><ip address='10.0.0.1' netmask='255.0.255.0'/></network>";
+        assert_eq!(parse_live_network(x).subnet, None);
+    }
+
+    /// The decision table of `libvirt_network_plan`. `users` panics where the
+    /// plan must not need to ask (listing domains costs a `virsh` per domain).
+    #[test]
+    fn a_network_name_is_used_only_on_its_declared_subnet() {
+        let never = || -> Option<Vec<String>> { panic!("users asked for no reason") };
+        let owned = |c: &str| LiveNetwork {
+            owned: true,
+            subnet: cidr(c),
+        };
+        let foreign = |c: &str| LiveNetwork {
+            owned: false,
+            subnet: cidr(c),
+        };
+
+        // Absent: defined with the mark, or left to libvirt when no subnet.
+        match libvirt_network_plan("cf-snet", Some("10.231.80.0/24"), None, &never) {
+            NetPlan::Define(x) => {
+                assert!(x.contains(NET_OWNER_NS) && x.contains("10.231.80.1"), "{x}")
+            }
+            p => panic!("{p:?}"),
+        }
+        assert_eq!(
+            libvirt_network_plan("cf-snet", None, None, &never),
+            NetPlan::Unresolved
+        );
+
+        // Present on the declared subnet — ours or not — or nothing to compare.
+        let want = Some("10.231.80.0/24");
+        for live in [owned("10.231.80.0/24"), foreign("10.231.80.0/24")] {
+            assert_eq!(
+                libvirt_network_plan("cf-snet", want, Some(&live), &never),
+                NetPlan::Use
+            );
+        }
+        assert_eq!(
+            libvirt_network_plan("cf-snet", None, Some(&owned("10.231.79.0/24")), &never),
+            NetPlan::Use
+        );
+
+        // THE MEASURED CASE: the name redeclared on 10.231.80.0/24 while
+        // libvirt still had 10.231.79.0/24. It was `Use`, rc 0, VM on .79.
+        let stale = owned("10.231.79.0/24");
+        match libvirt_network_plan("cf-snet", want, Some(&stale), &|| Some(vec![])) {
+            NetPlan::Redefine(x) => assert!(x.contains("10.231.80.1"), "{x}"),
+            p => panic!("ours and unused must be redefined: {p:?}"),
+        }
+        match libvirt_network_plan("cf-snet", want, Some(&stale), &|| {
+            Some(vec!["cf-vm1".into()])
+        }) {
+            NetPlan::Refuse(m) => assert!(
+                m.contains("10.231.79.0/24")
+                    && m.contains("10.231.80.0/24")
+                    && m.contains("cf-vm1"),
+                "{m}"
+            ),
+            p => panic!("a VM on it must block the redefine: {p:?}"),
+        }
+        assert!(matches!(
+            libvirt_network_plan("cf-snet", want, Some(&stale), &|| None),
+            NetPlan::Refuse(_)
+        ));
+
+        // Not ours: refused without asking who is on it — never redefined.
+        match libvirt_network_plan("labnet", want, Some(&foreign("10.0.0.0/24")), &never) {
+            NetPlan::Refuse(m) => assert!(m.contains("did not define"), "{m}"),
+            p => panic!("{p:?}"),
+        }
+        let no_ip = LiveNetwork {
+            owned: false,
+            subnet: None,
+        };
+        match libvirt_network_plan("labnet", want, Some(&no_ip), &never) {
+            NetPlan::Refuse(m) => assert!(m.contains("no IPv4 subnet"), "{m}"),
+            p => panic!("{p:?}"),
+        }
+    }
+
+    /// `domiflist` rows of type `network` only; a `bridge` row names a host
+    /// bridge, not a libvirt network.
+    #[test]
+    fn domiflist_networks_reads_only_network_rows() {
+        let out = " Interface   Type      Source    Model    MAC\n\
+                   ---------------------------------------------------------\n \
+                   vnet0       network   cf-snet   virtio   52:54:00:aa:bb:cc\n \
+                   vnet1       bridge    br0       virtio   52:54:00:aa:bb:cd\n \
+                   vnet2       network   default   virtio   52:54:00:aa:bb:ce\n";
+        assert_eq!(domiflist_networks(out), ["cf-snet", "default"]);
+    }
+
+    /// The network a RECORD is on, for `destroy`'s DHCP release and for
+    /// `release_network`: the declared one when the record names one, never
+    /// libvirt's `default`. `boot.bridge` alone was `None` for a VM created
+    /// with `--network`, so the static-IP release went to `default`.
+    #[test]
+    fn a_record_is_on_its_declared_network() {
+        assert_eq!(recorded_libvirt_network(None, "cf-snet"), Some("cf-snet"));
+        assert_eq!(recorded_libvirt_network(None, "ingress"), None);
+        assert_eq!(recorded_libvirt_network(None, "default"), None);
+        assert_eq!(
+            recorded_libvirt_network(Some("br-lab"), "ingress"),
+            Some("br-lab")
+        );
+    }
+
+    /// BUG-1 of the cli-tester's run on 2026-10-21: VM A on `--network ct-x`,
+    /// VM B on `--net-mode nat --bridge ct-x` (recorded as `network: ingress,
+    /// bridge: ct-x`), B stopped, `vm rm A` — and the network went, because
+    /// the count compared `network` fields only; `vm start B` then failed
+    /// with «Network not found». B's record keeps it now.
+    #[test]
+    fn a_vm_on_the_network_by_bridge_keeps_it() {
+        let b = (Some("ct-x"), "ingress");
+        assert!(still_on_network("ct-x", [b]));
+        assert!(still_on_network("ct-x", [(None, "ct-x")]));
+        assert!(!still_on_network(
+            "ct-x",
+            [(None, "ingress"), (None, "ct-y")]
+        ));
+        assert!(!still_on_network("ct-x", []));
     }
 
     /// REGRESSION (the whole point of the `network_subnet` field): with the
@@ -4776,6 +5286,80 @@ mod tests {
         c.bridge = Some("br0".into());
         let br = libvirt_interface_xml(&c, "52:54:00:00:00:01");
         assert!(br.contains("type='bridge'") && br.contains("source bridge='br0'"));
+    }
+    #[test]
+    fn the_default_network_values_never_reach_libvirt_as_a_name() {
+        // Measured 2026-10-21 on main: `vm create --backend libvirt` without
+        // `--network` failed with "no network with matching name 'ingress'",
+        // because only "default" was excluded and `ingress` is what the bin
+        // puts in `network` when the flag is absent.
+        for default in ["", "ingress", "bridge", "default"] {
+            let mut c = hpc_cfg();
+            c.network = default.into();
+            c.net_mode = Some("nat".into());
+            super::map_declared_network(&mut c);
+            assert_eq!(c.bridge, None, "{default:?}");
+            let xml = libvirt_interface_xml(&c, "52:54:00:00:00:01");
+            assert!(
+                xml.contains("source network='default'"),
+                "{default:?}: {xml}"
+            );
+        }
+        // A name the operator asked for still reaches the domain (#866).
+        let mut c = hpc_cfg();
+        c.network = "lab-net".into();
+        c.net_mode = Some("nat".into());
+        super::map_declared_network(&mut c);
+        assert_eq!(c.bridge.as_deref(), Some("lab-net"));
+        // And an explicit bridge is never overwritten by it.
+        c.bridge = Some("br0".into());
+        super::map_declared_network(&mut c);
+        assert_eq!(c.bridge.as_deref(), Some("br0"));
+    }
+    /// What `vm describe`, `vm ls -o json` and the node API report for a libvirt
+    /// VM is read back from its RECORD; the domain is built from the config.
+    /// Both go through `libvirt_nic`, and this holds them to each other for
+    /// every net mode: the record as `boot` writes it (`tap` = the net mode, the
+    /// boot spec from the config before `map_declared_network`) reports the
+    /// network the generated `<interface>` names.
+    #[test]
+    fn the_reported_network_is_the_one_in_the_domain_xml() {
+        for mode in [
+            None,
+            Some("user"),
+            Some("nat"),
+            Some("network"),
+            Some("bridge"),
+        ] {
+            for network in ["", "ingress", "default", "lab-net"] {
+                for bridge in [None, Some("br-x")] {
+                    let mut c = hpc_cfg();
+                    c.net_mode = mode.map(str::to_string);
+                    c.network = network.into();
+                    c.bridge = bridge.map(str::to_string);
+                    let record: delonix_compute::Vm = serde_json::from_value(serde_json::json!({
+                        "name": c.name, "disk": c.disk, "overlay": "/o.qcow2",
+                        "vcpus": c.vcpus, "memory": c.memory, "network": c.network,
+                        "tap": mode.unwrap_or("user"), "mac": "52:54:00:00:00:01",
+                        "pid": null, "api_socket": "", "status": "Running",
+                        "created_unix": 1, "backend": "libvirt",
+                        "boot": delonix_compute::vm::boot_spec_of(&c),
+                    }))
+                    .unwrap();
+                    super::map_declared_network(&mut c);
+                    let xml = libvirt_interface_xml(&c, "52:54:00:00:00:01");
+                    let case = format!("{mode:?} {network:?} {bridge:?}: {xml}");
+                    match delonix_compute::vm::attached_network(&record) {
+                        None => assert!(xml.contains("type='user'"), "{case}"),
+                        Some(n) => assert!(
+                            xml.contains(&format!("source network='{n}'"))
+                                || xml.contains(&format!("source bridge='{n}'")),
+                            "reported {n:?} — {case}"
+                        ),
+                    }
+                }
+            }
+        }
     }
 }
 

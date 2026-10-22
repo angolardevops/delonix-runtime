@@ -103,7 +103,7 @@ fn root_suffix() -> String {
 }
 
 /// Directory `<base>/ingress/` with the infra's state.
-fn ingress_dir() -> PathBuf {
+pub(crate) fn ingress_dir() -> PathBuf {
     base_root().join("ingress")
 }
 /// The **pin**'s pid — the process that owns the userns/netns/mountns and does
@@ -655,6 +655,246 @@ fn proc_is_ours(kind: PidKind, pid: i32, argv: &[String]) -> bool {
 
 // ---- ingress nft (inside the infra netns) -----------------------------------
 
+// ---- the two unconditional guards (reconciled, not built once) --------------
+//
+// `fwguard` and `dlxinput` are the holder's two UNCONDITIONAL denials: the first
+// refuses cloud metadata and the host loopback as destinations, the second refuses
+// new connections to the services the holder itself runs. Both have an escape hatch
+// (`DELONIX_ALLOW_LINK_LOCAL` / `DELONIX_ALLOW_HOLDER_INGRESS`) that empties them.
+//
+// They used to be emitted ONLY by [`ingress_table_ruleset`], whose single production
+// caller is `setup_infra_netns` — and the reattach path never reloads that ruleset,
+// deliberately (re-applying it re-appends the dispatch rules; it has no `flush`). So a
+// node whose infra came up ONCE with an escape hatch set kept the emptied chain for the
+// whole life of the pin, which by design never restarts: every later invocation
+// WITHOUT the variable reattached to the weakened table and repaired nothing, and
+// nothing anywhere said so.
+//
+// That is the same bug the dispatch had ([`ensure_fw_dispatch_current`]) and the same
+// one the private-egress guard was built to avoid ([`ensure_private_egress_guard_current`]).
+// The fix has the same shape: ONE source of truth for the rule text, a pure renderer
+// that flushes and refills in a single transaction, and a reconciler that runs on the
+// paths every workload attach takes.
+
+/// Name of the guard chain that holds the unconditional destination denials.
+pub const FWGUARD_CHAIN: &str = "fwguard";
+/// Before everything: `fwprivate` (-15), `fwdeny` (-10), the per-container dispatch
+/// (-6/-5) and the default policy (0). A denial here cannot be reached around.
+pub const FWGUARD_PRIORITY: i32 = -20;
+/// Name of the chain that governs traffic addressed TO the holder itself.
+pub const DLXINPUT_CHAIN: &str = "dlxinput";
+/// The `input` hook has no other chain of ours, so the priority is not load-bearing.
+pub const DLXINPUT_PRIORITY: i32 = 0;
+
+/// Is the link-local/loopback denial opted OUT of? Warns when it is.
+fn allow_link_local() -> bool {
+    let on = std::env::var("DELONIX_ALLOW_LINK_LOCAL").ok().as_deref() == Some("1");
+    if on {
+        tracing::warn!(
+            "SECURITY WARNING — DELONIX_ALLOW_LINK_LOCAL=1: containers may reach \
+             169.254.0.0/16 (cloud metadata / instance credentials) and the host loopback. \
+             For debugging only — do NOT use in production."
+        );
+    }
+    on
+}
+
+/// Is the holder's own-services denial opted OUT of? Warns when it is.
+fn allow_holder_ingress() -> bool {
+    let on = std::env::var("DELONIX_ALLOW_HOLDER_INGRESS")
+        .ok()
+        .as_deref()
+        == Some("1");
+    if on {
+        tracing::warn!(
+            "SECURITY WARNING — DELONIX_ALLOW_HOLDER_INGRESS=1: containers may reach the \
+             services the holder exposes (the L7 proxy, the internal DNS). Through the proxy \
+             a container reaches ANY registered backend, in ANY namespace, past that \
+             backend's own ingress policy. For debugging only — do NOT use in production."
+        );
+    }
+    on
+}
+
+/// The rules of `fwguard`, as the environment asks for them.
+fn fwguard_rules() -> Vec<String> {
+    fwguard_rules_for(allow_link_local())
+}
+
+/// [`fwguard_rules`] with the decision passed in. PURE — the whole policy is in the
+/// return value, so both directions are testable without touching the environment
+/// (which is also why this is not one function with an env read inside: the
+/// process-wide environment is shared by the test battery, see `crate::testenv`).
+///
+///   169.254.0.0/16 — cloud metadata (`169.254.169.254`). On a cloud host this is the
+///     instance's credentials endpoint, one HTTP GET away from any container. THIS
+///     CHAIN IS THE ONLY THING REFUSING IT — unlike the loopback below, there is no
+///     second layer anywhere.
+///   127.0.0.0/8 — the host's own loopback. Also unreachable because `slirp4netns`
+///     runs with `--disable-host-loopback` (hardcoded in [`start_slirp`] and in
+///     `crate::slirp_attach`), but that is one flag in one spawn path away from
+///     regressing, and this costs one rule.
+fn fwguard_rules_for(allow_link_local: bool) -> Vec<String> {
+    if allow_link_local {
+        return Vec::new();
+    }
+    vec![
+        "ip daddr 169.254.0.0/16 counter drop".to_string(),
+        "ip daddr 127.0.0.0/8 counter drop".to_string(),
+    ]
+}
+
+/// The rules of `dlxinput`, as the environment asks for them.
+fn dlxinput_rules() -> Vec<String> {
+    dlxinput_rules_for(allow_holder_ingress())
+}
+
+/// [`dlxinput_rules`] with the decision passed in. PURE, same reason as
+/// [`fwguard_rules_for`].
+///
+/// Every policy chain of this table hangs off `forward`, and traffic addressed TO the
+/// holder never goes through `forward` — it goes through `input`, which had no chain at
+/// all. That was a whole side of the node with no policy on it, and it was exploitable:
+/// the L7 proxy listens in this netns, so any container could reach it on its bridge
+/// gateway and be relayed to ANY registered backend — across namespaces, and past an
+/// `ingress policy deny` on the backend (both measured; the proxy→backend leg
+/// originates here, so it never meets `fwout`/`fwcont` either). See
+/// `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2.
+///
+/// The allowlist is what a container legitimately needs FROM the holder and nothing
+/// else: the internal DNS, DHCP (the VM leases), ICMP for diagnostics, and the return
+/// traffic of anything the holder itself opened. `tap0` is the host→slirp→holder path,
+/// which is the whole point of an ingress, so it stays open.
+///
+/// Deliberately keyed on what is ALLOWED, not on the proxy's ports: the listeners are
+/// dynamic (`kind: HTTPRoute` declares its own) and enumerating ports would have to be
+/// kept in sync with a moving target — and would leave every FUTURE holder-resident
+/// listener exposed by default, which is the same shape of gap this closes.
+fn dlxinput_rules_for(allow_holder_ingress: bool) -> Vec<String> {
+    let mut rules: Vec<String> = [
+        "ct state established,related accept",
+        "iifname \"lo\" accept",
+        "iifname \"tap0\" accept",
+        "udp dport { 53, 67, 68 } accept",
+        "tcp dport 53 accept",
+        "meta l4proto icmp accept",
+    ]
+    .iter()
+    .map(|r| r.to_string())
+    .collect();
+    if !allow_holder_ingress {
+        rules.push("ct state new counter drop".to_string());
+    }
+    rules
+}
+
+/// Rules as the BODY of a chain inside a `table` block — the shape
+/// [`ingress_table_ruleset`] interpolates. Empty for no rules, never a stray newline.
+fn indent_chain_body(rules: &[String]) -> String {
+    rules.iter().map(|r| format!("\x20\x20 {r}\n")).collect()
+}
+
+/// One `nft -f` transaction that brings `fwguard` and `dlxinput` to the shape the
+/// environment asks for, whatever shape they held.
+///
+/// Idempotent and atomic, exactly like [`render_private_egress`]: each chain is created
+/// if missing (a table built by an older holder may have neither), flushed and refilled
+/// in the same transaction, so no packet ever sees a chain half-written and running it
+/// twice changes nothing. Creating the chain with its hook and priority is what makes
+/// this safe to run against a table that predates either chain.
+pub fn unconditional_guards_script() -> String {
+    unconditional_guards_script_for(allow_link_local(), allow_holder_ingress())
+}
+
+/// [`unconditional_guards_script`] with both decisions passed in. PURE.
+pub fn unconditional_guards_script_for(
+    allow_link_local: bool,
+    allow_holder_ingress: bool,
+) -> String {
+    let t = INGRESS_TABLE;
+    let mut s = String::new();
+    for (chain, prio, hook, rules) in [
+        (
+            FWGUARD_CHAIN,
+            FWGUARD_PRIORITY,
+            "forward",
+            fwguard_rules_for(allow_link_local),
+        ),
+        (
+            DLXINPUT_CHAIN,
+            DLXINPUT_PRIORITY,
+            "input",
+            dlxinput_rules_for(allow_holder_ingress),
+        ),
+    ] {
+        s.push_str(&format!(
+            "add chain ip {t} {chain} {{ type filter hook {hook} priority {prio}; }}\n\
+             flush chain ip {t} {chain}\n"
+        ));
+        for r in rules {
+            s.push_str(&format!("add rule ip {t} {chain} {r}\n"));
+        }
+    }
+    s
+}
+
+/// Where [`ensure_unconditional_guards_current`] records the guards a pin is running.
+fn unconditional_guards_marker(pin: i32) -> PathBuf {
+    ingress_dir().join(format!("guards.{pin}"))
+}
+
+/// Holder side: enforces the guards in THIS netns and stamps the pin. Run by a control
+/// plane of this binary when it builds or reattaches to the infra netns.
+///
+/// `?` for the same reason as the private-egress guard: a control plane that cannot put
+/// the unconditional denials in force must not come up announcing a working firewall.
+fn apply_unconditional_guards() -> Result<()> {
+    let script = unconditional_guards_script();
+    apply_nft_stdin(&script)?;
+    if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
+        // Best effort: without the stamp the host side applies it again, idempotently.
+        let _ = std::fs::write(unconditional_guards_marker(pin), script_stamp(&script));
+    }
+    Ok(())
+}
+
+/// Host side: brings the RUNNING holder's guards to what the environment asks for, from
+/// the host, the way [`ensure_fw_dispatch_current`] migrates the dispatch — so it also
+/// reaches a control plane started by an older binary, which is the case that matters
+/// (the pin never restarts, so an escape hatch set once would otherwise hold forever).
+///
+/// A stamp per pin keeps it to one `nft -f` per CHANGE: the common invocation, with no
+/// hatch set and a holder already in that shape, does no work at all. When the stamp
+/// does not match — the first call after a weakened bring-up — the chain is repaired.
+///
+/// A failure is an error, never a warning: a node running without its unconditional
+/// denials is the hole this exists to close.
+pub fn ensure_unconditional_guards_current() -> Result<()> {
+    let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) else {
+        return Ok(()); // no holder: the next one is built with the guards
+    };
+    let script = unconditional_guards_script();
+    let stamp = script_stamp(&script);
+    let marker = unconditional_guards_marker(pin);
+    if std::fs::read_to_string(&marker).ok().as_deref() == Some(stamp.as_str()) {
+        return Ok(());
+    }
+    // Inside the pin's user namespace already: see `ensure_fw_dispatch_current`.
+    if same_user_namespace(pin) {
+        return Ok(());
+    }
+    nft_in_pin(pin, &script).map_err(|why| Error::Command {
+        context: "ingress guards",
+        message: format!(
+            "could not apply the holder's unconditional denials (pin {pin}): {why}. \
+             Containers may reach 169.254.0.0/16 (cloud metadata) and the services the \
+             holder itself exposes until it is applied"
+        ),
+    })?;
+    let _ = std::fs::write(&marker, stamp);
+    Ok(())
+}
+
 /// The ingress's BASE `nft` *ruleset*: `pre` chain (DNAT of published ports),
 /// `post` (tap0 masquerade) and `fwd` (forward FILTER — the ONLY place of the
 /// parameterizable firewall, with per-container chains called by jump). PURE.
@@ -722,18 +962,10 @@ pub fn ingress_table_ruleset() -> String {
     // The services the holder itself exposes ARE covered now, by `dlxinput` below —
     // this comment used to record that as a follow-up, and the follow-up turned out to be
     // an exploitable bypass (measured, see `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2).
-    let guard = if std::env::var("DELONIX_ALLOW_LINK_LOCAL").ok().as_deref() == Some("1") {
-        tracing::warn!(
-            "SECURITY WARNING — DELONIX_ALLOW_LINK_LOCAL=1: containers may reach \
-             169.254.0.0/16 (cloud metadata / instance credentials) and the host loopback. \
-             For debugging only — do NOT use in production."
-        );
-        String::new()
-    } else {
-        "\x20\x20 ip daddr 169.254.0.0/16 counter drop\n\
-         \x20\x20 ip daddr 127.0.0.0/8 counter drop\n"
-            .to_string()
-    };
+    // The rules themselves live in [`fwguard_rules`], which this shares with
+    // [`unconditional_guards_script`] — the base ruleset is loaded once, the guard is
+    // reconciled on every `ensure_up`, and two copies of the rule text would drift.
+    let guard = indent_chain_body(&fwguard_rules());
     // `dlxinput` — the holder's OWN services are not reachable from a container.
     //
     // Every policy chain in this table hangs off `forward`, and traffic addressed TO the
@@ -754,21 +986,10 @@ pub fn ingress_table_ruleset() -> String {
     // `ensure_up`, long before any proxy exists. Enumerating ports would have to be kept in
     // sync with a moving target — and would leave every FUTURE holder-resident listener
     // exposed by default, which is the same shape of gap being closed here.
-    let holder_input = if std::env::var("DELONIX_ALLOW_HOLDER_INGRESS")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
-        tracing::warn!(
-            "SECURITY WARNING — DELONIX_ALLOW_HOLDER_INGRESS=1: containers may reach the \
-             services the holder exposes (the L7 proxy, the internal DNS). Through the proxy \
-             a container reaches ANY registered backend, in ANY namespace, past that \
-             backend's own ingress policy. For debugging only — do NOT use in production."
-        );
-        String::new()
-    } else {
-        "\x20\x20 ct state new counter drop\n".to_string()
-    };
+    // Whole chain, allowlist included, from [`dlxinput_rules`] — same single source of
+    // truth as the guard above, and for the same reason: the reconciler FLUSHES this
+    // chain and refills it, so it needs every rule, not just the conditional tail.
+    let holder_input = indent_chain_body(&dlxinput_rules());
     let dispatch: String = fw_dispatch_chains()
         .iter()
         .map(|(chain, prio, rule)| {
@@ -785,7 +1006,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20 map {FWMAP} {{ type ipv4_addr : verdict; }}\n\
          \x20 set {DLXBR_SET} {{ type ifname; }}\n\
          \x20 map {NETPAIR_MAP} {{ type ifname . ifname : verdict; counter; }}\n\
-         \x20 chain fwguard {{ type filter hook forward priority -20;\n\
+         \x20 chain {FWGUARD_CHAIN} {{ type filter hook forward priority {FWGUARD_PRIORITY};\n\
          {guard}\
          \x20 }}\n\
          \x20 chain {PRIVATE_EGRESS_CHAIN} {{ type filter hook forward priority {PRIVATE_EGRESS_PRIORITY};\n\
@@ -798,13 +1019,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20\x20 iifname . oifname vmap @{NETPAIR_MAP}\n\
          \x20\x20 iifname @{DLXBR_SET} oifname @{DLXBR_SET} counter drop\n\
          \x20 }}\n\
-         \x20 chain dlxinput {{ type filter hook input priority 0;\n\
-         \x20\x20 ct state established,related accept\n\
-         \x20\x20 iifname \"lo\" accept\n\
-         \x20\x20 iifname \"tap0\" accept\n\
-         \x20\x20 udp dport {{ 53, 67, 68 }} accept\n\
-         \x20\x20 tcp dport 53 accept\n\
-         \x20\x20 meta l4proto icmp accept\n\
+         \x20 chain {DLXINPUT_CHAIN} {{ type filter hook input priority {DLXINPUT_PRIORITY};\n\
          {holder_input}\
          \x20 }}\n\
          \x20 chain forward {{ type filter hook forward priority 0;{policy}\n\
@@ -1190,7 +1405,10 @@ fn private_egress_marker(pin: i32) -> PathBuf {
     ingress_dir().join(format!("private-egress.{pin}"))
 }
 
-fn private_egress_stamp(script: &str) -> String {
+/// A pin's marker content for an `nft` script: the hash of the script it runs. Shared
+/// by both reconcilers (the private-egress guard and the two unconditional denials) —
+/// same question in both, "is the holder already running exactly this?".
+fn script_stamp(script: &str) -> String {
     format!("{:08x}\n", crate::fnv32(script))
 }
 
@@ -1202,7 +1420,7 @@ fn apply_recorded_private_egress() -> Result<()> {
     apply_nft_stdin(&script)?;
     if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
         // Best effort: without the stamp the host side applies it again, idempotently.
-        let _ = std::fs::write(private_egress_marker(pin), private_egress_stamp(&script));
+        let _ = std::fs::write(private_egress_marker(pin), script_stamp(&script));
     }
     Ok(())
 }
@@ -1225,7 +1443,7 @@ pub fn ensure_private_egress_guard_current() -> Result<()> {
         return Ok(());
     }
     let script = recorded_private_egress_script();
-    let stamp = private_egress_stamp(&script);
+    let stamp = script_stamp(&script);
     if std::fs::read_to_string(&marker).ok().as_deref() == Some(stamp.as_str()) {
         return Ok(());
     }
@@ -1612,7 +1830,10 @@ fn ensure_up_locked() -> Result<()> {
             // migrate it here, on the path every workload attach takes. Same path,
             // same reason, for the node's private-egress guard.
             ensure_fw_dispatch_current()?;
-            return ensure_private_egress_guard_current();
+            ensure_private_egress_guard_current()?;
+            // The pin never restarts, so a guard emptied by an escape hatch on some
+            // earlier invocation is still empty here — this is the path that repairs it.
+            return ensure_unconditional_guards_current();
         }
         // An in-place upgrade over a PRE-split build: that holder is a single
         // process serving the legacy socket path, and its presence on disk is the
@@ -2276,6 +2497,10 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             let _ = std::fs::write(slirp_pid_path(), (child.id() as i32).to_string());
             // the slirp lives for the entire life of the infra — we don't wait on it.
             std::mem::forget(child);
+            // A new slirp has no hostfwd: the host ports of VIP Services
+            // (ADR-0066 D6) come back here, the way a container's come back
+            // when it is restarted.
+            crate::service_lb::republish_all();
             Ok(())
         }
         Err(e) => {
@@ -2367,6 +2592,10 @@ pub fn control_main() -> ! {
             std::thread::spawn(dns_server_main);
             // Router Advertisements emitter (SLAAC IPv6 for VMs/containers).
             std::thread::spawn(ra_sender_main);
+            // VIP readiness prober + dataplane sync (ADR-0066 D8 a). Idle on a
+            // node that has never served a VIP; the first round re-syncs the
+            // dataplane from the records, which is the control-start trigger.
+            std::thread::spawn(crate::service_lb::prober_main);
             // only now do we signal ready — the control socket already accepts connections.
             write_status("ready");
             control_loop(listener); // never returns (until SIGTERM)
@@ -2472,6 +2701,7 @@ fn is_readonly_verb(line: &str) -> bool {
             | "netroute-show"
             | "l4guard-show"
             | "br-netfilter-check"
+            | "svc-state"
     )
 }
 
@@ -2836,8 +3066,16 @@ fn handle_control(line: &str) -> String {
             .unwrap_or(false);
         return format!("ok {}\n", if active { "1" } else { "0" });
     }
+    // Query: what each `VirtualIP` Service serves right now — the prober's last
+    // round (ADR-0066 F3). Read-only, hex JSON for the one-line reply.
+    if let ["svc-state"] = parts.as_slice() {
+        return format!("ok {}\n", crate::service_lb::state_reply());
+    }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
+        // Re-evaluate every `VirtualIP` Service now and rewrite the VIP
+        // dataplane (ADR-0066 D7): sent by the CLI on apply/delete.
+        ["svcsync"] => crate::service_lb::sync_now(true),
         // ADR-0013 tier B: a declared route between two networks. One ELEMENT in
         // the exemption map — the spike proved the forwarding already exists and
         // an explicit pair drop is what closes it, so opening a path is not a
@@ -2872,6 +3110,8 @@ fn handle_control(line: &str) -> String {
         // exactly as before (it leaks, as it always did) instead of failing the teardown.
         ["nsleave", ip] => {
             ns_set_leave(ip);
+            // Out of every VIP map before the detach returns (ADR-0066 D7).
+            crate::service_lb::forget_address(ip);
             Ok(())
         }
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
@@ -2927,8 +3167,6 @@ fn handle_control(line: &str) -> String {
         }
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
         // 2 tokens = every proto on the port (teardown); 3 = only that proto.
-        ["lbclear", vip] => do_lbclear(vip),
-        ["lbset", vip, algo, backends] => do_lbset(vip, algo, backends),
         ["unpublish", host_port] => do_unpublish(host_port, None),
         ["unpublish", host_port, proto] => do_unpublish(host_port, Some(proto)),
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
@@ -3706,6 +3944,8 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     // container's fw_chain_body references these sets). Behavior unchanged
     // for everything in `default` (the same namespace contains all = open SDN).
     ns_set_join(ip, namespace);
+    // An address that left the wire may serve a VIP again (ADR-0066 D7).
+    crate::service_lb::address_back(ip);
     Ok(())
 }
 
@@ -4397,147 +4637,6 @@ fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()
 /// `proto` narrows it to one protocol; `None` removes every proto on that port.
 /// The `dport <n>` needle alone matched a `tcp dport n` rule and a `udp dport n` rule
 /// alike, so unpublishing one protocol tore down the other's DNAT too.
-/// Remove as regras de DNAT que apontam para um VIP de serviço.
-///
-/// Contraparte rootless do antigo `Net::clear_service_lb`, que fazia isto no
-/// netns do host. Corre no holder, dono do netns onde a tabela vive.
-///
-/// **O VIP é validado contra o espaço de ingress** antes de entrar numa
-/// comparação de texto: sem isso, um `vip` com um espaço lá dentro casaria
-/// linhas que não são dele, e apagar regras de DNAT alheias tira do ar serviços
-/// que ninguém mandou tirar.
-fn do_lbclear(vip: &str) -> Result<()> {
-    if !is_ingress_ip(vip) {
-        return Err(Error::VipOutsideIngressSpace(format!(
-            "VIP fora do espaço de ingress: {vip}"
-        )));
-    }
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "pre"])
-        .unwrap_or_default();
-    // `ip daddr <vip> ` com o espaço final: sem ele, `10.200.0.5` casaria
-    // `10.200.0.50`.
-    let needle = format!("ip daddr {vip} ");
-    for line in listed.lines() {
-        if !line.contains(&needle) || !line.contains("dnat") {
-            continue;
-        }
-        if let Some(handle) = line
-            .rsplit("# handle ")
-            .next()
-            .and_then(|h| h.trim().parse::<u32>().ok())
-        {
-            run_ok(
-                "nft",
-                &[
-                    "delete",
-                    "rule",
-                    "ip",
-                    INGRESS_TABLE,
-                    "pre",
-                    "handle",
-                    &handle.to_string(),
-                ],
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Instala o balanceamento de um VIP de serviço: uma regra de DNAT no `pre` que
-/// reparte para os `backends` (`ip:port`, separados por vírgulas).
-///
-/// Contraparte do [`do_lbclear`] — e a razão de existir. Até aqui dava para LIMPAR
-/// um balanceamento que nada instalava: um par em que só metade estava escrita.
-///
-/// A repartição é do kernel (`numgen`/`jhash` + `map`), sem cópia em espaço de
-/// utilizador:
-/// - `round-robin` — `numgen inc`, por ligação e em ordem;
-/// - `random` — `numgen random`;
-/// - `ip-hash`/`sticky` — `jhash ip saddr`, ou seja AFINIDADE: o mesmo cliente cai
-///   sempre no mesmo backend enquanto o conjunto não mudar;
-/// - `weighted` — backends em `ip:port#peso`, repetidos no mapa na proporção do
-///   peso (sem peso → round-robin).
-///
-/// `least-conn` não se exprime só com `dnat`/`numgen`: exige contar ligações
-/// abertas por backend, que o mapa não sabe fazer. Fica para o caminho L7.
-///
-/// **Substitui, não acumula**: limpa primeiro as regras do VIP. Sem isso, mudar o
-/// conjunto de backends deixaria as regras antigas por baixo e o tráfego
-/// continuaria a cair em backends que já saíram do serviço — um LB que só
-/// acrescenta nunca tira ninguém de rotação.
-///
-/// Tudo é validado ANTES de chegar ao argv do `nft`: o VIP no espaço de ingress,
-/// cada backend um `ip:port` do mesmo espaço. É a única barreira entre um nome de
-/// serviço, que vem de um manifesto, e uma regra de firewall.
-fn do_lbset(vip: &str, algo: &str, backends: &str) -> Result<()> {
-    if !is_ingress_ip(vip) {
-        return Err(Error::VipOutsideIngressSpace(format!(
-            "VIP fora do espaço de ingress: {vip}"
-        )));
-    }
-    let alvos = lb_map_targets(backends)?;
-    do_lbclear(vip)?;
-    let seletor = match algo {
-        "random" => "numgen random",
-        "ip-hash" | "sticky" => "jhash ip saddr",
-        // `weighted` já foi resolvido em `lb_map_targets`, ao repetir os alvos.
-        _ => "numgen inc",
-    };
-    let mapa = alvos
-        .iter()
-        .enumerate()
-        .map(|(i, a)| format!("{i} : {a}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let regra = format!(
-        "add rule ip {INGRESS_TABLE} pre ip daddr {vip} dnat to {seletor} mod {} map {{ {mapa} }}",
-        alvos.len()
-    );
-    let args: Vec<&str> = regra.split_whitespace().collect();
-    run("nft", &args)
-}
-
-/// Valida a lista de backends e devolve os alvos já na forma do mapa do `nft`
-/// (`<ip> . <porta>`), com os pesos expandidos por repetição.
-///
-/// Puro — separado do [`do_lbset`] para que a validação, que é onde mora o risco,
-/// se possa testar sem holder, sem netns e sem `nft`.
-///
-/// O peso é limitado a 64: sem tecto, um `#100000` num manifesto gerava um mapa
-/// com cem mil entradas e punha o holder a construir uma linha de `nft` de vários
-/// megabytes — negação de serviço escrita por quem só queria muito daquele backend.
-fn lb_map_targets(backends: &str) -> Result<Vec<String>> {
-    let mut alvos: Vec<String> = Vec::new();
-    for b in backends.split(',').filter(|s| !s.is_empty()) {
-        let (endereco, peso) = match b.split_once('#') {
-            Some((e, p)) => (
-                e,
-                p.parse::<u32>()
-                    .map_err(|_| Error::InvalidLbSpec(format!("peso inválido: {p}")))?
-                    .clamp(1, 64),
-            ),
-            None => (b, 1),
-        };
-        let Some((ip, porta)) = endereco.rsplit_once(':') else {
-            return Err(Error::InvalidLbSpec(format!(
-                "backend sem porta: {endereco}"
-            )));
-        };
-        if !is_ingress_ip(ip) || !is_port(porta) {
-            return Err(Error::InvalidLbSpec(format!(
-                "backend inválido: {endereco}"
-            )));
-        }
-        for _ in 0..peso {
-            alvos.push(format!("{ip} . {porta}"));
-        }
-    }
-    if alvos.is_empty() {
-        return Err(Error::InvalidLbSpec("lbset sem backends".into()));
-    }
-    Ok(alvos)
-}
-
 fn do_unpublish(host_port: &str, proto: Option<&str>) -> Result<()> {
     if !is_port(host_port) {
         return Err(Error::InvalidPort(format!("invalid port: {host_port}")));
@@ -5762,7 +5861,7 @@ fn do_unfirewall(ip: &str) -> Result<()> {
 }
 
 /// Hex-encode (lowercase) — to pass the firewall JSON through the line channel.
-fn hex_encode(bytes: &[u8]) -> String {
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         s.push_str(&format!("{b:02x}"));
@@ -5771,7 +5870,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 /// Hex-decode; `None` if the length is odd or there are invalid digits.
-fn hex_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
     }
@@ -6048,31 +6147,6 @@ fn egress_set_members(bridge: &str) -> Vec<String> {
     ips.sort();
     ips.dedup();
     ips
-}
-
-/// Limpa o balanceamento de um VIP de serviço — todas as regras de DNAT que lhe
-/// apontam.
-///
-/// Best-effort, como o `unpublish_port`: se o holder está em baixo não há
-/// regras a remover, e insistir seria pedir ao operador que levantasse a infra
-/// para poder desligar algo que já não está ligado.
-pub fn clear_service_lb(vip: &str) {
-    let _ = control_send(&format!("lbclear {vip}"));
-}
-
-/// Instala o balanceamento de um VIP de serviço, com repartição round-robin.
-/// Ver [`set_service_lb_algo`] para escolher o algoritmo.
-pub fn set_service_lb(vip: &str, backends: &[String]) -> Result<()> {
-    set_service_lb_algo(vip, backends, "round-robin")
-}
-
-/// Como [`set_service_lb`], com o algoritmo à escolha: `round-robin`, `random`,
-/// `ip-hash`/`sticky` (afinidade de sessão) ou `weighted` (backends `ip:port#peso`).
-///
-/// É o par que faltava ao [`clear_service_lb`]: um limpador sem instalador só
-/// conseguia apagar regras postas por outra coisa qualquer.
-pub fn set_service_lb_algo(vip: &str, backends: &[String], algo: &str) -> Result<()> {
-    control_send(&format!("lbset {vip} {algo} {}", backends.join(",")))
 }
 
 /// **Analisa** um `iptables-save` e devolve um relatório legível — sem tocar no
@@ -6583,6 +6657,25 @@ pub struct ServiceDef {
     pub labels: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub annotations: std::collections::BTreeMap<String, String>,
+    /// `spec.type` (ADR-0066 D1). A record written before it reads as `DNS`,
+    /// which is what it always was.
+    #[serde(default, rename = "type")]
+    pub service_type: crate::service_lb::ServiceType,
+    /// The VIP this Service holds (`type: VirtualIP`), leased in the IPAM
+    /// under [`crate::service_lb::lease_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip: Option<String>,
+    /// What the manifest asked for in `spec.vip` — `None` when the address
+    /// was picked by the IPAM. Kept apart from [`Self::vip`] so the plan
+    /// compares the declaration, not the outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip_requested: Option<String>,
+    /// `spec.readiness.tcp`; `None` = the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<crate::service_lb::TcpReadiness>,
+    /// `spec.publish`: host ports leading to the VIP's backends (ADR-0066 D6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publish: Vec<u16>,
 }
 
 fn services_dir() -> PathBuf {
@@ -6674,6 +6767,28 @@ pub fn service_set(
     write_servicedef(&def)
 }
 
+/// The VIP half of a `Service` record (ADR-0066): its type, the address it
+/// holds and what the manifest asked for, and its readiness knobs. Written
+/// after [`service_set`], on the same record.
+pub fn service_set_lb(
+    namespace: &str,
+    name: &str,
+    service_type: crate::service_lb::ServiceType,
+    vip: Option<String>,
+    vip_requested: Option<String>,
+    readiness: Option<crate::service_lb::TcpReadiness>,
+    publish: Vec<u16>,
+) -> Result<()> {
+    let mut def = service_get(namespace, name)
+        .ok_or_else(|| Error::ServiceNotFound(format!("service: {namespace}/{name}")))?;
+    def.service_type = service_type;
+    def.vip = vip;
+    def.vip_requested = vip_requested;
+    def.readiness = readiness;
+    def.publish = publish;
+    write_servicedef(&def)
+}
+
 /// Records ownership on a `Service` — mirrors `route_set_metadata`.
 pub fn service_set_metadata(
     namespace: &str,
@@ -6708,6 +6823,15 @@ pub fn service_set_metadata(
 
 /// Retracts a `Service` document — what `--prune`/`destroy` call.
 pub fn service_remove(namespace: &str, name: &str) -> Result<()> {
+    // The VIP lease goes with the record: a lease nobody declares is one the
+    // IPAM reaper would only reclaim later, and a VIP re-handed meanwhile is
+    // not this Service's any more.
+    crate::service_lb::release_vip(namespace, name);
+    if let Some(def) = service_get(namespace, name) {
+        for p in def.publish {
+            crate::service_lb::unpublish(p);
+        }
+    }
     let _ = std::fs::remove_file(servicedef_path(namespace, name));
     forget_legacy_service(namespace, name);
     Ok(())
@@ -8457,7 +8581,7 @@ fn control_send(cmd: &str) -> Result<()> {
 
 /// Like `control_send`, but returns the BODY of the response after `ok ` (empty if just
 /// `ok`). Used by `cni-add`, whose response carries the IP assigned by the IPAM.
-fn control_query(cmd: &str) -> Result<String> {
+pub(crate) fn control_query(cmd: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     // Fast-fail if the holder is NOT alive: without it there's no one to respond, and
@@ -8642,6 +8766,9 @@ fn reattach_or_setup_infra_netns() -> Result<()> {
         setup_infra_netns()?;
         mark_fw_dispatch_current();
         apply_recorded_private_egress()?;
+        // Stamps this pin so the host side knows the shape it is running. The build
+        // already loaded the guards with the base ruleset; this records that.
+        apply_unconditional_guards()?;
         return Ok(());
     }
     apply_nft_stdin(&fw_dispatch_migration_script())?;
@@ -8649,6 +8776,10 @@ fn reattach_or_setup_infra_netns() -> Result<()> {
     // Same `?` as the dispatch: a control that cannot enforce the guard the node
     // recorded must not come up announcing a working firewall.
     apply_recorded_private_egress()?;
+    // And the two unconditional denials, for the same reason AND one more: the base
+    // ruleset is not reloaded on this path, so without this a chain emptied by an
+    // escape hatch on the invocation that BUILT the table would never come back.
+    apply_unconditional_guards()?;
     start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
     for def in network_list() {
         if link_exists(&def.bridge) {
@@ -8700,7 +8831,7 @@ fn setup_infra_netns() -> Result<()> {
 
 /// Applies an `nft` *ruleset* via stdin (`nft -f -`) — variant local to the holder
 /// (the one in `lib.rs` is private to that module).
-fn apply_nft_stdin(ruleset: &str) -> Result<()> {
+pub(crate) fn apply_nft_stdin(ruleset: &str) -> Result<()> {
     use std::io::Write;
     let mut child = Command::new("nft")
         .args(["-f", "-"])
@@ -9114,7 +9245,7 @@ fn dns_state_serves(status: Option<&str>) -> bool {
 /// traffic to something that cannot answer. A container with no health check
 /// declared has nothing to wait for: it is ready when it runs. A paused or
 /// not-yet-started one is never a backend.
-fn service_member_ready(
+pub(crate) fn service_member_ready(
     status: Option<&str>,
     has_health_check: bool,
     health: Option<&str>,
@@ -9239,14 +9370,10 @@ fn build_dns_index() -> DnsIndex {
     // Collected alongside the container loop below, for the `kind: Service`
     // pass at the end — a SECOND directory read would just re-parse the same
     // files this loop already opened.
-    // (labels, namespace, address, ready) of each serving container.
-    type ContainerSummary = (
-        std::collections::BTreeMap<String, String>,
-        String,
-        [u8; 4],
-        bool,
-    );
-    let mut container_summaries: Vec<ContainerSummary> = Vec::new();
+    // What `service_lb::service_backends` needs of each serving container — the
+    // ONE evaluation of a Service's selector, shared with the VIP dataplane
+    // (ADR-0066 D7).
+    let mut container_summaries: Vec<crate::service_lb::Member> = Vec::new();
     // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
@@ -9307,7 +9434,16 @@ fn build_dns_index() -> DnsIndex {
                 !v["health"].is_null(),
                 v["health_state"]["health"].as_str(),
             );
-            container_summaries.push((container_labels, ns.clone(), ip, ready));
+            container_summaries.push(crate::service_lb::Member {
+                name: name.clone(),
+                namespace: ns.clone(),
+                ip: std::net::Ipv4Addr::from(ip).to_string(),
+                labels: container_labels,
+                serving: ready,
+                has_health_check: !v["health"].is_null(),
+                health: v["health_state"]["health"].as_str().map(str::to_string),
+                running: v["status"].as_str() == Some("Running"),
+            });
             let entry = DnsEntry {
                 ip,
                 ns: ns.clone(),
@@ -9408,15 +9544,21 @@ fn build_dns_index() -> DnsIndex {
     // at most once per `DNS_INDEX_TTL`), which is MORE live than
     // `FirewallPolicy`'s own selector will be (apply-triggered only).
     for def in service_list() {
-        let ips: Vec<[u8; 4]> = container_summaries
+        // A `VirtualIP` Service answers ONE `A`, its VIP, whatever its backends
+        // are doing (ADR-0066 D1): with none ready the VIP itself refuses, which
+        // is the predictable unavailability the ADR asks for.
+        let ips: Vec<[u8; 4]> = if def.service_type == crate::service_lb::ServiceType::VirtualIp {
+            def.vip.as_deref().and_then(parse_v4).into_iter().collect()
+        } else {
+            crate::service_lb::service_backends(
+                &def.namespace,
+                &def.match_labels,
+                &container_summaries,
+            )
             .iter()
-            .filter(|(labels, ns, _, ready)| {
-                *ready
-                    && ns.eq_ignore_ascii_case(&def.namespace)
-                    && crate::matches_labels(labels, &def.match_labels)
-            })
-            .map(|(_, _, ip, _)| *ip)
-            .collect();
+            .filter_map(|m| parse_v4(&m.ip))
+            .collect()
+        };
         // An empty match is not an error here (ADR-0032: "applies to nothing,
         // warns loudly, succeeds") — the warning is the CALLER's job (the
         // Kind's `apply`, which runs once and can log); the index just
@@ -10929,6 +11071,144 @@ Inter-|   Receive                                                |  Transmit
         assert!(priorities.iter().filter(|p| **p == guard).count() == 1);
     }
 
+    /// THE FINDING. The two unconditional denials used to be emitted only by
+    /// [`ingress_table_ruleset`], whose one production caller builds the netns — and
+    /// the reattach path never reloads it. So a node whose infra came up once with an
+    /// escape hatch set kept the emptied chain for the whole life of the pin, which
+    /// never restarts, and no later invocation repaired it.
+    ///
+    /// What makes repair possible is asserted here, not the message of any command:
+    /// the script CREATES each chain with its hook and priority (so it also works on a
+    /// table that predates the chain), FLUSHES it before refilling (so whatever the
+    /// hatch left cannot survive), and renders the denials when the hatch is off.
+    #[test]
+    fn the_guard_script_repairs_a_chain_a_hatch_emptied() {
+        // The repairing direction: no hatch set → both denials come back.
+        let strong = unconditional_guards_script_for(false, false);
+        for chain in [FWGUARD_CHAIN, DLXINPUT_CHAIN] {
+            let add = strong
+                .find(&format!("add chain ip {INGRESS_TABLE} {chain} "))
+                .unwrap_or_else(|| panic!("`{chain}` has to be created: {strong}"));
+            let flush = strong
+                .find(&format!("flush chain ip {INGRESS_TABLE} {chain}\n"))
+                .unwrap_or_else(|| panic!("`{chain}` has to be flushed: {strong}"));
+            assert!(
+                add < flush,
+                "`{chain}` must be created BEFORE it is flushed, or the flush fails on a \
+                 table that never had it: {strong}"
+            );
+            // Every rule of that chain comes AFTER its flush, else the flush erases it.
+            let first_rule = strong
+                .find(&format!("add rule ip {INGRESS_TABLE} {chain} "))
+                .unwrap_or_else(|| panic!("`{chain}` has to be refilled: {strong}"));
+            assert!(
+                flush < first_rule,
+                "`{chain}` must be refilled AFTER the flush: {strong}"
+            );
+        }
+        // The hook and priority are carried, so a table that lacks the chain gets it in
+        // the right place rather than at the default priority.
+        assert!(strong.contains(&format!(
+            "add chain ip {INGRESS_TABLE} {FWGUARD_CHAIN} {{ type filter hook forward priority {FWGUARD_PRIORITY}; }}"
+        )), "{strong}");
+        assert!(strong.contains(&format!(
+            "add chain ip {INGRESS_TABLE} {DLXINPUT_CHAIN} {{ type filter hook input priority {DLXINPUT_PRIORITY}; }}"
+        )), "{strong}");
+        for denial in [
+            "ip daddr 169.254.0.0/16 counter drop",
+            "ip daddr 127.0.0.0/8 counter drop",
+            "ct state new counter drop",
+        ] {
+            assert!(strong.contains(denial), "missing `{denial}`: {strong}");
+        }
+
+        // The weakening direction, so the hatch is still a hatch: each one empties ONLY
+        // its own chain, and the flush is still there — which is what lets the next
+        // invocation without it put the denial back.
+        let no_link_local = unconditional_guards_script_for(true, false);
+        assert!(!no_link_local.contains("169.254.0.0/16"), "{no_link_local}");
+        assert!(
+            no_link_local.contains("ct state new counter drop"),
+            "DELONIX_ALLOW_LINK_LOCAL must not touch the holder's own-services denial: \
+             {no_link_local}"
+        );
+        let no_holder_input = unconditional_guards_script_for(false, true);
+        assert!(
+            !no_holder_input.contains("ct state new counter drop"),
+            "{no_holder_input}"
+        );
+        assert!(
+            no_holder_input.contains("169.254.0.0/16"),
+            "DELONIX_ALLOW_HOLDER_INGRESS must not touch the metadata denial: \
+             {no_holder_input}"
+        );
+        // Emptied means emptied, not absent: the chain is still created and flushed, so
+        // the ruleset converges either way.
+        for weakened in [&no_link_local, &no_holder_input] {
+            for chain in [FWGUARD_CHAIN, DLXINPUT_CHAIN] {
+                assert!(
+                    weakened.contains(&format!("flush chain ip {INGRESS_TABLE} {chain}\n")),
+                    "`{chain}` must still be flushed: {weakened}"
+                );
+            }
+        }
+        // Idempotent in the sense the reconciler relies on: same inputs, same script,
+        // so the per-pin stamp is stable and the common call does no `nft` work.
+        assert_eq!(strong, unconditional_guards_script_for(false, false));
+        assert_ne!(script_stamp(&strong), script_stamp(&no_link_local));
+    }
+
+    /// The base ruleset and the reconciler must render the SAME rules, or a node
+    /// repairs itself into a shape different from the one it was built with — and the
+    /// difference would be invisible until someone diffed a live table by hand.
+    ///
+    /// Compares the rule TEXT of both chains as the two paths emit it. This is the test
+    /// that fails if someone edits one copy and not the other.
+    #[test]
+    fn the_built_table_and_the_reconciler_agree_on_every_rule() {
+        let rs = ingress_table_ruleset();
+        let script = unconditional_guards_script();
+        for (chain, rules) in [
+            (FWGUARD_CHAIN, fwguard_rules()),
+            (DLXINPUT_CHAIN, dlxinput_rules()),
+        ] {
+            // What the BUILD path puts in the chain body.
+            let lines: Vec<&str> = rs.lines().collect();
+            let start = lines
+                .iter()
+                .position(|l| l.contains(&format!("chain {chain} ")))
+                .unwrap_or_else(|| panic!("`{chain}` has to be in the base ruleset: {rs}"));
+            let end = start
+                + 1
+                + lines[start + 1..]
+                    .iter()
+                    .position(|l| l.trim() == "}")
+                    .unwrap_or_else(|| panic!("`{chain}` has to close: {rs}"));
+            let built: Vec<String> = lines[start + 1..end]
+                .iter()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            assert_eq!(
+                built, rules,
+                "the base ruleset's `{chain}` body must be exactly what the shared rule \
+                 list renders"
+            );
+            // And what the RECONCILER puts in it.
+            let prefix = format!("add rule ip {INGRESS_TABLE} {chain} ");
+            let reconciled: Vec<String> = script
+                .lines()
+                .filter_map(|l| l.strip_prefix(prefix.as_str()))
+                .map(|r| r.to_string())
+                .collect();
+            assert_eq!(
+                reconciled, rules,
+                "the reconciler's `{chain}` rules must be exactly what the shared rule \
+                 list renders — otherwise a repaired node differs from a freshly built one"
+            );
+        }
+    }
+
     /// The forward-hook base chains of a ruleset, as `(name, priority, rule lines)`.
     fn forward_base_chains(rs: &str) -> Vec<(String, i32, Vec<String>)> {
         let mut out = Vec::new();
@@ -11887,33 +12167,6 @@ Inter-|   Receive                                                |  Transmit
         // root cannot produce a control plane of its own to account for it.
         assert!(m.contains("live listener"));
         assert!(m.contains("prove"));
-    }
-}
-
-#[cfg(test)]
-mod testes_lbset {
-    use super::lb_map_targets;
-
-    #[test]
-    fn expande_pesos_e_recusa_o_que_nao_e_backend() {
-        // Sem peso: um alvo por backend, na ordem dada.
-        let t = lb_map_targets("10.200.0.5:80,10.200.0.6:80").unwrap();
-        assert_eq!(t, vec!["10.200.0.5 . 80", "10.200.0.6 . 80"]);
-
-        // Com peso: repetição proporcional — é assim que o `numgen` fica pesado.
-        let t = lb_map_targets("10.200.0.5:80#3,10.200.0.6:80").unwrap();
-        assert_eq!(t.iter().filter(|x| x.starts_with("10.200.0.5")).count(), 3);
-        assert_eq!(t.iter().filter(|x| x.starts_with("10.200.0.6")).count(), 1);
-
-        // Tecto do peso: um manifesto não pode mandar construir um mapa gigante.
-        assert_eq!(lb_map_targets("10.200.0.5:80#100000").unwrap().len(), 64);
-
-        // O que NÃO pode chegar ao argv do `nft`.
-        assert!(lb_map_targets("10.200.0.5").is_err()); // sem porta
-        assert!(lb_map_targets("10.200.0.5:0").is_err()); // porta 0
-        assert!(lb_map_targets("8.8.8.8:80").is_err()); // fora do ingress
-        assert!(lb_map_targets("10.200.0.5:80; reboot").is_err()); // injecção
-        assert!(lb_map_targets("").is_err()); // vazio não é um LB
     }
 }
 

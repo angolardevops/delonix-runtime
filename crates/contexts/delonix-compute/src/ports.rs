@@ -118,6 +118,10 @@ pub trait RunHost {
 pub trait VmNetwork: Send + Sync {
     /// Ensures a private network's bridge and DHCP exist before an attach.
     fn ensure_network(&self, name: &str) -> Result<()>;
+    /// Whether `name` is a network declared on this node (`network create`,
+    /// `kind: Network`) — the question a create asks BEFORE it builds anything,
+    /// so a VM is never half-made on a network nobody declared.
+    fn is_declared(&self, name: &str) -> Result<bool>;
     /// Creates `vm`'s tap on `network`, registered in `namespace`; returns the
     /// tap's name.
     fn attach_tap(&self, vm: &str, network: &str, mac: &str, namespace: &str) -> Result<String>;
@@ -128,6 +132,16 @@ pub trait VmNetwork: Send + Sync {
     /// The argv prefix that runs a command inside the infra's namespaces, or
     /// `None` when the infra is not up.
     fn join_argv(&self) -> Option<Vec<String>>;
+    /// The subnet declared for the network `name` (`10.231.80.0/24`), or
+    /// `None` when none is declared. Default: `None`.
+    ///
+    /// A `vm start` rebuilds its config from the record, which does not keep
+    /// the subnet; without it a hypervisor-side network that has gone (removed
+    /// with its last VM by another state root, or out of band) could not be
+    /// defined again, and one left on an old subnet could not be judged.
+    fn subnet_of(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 /// The VM backends a node has, as the VM use cases ask for them
@@ -206,6 +220,24 @@ pub struct ImageDefaults {
 /// crate those live in to get at the three fields it does need).
 pub trait ImageDefaultsReader: Send + Sync {
     fn defaults(&self, root: &std::path::Path, reference: &str) -> Option<ImageDefaults>;
+}
+
+/// Where a process tree that is not a container gets its cgroup leaf (the Cloud
+/// Hypervisor VMM is the first user). The adapter that owns the host's cgroup
+/// knowledge implements it — which base is delegable, the root slice, the
+/// controllers to hand down — and the composition root registers it
+/// (`vm_registry::set_process_leaves`), like [`VmNetwork`].
+pub trait ProcessLeaves: Send + Sync {
+    /// Creates (or reuses) the leaf `name` with `limits` already written, BEFORE
+    /// anything enters it. `Ok(None)`: no leaf can exist on this host for this
+    /// process (rootless without a delegated base, or a user namespace with no
+    /// cgroup of its own). `Err`: the name is refused, or a requested ceiling did
+    /// not land — the leaf is not left behind half-limited.
+    fn create(
+        &self,
+        name: &str,
+        limits: &crate::cgroup_leaf::LeafLimits,
+    ) -> Result<Option<crate::cgroup_leaf::ProcessLeaf>>;
 }
 
 /// The cloud-init seed a local VM boots with: the realized form of `cfg`'s

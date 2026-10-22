@@ -304,7 +304,7 @@ spec:
 
 ```bash
 delonix stack validate -f vm.yaml            # referências resolvem?
-delonix stack apply -f vm.yaml --dry-run     # o spec com todos os defaults
+delonix stack apply -f vm.yaml --dry-run     # o spec com todos os defaults, e a recusa do apply
 delonix stack apply -f vm.yaml               # aplicar
 delonix stack plan -f vm.yaml                # o que mudaria
 delonix explain Vm                           # todos os campos, gerados do código
@@ -1004,13 +1004,15 @@ mesmo *stack*:
 ```
 $ delonix stack plan -f 50-nas.yaml
   -/+ Vm/lab-nas    — does not converge live: memory
-  -   Vm/lab-samba  — no longer declared in the manifest
-  -   Vm/lab-dns    — no longer declared in the manifest
-  -   Vm/lab-cli    — no longer declared in the manifest
+  -   Vm/lab-samba  — no longer declared in the manifest — kept, `--prune` removes it
+  -   Vm/lab-dns    — no longer declared in the manifest — kept, `--prune` removes it
+  -   Vm/lab-cli    — no longer declared in the manifest — kept, `--prune` removes it
 ```
 
 Sem `--prune` nada é removido — e é por isso que essa opção existe e nunca é o
-comportamento por omissão. Mas o plano mostra bem o risco.
+comportamento por omissão. Mas o plano mostra bem o risco, e `stack plan --prune`
+mostra-o como o `apply --prune` o faria: as três VMs passam a remoções e contam para o
+`--detailed-exitcode`.
 
 ### `--replace` deita fora o disco
 
@@ -1095,4 +1097,5 @@ delonix vm bridge <rede> [--apply] · vm unbridge <rede>    # root
 ```
 
 **Códigos de saída:** `0` sucesso · `1` erro genérico · `2` argumentos inválidos (ou
-«há alterações» no `plan --detailed-exitcode`) · `4` não existe · `5` conflito.
+«há alterações» no `plan --detailed-exitcode`) · `4` não existe · `5` conflito (também no
+`plan --detailed-exitcode`, quando o plano tem um recurso de outra stack).

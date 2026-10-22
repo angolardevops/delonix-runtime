@@ -11,8 +11,13 @@ how much room the total has. A check whose output exceeded that killed
 `python3` with "Argument list too long" and the line was never appended — while
 the console still printed PASS. The run therefore read as complete and
 `results.jsonl` had silently lost the leaf, which is exactly what
-`cli_exec_ratchet.py --from-results` counts. Measured 2026-10-18 on
-`manifest schema`.
+`cli_exec_ratchet.py --from-results` counts. Measured on `manifest schema`.
+
+The writer now hands the output and the command to `python3` through FILES,
+and a long output keeps its first 1000 characters, a marker naming how many
+were cut, and its last 3000 — the end is where a failing step says why. This
+test asserts that shape exactly: one line, the head and the tail present
+verbatim, the marker with the right count, and nothing else.
 
 The test drives the REAL `check` out of the script (not a restatement of the
 pattern), so pointing it at a pre-fix `e2e.sh` fails it:
@@ -31,7 +36,22 @@ DEFAULT = REPO / "scripts" / "e2e.sh"
 
 # Comfortably past MAX_ARG_STRLEN (128 KiB) so the pre-fix shape cannot survive.
 OUTPUT_BYTES = 200_000
-KEPT_CHARS = 4000
+# What the writer keeps of a long output: this much of the head, this much of
+# the tail, and a marker between them.
+HEAD_CHARS = 1000
+TAIL_CHARS = 3000
+KEPT_CHARS = HEAD_CHARS + TAIL_CHARS
+
+
+def expected_output() -> str:
+    """The exact bytes the check's command prints.
+
+    Distinct head and tail (`H`, `T`) around a body of `x`, so a writer that
+    keeps only the head, only the tail, or the wrong amount of either cannot
+    pass by printing `x` in the right length.
+    """
+    body = OUTPUT_BYTES - KEPT_CHARS
+    return "H" * HEAD_CHARS + "x" * body + "T" * TAIL_CHARS
 
 
 def extract_check(script: pathlib.Path) -> str:
@@ -59,7 +79,7 @@ log() {{ printf '%s\\n' "$*"; }}
 
 {extract_check(script)}
 
-check "huge output" ok bash -c 'head -c {OUTPUT_BYTES} /dev/zero | tr "\\0" x'
+check "huge output" ok python3 -c 'import sys; sys.stdout.write("H"*{HEAD_CHARS} + "x"*{OUTPUT_BYTES - KEPT_CHARS} + "T"*{TAIL_CHARS})'
 """
     return subprocess.run(
         ["bash", "-c", harness], capture_output=True, text=True, timeout=120
@@ -108,16 +128,36 @@ def main() -> int:
         if rec["verdict"] != "PASS":
             print(f"FAIL: expected PASS, got {rec['verdict']!r}")
             return 1
-        # The writer keeps only the first 4000 characters; a huge output must be
-        # cut to exactly that, not dropped and not kept whole.
-        if len(rec["output"]) != KEPT_CHARS:
+        # A long output keeps its head and its tail verbatim, with a marker
+        # between them naming how many characters were cut — never dropped,
+        # never kept whole, never only the head.
+        full = expected_output()
+        marker = "\n[... %d chars cut ...]\n" % (len(full) - KEPT_CHARS)
+        want = full[:HEAD_CHARS] + marker + full[-TAIL_CHARS:]
+        got = rec["output"]
+        if not got.startswith(full[:HEAD_CHARS]):
+            print(f"FAIL: the first {HEAD_CHARS} chars of the output were not kept")
+            return 1
+        if not got.endswith(full[-TAIL_CHARS:]):
+            print(f"FAIL: the last {TAIL_CHARS} chars of the output were not kept")
+            return 1
+        if marker not in got:
+            print(f"FAIL: no cut marker {marker.strip()!r} in the recorded output")
+            return 1
+        if got != want:
             print(
-                f"FAIL: expected the output cut to {KEPT_CHARS} chars, "
-                f"got {len(rec['output'])}"
+                f"FAIL: expected {len(want)} chars (head + marker + tail), "
+                f"got {len(got)}"
             )
             return 1
+        if "python3 -c" not in rec["cmd"]:
+            print(f"FAIL: the command line was not recorded: {rec['cmd'][:80]!r}")
+            return 1
 
-    print(f"ok: a {OUTPUT_BYTES}-byte output still records one line, cut to {KEPT_CHARS}")
+    print(
+        f"ok: a {OUTPUT_BYTES}-byte output still records one line, "
+        f"head {HEAD_CHARS} + marker + tail {TAIL_CHARS}"
+    )
     return 0
 
 

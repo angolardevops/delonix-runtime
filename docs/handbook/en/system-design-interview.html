@@ -675,7 +675,8 @@ and make planning a pure function.</p>
   the label.</li>
 <li><strong>Actions</strong> are <code>Create</code>, <code>Adopt</code>, <code>Update</code> (hot, same PID), <code>Replace</code> (refused unless
   <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> is given, checked before anything is created), <code>NoOp</code>, <code>Delete</code>,
-  <code>Conflict</code>, <code>NotConverged</code>. <code>plan --detailed-exitcode</code> answers 0/2/1 for a CI drift gate.</li>
+  <code>Conflict</code>, <code>NotConverged</code>. <code>plan --detailed-exitcode</code> answers 0/2/1 for a CI drift gate, and 5 when the plan holds a
+  <code>Conflict</code> the apply would refuse.</li>
 <li><strong>One table of Kind facts</strong> (domain, form, whether it converges, has teardown, is namespaced,
   how presence is observed) governs the planner, apply order and teardown order, instead of lists
   kept in sync by hand.</li>

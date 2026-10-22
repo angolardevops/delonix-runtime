@@ -12,6 +12,8 @@
 # (scripts/proxmox_api_inventory.py, ADR-0049).
 #
 # medido: 2026-10-18, commit a24731e3 (arvore identica a f49d3570), delonix 5.1.1
+# actualizado: 2026-10-22, merge de origin/main 4b860b51 — 7 folhas da CLI e 5 celulas de kinds
+# novas (gitops, network vip-pool, GitOpsSource) classificadas; o trace e o de 6dc31582.
 cli	api-resources	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	backup create	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -88,6 +90,10 @@ cli	diff	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	drift	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	explain	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	get	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	gitops reconcile	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
+cli	gitops resume	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
+cli	gitops status	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
+cli	gitops suspend	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
 cli	hosts sync	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	image apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	image describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -137,8 +143,8 @@ cli	net ingress policy	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=
 cli	net ingress publish	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net ingress rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net ingress unpublish	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	net l4guard clear	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
-cli	net l4guard set	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
+cli	net l4guard clear	B	o check 'net l4guard clear: both meter rules leave the ruleset' em scripts/e2e.sh conduz-a e afirma o efeito; o trace commitado (2026-10-21, 6dc31582) e anterior a esse check — sobe a A quando o trace for regravado de uma corrida da bateria que o inclua
+cli	net l4guard set	B	o check 'net l4guard set: the two meter rules appear with the values given' em scripts/e2e.sh conduz-a e afirma o efeito; o trace commitado (2026-10-21, 6dc31582) e anterior a esse check — sobe a A quando o trace for regravado de uma corrida da bateria que o inclua
 cli	net l4guard status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net netns attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	net netns detach	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
@@ -166,6 +172,9 @@ cli	network node init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1
 cli	network node key	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	network rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	network route	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	network vip-pool clear	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
+cli	network vip-pool set	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
+cli	network vip-pool show	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
 cli	network vlan	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	plan	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	pod attach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -205,8 +214,8 @@ cli	stack prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FA
 cli	stack rollback	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	stack validate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	stack wait	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	system boot disable	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
-cli	system boot enable	A	scripts/cli_exec_trace.tsv (2026-10-20, 2663c846, PASS=1340 FAIL=0)
+cli	system boot disable	B	o check 'system boot disable: the written unit goes, the foreign one stays' em scripts/e2e.sh conduz-a e afirma o efeito; o trace commitado (2026-10-21, 6dc31582) e anterior a esse check — sobe a A quando o trace for regravado de uma corrida da bateria que o inclua
+cli	system boot enable	B	o check 'system boot enable: the unit for a restart=always container is written' em scripts/e2e.sh conduz-a e afirma o efeito; o trace commitado (2026-10-21, 6dc31582) e anterior a esse check — sobe a A quando o trace for regravado de uma corrida da bateria que o inclua
 cli	system boot status	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	system df	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	system doctor	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -253,7 +262,7 @@ cli	vm init	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0
 cli	vm ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm migrate	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm move	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	vm pause	E	imagem de VM arrancavel no store isolado; backend real nos tres providers
+cli	vm pause	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
 cli	vm prune	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm reach	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm resize	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -266,7 +275,7 @@ cli	vm ssh	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm start	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm stop	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm unbridge	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
-cli	vm unpause	E	imagem de VM arrancavel no store isolado; par de 'vm pause'
+cli	vm unpause	A	scripts/cli_exec_trace.tsv (2026-10-21, 6dc31582, PASS=1537 FAIL=0)
 cli	vm update	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	vm vnc	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	volume apply	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
@@ -445,6 +454,11 @@ kinds	gateways diff	B	nenhuma corrida real conduz este verbo neste kind
 kinds	gateways plan	B	nenhuma corrida real conduz este verbo neste kind
 kinds	gateways delete	C	delete generico funciona; stack destroy/--prune recusa (sem labels)
 kinds	gateways drift	D	last_applied: None — o drift nunca dispara
+kinds	gitopssources apply	A	scripts/e2e.sh 'gitops: stack apply regista a fonte e escreve o temporizador (systemctl falso)'
+kinds	gitopssources diff	B	nenhuma corrida real conduz este verbo neste kind (actual() leva last_applied, logo o diff e alcancavel)
+kinds	gitopssources plan	A	scripts/e2e.sh 'gitops: um manifesto inalterado planeia ZERO diferencas' (--detailed-exitcode 0)
+kinds	gitopssources delete	A	scripts/e2e.sh 'gitops: delete gitopssources desactiva o temporizador e apaga a fonte'
+kinds	gitopssources drift	B	nenhuma corrida real conduz este verbo neste kind (actual() leva last_applied, logo o drift e alcancavel)
 kinds	httproutes apply	A	scripts/e2e.sh:7164 via 'net httproute apply', nao via 'stack apply'
 kinds	httproutes diff	B	nenhuma corrida real conduz este verbo neste kind
 kinds	httproutes plan	A	scripts/e2e.sh

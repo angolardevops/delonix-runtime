@@ -34,13 +34,13 @@
 
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| cli | **273** | 263 | 0 | 0 | 0 | 10 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| cli | **280** | 268 | 4 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
 | node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
 | mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
 | mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
 | cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
-| kinds | **125** | 38 | 48 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 25 kinds × 5 verbos |
-| **total** | **538** | **341** | **62** | **57** | **60** | **18** | — |
+| kinds | **130** | 41 | 50 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 26 kinds × 5 verbos |
+| **total** | **550** | **349** | **68** | **57** | **60** | **16** | — |
 
 <!-- folhas:counts:end -->
 
@@ -69,7 +69,7 @@ legítimas diferentes:
 
 ---
 
-## 1. CLI — 273 folhas
+## 1. CLI — 280 folhas
 
 `scripts/cli-tree.sh --count` → **316 comandos · 273 folhas · 40 grupos**;
 classes de reestruturação 169 `~`, 85 `=`, 17 `→`, 2 `!`. `--gate` **rc=0**.
@@ -77,6 +77,18 @@ classes de reestruturação 169 `~`, 85 `=`, 17 `→`, 2 `!`. `--gate` **rc=0**.
 `scripts/cli_exec_ratchet.py` **rc=0** → **263 de 273 invocadas sob asserção —
 96,3 %**. Proveniência do trace: 2026-10-20, commit `2663c846`, root isolado,
 `PASS=1340 FAIL=0 SKIP=16`.
+
+> **Actualização de 2026-10-22 (merge de `origin/main` `4b860b51`).** A CLI
+> cresceu para **280 folhas** (`gitops reconcile/resume/status/suspend`,
+> `network vip-pool clear/set/show`), e o trace commitado passou a ser o da
+> `main`: 2026-10-21, `6dc31582`, `PASS=1537 FAIL=0 SKIP=15`, **268 de 280**.
+> As sete folhas novas estão nesse trace e são **A**; `vm pause`/`vm unpause`
+> também (a bateria da `main` tinha uma VM libvirt a correr) e saíram de **E**.
+> As quatro que este ramo promoveu — `net l4guard set/clear` e `system boot
+> enable/disable` — voltaram a **B**: os checks que as conduzem estão em
+> `scripts/e2e.sh`, mas o trace de `6dc31582` é anterior a eles, e o trace só se
+> regrava de uma corrida real. Sobem a **A** na próxima gravação. O texto abaixo
+> descreve o estado de 2026-10-20 e fica como estava.
 
 As 10 que nenhuma corrida executa, e o que **cada uma** precisa — medido, não
 presumido. Os irmãos de cada grupo já correm, e é isso que as torna baratas:
@@ -298,7 +310,13 @@ proto do repo (`StreamContainers`, `StreamContainerStats`, `StreamPodSandboxes`,
 
 ---
 
-## 6. Kinds — 25 kinds × 5 verbos = 125 células
+## 6. Kinds — 26 kinds × 5 verbos = 130 células
+
+> **Actualização de 2026-10-22.** O `GitOpsSource` (ADR-0021) entrou no
+> catálogo depois desta medição: `apply`, `plan` e `delete` são **A** (a secção
+> `gitops:` do `scripts/e2e.sh`), `diff` e `drift` são **B** (alcançáveis —
+> o `actual()` traz `last_applied` — mas nenhuma corrida os nomeia). O resto
+> desta secção é a medição de 2026-10-20, com 25 kinds.
 
 Medido com `delonix api-resources` contra o binário da árvore.
 

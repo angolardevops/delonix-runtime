@@ -2,13 +2,13 @@
   "schema": 1,
   "surfaces": {
     "cli": {
-      "proved": 263,
-      "leaves": 273,
-      "A": 263,
-      "B": 0,
+      "proved": 268,
+      "leaves": 280,
+      "A": 268,
+      "B": 4,
       "C": 0,
       "D": 0,
-      "E": 10
+      "E": 8
     },
     "node-api": {
       "proved": 15,
@@ -47,10 +47,10 @@
       "E": 0
     },
     "kinds": {
-      "proved": 38,
-      "leaves": 125,
-      "A": 38,
-      "B": 48,
+      "proved": 41,
+      "leaves": 130,
+      "A": 41,
+      "B": 50,
       "C": 8,
       "D": 23,
       "E": 8

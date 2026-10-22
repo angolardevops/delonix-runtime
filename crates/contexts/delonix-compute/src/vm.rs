@@ -9,8 +9,8 @@
 use crate::capability::Capability;
 use crate::ports::{LocalDiskImages, SeedBuilder, VmBackends, VmNetwork};
 use crate::vm_backend::{
-    mem_mib, parse_mem_mib, CloudInitIntent, CreateStage, DestroyStage, GuestInfo, HotplugOutcome,
-    MoveOptions, VmBackend, VmConfig,
+    libvirt_nic, mem_mib, names_a_declared_network, parse_mem_mib, CloudInitIntent, CreateStage,
+    DestroyStage, GuestInfo, HotplugOutcome, LibvirtNic, MoveOptions, VmBackend, VmConfig,
 };
 use crate::vm_error::{Error, Result};
 use crate::vm_firewall as firewall;
@@ -20,6 +20,35 @@ use delonix_model::records::Status;
 use delonix_node::proc_starttime;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Refuses `network` unless the node's `net` declares it — the refusal
+/// [`VmEngine::create_with`] makes before the overlay, public so a caller that
+/// must answer BEFORE it starts the create (the node API acknowledges an
+/// operation first) says the same thing with the same number.
+///
+/// Fails closed: with no network registered there is nothing to ask, and a
+/// create that cannot check is not one that may go ahead. The caller decides
+/// whether `network` is a question at all ([`names_a_declared_network`]).
+pub fn refuse_undeclared_network(net: Option<&dyn VmNetwork>, network: &str) -> Result<()> {
+    let net = net.ok_or_else(|| Error::Command {
+        context: "vm",
+        message: "no VM network provider is registered in this process".into(),
+    })?;
+    if net.is_declared(network)? {
+        return Ok(());
+    }
+    Err(Error::NetworkNotDeclared(format!(
+        "network '{network}': it is not declared on this node — create it first with \
+         `delonix network create {network}`, or leave --network out for the default network"
+    )))
+}
+
+/// The runtime files a backend leaves next to the overlay, as
+/// `vms/<name>.<ext>`: Cloud Hypervisor's api socket (and the lock it takes on
+/// it), the serial capture, the VMM log and pidfile, libvirt's domain XML. ONE
+/// list for the two places that take them back — `destroy` and the undo of a
+/// failed create — so the second cannot miss what the first knows.
+const RUNTIME_LEFTOVERS: [&str; 6] = ["sock", "sock.lock", "serial", "log", "pid", "xml"];
 
 /// `--disk-size`'s unit, everywhere in this crate: whole GiB.
 const GIB_BYTES: u64 = 1024 * 1024 * 1024;
@@ -165,6 +194,79 @@ where
         // same string the caller wrote — this engine does not get to reinterpret a
         // name that means something on the far node.
         let own_storage = backend.manages_own_storage();
+
+        // A VM on a network nobody declared is refused here, before the
+        // overlay — the first thing that leaves something on disk. Measured
+        // (2026-10-21): `vm create --network cf-nope --backend libvirt` built the
+        // overlay, defined the domain and only then died on libvirt's own «no
+        // network with matching name», after a warning promising a fallback to
+        // `default` that never happened; Cloud Hypervisor instead CREATED the
+        // network on the fly, so a typo became a network. The `--help` and
+        // `kind: VM` (`stack validate`) already said the network must exist.
+        //
+        // Local backends only: a backend that owns its storage speaks the far
+        // node's network vocabulary and refuses what it cannot map itself
+        // (Proxmox).
+        //
+        // A create over a STOPPED record asks too, unless it names the network
+        // the record already has: the recover path boots with `cfg`, not with
+        // the record, so `vm create <stopped> --network <typo>` moved the VM and
+        // Cloud Hypervisor created the typo (found by the cli-tester on this
+        // very change). Only the unchanged network is spared — a VM that already
+        // booted on it keeps booting, even on a network an older version made.
+        let changes_network = match &restarting {
+            Some(ex) => ex.network != cfg.network,
+            None => true,
+        };
+        if changes_network && !own_storage && names_a_declared_network(&cfg.network) {
+            refuse_undeclared_network(self.network, &cfg.network)?;
+        }
+
+        // A create of a NEW VM that fails takes back what it wrote: with no
+        // record, nothing else ever will — `vm ls` does not list the leftovers
+        // and `rm` answers «no such VM» and keeps them (it deletes nothing it
+        // cannot prove is a VM's, see `remove_inner`). The per-VM directory is
+        // taken back only if this call brought it into being: one already there
+        // holds a `--user-data` seed the caller packaged, or what an earlier
+        // attempt left, and is not this call's to remove.
+        let fresh = restarting.is_none();
+        let seed_dir = vmdir.join(&cfg.name);
+        let seed_dir_is_ours = fresh && !seed_dir.exists();
+        // Same rule for the backend's runtime files: a boot that fails after
+        // the VMM started leaves its log, pidfile and api socket (Cloud
+        // Hypervisor: `<name>.log/.pid/.sock/.sock.lock`, measured after #906),
+        // and only the ones this call brought into being are taken back.
+        let runtime_files_ours: Vec<PathBuf> = if fresh {
+            RUNTIME_LEFTOVERS
+                .iter()
+                .map(|ext| vmdir.join(format!("{}.{ext}", cfg.name)))
+                .filter(|p| !p.exists())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let undo = |overlay: &Path| {
+            if !fresh {
+                return;
+            }
+            // Only when WE made it. With `manages_own_storage`, `overlay` IS
+            // `cfg.disk` verbatim — the name the caller wrote for something on
+            // the far node — and removing it means this engine deleting a file
+            // it did not create. For today's Proxmox backend that name is
+            // `local-lvm:8` and the unlink simply fails, but the rule cannot
+            // rest on the spelling a backend happens to use: a remote backend
+            // whose disk reference IS a local path would lose the user's base
+            // image on a failed boot.
+            if !own_storage {
+                let _ = std::fs::remove_file(overlay);
+            }
+            if seed_dir_is_ours {
+                let _ = std::fs::remove_dir_all(&seed_dir);
+            }
+            for f in &runtime_files_ours {
+                let _ = std::fs::remove_file(f);
+            }
+        };
         let (disk_path, overlay) = if own_storage {
             (
                 std::path::PathBuf::from(&cfg.disk),
@@ -192,7 +294,10 @@ where
         // ISO nobody reads, on a drive that changes the guest's device list.
         let realized;
         let cfg = if cfg.seed.is_none() && cfg.cloud_init != Some(false) && !own_storage {
-            let iso = self.seed.seed(self.root, cfg)?;
+            let iso = self
+                .seed
+                .seed(self.root, cfg)
+                .inspect_err(|_| undo(&overlay))?;
             realized = VmConfig {
                 seed: Some(iso.to_string_lossy().into_owned()),
                 ..cfg.clone()
@@ -219,17 +324,7 @@ where
             None => match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
                 Ok(b) => b,
                 Err(e) => {
-                    // Clean up the overlay only when WE made it. With
-                    // `manages_own_storage`, `overlay` IS `cfg.disk` verbatim — the name
-                    // the caller wrote for something on the far node — and removing it
-                    // means this engine deleting a file it did not create. For today's
-                    // Proxmox backend that name is `local-lvm:8` and the unlink simply
-                    // fails, but the rule cannot rest on the spelling a backend happens
-                    // to use: a remote backend whose disk reference IS a local path
-                    // would lose the user's base image on a failed boot.
-                    if restarting.is_none() && !own_storage {
-                        let _ = std::fs::remove_file(&overlay);
-                    }
+                    undo(&overlay);
                     return Err(e.into());
                 }
             },
@@ -480,7 +575,7 @@ where
                 out.removed.push(format!("{name}/"));
             }
         }
-        let leftovers = ["sock", "sock.lock", "serial", "log", "pid", "xml"];
+        let leftovers = RUNTIME_LEFTOVERS;
         if leftovers
             .iter()
             .any(|e| vmdir.join(format!("{name}.{e}")).exists())
@@ -500,6 +595,30 @@ where
         // outlived every destroy, so «removes everything» was not quite true.
         // Nothing holds it once the record is gone.
         let _ = std::fs::remove_file(vmdir.join(format!(".{name}.lock")));
+        // The hypervisor-side network goes with its LAST user. The backend
+        // decides, because only it knows which network a record is on (libvirt:
+        // an explicit `bridge` before `network`); this side hands it every
+        // record of the same backend that is left, stopped ones included — a
+        // stopped VM still needs the network at its next `start`. Unreadable
+        // records release nothing. A failure does not undo an `rm` that has
+        // already happened; it is said, not swallowed.
+        if let (Some(vm), Ok(all)) = (&record, st.list()) {
+            let remaining: Vec<Vm> = all
+                .into_iter()
+                .filter(|o| o.backend == vm.backend)
+                .collect();
+            if let Err(e) = self
+                .backends
+                .for_vm(vm)
+                .and_then(|b| b.release_network(vm, &remaining))
+            {
+                tracing::warn!(
+                    vm = %name,
+                    network = %vm.network,
+                    "the VM is removed, but the network its backend defined for it could not be released: {e}"
+                );
+            }
+        }
         Ok(out)
     }
     /// Stops the VM via ITS backend (CH/libvirt) but **preserves** the record and disk
@@ -1102,7 +1221,20 @@ where
                 Error::from(e)
             }
         })?;
-        self.create(&config_from(&vm))
+        self.create(&self.restart_config(&vm))
+    }
+    /// The config a `start`/`restart` boots from: [`config_from`] the record,
+    /// plus the subnet declared NOW for the network the VM's NIC names (an
+    /// explicit `bridge`, else `network`), which the record does not keep.
+    /// With it the backend can define again a hypervisor-side network that has
+    /// gone, and judge one left on another subnet, the same way `create` does.
+    fn restart_config(&self, vm: &Vm) -> VmConfig {
+        let mut cfg = config_from(vm);
+        if cfg.network_subnet.is_none() {
+            let name = cfg.bridge.as_deref().unwrap_or(&cfg.network);
+            cfg.network_subnet = self.network.and_then(|n| n.subnet_of(name));
+        }
+        cfg
     }
     /// Stops (if running) then starts — always a real reboot, unlike `start`
     /// (which no-ops when already running). Same recovered-fields caveat as
@@ -1119,7 +1251,7 @@ where
         if self.backends.for_vm(&vm)?.is_running(&vm) {
             self.stop(name)?;
         }
-        self.create(&config_from(&vm))
+        self.create(&self.restart_config(&vm))
     }
     /// Current state of a VM, with `status`/`ip` reconciled by its backend.
     pub fn status(&self, name: &str) -> Result<Vm> {
@@ -1459,20 +1591,12 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         devices: _,
         backend: _,
         net_mode: _,
-        // NOT restored, and the reason is narrow: this subnet only ever feeds
-        // `ensure_libvirt_network`'s DEFINE branch. By the time a `vm start`
-        // runs, the network it describes already exists, so that branch is not
-        // taken and the value would be dead. `network` IS persisted, and
-        // `boot` re-derives `bridge` from it, so the VM goes back onto the same
-        // network it was created on.
-        //
-        // The one case this gives up on: if the libvirt network is removed out
-        // of band between `create` and `start`, the restart cannot redefine it
-        // (no subnet) and `ensure_libvirt_network` warns and leaves it. The
-        // domain then names a network the daemon does not have and `virsh
-        // start` fails — loudly, which is the point. Persisting the subnet
-        // would need a new flat `Vm` field; worth doing if that case shows up
-        // in practice.
+        // NOT persisted: the subnet is a property of the NETWORK, declared in
+        // its own registry, and can change after the VM was created. A `start`
+        // resolves the current one through the network port
+        // (`VmEngine::restart_config`), which is what lets the backend define
+        // again a hypervisor-side network that has gone, and refuse or redefine
+        // one left on another subnet.
         network_subnet: _,
         // Consumido em `prepare_local_overlay` no momento da criação: depois de
         // o overlay existir, o tamanho é uma propriedade DELE e não há nada a
@@ -1667,9 +1791,9 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         // the net mode string there. For Cloud Hypervisor it IS a device name
         // and must not be misread as one.
         net_mode: (vm.backend == "libvirt").then(|| vm.tap.clone()),
-        // `None` on purpose — see the `network_subnet` note in `boot_spec_of`:
-        // only the DEFINE branch reads it, and a restart's network already
-        // exists. `network` above is what puts the VM back on it.
+        // `None` here — see the `network_subnet` note in `boot_spec_of`: the
+        // record does not keep it, and `VmEngine::restart_config` resolves the
+        // declared one when a `start` needs it.
         network_subnet: None,
         // `None` de propósito: o overlay já tem o tamanho com que nasceu, e um
         // restart não o redimensiona. Reafirmar aqui um número seria convidar um
@@ -1704,6 +1828,28 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         libvirt_xml: b.libvirt_xml.clone(),
     }
 }
+/// The network a VM is actually on, for whoever REPORTS it (`vm describe`,
+/// `vm ls -o json`, the node API). `None` for a libvirt user-mode NIC, which is
+/// on no network. **Pure.**
+///
+/// `Vm.network` is what was ASKED for, and for every backend but libvirt that
+/// is also where the VM is: Cloud Hypervisor attaches the engine's `ingress`
+/// bridge or the named SDN network. libvirt does not — without a declared
+/// network the domain lands in libvirt's own `default`, so reading `network`
+/// back said `ingress` for a VM that was in `<source network='default'>`. The
+/// answer comes from [`libvirt_nic`], the function the domain XML is built
+/// from. A domain given whole as `libvirt_xml` is not parsed: its NIC is
+/// whatever that XML says, and the request is the best this can report.
+pub fn attached_network(vm: &Vm) -> Option<String> {
+    if vm.backend != "libvirt" || vm.boot.libvirt_xml.is_some() {
+        return Some(vm.network.clone());
+    }
+    match libvirt_nic(Some(&vm.tap), vm.boot.bridge.as_deref(), &vm.network) {
+        LibvirtNic::Network(n) | LibvirtNic::Bridge(n) => Some(n),
+        LibvirtNic::User => None,
+    }
+}
+
 /// Is `argv` the `cloud-hypervisor` serving THIS VM? PURE.
 ///
 /// The api-socket path is the ownership token: we choose it, it is unique per
@@ -1885,6 +2031,15 @@ mod tests {
         resized: RefCell<Option<Vm>>,
         /// Makes `hotplug_add_disk` fail after it reported the attachment.
         fail_after_attach: RefCell<bool>,
+        /// Makes the overlay and the seed land on disk where the real ports
+        /// put them (`vms/<name>.qcow2`, `vms/<name>/`), so a test can see
+        /// what a failed create leaves behind.
+        writes_files: bool,
+        /// Makes the seed fail after it wrote its directory, the way
+        /// `cloud-localds` failing leaves `user-data` and `meta-data`.
+        fail_seed: bool,
+        /// Makes `boot` fail, the way a libvirt domain that does not start does.
+        fail_boot: bool,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1904,7 +2059,7 @@ mod tests {
         }
         fn boot(
             &self,
-            _vmdir: &Path,
+            vmdir: &Path,
             cfg: &VmConfig,
             overlay: &str,
             _on: &dyn Fn(CreateStage),
@@ -1913,6 +2068,18 @@ mod tests {
                 .calls
                 .borrow_mut()
                 .push(format!("boot {} {overlay} seed={:?}", cfg.name, cfg.seed));
+            if self.0.fail_boot && self.0.writes_files {
+                // What Cloud Hypervisor leaves when the VMM starts and dies:
+                // its log, its pidfile, its api socket and the lock on it.
+                for ext in ["log", "pid", "sock", "sock.lock"] {
+                    std::fs::write(vmdir.join(format!("{}.{ext}", cfg.name)), b"x").unwrap();
+                }
+            }
+            if self.0.fail_boot {
+                return Err(delonix_model::Error::Invalid(
+                    "failed to start the domain".into(),
+                ));
+            }
             *self.0.running.borrow_mut() = true;
             Ok(Boot {
                 pid: None,
@@ -1932,6 +2099,14 @@ mod tests {
         fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
             self.0.calls.borrow_mut().push(format!("stop {}", vm.name));
             *self.0.running.borrow_mut() = false;
+            Ok(())
+        }
+        fn release_network(&self, vm: &Vm, remaining: &[Vm]) -> delonix_model::Result<()> {
+            let left: Vec<&str> = remaining.iter().map(|o| o.name.as_str()).collect();
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("release_network {} {left:?}", vm.name));
             Ok(())
         }
         fn resize_cold(
@@ -2100,7 +2275,11 @@ mod tests {
             _on: &dyn Fn(CreateStage),
         ) -> delonix_model::Result<(PathBuf, PathBuf)> {
             self.0.calls.borrow_mut().push(format!("overlay {name}"));
-            Ok((PathBuf::from(base), vmdir.join(format!("{name}.qcow2"))))
+            let overlay = vmdir.join(format!("{name}.qcow2"));
+            if self.0.writes_files {
+                std::fs::write(&overlay, b"qcow2").unwrap();
+            }
+            Ok((PathBuf::from(base), overlay))
         }
     }
 
@@ -2109,7 +2288,17 @@ mod tests {
     impl SeedBuilder for FakeSeed {
         fn seed(&self, root: &Path, cfg: &VmConfig) -> delonix_model::Result<PathBuf> {
             self.0.calls.borrow_mut().push(format!("seed {}", cfg.name));
-            Ok(root.join(format!("{}-seed.iso", cfg.name)))
+            if !self.0.writes_files {
+                return Ok(root.join(format!("{}-seed.iso", cfg.name)));
+            }
+            let dir = root.join("vms").join(&cfg.name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("user-data"), b"#cloud-config\n").unwrap();
+            if self.0.fail_seed {
+                return Err(delonix_model::Error::Invalid("cloud-localds failed".into()));
+            }
+            std::fs::write(dir.join("seed.iso"), b"iso").unwrap();
+            Ok(dir.join("seed.iso"))
         }
     }
 
@@ -2143,6 +2332,39 @@ mod tests {
 
     /// A local backend: the overlay and the seed are built, the backend boots
     /// the overlay with the seed attached, and the record says Running.
+    /// The record `vm create vgj-lv --backend libvirt` (no `--network`) wrote,
+    /// measured 2026-10-21; `virsh dumpxml` had `<source network='default'>`.
+    fn libvirt_record(network: &str, tap: &str) -> Vm {
+        serde_json::from_value(serde_json::json!({
+            "name": "vgj-lv", "disk": "/d.qcow2", "overlay": "/o.qcow2",
+            "vcpus": 1, "memory": "256M", "network": network, "tap": tap,
+            "mac": "52:54:00:bd:15:b5", "pid": null, "api_socket": "",
+            "status": "Running", "created_unix": 1, "backend": "libvirt",
+            "boot": {}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_libvirt_vm_reports_the_network_its_domain_is_on() {
+        assert_eq!(
+            attached_network(&libvirt_record("ingress", "nat")).as_deref(),
+            Some("default")
+        );
+        assert_eq!(
+            attached_network(&libvirt_record("lab-net", "nat")).as_deref(),
+            Some("lab-net")
+        );
+        let mut bridged = libvirt_record("ingress", "bridge");
+        bridged.boot.bridge = Some("br0".into());
+        assert_eq!(attached_network(&bridged).as_deref(), Some("br0"));
+        assert_eq!(attached_network(&libvirt_record("ingress", "user")), None);
+        // Cloud Hypervisor IS on the engine's `ingress` bridge.
+        let mut ch = libvirt_record("ingress", "dlxtap0");
+        ch.backend = "cloud-hypervisor".into();
+        assert_eq!(attached_network(&ch).as_deref(), Some("ingress"));
+    }
+
     #[test]
     fn a_new_vm_on_a_local_backend_gets_an_overlay_and_a_seed() {
         let root = tempfile::tempdir().unwrap();
@@ -2160,6 +2382,147 @@ mod tests {
             "{c:?}"
         );
         assert_eq!(e.repo.get("web").unwrap().status, Status::Running);
+    }
+
+    /// A node network that declares exactly `.0`. The attach half is never
+    /// reached by these tests (the fake backend boots without one).
+    struct DeclaredNets(&'static [&'static str]);
+
+    impl VmNetwork for DeclaredNets {
+        fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
+            Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(self.0.contains(&name))
+        }
+        fn attach_tap(
+            &self,
+            _vm: &str,
+            _network: &str,
+            _mac: &str,
+            _namespace: &str,
+        ) -> delonix_model::Result<String> {
+            Ok("tap0".into())
+        }
+        fn lease_ip(&self, _network: &str, _mac: &str) -> Option<String> {
+            None
+        }
+        fn detach_tap(&self, _vm: &str, _lease: Option<&str>) {}
+        fn join_argv(&self) -> Option<Vec<String>> {
+            None
+        }
+    }
+
+    /// A network nobody declared is refused as «not found» (exit 4), naming
+    /// the network and the command that declares it — and BEFORE the overlay:
+    /// the defect was a create that built the disk and defined the domain,
+    /// then died on the hypervisor's own «no network with matching name».
+    #[test]
+    fn an_undeclared_network_is_refused_before_anything_is_built() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let nets = DeclaredNets(&["lab-net"]);
+        let e = VmEngine {
+            network: Some(&nets),
+            ..engine(root.path(), seen.clone())
+        };
+        let err = e
+            .create(&VmConfig {
+                network: "cf-nope".into(),
+                ..cfg("web")
+            })
+            .expect_err("an undeclared network must be refused");
+        assert!(err.is_not_found(), "{err}");
+        let shown = delonix_model::Error::from(err);
+        assert_eq!(shown.number(), 4505, "{shown}");
+        let msg = shown.to_string();
+        assert!(
+            msg.contains("'cf-nope'") && msg.contains("delonix network create cf-nope"),
+            "{msg}"
+        );
+        assert!(calls(&seen).is_empty(), "{:?}", calls(&seen));
+        assert!(e.repo.get("web").is_err(), "no record may be left");
+    }
+
+    /// A create over a STOPPED VM that names a different, undeclared network
+    /// is refused like a new one — the recover path boots with the new `cfg`,
+    /// so skipping the question there moved the VM onto the typo (and Cloud
+    /// Hypervisor created it). The record's own network is not asked again.
+    #[test]
+    fn a_stopped_vm_is_not_recovered_onto_an_undeclared_network() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let declared = DeclaredNets(&["lab-net"]);
+        let e = VmEngine {
+            network: Some(&declared),
+            ..engine(root.path(), seen.clone())
+        };
+        let on_lab = VmConfig {
+            network: "lab-net".into(),
+            ..cfg("web")
+        };
+        e.create(&on_lab).expect("create on a declared network");
+        *seen.running.borrow_mut() = false; // stopped
+        let boots = |s: &Seen| calls(s).iter().filter(|c| c.starts_with("boot ")).count();
+        let before = boots(&seen);
+
+        let err = e
+            .create(&VmConfig {
+                network: "cf-nope".into(),
+                ..cfg("web")
+            })
+            .expect_err("a stopped VM must not be recovered onto an undeclared network");
+        assert_eq!(delonix_model::Error::from(err).number(), 4505);
+        assert_eq!(boots(&seen), before, "{:?}", calls(&seen));
+        assert_eq!(e.repo.get("web").unwrap().network, "lab-net");
+
+        // Its own network is not a question — even once it is no longer
+        // declared (a network an older version made, adopted on boot).
+        let none = DeclaredNets(&[]);
+        let e = VmEngine {
+            network: Some(&none),
+            ..e
+        };
+        e.create(&on_lab)
+            .expect("recovering on the record's own network");
+        assert_eq!(boots(&seen), before + 1, "{:?}", calls(&seen));
+    }
+
+    /// The declared network goes through; the default-network values are not
+    /// questions at all (#901's set), even in a process with no network
+    /// registered; and a backend that owns its storage is not asked either.
+    #[test]
+    fn only_a_local_create_on_a_named_network_asks_whether_it_is_declared() {
+        let root = tempfile::tempdir().unwrap();
+        let nets = DeclaredNets(&["lab-net"]);
+        let seen = Rc::new(Seen::default());
+        let e = VmEngine {
+            network: Some(&nets),
+            ..engine(root.path(), seen.clone())
+        };
+        e.create(&VmConfig {
+            network: "lab-net".into(),
+            ..cfg("declared")
+        })
+        .expect("a declared network is accepted");
+        for (i, default) in ["", "ingress", "bridge", "default"].iter().enumerate() {
+            let e = engine(root.path(), Rc::new(Seen::default()));
+            e.create(&VmConfig {
+                network: (*default).into(),
+                ..cfg(&format!("d{i}"))
+            })
+            .unwrap_or_else(|err| panic!("{default:?}: {err}"));
+        }
+        let remote = Rc::new(Seen {
+            own_storage: true,
+            ..Default::default()
+        });
+        engine(root.path(), remote)
+            .create(&VmConfig {
+                network: "vmbr9".into(),
+                ..cfg("far")
+            })
+            .expect("a remote backend decides its own network vocabulary");
     }
 
     /// A backend that owns its storage (a remote node) is handed the disk
@@ -2238,6 +2601,131 @@ mod tests {
         assert!(e.create(&cfg("../escape")).is_err());
         assert!(calls(&seen).is_empty());
         assert!(e.repo.list().unwrap().is_empty());
+    }
+
+    /// A NEW VM whose boot fails takes back everything its create wrote: the
+    /// overlay AND the per-VM seed directory. The directory used to stay —
+    /// with `user-data` holding the injected key — and with no record, `vm ls`
+    /// did not list it and `rm` answered «no such VM» (4501) and kept it.
+    #[test]
+    fn a_failed_boot_of_a_new_vm_removes_the_overlay_and_the_seed_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("web")).expect_err("the boot fails");
+        let vms = root.path().join("vms");
+        assert!(!vms.join("web.qcow2").exists(), "overlay left behind");
+        assert!(!vms.join("web").exists(), "seed directory left behind");
+        // The VMM's runtime files too: with no record, `rm` (4501 below)
+        // never would take them.
+        for ext in ["log", "pid", "sock", "sock.lock"] {
+            assert!(
+                !vms.join(format!("web.{ext}")).exists(),
+                "web.{ext} left behind"
+            );
+        }
+        assert!(e.repo.get("web").is_err());
+        assert_eq!(e.remove("web").unwrap_err().number(), 4501);
+    }
+
+    /// A runtime file that was there BEFORE the create — the log of an earlier
+    /// attempt someone is reading — is not this create's to remove.
+    #[test]
+    fn a_failed_boot_keeps_a_runtime_file_that_was_already_there() {
+        let root = tempfile::tempdir().unwrap();
+        let vms = root.path().join("vms");
+        std::fs::create_dir_all(&vms).unwrap();
+        std::fs::write(vms.join("web.log"), b"earlier attempt").unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen);
+        e.create(&cfg("web")).expect_err("the boot fails");
+        assert!(
+            vms.join("web.log").exists(),
+            "a log this call did not create"
+        );
+        assert!(!vms.join("web.pid").exists());
+        assert!(!vms.join("web.sock").exists());
+    }
+
+    /// A seed that fails after it wrote its directory takes the overlay built a
+    /// moment earlier with it — the next create of the name would otherwise
+    /// reuse that overlay whatever base image it asks for.
+    #[test]
+    fn a_failed_seed_removes_the_overlay_and_what_the_seed_wrote() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_seed: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("web")).expect_err("the seed fails");
+        let vms = root.path().join("vms");
+        assert!(!vms.join("web.qcow2").exists(), "overlay left behind");
+        assert!(!vms.join("web").exists(), "seed directory left behind");
+        assert!(
+            !calls(&seen).iter().any(|c| c.starts_with("boot ")),
+            "{:?}",
+            calls(&seen)
+        );
+    }
+
+    /// A per-VM directory that was there BEFORE the create — a `--user-data`
+    /// seed the caller packaged into it, or what an earlier attempt left — is
+    /// not this create's to remove, even when its boot fails.
+    #[test]
+    fn a_failed_boot_keeps_a_seed_directory_that_was_already_there() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("vms").join("web");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("caller-file"), b"keep").unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("web")).expect_err("the boot fails");
+        assert!(dir.join("caller-file").exists());
+        assert!(!root.path().join("vms").join("web.qcow2").exists());
+    }
+
+    /// A RESTART whose boot fails deletes nothing: the overlay and the seed
+    /// are the recorded VM's, and the record stays to be started again.
+    #[test]
+    fn a_failed_restart_keeps_the_vms_overlay_and_seed() {
+        let root = tempfile::tempdir().unwrap();
+        let ok = Rc::new(Seen {
+            writes_files: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), ok.clone());
+        e.create(&cfg("web")).expect("create");
+        e.stop("web").expect("stop");
+        let failing = Rc::new(Seen {
+            writes_files: true,
+            fail_boot: true,
+            ..Default::default()
+        });
+        let again = VmEngine {
+            backends: FakeBackends(failing.clone()),
+            disks: FakeDisks(failing.clone()),
+            seed: FakeSeed(failing),
+            ..e
+        };
+        again.create(&cfg("web")).expect_err("the restart fails");
+        let vms = root.path().join("vms");
+        assert!(vms.join("web.qcow2").exists());
+        assert!(vms.join("web").join("seed.iso").exists());
+        assert_eq!(again.repo.get("web").unwrap().status, Status::Stopped);
     }
 
     /// `stop` of a name no record describes asks the backends for an
@@ -2726,5 +3214,117 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.to_string().contains("52:54:00:00:00:09"), "{err}");
+    }
+
+    /// The backend is asked to release the network on every `rm`, handed the
+    /// records of the same backend that are LEFT — stopped ones included: a
+    /// libvirt `stop` undefines the domain, so asking the hypervisor would
+    /// have pulled the network from under the stopped one's next `start`.
+    /// Measured 2026-10-21: before, nothing was released at all and the
+    /// libvirt network, its bridge and route outlived `vm rm` and `stack
+    /// destroy`. Which of those records is on the network is the backend's to
+    /// say (libvirt's `still_on_network`), so the whole list goes.
+    #[test]
+    fn the_backend_releases_with_the_records_that_are_left() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        // Both networks declared: a create on an undeclared one is refused
+        // before anything is built (#905), which is not what this measures.
+        let nets = DeclaredNets(&["lab-net", "other-net"]);
+        let mut e = engine(root.path(), seen.clone());
+        e.network = Some(&nets);
+        let on = |n: &str, net: &str| VmConfig {
+            network: net.into(),
+            ..cfg(n)
+        };
+        e.create(&on("a", "lab-net")).expect("create a");
+        e.create(&on("b", "lab-net")).expect("create b");
+        e.create(&on("c", "other-net")).expect("create c");
+        e.stop("b").expect("stop b");
+        let released = |s: &Seen| -> Vec<String> {
+            calls(s)
+                .into_iter()
+                .filter(|c| c.starts_with("release_network"))
+                .collect()
+        };
+        e.destroy("a", false, false).expect("rm a");
+        e.destroy("b", false, false).expect("rm b");
+        e.destroy("c", false, false).expect("rm c");
+        assert_eq!(
+            released(&seen),
+            [
+                r#"release_network a ["b", "c"]"#,
+                r#"release_network b ["c"]"#,
+                "release_network c []",
+            ]
+        );
+    }
+
+    /// A network port that declares one subnet per name — and only those
+    /// names, since a start onto an undeclared network is refused (#905).
+    struct DeclaredSubnets(BTreeMap<&'static str, &'static str>);
+
+    impl VmNetwork for DeclaredSubnets {
+        fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
+            Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(self.0.contains_key(name))
+        }
+        fn attach_tap(&self, _: &str, _: &str, _: &str, _: &str) -> delonix_model::Result<String> {
+            Ok("tap0".into())
+        }
+        fn lease_ip(&self, _network: &str, _mac: &str) -> Option<String> {
+            None
+        }
+        fn detach_tap(&self, _vm: &str, _lease: Option<&str>) {}
+        fn join_argv(&self) -> Option<Vec<String>> {
+            None
+        }
+        fn subnet_of(&self, name: &str) -> Option<String> {
+            self.0.get(name).map(|s| s.to_string())
+        }
+    }
+
+    /// BUG-1b/GAP-2 of the same run: a `start` rebuilt its config from the
+    /// record, which does not keep the subnet, so a libvirt network removed
+    /// meanwhile (by another state root's last `rm`) could not be defined
+    /// again and the start failed with «Network not found»; and one left on
+    /// an old subnet was never judged. The subnet declared NOW travels with
+    /// the start — by the NIC's network: an explicit `bridge` first.
+    #[test]
+    fn a_start_carries_the_subnet_declared_now() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let nets = DeclaredSubnets(BTreeMap::from([
+            ("lab-net", "10.231.80.0/24"),
+            ("br-net", "10.231.81.0/24"),
+        ]));
+        let mut e = engine(root.path(), seen.clone());
+        e.network = Some(&nets);
+        let on_net = VmConfig {
+            network: "lab-net".into(),
+            ..cfg("a")
+        };
+        let on_bridge = VmConfig {
+            bridge: Some("br-net".into()),
+            ..cfg("b")
+        };
+        assert_eq!(
+            e.restart_config(&e.create(&on_net).unwrap())
+                .network_subnet
+                .as_deref(),
+            Some("10.231.80.0/24")
+        );
+        assert_eq!(
+            e.restart_config(&e.create(&on_bridge).unwrap())
+                .network_subnet
+                .as_deref(),
+            Some("10.231.81.0/24")
+        );
+        // No port, or nothing declared: nothing invented.
+        e.network = None;
+        let vm = e.repo.get("a").unwrap();
+        assert_eq!(e.restart_config(&vm).network_subnet, None);
     }
 }

@@ -454,3 +454,22 @@ pub fn image_defaults(
 ) -> Option<crate::ports::ImageDefaults> {
     IMAGE_DEFAULTS.get()?.defaults(root, reference)
 }
+
+/// The node's [`ProcessLeaves`](crate::ports::ProcessLeaves), registered once per
+/// process by the composition root. Its ABSENCE is not «no limits»: a VM whose
+/// VMM needs a leaf and finds no provider is refused like one whose host has no
+/// delegated cgroup, because from the VM's side the two are the same fact —
+/// nothing would hold its ceilings.
+static PROCESS_LEAVES: std::sync::OnceLock<Box<dyn crate::ports::ProcessLeaves>> =
+    std::sync::OnceLock::new();
+
+/// Registers the node's [`ProcessLeaves`](crate::ports::ProcessLeaves). First
+/// registration wins, same rule as [`set_network`].
+pub fn set_process_leaves(leaves: Box<dyn crate::ports::ProcessLeaves>) {
+    let _ = PROCESS_LEAVES.set(leaves);
+}
+
+/// The registered leaf provider, or `None` when this process registered none.
+pub fn process_leaves() -> Option<&'static dyn crate::ports::ProcessLeaves> {
+    PROCESS_LEAVES.get().map(|p| p.as_ref())
+}

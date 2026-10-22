@@ -44,6 +44,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
+    kinds::GITOPS_SOURCE,
 ];
 
 /// Kinds whose listing has no `-o json` today. Listed rather than discovered,
@@ -76,6 +77,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
+    kinds::GITOPS_SOURCE,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::POD,
@@ -94,6 +96,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
+    kinds::GITOPS_SOURCE,
 ];
 
 /// A generic verb, as DATA — so the table below and its test can name one
@@ -276,6 +279,16 @@ pub(crate) fn get(
                     .into(),
             ));
         }
+        // `describe` is a table. Routing `-o json` to it printed that table
+        // with rc 0 — the accepted-and-ignored format refused below for the
+        // list. A Kind whose named read has JSON answers it; every other one
+        // refuses before printing anything.
+        if output != OutputFormat::Table {
+            return match f.kind {
+                k if k == kinds::VM => super::vm::cmd_get_json(&super::util::state_root(), names),
+                _ => Err(named_json_refusal(f)),
+            };
+        }
         return describe(kind, names);
     }
     // Only Kinds whose own `ls` already accepts a namespace do anything with
@@ -283,7 +296,8 @@ pub(crate) fn get(
     // would be the accepted-and-ignored trap this codebase refuses elsewhere
     // (`--security-opt seccomp=`, `-v :z`, `--network-alias`) if `--namespace`
     // reached them un-checked. Refuse it up front instead.
-    const NAMESPACED_GET_KINDS: &[&str] = &[kinds::POD, kinds::VM, kinds::VOLUME];
+    const NAMESPACED_GET_KINDS: &[&str] =
+        &[kinds::POD, kinds::VM, kinds::VOLUME, kinds::GITOPS_SOURCE];
     if namespace.is_some() && !NAMESPACED_GET_KINDS.contains(&f.kind) {
         return Err(Error::Invalid(format!(
             "`get {}` has no namespace to filter by",
@@ -325,6 +339,7 @@ pub(crate) fn get(
         // identity — so there is nothing else `get` could key on.
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
         k if k == kinds::SERVICE => super::service::cmd_ls(output),
+        k if k == kinds::GITOPS_SOURCE => super::gitops::cmd_ls(output, namespace.as_deref()),
         k if k == kinds::IPPOOL => super::ippool::cmd_ls(output),
         k if k == kinds::STORAGE_POOL => super::storage_pool::cmd_ls(output),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_ls(output),
@@ -407,6 +422,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         }
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
         k if k == kinds::SERVICE => super::service::cmd_describe(&n),
+        k if k == kinds::GITOPS_SOURCE => super::gitops::cmd_describe(&n),
         k if k == kinds::IPPOOL => super::ippool::cmd_describe(&n),
         k if k == kinds::STORAGE_POOL => super::storage_pool::cmd_describe(&n),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_describe(&n),
@@ -536,6 +552,16 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             }
             Ok(())
         }
+        k if k == kinds::GITOPS_SOURCE => {
+            for n in names {
+                super::gitops::remove_for_replace(n)?;
+                println!(
+                    "{}",
+                    super::po::tf("gitopssource {name}: removed", &[("name", n)])
+                );
+            }
+            Ok(())
+        }
         k if k == kinds::SERVICE => {
             for n in names {
                 super::service::remove_for_replace(n)?;
@@ -581,6 +607,22 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
     }
 }
 
+/// The refusal for `get <kind> <name> -o json` on a Kind with no JSON for one
+/// resource: the list has it (when `get` routes the Kind and it is not
+/// table-only), so that is where it points.
+fn named_json_refusal(f: &KindFacts) -> Error {
+    let list = if GET_ROUTES.contains(&f.kind) && !NO_JSON_YET.contains(&f.kind) {
+        format!(" — `get {} -o json` lists them all", f.plural)
+    } else {
+        String::new()
+    };
+    Error::Invalid(format!(
+        "`get {} <name> -o json` has no JSON for one resource yet{list}; \
+         `describe {} <name>` is the detail view",
+        f.plural, f.plural
+    ))
+}
+
 fn refuse_if_unreachable(f: &'static KindFacts) -> Result<()> {
     let why = no_verb_reason(f.kind);
     if why.is_empty() {
@@ -616,6 +658,28 @@ mod tests {
                 f.kind
             );
         }
+    }
+
+    /// `get <kind> <name> -o json` printed `describe`'s table with rc 0 for
+    /// every Kind (measured on `get vm <name> -o json`). A Kind without JSON for
+    /// one resource now refuses — before any I/O, so this needs no state root.
+    #[test]
+    fn a_named_get_never_answers_json_with_a_table() {
+        for kind in ["pods", "networks", "volumes", "images", "clusters"] {
+            let e = get(kind, &["x".into()], OutputFormat::Json, None)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("<name> -o json"), "{kind}: {e}");
+        }
+        // The pointer to the list is only there when the list has JSON.
+        let e = get("pods", &["x".into()], OutputFormat::Json, None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("`get pods -o json`"), "{e}");
+        let e = get("clusters", &["x".into()], OutputFormat::Json, None)
+            .unwrap_err()
+            .to_string();
+        assert!(!e.contains("-o json` lists"), "{e}");
     }
 
     /// A Kind listed as table-only has to be a Kind `get` actually routes —

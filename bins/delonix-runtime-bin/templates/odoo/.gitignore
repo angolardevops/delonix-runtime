@@ -1,0 +1,14 @@
+# The database credentials never go into git. The README and
+# delonix-manifest.yaml both tell you to move them here — and the project is a
+# git repository from the moment `delonix init` finishes, so this file is what
+# makes that promise true. `.dockerignore` keeps a file out of an IMAGE, which
+# is a different thing entirely.
+.secrets.env
+
+# Python bytecode from an addon you are working on.
+__pycache__/
+*.py[cod]
+
+# A local filestore or log, if you ever bind-mount one next to the project.
+filestore/
+*.log

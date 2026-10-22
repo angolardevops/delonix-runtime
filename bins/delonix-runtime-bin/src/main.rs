@@ -104,6 +104,12 @@ enum Cmd {
     /// CONTRIBUTING.md) is written, the project's own code is never touched —
     /// a warning follows, since the Delonixfile still assumes the template's
     /// own file layout and needs a look before `build`.
+    ///
+    /// The project is left as a git repository on `main`, with one commit
+    /// holding everything it was just given — so the next step is adding a
+    /// remote and pushing, not four commands of setup. Skipped inside an
+    /// existing work tree (a monorepo subdirectory), over an existing
+    /// `.git`, and when adopting a project that already has a history.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath)]
@@ -248,7 +254,8 @@ enum Cmd {
         /// Stack name to own the resources with (`delonix.io/stack`).
         #[arg(long)]
         name: Option<String>,
-        /// Print what would be applied, and apply nothing.
+        /// Print what would be applied, and apply nothing — exiting as the apply
+        /// would refuse (5 for a resource another stack owns, DX-5601).
         #[arg(long)]
         dry_run: bool,
         /// Authorize the recreate of a resource whose cold field changed.
@@ -276,9 +283,12 @@ enum Cmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: cmd::output::OutputFormat,
-        /// 0 = no changes, 2 = there are changes, 1 = error (`terraform plan`).
+        /// 0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`).
         #[arg(long)]
         detailed_exitcode: bool,
+        /// Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept.
+        #[arg(long)]
+        prune: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit.
         #[arg(long)]
         fields: bool,
@@ -422,6 +432,15 @@ enum Cmd {
     Backup {
         #[command(subcommand)]
         action: cmd::rbackup::BackupCmd,
+    },
+    /// Pull sources: one reconcile pass, status, suspend and resume (ADR-0021).
+    ///
+    /// A source is declared with `kind: GitOpsSource` and `stack apply`; this
+    /// group acts on one that already exists. Nothing here runs in the
+    /// background: a pass fetches, verifies, plans and applies, and exits.
+    Gitops {
+        #[command(subcommand)]
+        action: cmd::gitops::GitopsCmd,
     },
     /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
     ///
@@ -1011,6 +1030,10 @@ fn run() -> Result<()> {
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
         state_root: cmd::util::state_root(),
     }));
+    // Same port shape for the cgroup leaf a Cloud Hypervisor VMM starts in: the
+    // provider may not reach the cgroup adapter, so the composition root hands
+    // it over. Without it, every Cloud Hypervisor VM would be refused (DX-6515).
+    delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),
@@ -1047,12 +1070,14 @@ fn run() -> Result<()> {
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         } => cmd::stack::run(cmd::stack::StackCmd::Plan {
             file,
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         }),
         Cmd::Wait { file, timeout } => {
@@ -1102,6 +1127,7 @@ fn run() -> Result<()> {
         }
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Backup { action } => cmd::rbackup::cmd_backup(action),
+        Cmd::Gitops { action } => cmd::gitops::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Compatibility { action } => cmd::compatibility::run(action),
@@ -1691,6 +1717,7 @@ mod cli_stability_classification_tests {
         "drift",
         "explain",
         "get",
+        "gitops",
         "hosts",
         "init",
         "man",

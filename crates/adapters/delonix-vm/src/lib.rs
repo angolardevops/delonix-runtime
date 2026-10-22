@@ -57,6 +57,9 @@ pub use delonix_compute::vm::{valid_vm_name, Destroyed, DeviceChange, ResizeRequ
 use delonix_compute::vm_registry;
 pub use delonix_compute::vm_registry::mac_for;
 pub use delonix_compute::vm_registry::set_network;
+/// The cgroup leaf provider a Cloud Hypervisor VMM is started in — registered by
+/// the composition root next to [`set_network`], for the same reason.
+pub use delonix_compute::vm_registry::set_process_leaves;
 #[cfg(test)]
 use delonix_compute::vm_registry::{auto_detect, unmet};
 use delonix_provider_libvirt::LibvirtBackend;
@@ -507,6 +510,28 @@ fn engine(
 
 pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     engine(base)?.create(cfg)
+}
+
+/// The «is this network declared on this node?» refusal [`create_with`] makes
+/// before the overlay, for a caller that has to answer BEFORE it starts the
+/// create — the node API acknowledges an operation first, and a refusal found
+/// inside it reached the client as a failed operation instead of `NOT_FOUND`.
+///
+/// Same question, same answer, same number (DX-4505). The default-network
+/// values are no question at all, and a backend that owns its storage (a
+/// remote node) maps, or refuses, a network name in its own vocabulary — so
+/// for it a name this node never declared is not a refusal here.
+pub fn refuse_undeclared_network(cfg: &VmConfig) -> Result<()> {
+    if !delonix_compute::vm_backend::names_a_declared_network(&cfg.network) {
+        return Ok(());
+    }
+    match delonix_compute::vm::refuse_undeclared_network(vm_registry::network().ok(), &cfg.network)
+    {
+        // Asked only when the refusal is coming: resolving the backend can mean
+        // authenticating to a remote node, which a declared network never needs.
+        Err(_) if backend_manages_own_storage(cfg.backend.as_deref()) => Ok(()),
+        other => other,
+    }
 }
 
 /// [`create`] with a progress callback: `on` fires once per [`CreateStage`] as

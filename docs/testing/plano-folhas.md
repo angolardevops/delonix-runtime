@@ -88,6 +88,13 @@ exec/detach/firewall/publish/unpublish`). **Já não há nenhuma `B` na CLI.** A
 **10** que restam são todas `E` — esperam infra-estrutura, por ordem do
 `lab-requisitos.md`.
 
+> **2026-10-22, depois do merge de `origin/main`.** O trace commitado passou a
+> ser o de `6dc31582` (2026-10-21), anterior aos checks deste ramo, por isso
+> `net l4guard set/clear` e `system boot enable/disable` estão em **B** no
+> `folhas.tsv` até o trace ser regravado de uma corrida da bateria — os checks
+> continuam no `scripts/e2e.sh`, e a classe do gate é a do trace, nunca a da
+> tabela. `vm pause`/`unpause` estão em **A** por esse mesmo trace.
+
 Atenção ao que `A` significa aqui, porque é fácil ler a promoção como trabalho
 fechado: a corrida de 2026-10-20 (`2663c846`, `PASS=1340 FAIL=0`) provou o
 **caso 1** de cada uma — o efeito — e não a matriz completa. Os casos
@@ -128,7 +135,7 @@ Casos: 1 (a unit existe, com o `Restart=` da política do container), 2
 (`--restart` inválido), 3 (`disable` sem nada instalado), 4 (`enable` duas
 vezes), 1-bis (units obsoletas de containers que já não existem são removidas).
 
-### `vm pause` · `vm unpause` — **E** (imagem)
+### `vm pause` · `vm unpause` — **E** (imagem); **A** no trace de `6dc31582` (2026-10-21)
 
 Reais nos três backends; o default do trait falha fechado de propósito.
 Casos: 1 (a VM fica `Paused` **e** o VMM continua vivo com a memória — distingue
@@ -194,7 +201,9 @@ criada **e removida** pelo `cluster destroy`, e uma rede nomeada por quem chama
 | 9 | As 40 operações do mgmt a sério (decisão do dono) | 32 | 2–3 sessões |
 | 10 | Kinds: os 9 sem `apply` em corrida real | ~45 células | 2–3 sessões |
 
-O passo 2 já está dentro do total: **341/538 (63,4 %)** a 2026-10-20. Os passos
+O passo 2 já está dentro do total: **341/538 (63,4 %)** a 2026-10-20
+(**349/550** a 2026-10-22, depois do merge de `origin/main` — ver a nota acima
+sobre as quatro folhas que voltaram a `B`). Os passos
 que faltam de 1 a 7 levam-no a cerca de **427/538 (79 %)** sem uma linha de
 funcionalidade nova. Os passos 8 a 10 são projecto, não sessão, e o 8 é o maior
 de todos: quatro serviços inteiros.
