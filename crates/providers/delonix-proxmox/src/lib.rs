@@ -7438,8 +7438,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::VmExtraNics => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it",
             },
-            C::VmDiskResize => S::Partial {
-                detail: "`vm resize --disk-size` calls `PUT …/resize` on an existing VM too now, grow-only, refused before any call against the node's own recorded size; no battery/live evidence yet for the existing-VM path (the template-clone path is live-tested)",
+            C::VmDiskResize => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vms_boot_disk_grows_and_the_node_reads_it_back",
             },
             C::VmPciPassthrough => S::UnsupportedByProvider {
                 reason: "`devices` refused by name: the guest is on another machine",
