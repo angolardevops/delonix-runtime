@@ -5008,6 +5008,33 @@ else
   skip "vm: --disk-size (cloud-hypervisor)" "sem cloud-hypervisor instalado"
 fi
 
+# --- CH: um boot que falha depois de o VMM arrancar não deixa nada em vms/ ----
+# Medido depois do #906: um `--firmware` inválido mata o VMM («Invalid bzImage»)
+# e ficavam `<nome>.log/.pid/.sock/.sock.lock`; sem registo, o `vm rm` dava
+# DX-4501 e não os tirava. Só conta quando o create CHEGOU ao VMM: uma falha
+# anterior (infra de rede) não escreve nada e passaria sem medir.
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "CH: boot falhado não deixa ficheiros em vms/" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif command -v cloud-hypervisor >/dev/null; then
+  FVM="chfail-$PFX"; FDIR="$OUT/$FVM"; mkdir -p "$FDIR"
+  qemu-img create -f qcow2 "$FDIR/d.qcow2" 64M >/dev/null 2>&1
+  echo "not a firmware" > "$FDIR/fw.bin"
+  fout=$("$BIN" vm create "$FVM" --disk "$FDIR/d.qcow2" --backend cloud-hypervisor \
+    --firmware "$FDIR/fw.bin" --memory 128M 2>&1); frc=$?
+  if [[ $frc -ne 0 && "$fout" == *"exited during startup"* ]]; then
+    check "CH: boot falhado não deixa ficheiros em vms/" ok bash -c "
+      left=\$(ls -A '$SROOT/vms' 2>/dev/null | grep -E '^$FVM(\$|\\.)')
+      [ -z \"\$left\" ] || { echo \"ficou: \$left\"; exit 1; }"
+  else
+    skip "CH: boot falhado não deixa ficheiros em vms/" "o create não chegou ao VMM (rc=$frc)"
+  fi
+  "$BIN" delete vm "$FVM" -f >/dev/null 2>&1
+  rm -rf "$FDIR"
+else
+  skip "CH: boot falhado não deixa ficheiros em vms/" "sem cloud-hypervisor instalado"
+fi
+
 ########################################
 section "vm: o mesmo nome noutra namespace é um conflito, não «ensured»"
 ########################################
