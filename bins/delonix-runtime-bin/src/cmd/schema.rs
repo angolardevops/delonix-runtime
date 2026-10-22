@@ -1114,11 +1114,52 @@ mod tests {
                 .is_some_and(|r| r.iter().any(|x| x == "from")),
             "`from` is still required — `storageRef` alone would be refused"
         );
-        assert_eq!(
-            share["anyOf"].as_array().map(Vec::len),
-            Some(2),
-            "{share:#?}"
+        assert!(
+            !presence_admits(share, &[]),
+            "a share with neither spelling validates: {share:#?}"
         );
+    }
+
+    /// Whether `node`'s presence keywords — `required`, and the `oneOf`/`anyOf`/
+    /// `not` built from it — admit an object carrying exactly `keys`. Only what
+    /// `NESTED_ALIASES` writes; the values' types are not looked at.
+    fn presence_admits(node: &serde_json::Value, keys: &[&str]) -> bool {
+        let required = node["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|k| k.as_str().is_some_and(|k| keys.contains(&k)));
+        let any = node["anyOf"]
+            .as_array()
+            .is_none_or(|a| a.iter().any(|b| presence_admits(b, keys)));
+        let one = node["oneOf"]
+            .as_array()
+            .is_none_or(|a| a.iter().filter(|b| presence_admits(b, keys)).count() == 1);
+        let not = node.get("not").is_none_or(|n| !presence_admits(n, keys));
+        required && any && one && not
+    }
+
+    /// serde refuses a field written under BOTH its spellings («duplicate field
+    /// `from`»), so the schema has to as well. It said «at least one» (`anyOf`),
+    /// and `share: {from: x, storageRef: x}` validated clean while `plan` refused
+    /// it; `SshSpec` (optional `key`) had no constraint at all.
+    #[test]
+    fn a_nested_alias_is_one_spelling_or_the_other_never_both() {
+        let s = manifest_schema(None).unwrap();
+        for (def_name, canonical, alias) in NESTED_ALIASES {
+            let def = &s["$defs"][*def_name];
+            assert!(presence_admits(def, &[canonical]), "{def_name}: {def:#?}");
+            assert!(presence_admits(def, &[alias]), "{def_name}: {def:#?}");
+            assert!(
+                !presence_admits(def, &[canonical, alias]),
+                "{def_name} accepts `{canonical}` and `{alias}` together — the \
+                 load refuses that as a duplicate field"
+            );
+        }
+        // The engine's side, for the one aliased struct this module can reach.
+        let both: std::result::Result<super::super::volume::ShareBlock, _> =
+            serde_json::from_value(serde_json::json!({ "from": "a", "storageRef": "a" }));
+        assert!(both.is_err(), "serde took both spellings: {both:?}");
     }
 
     /// **schemars não vê `#[serde(alias = ...)]`**, só `rename`. No topo de um
@@ -1148,7 +1189,7 @@ mod tests {
                 .is_some_and(|r| r.iter().any(|x| x == "ip")),
             "`ip` continua obrigatório — o `address` do exemplo seria recusado"
         );
-        let alts = host["anyOf"]
+        let alts = host["oneOf"]
             .as_array()
             .expect("faltam as duas alternativas");
         assert_eq!(alts.len(), 2, "{host:#?}");
