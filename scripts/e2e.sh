@@ -959,10 +959,14 @@ fi
 
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
-check "container describe de inexistente recusa" fail "$BIN" container describe naoexiste-$PFX
-check "container inspect de inexistente recusa" fail "$BIN" container inspect naoexiste-$PFX
-check "volume inspect de inexistente recusa" fail "$BIN" volume inspect naoexiste-$PFX
-check "network inspect de inexistente recusa" fail "$BIN" network inspect naoexiste-$PFX
+# Um recurso que não existe afirma-se pela CLASSE (4, «no such …»), nunca por
+# `fail` nem por `!`: esses também passam num DX-8101, num root ilegível ou num
+# binário que rebenta. Medido a 2026-10-21: container/volume/network/workload/
+# secret inspect|describe e gitops status dizem todos 4 sobre um nome inexistente.
+check "container describe de inexistente recusa" 4 "$BIN" container describe naoexiste-$PFX
+check "container inspect de inexistente recusa" 4 "$BIN" container inspect naoexiste-$PFX
+check "volume inspect de inexistente recusa" 4 "$BIN" volume inspect naoexiste-$PFX
+check "network inspect de inexistente recusa" 4 "$BIN" network inspect naoexiste-$PFX
 check "container update sem mudanças recusa" fail "$BIN" container update naoexiste-$PFX
 check "container stop de inexistente recusa" fail "$BIN" container stop naoexiste-$PFX
 check "container rm de inexistente recusa" fail "$BIN" container rm naoexiste-$PFX
@@ -2627,7 +2631,7 @@ check "stack destroy --dry-run" ok "$BIN" stack destroy -f "$WORK/delonix-manife
 check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
 # O destroy levou o que a stack possui — o `describe` a seguir tem de correr na
 # mesma (parte do ficheiro, não de um registo), mas os recursos já não existem.
-check "volume describe depois do destroy recusa" fail "$BIN" volume describe "sv-$PFX"
+check "volume describe depois do destroy recusa" 4 "$BIN" volume describe "sv-$PFX"
 "$BIN" volume rm "sv-$PFX" >/dev/null 2>&1
 e2e_net_rm "sn-$PFX"
 
@@ -3503,7 +3507,7 @@ check "…e o history desse nome vê a revisão" ok \
 # carimbado o directório, e um destroy sob `own-…` não encontraria nada.
 check "…e o destroy desse nome leva o que ele criou" ok \
   "$BIN" stack destroy -f "$OWORK/m.yaml" --name "own-$PFX"
-check "…e já não está" fail "$BIN" volume inspect "ov-$PFX"
+check "…e já não está" 4 "$BIN" volume inspect "ov-$PFX"
 
 # `stack apply` de um recurso que OUTRA stack possui: classe de conflito (rc 5,
 # DX-5601), e nada mudado. Até ao #902 saía rc 1/DX-1000 — «argumento
@@ -3636,8 +3640,9 @@ sys.exit(0 if got==[(\"Network\",sys.argv[4]),(\"Volume\",sys.argv[3])] else 1)'
   fi
   "$BIN" stack destroy -f "$CFWORK/a.yaml" --name "$CSA" >/dev/null 2>&1
   check "conflito de posse: as duas stacks levaram o que criaram" ok bash -c "
-    ! '$BIN' volume inspect '$CFV' >/dev/null 2>&1 && ! '$BIN' network inspect '$CFN' >/dev/null 2>&1 \
-      && ! '$BIN' volume inspect '$CFB' >/dev/null 2>&1"
+    '$BIN' volume inspect '$CFV' >/dev/null 2>&1; [ \$? -eq 4 ] || exit 1
+    '$BIN' network inspect '$CFN' >/dev/null 2>&1; [ \$? -eq 4 ] || exit 1
+    '$BIN' volume inspect '$CFB' >/dev/null 2>&1; [ \$? -eq 4 ]"
 fi
 # Só apanha alguma coisa quando um check acima chumbou (um apply que adoptou o
 # recurso alheio deixa-o carimbado com a stack errada, e o destroy dessa não o
@@ -3719,7 +3724,7 @@ check "…e o rollback avisa que é preciso --prune para o levar" ok \
   bash -c "'$BIN' stack rollback --to 1 -f '$HWORK/hist.yaml' --dry-run 2>&1 | grep -q -- '--prune'"
 check "rollback --prune leva-o" ok \
   "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --prune
-check "…e agora já não está" fail "$BIN" volume inspect "hv2-$PFX"
+check "…e agora já não está" 4 "$BIN" volume inspect "hv2-$PFX"
 # Um rollback É um apply: ganha revisão própria, e a história diz de qual veio.
 check "a história marca o rollback e diz que revisão replicou" ok \
   bash -c "'$BIN' stack history -f '$HWORK/hist.yaml' | grep -q 'rollback of 1'"
@@ -4121,7 +4126,7 @@ section "workload / pod / secret (leitura)"
 ########################################
 check "workload ls" ok "$BIN" workload ls
 check "workload ls -o json" ok "$BIN" workload ls -o json
-check "workload describe inexistente recusa" fail "$BIN" workload describe "nao-existe-$PFX"
+check "workload describe inexistente recusa" 4 "$BIN" workload describe "nao-existe-$PFX"
 # `pod ls` foi colapsado em `get pods` no B7 (#159) — o grupo `pod` só
 # tem create/logs/attach/cp/exec/port-forward.
 check "get pods" ok "$BIN" get pods
@@ -4325,7 +4330,7 @@ else
   skip "portas de um membro de pod" "o pod create com porta falhou (holder/SDN indisponível)"
 fi
 check "secret ls" ok "$BIN" secret ls
-check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
+check "secret inspect inexistente recusa" 4 "$BIN" secret inspect "nao-existe-$PFX"
 
 # `secret create` sobre um nome que JÁ existe: até 2026-09-10 substituía o
 # segredo inteiro em silêncio (`created (1 key(s))` sobre uma substituição real
@@ -7012,7 +7017,9 @@ YAML
 check "plan: before the apply there is something to create (2)" 2 "$BIN" plan -f "$L3/m.yaml" --detailed-exitcode
 check "plan: names the Create and creates nothing" ok bash -c "
   '$BIN' plan -f '$L3/m.yaml' 2>&1 | grep -qE '^ +\+ +Container/l3w-$PFX' || { echo 'the plan does not name the resource'; exit 1; }
-  '$BIN' container inspect 'l3w-$PFX' >/dev/null 2>&1 && { echo 'a plan created the container'; exit 1; }
+  '$BIN' container inspect 'l3w-$PFX' >/dev/null 2>&1; rc=\$?
+  [ \$rc -eq 0 ] && { echo 'a plan created the container'; exit 1; }
+  [ \$rc -eq 4 ] || { echo \"container inspect: rc=\$rc, not 4 (gone)\"; exit 1; }
   true"
 check "stack apply of the plan/wait/diff manifest" ok "$BIN" stack apply -f "$L3/m.yaml"
 check "wait: returns once the manifest's container is Running" ok bash -c "
@@ -7388,7 +7395,9 @@ check "cluster destroy: the nodes go, and cluster ls no longer lists it" ok bash
     HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster destroy '$L3K' --force >/dev/null 2>&1 && break
     sleep 2
   done
-  '$BIN' container inspect '$L3K-control-plane' >/dev/null 2>&1 && { echo 'a node survived'; exit 1; }
+  '$BIN' container inspect '$L3K-control-plane' >/dev/null 2>&1; rc=\$?
+  [ \$rc -eq 0 ] && { echo 'a node survived'; exit 1; }
+  [ \$rc -eq 4 ] || { echo \"container inspect: rc=\$rc, not 4 (gone)\"; exit 1; }
   '$BIN' cluster ls 2>&1 | grep -q '$L3K' && { echo 'cluster ls still lists it'; exit 1; }
   true"
 check "cluster destroy: a cluster that does not exist is 4" 4 \
@@ -8189,7 +8198,9 @@ YAML
     gox delete gitopssources '$GS' >/dev/null || exit 1
     grep -q 'disable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'timer não desactivado'; exit 1; }
     test ! -e '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'unit ficou'; exit 1; }
-    $GOX gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
+    $GOX gitops status '$GS' >/dev/null 2>&1; rc=\$?
+    [ \$rc -eq 0 ] && { echo 'a fonte ficou'; exit 1; }
+    [ \$rc -eq 4 ] || { echo \"gitops status: rc=\$rc, não 4 (inexistente)\"; exit 1; }"
   cp "$GO/work/env/prod/app.yaml" "$GO/app-destroy.yaml"
   sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
   gox stack destroy -f "$GO/app-destroy.yaml" --name "$GSS" >/dev/null 2>&1 || true
