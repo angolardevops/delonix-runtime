@@ -1532,6 +1532,7 @@
       "type": "object"
     },
     "NetShareSpec": {
+      "additionalProperties": false,
       "description": "A network share, as declared inside a `kind: Volume` (`spec.nfs`,\n`spec.cifs`, `spec.webdav`).\n\nThis is `StorageSpec` minus the `type` field — the type is now the BLOCK's\nname, the same shape `kind: Workload` uses (`spec.container`/`spec.vm`), and\nfor the same reason: a type that names its own block cannot contradict it.\n\n`kind: Volume` and `kind: Storage` used to describe the SAME mount two ways\nand land in the SAME store, with nothing to say which to use — `volumes ls`\nshowed both (one store) while `storage ls` showed only some, so the same\nquestion got different answers depending on the command.",
       "properties": {
         "mountOptions": {
@@ -1893,6 +1894,7 @@
       "type": "object"
     },
     "OwnerSpec": {
+      "additionalProperties": false,
       "properties": {
         "gid": {
           "format": "uint32",
@@ -2352,6 +2354,7 @@
       "type": "object"
     },
     "ProvisionSpec": {
+      "additionalProperties": false,
       "properties": {
         "truenas": {
           "anyOf": [
@@ -2726,19 +2729,35 @@
       "type": "string"
     },
     "ShareBlock": {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "from"
+          ]
+        },
+        {
+          "required": [
+            "storageRef"
+          ]
+        }
+      ],
       "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
       "properties": {
         "from": {
           "description": "Name of the volume to carve this one out of — typically a network volume\n(`nfs:`/`cifs:`/`webdav:`), which is the case the feature exists for, but\nany volume works: the mechanism is a real subdirectory of its mountpoint.\n\n`storageRef` is the spelling `kind: ShareVolume` used, kept as an alias so\na manifest that only renames its Kind does not also have to rename this.",
           "type": "string"
+        },
+        "storageRef": {
+          "description": "Name of the volume to carve this one out of — typically a network volume\n(`nfs:`/`cifs:`/`webdav:`), which is the case the feature exists for, but\nany volume works: the mechanism is a real subdirectory of its mountpoint.\n\n`storageRef` is the spelling `kind: ShareVolume` used, kept as an alias so\na manifest that only renames its Kind does not also have to rename this.",
+          "type": "string"
         }
       },
-      "required": [
-        "from"
-      ],
+      "required": [],
       "type": "object"
     },
     "ShareSpec": {
+      "additionalProperties": false,
       "properties": {
         "maprootGroup": {
           "type": [
@@ -4012,6 +4031,7 @@
       "type": "object"
     },
     "TrueNasSpec": {
+      "additionalProperties": false,
       "properties": {
         "apiKeySecret": {
           "description": "`kind: Secret` holding the API key under the key `apiKey` (or `token`).\nPreferred over an account: a key is revocable on the appliance without\ntouching anyone's login.",

@@ -31,6 +31,7 @@ use schemars::generate::SchemaSettings;
 use schemars::SchemaGenerator;
 
 use super::kinds as k;
+use super::{provision, storage, volume};
 
 /// The Kinds that have a TYPED spec, and therefore a real schema.
 ///
@@ -88,8 +89,31 @@ const TYPED_KINDS: &[&str] = &[
 /// required property», five times over. `address` is the CANONICAL name in the
 /// templates and `ip` is the compatibility spelling, so the schema was demanding
 /// the one nobody is told to write.
-const NESTED_ALIASES: &[(&str, &str, &str)] =
-    &[("HostSpec", "ip", "address"), ("SshSpec", "key", "keyPath")];
+///
+/// `ShareBlock.storageRef` is the spelling `kind: ShareVolume` used for `from`.
+const NESTED_ALIASES: &[(&str, &str, &str)] = &[
+    ("HostSpec", "ip", "address"),
+    ("SshSpec", "key", "keyPath"),
+    ("ShareBlock", "from", "storageRef"),
+];
+
+/// Blocks NESTED inside a typed spec that the load closes with an accept list
+/// of their own, as `(owner def, nested def, accept list)`.
+///
+/// The top-level strictness below closes only the Kind's own spec. The load
+/// goes one level further for a Volume (`volume::warn_unknown_nested`, ADR-0069
+/// D1): `nfs: { readOnlyy: true }` is refused before any effect. Without this
+/// the schema stayed permissive there and an editor green-ticked the very typo
+/// `validate` and `apply` refuse. The lists are the SAME constants the load
+/// counts with, so the two cannot disagree on a key.
+const NESTED_STRICT: &[(&str, &str, &[&str])] = &[
+    ("VolumeSpec", "NetShareSpec", storage::NET_SHARE_FIELDS),
+    ("VolumeSpec", "ShareBlock", volume::SHARE_BLOCK_FIELDS),
+    ("VolumeSpec", "ProvisionSpec", provision::PROVISION_FIELDS),
+    ("VolumeSpec", "TrueNasSpec", provision::TRUENAS_FIELDS),
+    ("VolumeSpec", "ShareSpec", provision::TRUENAS_SHARE_FIELDS),
+    ("VolumeSpec", "OwnerSpec", provision::OWNER_FIELDS),
+];
 
 /// The refusal for a Kind with no typed spec.
 ///
@@ -535,6 +559,33 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                         serde_json::json!({ "anyOf": [existing, { "type": other }] }),
                     );
                 }
+            }
+        }
+        obj.insert(
+            "additionalProperties".into(),
+            serde_json::Value::Bool(false),
+        );
+    }
+    // The nested blocks (see `NESTED_STRICT`). Only where their owner is in the
+    // schema — `schema print --kind Container` has no Volume blocks to close —
+    // and loud when the owner is there and the block is not, for the same
+    // reason as the top-level loop: a renamed struct would otherwise leave the
+    // block open and say nothing.
+    for (owner, def_name, accepted) in NESTED_STRICT {
+        if !defs.contains_key(*owner) {
+            continue;
+        }
+        let Some(obj) = defs.get_mut(*def_name).and_then(|d| d.as_object_mut()) else {
+            return Err(Error::Invalid(format!(
+                "internal: `{owner}` nests `{def_name}` and it is not in $defs — \
+                 the schema would accept unknown fields inside it"
+            )));
+        };
+        if let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+            for name in *accepted {
+                props
+                    .entry(name.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
             }
         }
         obj.insert(
@@ -1020,8 +1071,8 @@ mod tests {
     #[test]
     fn every_nested_volume_block_refuses_an_unknown_field() {
         let blocks: &[(&str, &[&str])] = &[
-            ("NetShareSpec", super::super::storage::NET_SHARE_FIELDS),
-            ("ShareBlock", super::super::volume::SHARE_BLOCK_FIELDS),
+            ("NetShareSpec", super::storage::NET_SHARE_FIELDS),
+            ("ShareBlock", super::volume::SHARE_BLOCK_FIELDS),
             ("ProvisionSpec", super::super::provision::PROVISION_FIELDS),
             ("TrueNasSpec", super::super::provision::TRUENAS_FIELDS),
             ("ShareSpec", super::super::provision::TRUENAS_SHARE_FIELDS),
