@@ -118,6 +118,10 @@ pub trait RunHost {
 pub trait VmNetwork: Send + Sync {
     /// Ensures a private network's bridge and DHCP exist before an attach.
     fn ensure_network(&self, name: &str) -> Result<()>;
+    /// Whether `name` is a network declared on this node (`network create`,
+    /// `kind: Network`) — the question a create asks BEFORE it builds anything,
+    /// so a VM is never half-made on a network nobody declared.
+    fn is_declared(&self, name: &str) -> Result<bool>;
     /// Creates `vm`'s tap on `network`, registered in `namespace`; returns the
     /// tap's name.
     fn attach_tap(&self, vm: &str, network: &str, mac: &str, namespace: &str) -> Result<String>;
