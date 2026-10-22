@@ -1008,6 +1008,28 @@ pub fn unknown_fields(doc: &ManifestDoc, known: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// The accepted JSON keys of a struct, read from the SAME `JsonSchema` the
+/// manifest schema is built from — so a drift-guard written with it tracks the
+/// struct automatically. Add a field and the schema gains a property; the guard
+/// then fails until the hand-kept `*_FIELDS` const is updated to match. This is
+/// what `SHAREVOLUME_SPEC_FIELDS` lacked: nothing tied the list to the block, so
+/// it drifted silently. Sorted, so callers can `assert_eq!` against a sorted
+/// const without caring about order.
+#[cfg(test)]
+pub(crate) fn schema_field_names<T: schemars::JsonSchema>() -> Vec<String> {
+    let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+    let root = generator.into_root_schema_for::<T>();
+    let mut names: Vec<String> = serde_json::to_value(root)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("properties"))
+        .and_then(|p| p.as_object())
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
 #[cfg(test)]
 mod tests {
     /// Every Kind this restructuring RENAMES keeps its old spelling working.
