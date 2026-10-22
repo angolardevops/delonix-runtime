@@ -39,8 +39,10 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
+    "django.contrib.messages",
     "notes.apps.NotesConfig",
     "webhooks.apps.WebhooksConfig",
+    "messaging.apps.MessagingConfig",
 ]
 
 MIDDLEWARE = [
@@ -68,6 +70,41 @@ APPEND_SLASH = False
 
 DATABASES = {"default": dj_database_url.parse(APP.database_url, conn_max_age=60, conn_health_checks=True)}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Cache ------------------------------------------------------------------
+# Django's cache framework (notes.services reads note lookups through it; a
+# note is immutable once created, so a cached entry is never stale — only the
+# TTL expires it). With REDIS_URL set, Redis via django-redis, which is told to
+# SWALLOW backend errors (IGNORE_EXCEPTIONS): a Redis outage turns the cache
+# into misses that fall through to the database, never a failed request, and
+# logs each ignored error once. Unset = an in-process LocMem cache, so local
+# runs and tests need no Redis. notes.services also guards every cache call, so
+# the degrade-to-the-store behaviour holds for any backend.
+if APP.redis_url:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": APP.redis_url,
+            "TIMEOUT": int(APP.cache_ttl),
+            "KEY_PREFIX": "note",
+            "OPTIONS": {
+                "IGNORE_EXCEPTIONS": True,
+                "SOCKET_CONNECT_TIMEOUT": 2,
+                "SOCKET_TIMEOUT": 2,
+            },
+        }
+    }
+    # django-redis logs the exceptions it ignores, so an outage is visible.
+    DJANGO_REDIS_LOG_IGNORED_EXCEPTIONS = True
+    DJANGO_REDIS_LOGGER = "core.cache"
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "TIMEOUT": int(APP.cache_ttl),
+            "KEY_PREFIX": "note",
+        }
+    }
 
 # Request bodies above this size answer 413 body_too_large.
 DATA_UPLOAD_MAX_MEMORY_SIZE = APP.max_body_bytes

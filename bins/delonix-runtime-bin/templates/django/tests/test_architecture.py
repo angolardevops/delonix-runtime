@@ -45,6 +45,11 @@ RULES = [
         "the webhooks adapter uses the notes use cases and events, not their internals",
     ),
     (
+        ["messaging/*.py"],
+        ["notes.views", "notes.models", "notes.urls"],
+        "the messaging adapter uses the notes use cases and events, not their internals",
+    ),
+    (
         ["config/env.py"],
         ["django", "core", "notes", "webhooks"],
         "configuration parsing is plain Python (gunicorn reads it before Django)",

@@ -24,6 +24,10 @@ def routes_in_code() -> set[tuple[str, str]]:
                 walk(p.url_patterns, route)
             elif isinstance(p, URLPattern):
                 path = "/" + re.sub(r"<(?:\w+:)?(\w+)>", r"{\1}", route)
+                # Django admin mounts its own URLconf of browser views; they are
+                # not part of the JSON API contract and declare no methods.
+                if path.startswith("/admin/"):
+                    continue
                 methods = getattr(p.callback, "allowed_methods", None)
                 assert methods, f"{path}: the view does not declare its methods (use core.http.api_view)"
                 found.update((m.upper(), path) for m in methods)
