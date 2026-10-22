@@ -129,9 +129,47 @@ Gates (all green at close):
 
 ## Known limitations
 
-- The nested walk covers the maps G-011 named (`deploy`, `healthcheck`, long `depends_on`,
-  long volume mount). Other nested bodies (`build`, service `networks` entry, `ulimits`)
-  keep the pre-existing one-level check — refusing a *sibling* but not yet a sub-key.
+- The nested walk now covers every nested service body with sub-keys: `deploy`,
+  `healthcheck`, long `depends_on`, long volume mount, `build`, service `networks` entry,
+  `ulimits`, and (resilience/security pass, 2026-10-21) **long-form `ports`**.
 - Refused keys are **refused, not implemented** — naming a key here is not a promise the
-  engine honours it.
+  engine honours it. The one exception added in the resilience pass is `ports.host_ip`,
+  which is now *honoured* (see below), at parity with the short form.
 - Validated offline; `compose up` against a live engine is a separate baseline.
+- Pathological deep-nested flow YAML (`[`×100k) is refused cleanly (`recursion limit
+  exceeded`, exit 1) but the refusal time grows ~quadratically — a minor local-only DoS,
+  not a crash or state corruption. Not fixed; recorded as a limitation.
+
+## Resilience/security pass (2026-10-21, HEAD `633d7de0` + this delivery)
+
+**Finding (CONFIRMED, isolation/silent-drop):** long-form `ports` entries were parsed into
+`ComposePort::Long`, which read only `target`/`published`/`protocol`. A `host_ip:` or
+`mode:` reached that struct (no `deny_unknown_fields`) and was **dropped in silence** —
+`ports: [{target: 80, published: 8080, host_ip: 127.0.0.1}]` resolved to `"8080:80"`,
+publishing on EVERY interface a port the author scoped to loopback. The short form
+(`127.0.0.1:8080:80`) was fixed for exactly this leak one commit earlier; the long form
+still had it, and the two shapes disagreed about who could reach the port.
+
+**Fix:** `host_ip` is now a field of `ComposePort::Long`, prepended verbatim in
+`resolve_ports` just as the short form carries it; `check_nested_service_fields` walks the
+long-form `ports` list and refuses any key outside `SUPPORTED_PORT_LONG`
+(`target, published, protocol, host_ip`) by full dotted path. `mode`/`name`/`app_protocol`
+are now named-refused, not dropped.
+
+**Evidence (real CLI, `target/debug/delonix`):**
+| Input | Before | After |
+|-------|--------|-------|
+| long `{target:80, published:8080, host_ip:127.0.0.1}` | `"8080:80"` (leak) · exit 0 | `"127.0.0.1:8080:80"` · exit 0 |
+| short `127.0.0.1:8080:80` | `"127.0.0.1:8080:80"` | `"127.0.0.1:8080:80"` (parity) |
+| long `{…, mode: host}` | accepted, dropped · exit 0 | `` `ports.mode:` … refused `` · exit 1 |
+| long `{target:53, published:5353, protocol:udp}` | `"5353:53/udp"` | `"5353:53/udp"` (unchanged) |
+
+**Regression gates added** (`bins/delonix-runtime-bin/src/cmd/compose.rs`):
+- `resolve_ports_long_form_honours_host_ip_like_the_short_form`
+- `an_unsupported_long_port_key_is_refused_by_name`
+- `nested_struct_fields_are_all_in_the_allowlist` extended with `ComposePort::Long` ↔
+  `SUPPORTED_PORT_LONG` (drift guard: the parser's field set must equal the allowlist).
+
+Gates green: `cargo test -p delonix-runtime-bin --bin delonix` → 1485 passed, 0 failed;
+`cargo clippy -p delonix-runtime-bin` clean; `lang_ratchet.py` rc 0; `dev_docs.py --check`
+rc 0.
