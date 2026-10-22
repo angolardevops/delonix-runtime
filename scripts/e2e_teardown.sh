@@ -43,10 +43,15 @@ e2e_image_rm() {
     if (( rc != 0 && rc != 4 )); then
       echo "image remove $i → rc=$rc: ${out##*$'\n'}"; bad=1; continue
     fi
-    ls=$("$BIN" image ls 2>&1) || { echo "image ls → rc=$?: ${ls##*$'\n'}"; bad=1; continue; }
+    # JSON, never the table: the table cuts REPOSITORY:TAG near 44 characters
+    # with «…», so a long name still in the store read as gone (measured).
+    ls=$("$BIN" image ls -o json 2>&1) || { echo "image ls → rc=$?: ${ls##*$'\n'}"; bad=1; continue; }
     # A name shows as given or behind a registry prefix (`…/name:tag`).
-    if awk -v n="$i" '{ for (f = 1; f <= NF; f++) if ($f == n || substr($f, length($f) - length(n)) == "/" n) found = 1 }
-                      END { exit !found }' <<<"$ls"; then
+    if python3 -I -c '
+import json, sys
+n = sys.argv[1]
+tags = [t for img in json.load(sys.stdin) for t in img.get("repo_tags") or []]
+sys.exit(0 if any(t == n or t.endswith("/" + n) for t in tags) else 1)' "$i" <<<"$ls"; then
       echo "image remove $i → rc=$rc, but image ls still lists it"; bad=1
     fi
   done

@@ -517,9 +517,9 @@ section "guard: the image teardown judges its effect"
 ETEARDOWN="$(cd "$(dirname "$0")" && pwd)/e2e_teardown.sh"
 cat >"$OUT/image-rm-stub" <<'EOF'
 #!/usr/bin/env bash
-case "$1 $2" in
-  "image remove") exit "${STUB_RC:-0}" ;;
-  "image ls") printf 'REPOSITORY:TAG IMAGE ID\n%s abc123\n' "${STUB_LS:-}" ;;
+case "$1 $2${3:+ $3}" in
+  "image remove "*) exit "${STUB_RC:-0}" ;;
+  "image ls -o") printf '[{"id":"abc123","repo_tags":["%s"]}]\n' "${STUB_LS:-}" ;;
   *) echo "error: unrecognized subcommand '$2'" >&2; exit 2 ;;
 esac
 EOF
@@ -532,6 +532,10 @@ check "e2e_image_rm: a removed name that image ls no longer lists passes" ok env
 check "e2e_image_rm: an image that is already gone (4) passes" ok env STUB_RC=4 "${_irm[@]}"
 check "e2e_image_rm: a removal the CLI refuses (rc 2) fails" 1 env STUB_RC=2 "${_irm[@]}"
 check "e2e_image_rm: a name image ls still lists, even behind a registry, fails" 1 env STUB_LS="localhost/t-$PFX:1" "${_irm[@]}"
+# The table cuts a long REPOSITORY:TAG with «…»; the helper reads JSON so it
+# still sees one.
+_irml=(bash "$OUT/image-rm.sh" "$ETEARDOWN" "$OUT/image-rm-stub" "t-$PFX-$(printf 'y%.0s' {1..60}):1")
+check "e2e_image_rm: a long name image ls still lists fails" 1 env STUB_LS="localhost/${_irml[4]}" "${_irml[@]}"
 
 ########################################
 section "guarda: o irmão SERVIDO é da release do \$BIN"
