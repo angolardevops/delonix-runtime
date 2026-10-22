@@ -1758,9 +1758,20 @@ mod cli_stability_classification_tests {
     /// `container <verb>`/`image <verb>` counterpart, so it inherits that
     /// surface's promise by construction — there is no second contract to break.
     const STABLE_GROUPS: &[&str] = &[
-        "container", "image", "build", // groups + build
+        "container",
+        "image",
+        "build", // groups + build
         // Docker/Podman root verbs (aliases of container/image — see above).
-        "run", "create", "ps", "start", "stop", "restart", "rm", "exec", "logs", "pull",
+        "run",
+        "create",
+        "ps",
+        "start",
+        "stop",
+        "restart",
+        "rm",
+        "exec",
+        "logs",
+        "pull",
     ];
 
     /// Every other real top-level group, mirroring "NÃO estável" 1:1. A group
