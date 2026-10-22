@@ -257,6 +257,14 @@ fn detail_of(v: &Violation) -> Option<String> {
         Violation::Registry { host, .. } => host.clone(),
         Violation::DevicePassthrough { devices } => devices.join(","),
         Violation::ImageUrlHost { host, .. } => host.clone(),
+        Violation::BaselineCapabilities { caps } => caps.join(","),
+        Violation::BaselineHostNamespace { namespaces } => namespaces.join(","),
+        Violation::BaselineUnconfined { profiles } => profiles.join(","),
+        // A host path is context an operator needs to find the workload; it
+        // goes through the same redaction as every other detail.
+        Violation::BaselineHostPath { paths } => paths.join(","),
+        Violation::BaselineDevice { devices } => devices.join(","),
+        Violation::BaselineUnmasked { paths } => paths.join(","),
     };
     bounded_detail(&raw)
 }
@@ -306,6 +314,12 @@ pub const EMITTED_RULES: &[Rule] = &[
     Rule::DevicePassthrough,
     Rule::LatestVmImage,
     Rule::ImageUrlHost,
+    Rule::BaselineCapabilities,
+    Rule::BaselineHostNamespace,
+    Rule::BaselineUnconfined,
+    Rule::BaselineHostPath,
+    Rule::BaselineDevice,
+    Rule::BaselineUnmasked,
 ];
 
 #[cfg(test)]

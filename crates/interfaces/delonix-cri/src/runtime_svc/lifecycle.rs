@@ -2334,8 +2334,16 @@ pub fn exec_sync(
             .arg(timeout.to_string())
             .arg(delonix_bin());
     }
+    // `--` before the command: it is the pod's (an exec probe, `crictl exec
+    // -s`), and without it a command starting with `-u 0` ran as root inside
+    // the container — see `streaming::subprocess_args`.
     let (status, stdout, stderr) = run_capped(
-        command.arg("container").arg("exec").arg(&name).args(&cmd),
+        command
+            .arg("container")
+            .arg("exec")
+            .arg(&name)
+            .arg("--")
+            .args(&cmd),
         EXEC_SYNC_MAX_OUTPUT,
     )
     .map_err(st)?;

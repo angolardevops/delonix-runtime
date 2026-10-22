@@ -218,6 +218,14 @@ async fn portforward_upgrade(
 /// Builds the `delonix` argv to launch to serve this stream: `logs -f`
 /// (attach — container output) or `exec [-t] <cmd>` (exec). Centralizes the
 /// exec/attach difference that would otherwise be scattered across the handlers.
+///
+/// **`--` before the command is a privilege boundary, not style.** `cmd` is
+/// the pod user's `kubectl exec <pod> -- <cmd>`, and `delonix container exec`
+/// parses options after the container name: without the separator, `kubectl
+/// exec pod -- -u 0 sh` ran `sh` as uid 0 — past `runAsNonRoot`/`runAsUser`,
+/// with nothing but the ordinary `pods/exec` permission (and `-e`/`-w` the
+/// same way). Measured: `container exec x -u` answered «a value is required
+/// for '--user'».
 pub fn subprocess_args(attach: bool, cmd: &[String], name: &str, tty: bool) -> Vec<String> {
     if attach {
         vec![
@@ -232,13 +240,51 @@ pub fn subprocess_args(attach: bool, cmd: &[String], name: &str, tty: bool) -> V
             "exec".into(),
             "-t".into(),
             name.to_string(),
+            "--".into(),
         ];
         a.extend(cmd.iter().cloned());
         a
     } else {
-        let mut a = vec!["container".into(), "exec".into(), name.to_string()];
+        let mut a = vec![
+            "container".into(),
+            "exec".into(),
+            name.to_string(),
+            "--".into(),
+        ];
         a.extend(cmd.iter().cloned());
         a
+    }
+}
+
+#[cfg(test)]
+mod tests_subprocess_args {
+    use super::subprocess_args;
+
+    fn v(x: &[&str]) -> Vec<String> {
+        x.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A pod user's command that starts with `-` stays the command: it never
+    /// reaches `container exec` as its `--user`/`--env`/`--workdir`.
+    #[test]
+    fn the_exec_command_follows_a_separator_in_both_modes() {
+        let cmd = v(&["-u", "0", "id"]);
+        assert_eq!(
+            subprocess_args(false, &cmd, "cri-a", false),
+            v(&["container", "exec", "cri-a", "--", "-u", "0", "id"])
+        );
+        assert_eq!(
+            subprocess_args(false, &cmd, "cri-a", true),
+            v(&["container", "exec", "-t", "cri-a", "--", "-u", "0", "id"])
+        );
+    }
+
+    #[test]
+    fn attach_takes_no_command() {
+        assert_eq!(
+            subprocess_args(true, &v(&["-u", "0"]), "cri-a", false),
+            v(&["container", "logs", "-f", "cri-a"])
+        );
     }
 }
 

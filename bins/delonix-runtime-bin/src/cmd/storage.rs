@@ -367,7 +367,23 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::build_mount;
+    use super::{NetShareSpec, NET_SHARE_FIELDS};
     use std::path::PathBuf;
+
+    /// `NET_SHARE_FIELDS` is the LIVE descendant of the block whose allowlist
+    /// (`SHAREVOLUME_SPEC_FIELDS`) once drifted. This ties it to `NetShareSpec`
+    /// so it cannot drift again: add a field to the struct and this fails until
+    /// the const lists it, so a `serverr:` typo stays caught.
+    #[test]
+    fn net_share_fields_cover_exactly_the_struct() {
+        let from_struct = crate::cmd::manifest::schema_field_names::<NetShareSpec>();
+        let mut from_const: Vec<String> = NET_SHARE_FIELDS.iter().map(|s| s.to_string()).collect();
+        from_const.sort();
+        assert_eq!(
+            from_struct, from_const,
+            "NET_SHARE_FIELDS divergiu de NetShareSpec — actualiza a const"
+        );
+    }
 
     #[test]
     fn nfs_forma_servidor_export() {

@@ -457,8 +457,57 @@ fn resolve_token(literal: Option<String>, secret_ref: Option<String>) -> Result<
                 .into(),
             ));
         }
+        // A token is written into a file (pinggy's ssh config) and into an
+        // environment variable: whitespace or a control character in it would
+        // be a second line of that config. No provider issues one.
+        if t.is_empty() || t.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(Error::Invalid(
+                super::po::t("token cannot be empty or contain whitespace or control characters")
+                    .into(),
+            ));
+        }
     }
     Ok(token)
+}
+
+/// pinggy takes its token as the SSH user, and an ssh destination
+/// `<token>@host` is argv — readable by every local user. `ssh` reads the user
+/// from a config file too, so the token goes into one, `0600`, next to the
+/// tunnel's log, and the argv names only the host. `-F` also means the user's
+/// own `~/.ssh/config` is not read, which an agent that only forwards one port
+/// never needed.
+fn write_pinggy_ssh_config(name: &str, token: &str) -> Result<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let dir = tunnels_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| Error::Runtime {
+        context: "write pinggy ssh config",
+        message: e.to_string(),
+    })?;
+    let path = dir.join(format!("{name}.ssh_config"));
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|e| Error::Runtime {
+            context: "write pinggy ssh config",
+            message: e.to_string(),
+        })?;
+    let _ = std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+    f.write_all(pinggy_ssh_config(token).as_bytes())
+        .map_err(|e| Error::Runtime {
+            context: "write pinggy ssh config",
+            message: e.to_string(),
+        })?;
+    Ok(path)
+}
+
+/// The config body. PURE — the token is validated by [`resolve_token`]
+/// (no whitespace, no control character), so it cannot open a second line.
+fn pinggy_ssh_config(token: &str) -> String {
+    format!("Host *\n  User {token}\n")
 }
 
 fn config_hash(spec: &TunnelSpec, token: &Option<String>) -> String {
@@ -731,18 +780,35 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
 /// matching URL via `extract` for up to 15s (best-effort: a provider slow to
 /// print its URL just leaves `public_url: None`, not an error — the tunnel
 /// IS up either way).
+/// `secret_env` carries a provider credential to the agent by ENVIRONMENT,
+/// never by argv: `/proc/<pid>/cmdline` is readable by every local user
+/// (`ps -ef` prints it), `/proc/<pid>/environ` only by this uid and root. The
+/// agent's log is `0600` for a related reason: ngrok writes the authtoken it
+/// was given into its own log when the account refuses it (measured, v3.39:
+/// «Your authtoken: …»).
 fn spawn_and_capture(
     rec: &mut TunnelRecord,
     bin: &str,
     args: &[String],
+    secret_env: Option<(&str, &str)>,
     extract: impl Fn(&str) -> Option<String>,
 ) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
     let path = log_path(&rec.name);
-    let log = std::fs::File::create(&path).map_err(|e| Error::Runtime {
-        context: "open tunnel log",
-        message: e.to_string(),
-    })?;
+    let log = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|e| Error::Runtime {
+            context: "open tunnel log",
+            message: e.to_string(),
+        })?;
+    // `mode` applies only on creation: a log a previous build left 0644 is
+    // tightened here, before the agent can write a token into it.
+    let _ = std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
     let log2 = log.try_clone().map_err(|e| Error::Runtime {
         context: "clone log",
         message: e.to_string(),
@@ -757,6 +823,9 @@ fn spawn_and_capture(
     // — the same measurement that denied `ingress_proxy` this proof (ACH-017),
     // with the difference that WE spawn this child and can simply set it.
     cmd.env("DELONIX_ROOT", state_root());
+    if let Some((k, v)) = secret_env {
+        cmd.env(k, v);
+    }
     // SAFETY: setsid in the child (post-fork, pre-exec) detaches it from this
     // process so it survives the CLI exiting — same pattern as `ingress_proxy`.
     unsafe {
@@ -919,11 +988,16 @@ fn spawn_pinggy(rec: &mut TunnelRecord, token: Option<&str>) -> Result<()> {
 fn spawn_pinggy_at(rec: &mut TunnelRecord, token: Option<&str>, host: &str) -> Result<()> {
     // The `-R0` port (dynamic, server-assigned) is what makes this work with
     // zero prior setup.
-    let user_host = match token {
-        Some(t) => format!("{t}@{host}"),
-        None => host.to_string(),
-    };
-    let args = vec![
+    let mut args = Vec::new();
+    if let Some(t) = token {
+        args.push("-F".to_string());
+        args.push(
+            write_pinggy_ssh_config(&rec.name, t)?
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    args.extend([
         "-p".to_string(),
         "443".to_string(),
         "-o".to_string(),
@@ -941,8 +1015,8 @@ fn spawn_pinggy_at(rec: &mut TunnelRecord, token: Option<&str>, host: &str) -> R
         // that OpenSSH honors it (a `--`-prefixed destination is treated
         // literally, never as an option, regardless of its content).
         "--".to_string(),
-        user_host,
-    ];
+        host.to_string(),
+    ]);
     if rec.hostname.is_some() {
         eprintln!(
             "tunnel: {}",
@@ -960,7 +1034,7 @@ fn spawn_pinggy_at(rec: &mut TunnelRecord, token: Option<&str>, host: &str) -> R
     // (rather than trying to enumerate every real tunnel domain) is the
     // robust signal: whatever the assigned domain looks like this time, it
     // is not that one fixed host.
-    spawn_and_capture(rec, "ssh", &args, |t| {
+    spawn_and_capture(rec, "ssh", &args, None, |t| {
         find_url_where(t, |u| {
             u.contains("pinggy") && !u.contains("dashboard.pinggy.io")
         })
@@ -1055,10 +1129,9 @@ fn spawn_ngrok(
         "--log".to_string(),
         "stdout".to_string(),
     ];
-    if let Some(t) = token {
-        args.push("--authtoken".to_string());
-        args.push(t.to_string());
-    }
+    // The authtoken goes by environment (`NGROK_AUTHTOKEN`, read by ngrok v3 —
+    // measured: a bogus value is reported back as ERR_NGROK_105), never as
+    // `--authtoken`, where every local user's `ps` would print it.
     if let Some(h) = hostname {
         // Reserved/custom domain — paid plans only; ngrok itself errors
         // clearly if the account doesn't have it, we don't pre-validate.
@@ -1082,7 +1155,13 @@ fn spawn_ngrok(
     }
     // ngrok's own log isn't a reliable place to scrape the URL from (format
     // varies by version); its local agent API is the documented way.
-    spawn_and_capture(rec, "ngrok", &args, |_| None)?;
+    spawn_and_capture(
+        rec,
+        "ngrok",
+        &args,
+        token.map(|t| ("NGROK_AUTHTOKEN", t)),
+        |_| None,
+    )?;
     poll_ngrok_api(rec);
     Ok(())
 }
@@ -1183,7 +1262,7 @@ fn spawn_cloudflare_quick(rec: &mut TunnelRecord, insecure_skip_tls_verify: bool
     if insecure_skip_tls_verify {
         args.push("--no-tls-verify".to_string());
     }
-    spawn_and_capture(rec, "cloudflared", &args, |t| {
+    spawn_and_capture(rec, "cloudflared", &args, None, |t| {
         find_url_containing(t, ".trycloudflare.com")
     })
 }
@@ -1204,11 +1283,11 @@ fn spawn_cloudflare_named(
     hostname: Option<&str>,
     insecure_skip_tls_verify: bool,
 ) -> Result<()> {
+    // The token by environment (`$TUNNEL_TOKEN`, cloudflared's own name for
+    // `--token`, per its `--help`), never on the argv `ps` prints.
     let mut args = vec![
         "tunnel".to_string(),
         "run".to_string(),
-        "--token".to_string(),
-        token.to_string(),
         "--url".to_string(),
         cloudflare_origin_url(rec.local_port, insecure_skip_tls_verify),
     ];
@@ -1223,7 +1302,13 @@ fn spawn_cloudflare_named(
     if let Some(h) = hostname {
         rec.public_url = Some(format!("https://{h}"));
     }
-    spawn_and_capture(rec, "cloudflared", &args, |_| None)
+    spawn_and_capture(
+        rec,
+        "cloudflared",
+        &args,
+        Some(("TUNNEL_TOKEN", token)),
+        |_| None,
+    )
 }
 
 /// One row of `get gateways`.
@@ -1346,6 +1431,8 @@ pub(crate) fn cmd_rm(name: &str) -> Result<()> {
     stop_process(&rec);
     store.remove(name)?;
     let _ = std::fs::remove_file(log_path(name));
+    // The pinggy credential file, when there was one.
+    let _ = std::fs::remove_file(tunnels_dir().join(format!("{name}.ssh_config")));
     println!("tunnel/{name}: {}", super::po::t("removed"));
     Ok(())
 }
@@ -1843,5 +1930,23 @@ mod tests {
         };
         store.save("p", &pinggy_rec).unwrap();
         assert!(other_alive_ngrok(&store, "mine").unwrap().is_none());
+    }
+
+    /// A provider credential never lands in a world-readable place: the
+    /// token is refused if it could open a second line of the ssh config.
+    #[test]
+    fn a_token_with_whitespace_or_a_control_character_is_refused() {
+        for bad in ["a b", "a\nHost evil", "a\tb", ""] {
+            assert!(
+                super::resolve_token(Some(bad.to_string()), None).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(super::resolve_token(Some("tok_123+tcp".into()), None).is_ok());
+    }
+
+    #[test]
+    fn the_pinggy_config_names_the_token_as_the_user_and_nothing_else() {
+        assert_eq!(super::pinggy_ssh_config("t0k"), "Host *\n  User t0k\n");
     }
 }

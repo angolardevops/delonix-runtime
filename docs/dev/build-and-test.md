@@ -318,6 +318,7 @@ cgroups, the network holder or VM boot works — that needs a live run (see
 | `lang` | lang ratchet |
 | `capability` | capability ratchet |
 | `cli-exec` | cli execution ratchet |
+| `folhas` | leaf inventory ratchet |
 | `arch` | arch fitness |
 | `contract` | contract gate |
 | `version` | version gate |

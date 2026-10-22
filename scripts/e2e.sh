@@ -2596,6 +2596,93 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
 else
   skip "private egress" "shared state — the check would write the real node's policy.json"
 fi
+# workloadSecurity: baseline (security audit #4): what `--privileged` is made of
+# is refused by the node's ONE admission point, on `run` AND on the hot paths
+# (`container update --volume-add`, `vm update --disk-add`), and a manifest VM
+# goes through it like `vm create`. Every refusal is checked by the POLICY'S
+# message, not the rc alone: a run that fails for another reason must not read
+# as the policy working. Writes policy.json, so isolated state only.
+if [[ "$E2E_ISOLATED" == 1 ]]; then
+  WS="ws-$PFX"; POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
+  refused() {  # <args…> → 0 when the run is refused BY THE POLICY, exit 77, and created nothing
+    local out; out=$("$BIN" container run --rm --net none "$@" "$IMG" true 2>&1)
+    [[ $? -eq 77 ]] && grep -q "workloadSecurity: baseline" <<<"$out"
+  }
+  printf '{"denyPrivileged":true}\n' > "$POL"
+  check "baseline: denyPrivileged alone names the hole it leaves (lint)" ok bash -c \
+    "'$BIN' container run --rm --net none '$IMG' true 2>&1 | grep -q POLICY-PRIVILEGE-EQUIVALENTS-OPEN"
+  printf '{"workloadSecurity":"baseline"}\n' > "$POL"
+  check "baseline: --cap-add ALL is refused" ok refused --cap-add ALL
+  check "baseline: --cap-add SYS_ADMIN is refused" ok refused --cap-add SYS_ADMIN
+  check "baseline: --host-pid is refused" ok refused --host-pid
+  check "baseline: seccomp=unconfined is refused" ok refused --security-opt seccomp=unconfined
+  check "baseline: a host-path bind mount is refused" ok refused -v /etc:/hostetc:ro
+  check "baseline: a host device is refused" ok refused --device /dev/null
+  check "baseline: --gpus dri is refused" ok refused --gpus dri
+  check "baseline: a --masked-path list that drops the defaults is refused" ok refused --masked-path /x
+  check "baseline: an ordinary container with an allowed capability and a named volume runs" ok \
+    "$BIN" container run --rm --net none --cap-add NET_BIND_SERVICE -v "ws-vol-$PFX":/d "$IMG" true
+  # The CRI's capability ceiling re-states the engine's whole default set as
+  # `--cap-drop ALL` plus one `--cap-add` each (NET_RAW and NET_BROADCAST
+  # included, which the PSS list does not have). That is what a plain run
+  # gets, so it must run, with the same effective set; measured refused on
+  # 2026-10-21 before `ContainerHardening::default_caps`, and no pod could
+  # start on a baseline node. A capability beyond both lists still is not.
+  DEFCAPS=(--cap-drop ALL)
+  for c in CHOWN DAC_OVERRIDE FOWNER FSETID KILL SETGID SETUID SETPCAP NET_BIND_SERVICE \
+           NET_BROADCAST NET_RAW SYS_CHROOT AUDIT_WRITE SETFCAP; do DEFCAPS+=(--cap-add "$c"); done
+  check "baseline: the CRI's re-stated default capability set runs, with the plain run's CapEff" ok bash -c "
+    plain=\$('$BIN' container run --rm --net none '$IMG' grep CapEff /proc/self/status 2>/dev/null)
+    stated=\$('$BIN' container run --rm --net none ${DEFCAPS[*]} '$IMG' grep CapEff /proc/self/status 2>/dev/null)
+    [[ -n \$plain && \$plain == \"\$stated\" ]]"
+  check "baseline: …and SYS_ADMIN next to the default set is still refused" ok \
+    refused "${DEFCAPS[@]}" --cap-add SYS_ADMIN
+  if "$BIN" container run -d --name "$WS" --net none "$IMG" sleep 900 >/dev/null 2>&1; then
+    check "baseline: update --volume-add of a host path is refused" ok bash -c \
+      "'$BIN' container update '$WS' --volume-add /etc:/hostetc:ro 2>&1 | grep -q 'workloadSecurity: baseline'"
+    check "baseline: …and the host path did not reach the container" fail \
+      "$BIN" container exec "$WS" -- test -e /hostetc/hostname
+    check "baseline: update --volume-add of a named volume still works" ok \
+      "$BIN" container update "$WS" --volume-add "ws-vol-$PFX":/d
+    # The CRI's argv shape (`exec <name> -- <cmd>`): a command that starts with
+    # `-u 0` is the command, never exec's own --user.
+    check "exec: a command after -- is never an option of exec (no uid 0)" fail bash -c \
+      "'$BIN' container exec '$WS' -- -u 0 id 2>&1 | grep -q 'uid=0'"
+  else
+    skip "baseline: update --volume-add" "could not start the container"
+  fi
+  "$BIN" container rm -f "$WS" >/dev/null 2>&1
+  printf '{"denyDevicePassthrough":true}\n' > "$POL"
+  cat > "$OUT/ws-vm-$PFX.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata: { name: ws-vm-$PFX }
+spec:
+  disk: /nonexistent/golden.qcow2
+  devices: ["0000:01:00.0"]
+YAML
+  check "vm admission: a kind: VirtualMachine with devices is refused like vm create --device" ok bash -c \
+    "'$BIN' stack apply -f '$OUT/ws-vm-$PFX.yaml' 2>&1 | grep -q 'device passthrough (0000:01:00.0'"
+  ln -sf /dev/null "$OUT/ws-disk-$PFX.qcow2"
+  check "vm admission: vm update --disk-add of a symlink to a device is refused" ok bash -c \
+    "'$BIN' vm update ws-novm --disk-add '$OUT/ws-disk-$PFX.qcow2' 2>&1 | grep -q 'device passthrough'"
+  rm -f "$POL" "$OUT/ws-disk-$PFX.qcow2"
+  # A RuntimePolicy field converges in place: before the fix, turning
+  # denyPrivateEgress on in an applied manifest planned an impossible `-/+`.
+  rp() { printf 'apiVersion: security.delonix.io/v1alpha1\nkind: RuntimePolicy\nmetadata: { name: node }\nspec:\n  denyPrivateEgress: %s\n' "$1" > "$OUT/ws-rp-$PFX.yaml"; }
+  rp false; "$BIN" stack apply -f "$OUT/ws-rp-$PFX.yaml" >/dev/null 2>&1
+  rp true
+  check "RuntimePolicy: denyPrivateEgress false→true plans an in-place update, not a replace" ok bash -c \
+    "out=\$('$BIN' stack plan -f '$OUT/ws-rp-$PFX.yaml' 2>&1); grep -q '^  ~ *RuntimePolicy/node' <<<\"\$out\" && ! grep -q '[-]/+' <<<\"\$out\""
+  "$BIN" stack apply -f "$OUT/ws-rp-$PFX.yaml" >/dev/null 2>&1
+  check "RuntimePolicy: after the apply the plan has nothing to do" 0 \
+    "$BIN" stack plan -f "$OUT/ws-rp-$PFX.yaml" --detailed-exitcode
+  "$BIN" policy unset --force >/dev/null 2>&1
+  "$BIN" volume rm "ws-vol-$PFX" >/dev/null 2>&1
+  rm -f "$POL"
+else
+  skip "workloadSecurity baseline" "shared state — the check would write the real node's policy.json"
+fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
@@ -2743,7 +2830,9 @@ if [[ "$E2E_HAVE_IMAGE" == "1" ]]; then
   cat >"$DELONIX_ROOT/policy.json" <<'JSON'
 {"denyPrivileged": true, "denyHostNetwork": true, "denyLatestTag": true, "allowedRegistries": ["ghcr.io"]}
 JSON
-  check "com política, o run é recusado" fail \
+  # Uma recusa da política é de PERMISSÃO (DX-7802), exit 77 — nunca o 1 de um
+  # pedido mal formado.
+  check "com política, o run é recusado (exit 77)" 77 \
     "$BIN" container run --rm --net host "$IMG" true
   check "…e nomeia várias razões de uma vez" ok bash -c \
     "test \$('$BIN' container run --rm --net host '$IMG' true 2>&1 | grep -c 'runtime policy') -ge 2"
@@ -6147,10 +6236,58 @@ check "ingress ls json separa governado de aberto" ok bash -c \
   # `ls` for acrescentado, é uma escolha e não um acidente.
   check "system boot ls NÃO existe (é status)" 2 "$BIN" system boot ls
 
-  # `system boot enable/disable` escreve units systemd em ~/.config/systemd/user,
-  # que o DELONIX_ROOT NÃO redirecciona — num host com produção isso mexe fora
-  # do isolamento. Fica declarado por cobrir, nunca corrido às escondidas.
-  skip "system boot enable/disable" "escreve units em ~/.config/systemd/user, fora do DELONIX_ROOT"
+  # --- system boot enable / disable: the units, in a HOME of our own ----------
+  # These two write systemd units under `$HOME/.config/systemd/user` (boot.rs
+  # reads HOME directly), which the DELONIX_ROOT does NOT redirect — which is
+  # why they were skipped here for so long. HOME pointed inside the run's own
+  # root makes the pair measurable without touching the host: this operator's
+  # real `~/.config/systemd/user` holds their own tooling, and a `disable` that
+  # deleted a unit it had not written is a defect this repo has already had
+  # (hence `claims_unit`, the OWN_MARKER filter). So the checks below assert
+  # three things and not the exit code: the unit APPEARS, it is GONE after
+  # `disable`, and a foreign unit sitting beside it SURVIVES.
+  #
+  # `systemctl --user` still talks to the live user manager, which resolves its
+  # search path from the real HOME and so will not find these units: the call
+  # fails and `enable` writes the files anyway (`fs::write`, unconditional).
+  # That is the intended shape here — the files are the contract, not the
+  # manager's opinion of them. `loginctl enable-linger` is a no-op on a host
+  # that already has `Linger=yes`; it is left as it was found either way.
+  BOOTHOME="$DELONIX_ROOT/boot-home"
+  BOOTUD="$BOOTHOME/.config/systemd/user"
+  REALUD="$HOME/.config/systemd/user"
+  mkdir -p "$BOOTUD"
+  # A foreign unit named like the one from the real incident. No OWN_MARKER, so
+  # `disable` has no claim on it.
+  printf '[Unit]\nDescription=not written by delonix\n[Service]\nExecStart=/bin/true\n' \
+    >"$BOOTUD/delonix-issues-sync.service"
+  # The host's own units, before. The whole SUBTREE, and symlinks with it: the
+  # likeliest way this pair reaches outside the isolation is not a unit file,
+  # it is `systemctl --user enable` dropping a link into
+  # `default.target.wants/`. Name, type and size, so an addition, a deletion,
+  # an edit or a retargeted link all show up.
+  # Same expression as the check below, which runs in its own shell and so
+  # cannot share a helper.
+  REAL_BEFORE="$(find "$REALUD" -printf '%p %y %s\n' 2>/dev/null | sort | md5sum)"
+  # A container that WANTS to be up, so `enable` has a unit to write at all:
+  # the units follow the store, and the section above removed its container.
+  # `--net none` on purpose — this leaf has nothing to do with the SDN, and the
+  # holder is shared.
+  BOOTC="bt-$PFX"
+  "$BIN" container run -d --net none --restart always --name "$BOOTC" "$IMG" sleep 120 >/dev/null 2>&1 || true
+  check "system boot enable: the unit for a restart=always container is written" ok bash -c "
+    HOME='$BOOTHOME' '$BIN' system boot enable >/dev/null 2>&1 || exit 1
+    ls '$BOOTUD' | grep -q '$BOOTC' || { echo 'no unit for $BOOTC:'; ls -A '$BOOTUD'; exit 1; }"
+  check "system boot disable: the written unit goes, the foreign one stays" ok bash -c "
+    HOME='$BOOTHOME' '$BIN' system boot disable >/dev/null 2>&1 || exit 1
+    ls '$BOOTUD' | grep -q '$BOOTC' && { echo 'the unit it wrote survived disable'; exit 1; }
+    [ -f '$BOOTUD/delonix-issues-sync.service' ] || { echo 'disable DELETED a unit it did not write'; exit 1; }
+    grep -q 'not written by delonix' '$BOOTUD/delonix-issues-sync.service' || { echo 'the foreign unit was rewritten'; exit 1; }"
+  check "system boot enable/disable left the host's own units alone" ok bash -c "
+    now=\$(find '$REALUD' -printf '%p %y %s\n' 2>/dev/null | sort | md5sum)
+    [ \"\$now\" = '$REAL_BEFORE' ] || {
+      echo 'the host unit dir changed: was $REAL_BEFORE now '\"\$now\"; exit 1; }"
+  "$BIN" container rm -f "$BOOTC" >/dev/null 2>&1 || true
 
   # --- reiniciar UM membro de um pod: o fim do antigo não apaga o novo ---------
   # Medido a 2026-09-17 na `main` (6209d59d/4fc211a6): `stop -t 0` + `start` de um
@@ -7886,6 +8023,47 @@ check "net l4guard status: the boot guard is live, both meter rules with counter
   grep -q '^l4guard: active' <<<\"\$out\" || { echo 'the guard is not reported active'; exit 1; }
   grep -q 'dlx_conn_rate' <<<\"\$out\" && grep -q 'dlx_conn_count' <<<\"\$out\" || { echo 'a meter rule is missing'; exit 1; }
   grep -qE 'packets, [0-9]+ bytes dropped' <<<\"\$out\" || { echo 'no drop counters'; exit 1; }"
+
+# --- net l4guard set / clear: the rule appears, and it goes ------------------
+# `set` is best-effort BY DESIGN: if the kernel rejects `meter`, `do_l4guard`'s
+# `nft -c` pre-flight applies nothing and still returns 0. So the exit code
+# proves nothing here, and the values have to be read back out of the ruleset
+# the holder actually carries. Distinctive values, not the boot guard's 50/200,
+# so a stale rule cannot pass for a new one — and the check above already
+# proved `meter` works on this kernel, which makes a rule that does not appear
+# a real failure rather than a documented degrade.
+check "net l4guard set: the two meter rules appear with the values given" ok bash -c "
+  '$BIN' net l4guard set 77 333 >/dev/null 2>&1 || exit 1
+  out=\$('$BIN' net l4guard status 2>&1)
+  grep -q '^l4guard: active' <<<\"\$out\" || { echo 'not active after set'; echo \"\$out\"; exit 1; }
+  grep -q 'over 77/second' <<<\"\$out\" || { echo 'the rate rule is not the one set'; echo \"\$out\"; exit 1; }
+  grep -q 'ct count over 333' <<<\"\$out\" || { echo 'the count rule is not the one set'; echo \"\$out\"; exit 1; }"
+# The class of the refusal, not just that it refused: both rates are `u32`
+# positionals, so a non-numeric one is a USAGE error (2) and clap rejects it
+# before the engine is reached — which is why this is safe to assert against a
+# shared holder. A collapse of this to 1 would mean the guard started taking
+# the argument and failing later, with the ruleset already touched.
+check "net l4guard set: a non-numeric rate is a usage error, not an engine call" 2 \
+  "$BIN" net l4guard set abc 1
+# The half that was actually broken: `clear` listed `fwdeny` while `set` wrote
+# to `forward`, so it deleted nothing, returned 0 and printed «l4guard:
+# cleared» with the guard still live and still dropping. Asserting the rules
+# are GONE — not that the command exited 0 — is the entire point of this check.
+check "net l4guard clear: both meter rules leave the ruleset" ok bash -c "
+  '$BIN' net l4guard clear >/dev/null 2>&1 || exit 1
+  out=\$('$BIN' net l4guard status 2>&1)
+  grep -q 'dlx_conn_rate' <<<\"\$out\" && { echo 'the rate rule survived clear'; echo \"\$out\"; exit 1; }
+  grep -q 'dlx_conn_count' <<<\"\$out\" && { echo 'the count rule survived clear'; echo \"\$out\"; exit 1; }
+  grep -q 'l4guard: not active' <<<\"\$out\" || { echo 'cleared, but not reported inactive'; echo \"\$out\"; exit 1; }"
+# Put the infra's own guard back. `ensure_up` installs 50/200 at boot, and this
+# holder is shared by UID across state roots: leaving the ingress unprotected
+# because a test ran here is not an acceptable side effect of measuring.
+check "net l4guard set: the boot guard is restored to 50/200" ok bash -c "
+  '$BIN' net l4guard set 50 200 >/dev/null 2>&1 || exit 1
+  out=\$('$BIN' net l4guard status 2>&1)
+  grep -q 'over 50/second' <<<\"\$out\" || { echo 'the boot guard rate did not come back'; echo \"\$out\"; exit 1; }
+  grep -q 'ct count over 200' <<<\"\$out\" || { echo 'the boot guard cap did not come back'; echo \"\$out\"; exit 1; }"
+
 # Rootless has no CAP_BPF, so `flow` says the eBPF datapath is off and falls
 # back to the veth counters — a row per container on the SDN, with its address.
 check "net flow: the veth fallback lists the container with its SDN address" ok bash -c "
