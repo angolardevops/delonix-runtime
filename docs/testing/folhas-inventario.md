@@ -34,13 +34,13 @@
 
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| cli | **291** | 272 | 11 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| cli | **300** | 272 | 20 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
 | node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
 | mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
 | mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
 | cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
 | kinds | **130** | 41 | 50 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 26 kinds × 5 verbos |
-| **total** | **561** | **353** | **75** | **57** | **60** | **16** | — |
+| **total** | **570** | **353** | **84** | **57** | **60** | **16** | — |
 
 <!-- folhas:counts:end -->
 
@@ -69,7 +69,7 @@ legítimas diferentes:
 
 ---
 
-## 1. CLI — 291 folhas
+## 1. CLI — 300 folhas
 
 `scripts/cli-tree.sh --count` → **316 comandos · 273 folhas · 40 grupos**;
 classes de reestruturação 169 `~`, 85 `=`, 17 `→`, 2 `!`. `--gate` **rc=0**.
@@ -100,6 +100,14 @@ classes de reestruturação 169 `~`, 85 `=`, 17 `→`, 2 `!`. `--gate` **rc=0**.
 > <verb>`/`image pull` (essas são **A**), nunca o atalho de raiz. Sobem a **A**
 > quando um check conduzir a forma de raiz e o trace for regravado de uma
 > corrida real.
+>
+> **Actualização de 2026-10-22 (tabela Docker/Podman completada).** A CLI
+> cresceu para **300 folhas**: os 9 atalhos de raiz que faltavam —
+> `kill/attach/stats` (container) e `images/rmi/tag/save/load/push` (imagem).
+> Mesma razão das anteriores: estão em **B**, partilham a struct e o handler da
+> forma canónica `container <verb>`/`image <verb>` (essas são **A**, ou **E**
+> no caso de `image push`), e a bateria exerce a canónica, não o atalho. Sobem a
+> **A** quando um check conduzir a forma de raiz e o trace for regravado.
 
 As 10 que nenhuma corrida executa, e o que **cada uma** precisa — medido, não
 presumido. Os irmãos de cada grupo já correm, e é isso que as torna baratas:
