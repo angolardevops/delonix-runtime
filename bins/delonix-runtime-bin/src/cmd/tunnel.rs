@@ -49,6 +49,7 @@ use std::time::{Duration, Instant};
 
 use clap::Subcommand;
 use delonix_model::{Error, Result};
+use delonix_node::{proc_starttime, safe_to_signal};
 use delonix_state::JsonStore;
 use serde::{Deserialize, Serialize};
 
@@ -199,7 +200,35 @@ struct TunnelRecord {
     /// no-op; a DIFFERENT one restarts the agent (no provider here supports
     /// hot-reload the way the HTTPRoute proxy's SIGHUP does).
     config_hash: String,
+    /// The provider AGENT's pid — the `ssh`/`ngrok`/`cloudflared` the
+    /// supervisor spawned and `waitpid`s. Changes on every respawn.
     pid: Option<i32>,
+    /// `proc_starttime` of `pid` (field 22 of `/proc/<pid>/stat`). Pins the
+    /// exact process instance so a recycled pid is never signalled by mistake
+    /// — the same guard `delonix-compute`'s `Container::is_live` uses.
+    /// `#[serde(default)]`: a pre-supervision record has none and falls back to
+    /// the argv-only guard (`agent_argv_is_ours`).
+    #[serde(default)]
+    pid_starttime: Option<u64>,
+    /// The detached SUPERVISOR's pid — a `fork` of this CLI (no exec) that owns
+    /// the agent, `waitpid`s it, and respawns it with backoff until this record
+    /// is removed or its `config_hash` changes. It `setsid`s, so its pid is
+    /// also the agent's process-GROUP id: tearing the group down
+    /// (`killpg`) takes the agent with it, even one caught mid-respawn.
+    /// `None` on a pre-supervision record (its agent `setsid`'d itself and has
+    /// no parent left) and while `--no-supervise` is not a thing — every new
+    /// apply supervises.
+    #[serde(default)]
+    supervisor_pid: Option<i32>,
+    /// `proc_starttime` of `supervisor_pid` — same PID-reuse guard as
+    /// `pid_starttime`, for the one process `is_alive` now anchors a supervised
+    /// tunnel's liveness to.
+    #[serde(default)]
+    supervisor_starttime: Option<u64>,
+    /// How many times the supervisor has respawned the agent. Status only
+    /// (`describe`), like a container's `RESTARTS`.
+    #[serde(default)]
+    restarts: u32,
     public_url: Option<String>,
     created_unix: u64,
     started_unix: Option<u64>,
@@ -644,14 +673,23 @@ fn env_allows_this_root(raw: &[u8], root: &std::path::Path) -> bool {
     }
 }
 
-/// The agent is genuinely alive AND is really ours.
+/// Whether the AGENT process is genuinely alive AND is really ours.
 ///
 /// Its first version asked whether the `/proc/<pid>/cmdline` CONTAINED the
 /// provider's binary name, and called the gap "rare". It was not rare: see
 /// [`agent_argv_is_ours`] for what passed it, measured. The pid read here is the
-/// one [`stop_process`] sends `SIGTERM` to.
-fn is_alive(rec: &TunnelRecord) -> bool {
+/// one [`signal_agent`] sends `SIGTERM` to when the supervisor is already gone
+/// and the agent was left orphaned.
+///
+/// `pid_starttime` is an ADDITIONAL guard on top of the argv/root pair: a
+/// recycled pid that happens to spell a provider's argv under this root still
+/// fails the starttime check. A pre-supervision record carries no starttime,
+/// and [`safe_to_signal`] tolerates that (the argv/root guard alone, as before).
+fn agent_alive(rec: &TunnelRecord) -> bool {
     let Some(pid) = rec.pid else { return false };
+    if !safe_to_signal(pid, rec.pid_starttime) {
+        return false;
+    }
     let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
         return false;
     };
@@ -662,18 +700,69 @@ fn is_alive(rec: &TunnelRecord) -> bool {
     env_allows_this_root(&raw, &state_root())
 }
 
-fn stop_process(rec: &TunnelRecord) {
+/// Whether this tunnel's SUPERVISOR is alive. `None` on a pre-supervision
+/// record. The supervisor is a `fork` of this CLI (no exec), so its argv is the
+/// original `delonix …` command and cannot identify it — the recorded
+/// pid+starttime pins the exact instance instead, which is enough precisely
+/// because WE forked it and wrote both down the same instant.
+fn supervisor_alive(rec: &TunnelRecord) -> bool {
+    match rec.supervisor_pid {
+        Some(pid) => safe_to_signal(pid, rec.supervisor_starttime),
+        None => false,
+    }
+}
+
+/// Whether the tunnel is up. A SUPERVISED tunnel is up for as long as its
+/// supervisor lives: an agent that just died is in the backoff window and the
+/// supervisor is about to bring it back, which is exactly the state an operator
+/// wants reported as "Running (recovering)", not "Stopped". A pre-supervision
+/// record has no supervisor, so it falls back to the agent itself.
+fn is_alive(rec: &TunnelRecord) -> bool {
+    if rec.supervisor_pid.is_some() {
+        supervisor_alive(rec)
+    } else {
+        agent_alive(rec)
+    }
+}
+
+/// SIGTERM the supervisor's whole process group when the supervisor is ours,
+/// so the agent it is the parent of dies with it — including one caught between
+/// `spawn_and_capture` and its record write (not yet in the record, so
+/// [`signal_agent`] below could not find it by pid). The supervisor `setsid`s,
+/// making its pid the group id of every agent it spawns.
+fn signal_supervisor(rec: &TunnelRecord) {
+    if let Some(pid) = rec.supervisor_pid {
+        if safe_to_signal(pid, rec.supervisor_starttime) {
+            // SAFETY: negative pid = the process group led by `pid`, which
+            // `safe_to_signal` just confirmed is our exact supervisor instance
+            // (pid+starttime), so the group is ours and nobody else's.
+            unsafe { libc::killpg(pid, libc::SIGTERM) };
+        }
+    }
+}
+
+/// SIGTERM the agent directly, by its recorded pid. Catches an agent ORPHANED
+/// by a supervisor that already died (its group leader gone, so
+/// [`signal_supervisor`] no longer reaches it) — identified by the argv/root
+/// guard, the pre-supervision teardown path unchanged.
+fn signal_agent(rec: &TunnelRecord) {
     if let Some(pid) = rec.pid {
-        if is_alive(rec) {
-            // SAFETY: signalling a PID we just confirmed alive AND ours — the
-            // argv names this record's agent and the environ does not name
-            // another root.
+        if agent_alive(rec) {
+            // SAFETY: signalling a PID confirmed alive, ours (argv+root), and
+            // the same instance (starttime).
             unsafe { libc::kill(pid, libc::SIGTERM) };
         }
     }
 }
 
-/// SIGTERM, then WAIT (bounded) for the agent to actually be gone.
+fn stop_process(rec: &TunnelRecord) {
+    // Supervisor FIRST: signalling the agent while the supervisor lives only
+    // makes it respawn a new one a backoff later.
+    signal_supervisor(rec);
+    signal_agent(rec);
+}
+
+/// SIGTERM, then WAIT (bounded) for the tunnel to actually be gone.
 ///
 /// [`stop_process`] only SIGNALS, and SIGTERM is asynchronous: a provider
 /// agent tears its tunnel down before exiting. `apply_one` replacing a
@@ -682,14 +771,29 @@ fn stop_process(rec: &TunnelRecord) {
 /// port ([`NGROK_WEB_ADDR`]) — reintroducing, from the other side, the exact
 /// cross-wire [`other_alive_ngrok`] exists to prevent.
 ///
-/// Best-effort by design: an agent that outlives the ceiling does not fail
+/// Supervisor first, awaited, THEN the agent: once the supervisor is confirmed
+/// gone it can spawn no replacement, so the agent named in the record (re-read
+/// by the caller) is the last one and killing it ends the tunnel for good.
+///
+/// Best-effort by design: a process that outlives the ceiling does not fail
 /// the apply (the new one is what the operator asked for, and a provider
 /// hung in teardown is not a reason to refuse it), same posture as the
 /// URL-polling deadline in [`spawn_and_capture`].
 fn stop_and_await(rec: &TunnelRecord) {
-    stop_process(rec);
+    signal_supervisor(rec);
+    await_gone(|| supervisor_alive(rec));
+    // The supervisor's own SIGTERM does not reliably reach the agent once the
+    // agent `setsid`? — it does NOT setsid (the supervisor is its session), so
+    // `killpg` above already hit it; this is the belt-and-suspenders path for
+    // an agent orphaned by a supervisor that had died before this call.
+    signal_agent(rec);
+    await_gone(|| agent_alive(rec));
+}
+
+/// Poll `still_alive` to `false`, bounded at 5s. Shared by both waits above.
+fn await_gone(mut still_alive: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && is_alive(rec) {
+    while Instant::now() < deadline && still_alive() {
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -728,51 +832,337 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
         }
         // Awaited, not just signalled: the replacement agent is spawned a few
         // lines down and (for ngrok) wants a local port this one still holds.
+        // Tears down the old SUPERVISOR first so it cannot respawn into the
+        // port the new one is about to take.
         stop_and_await(&existing);
     }
 
-    let now = output::now_unix();
-    let mut rec = TunnelRecord {
-        name: name.to_string(),
-        provider: spec.provider.clone(),
-        local_port: spec.local_port,
-        hostname: spec.hostname.clone(),
-        config_hash: hash,
-        pid: None,
-        public_url: None,
-        created_unix: now,
-        started_unix: None,
-        agent_web_port: None,
-        insecure_skip_tls_verify: spec.insecure_skip_tls_verify,
-    };
+    spawn_supervised(name, spec, token, hash, &store)
+}
 
+/// The provider-agent dispatch, factored out so the supervisor can call it on
+/// every (re)start, not just the first. Fills `rec.pid`/`pid_starttime` and,
+/// best-effort, `rec.public_url`.
+fn spawn_agent(
+    rec: &mut TunnelRecord,
+    spec: &TunnelSpec,
+    token: Option<&str>,
+    store: &JsonStore<TunnelRecord>,
+) -> Result<()> {
     match spec.provider.as_str() {
-        "pinggy" => spawn_pinggy(&mut rec, token.as_deref())?,
+        "pinggy" => spawn_pinggy(rec, token),
         "ngrok" => spawn_ngrok(
-            &mut rec,
-            token.as_deref(),
+            rec,
+            token,
             spec.hostname.as_deref(),
             spec.insecure_skip_tls_verify,
-            &store,
-        )?,
+            store,
+        ),
         "cloudflare" => spawn_cloudflare(
-            &mut rec,
-            token.as_deref(),
+            rec,
+            token,
             spec.hostname.as_deref(),
             spec.insecure_skip_tls_verify,
-        )?,
-        _ => unreachable!(),
+        ),
+        _ => unreachable!("provider validated by apply_one"),
     }
-    rec.started_unix = Some(now);
-    store.save(name, &rec)?;
-    println!(
-        "tunnel/{name}: {} — {}",
-        super::po::t("running"),
-        rec.public_url.as_deref().unwrap_or(super::po::t(
-            "(URL not confirmed yet — see `delonix describe gateways <name>` / the log)"
-        ))
-    );
+}
+
+/// Forks a DETACHED supervisor that owns the agent and keeps it alive, then —
+/// in the parent (the CLI) — waits through a pipe for the first start so
+/// `expose`/`apply` still return only once the tunnel exists (and prints its
+/// URL). Mirrors `delonix-linux::supervise::run_supervised`: one short-lived
+/// process per tunnel, no daemon. The `fork` assumes a single-threaded caller,
+/// which the CLI is (same constraint `run -d --restart` already relies on).
+fn spawn_supervised(
+    name: &str,
+    spec: &TunnelSpec,
+    token: Option<String>,
+    hash: String,
+    store: &JsonStore<TunnelRecord>,
+) -> Result<()> {
+    let mut fds = [0i32; 2];
+    // Close-on-exec: the agent the supervisor execs must NOT inherit the write
+    // end, or the parent's read below would wait for an EOF only the agent
+    // could give — the exact hang `delonix-linux::supervise` documents.
+    // SAFETY: pipe2 fills two fds; used only for the first-start handshake.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(Error::Runtime {
+            context: "tunnel",
+            message: "supervisor handshake pipe".into(),
+        });
+    }
+    let (rd, wr) = (fds[0], fds[1]);
+    // SAFETY: fork of a single-threaded process (the CLI).
+    let sup = unsafe { libc::fork() };
+    if sup < 0 {
+        let e = std::io::Error::last_os_error();
+        // SAFETY: both ends are ours and handed to nobody.
+        unsafe {
+            libc::close(rd);
+            libc::close(wr);
+        }
+        return Err(Error::Runtime {
+            context: "tunnel",
+            message: format!("fork supervisor: {e}"),
+        });
+    }
+    if sup == 0 {
+        // ---- supervisor (child): never returns ----
+        // SAFETY: in the fork: `rd` is the parent's end, closed once; `setsid`
+        // makes this the session + process-group leader, so every agent it
+        // spawns shares its pgid and `killpg` can tear the group down together.
+        unsafe {
+            libc::close(rd);
+            libc::setsid();
+        }
+        supervise_loop(name, spec, token.as_deref(), &hash, store, wr);
+    }
+
+    // ---- parent (CLI): wait for the first start ----
+    // SAFETY: closes the write end; the supervisor keeps its own.
+    unsafe { libc::close(wr) };
+    let (ok, reason) = read_handshake(rd, sup);
+    // SAFETY: `rd` is ours; closed once.
+    unsafe { libc::close(rd) };
+    if !ok {
+        return Err(Error::Runtime {
+            context: "tunnel",
+            message: if reason.is_empty() {
+                super::po::t("the tunnel supervisor died before its first start").into()
+            } else {
+                reason
+            },
+        });
+    }
+    // The supervisor saved the record (its pid, the agent's pid, the URL) BEFORE
+    // the handshake byte, so a reload here sees it.
+    let url = store
+        .load(name)
+        .ok()
+        .and_then(|r| r.public_url)
+        .unwrap_or_else(|| {
+            super::po::t(
+                "(URL not confirmed yet — see `delonix describe gateways <name>` / the log)",
+            )
+            .into()
+        });
+    println!("tunnel/{name}: {} — {url}", super::po::t("running"));
     Ok(())
+}
+
+/// The supervisor's body: (re)start the agent, block on its death, respawn with
+/// capped exponential backoff + jitter, until the record is removed (`rm`) or
+/// its `config_hash` changes (a newer apply took over). Never returns — it ends
+/// by `std::process::exit`.
+fn supervise_loop(
+    name: &str,
+    spec: &TunnelSpec,
+    token: Option<&str>,
+    hash: &str,
+    store: &JsonStore<TunnelRecord>,
+    wr: i32,
+) -> ! {
+    let self_pid = std::process::id() as i32;
+    let self_start = proc_starttime(self_pid);
+    let created = output::now_unix();
+    let mut restarts: u32 = 0;
+    let mut first = true;
+    loop {
+        // Desired state BEFORE a respawn (never on the very first start): a
+        // removed record means `rm`, a changed hash means a newer apply owns
+        // this tunnel now — either way, stop. Same rule as
+        // `supervise::resume_restart`.
+        if !first && !should_keep_running(store, name, hash) {
+            std::process::exit(0);
+        }
+        let mut rec = TunnelRecord {
+            name: name.to_string(),
+            provider: spec.provider.clone(),
+            local_port: spec.local_port,
+            hostname: spec.hostname.clone(),
+            config_hash: hash.to_string(),
+            pid: None,
+            pid_starttime: None,
+            supervisor_pid: Some(self_pid),
+            supervisor_starttime: self_start,
+            restarts,
+            public_url: None,
+            created_unix: created,
+            started_unix: Some(created),
+            agent_web_port: None,
+            insecure_skip_tls_verify: spec.insecure_skip_tls_verify,
+        };
+        let started = spawn_agent(&mut rec, spec, token, store);
+        if started.is_ok() {
+            let _ = store.save(name, &rec);
+        }
+        if first {
+            first = false;
+            // Handshake FIRST (status byte + reason on failure), THEN release
+            // stdio: until the byte is written the parent is still reading, and
+            // a `spawn_agent` error has to reach the user through the pipe, not
+            // this soon-to-be-/dev/null stderr.
+            write_handshake(wr, started.is_ok(), started.as_ref().err());
+            // SAFETY: closes our write end, then redirects stdio to /dev/null so
+            // the detached supervisor holds no terminal.
+            unsafe {
+                libc::close(wr);
+                let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+                if null >= 0 {
+                    libc::dup2(null, 0);
+                    libc::dup2(null, 1);
+                    libc::dup2(null, 2);
+                    if null > 2 {
+                        libc::close(null);
+                    }
+                }
+            }
+            if started.is_err() {
+                // The caller will report this; nothing was saved.
+                std::process::exit(1);
+            }
+        }
+        if started.is_err() {
+            // A RESPAWN whose agent would not start (e.g. the binary vanished
+            // from PATH): back off and try again rather than spin. The first
+            // start's failure already exited above.
+            restarts = restarts.saturating_add(1);
+            std::thread::sleep(backoff_delay(restarts, self_pid));
+            continue;
+        }
+        // The agent is up and we are its parent: block until it dies.
+        if let Some(pid) = rec.pid {
+            wait_for_pid(pid);
+        }
+        // It died. Stop if the desired state says so; else back off and respawn.
+        if !should_keep_running(store, name, hash) {
+            std::process::exit(0);
+        }
+        restarts = restarts.saturating_add(1);
+        std::thread::sleep(backoff_delay(restarts, self_pid));
+    }
+}
+
+/// Whether the supervisor should keep the tunnel alive: the record still exists
+/// (`rm` removes it) AND still names this configuration (a newer apply writes a
+/// different `config_hash` and forks its own supervisor). PURE given the store.
+fn should_keep_running(store: &JsonStore<TunnelRecord>, name: &str, hash: &str) -> bool {
+    matches!(store.load(name), Ok(r) if r.config_hash == hash)
+}
+
+/// Blocks until `pid` (this supervisor's own child) exits, reaping it. Returns
+/// at once with `ECHILD` if it was already reaped (the `WNOHANG` in `pid_alive`
+/// during URL capture can collect an agent that died inside the poll window).
+fn wait_for_pid(pid: i32) {
+    let mut st: libc::c_int = 0;
+    // SAFETY: a blocking waitpid on our own child; ECHILD (already reaped) just
+    // returns -1 and changes nothing.
+    unsafe {
+        libc::waitpid(pid, &mut st, 0);
+    }
+}
+
+/// Capped exponential backoff with jitter, for the `restarts`-th respawn
+/// (`restarts >= 1`). Base doubles 1s→2→4→8→16→32 and stays at 32s, like the
+/// container supervisor; the jitter (0..25% of the base, derived from the
+/// supervisor pid so two tunnels that crash together do not respawn in
+/// lockstep) is added on top. PURE and deterministic for a given (restarts,
+/// seed), so the schedule is testable without sleeping.
+fn backoff_delay(restarts: u32, seed: i32) -> Duration {
+    let base = backoff_base_secs(restarts);
+    let jitter_ceiling = base * 250; // ms; 25% of the base
+    let jitter = backoff_jitter_ms(seed, restarts, jitter_ceiling);
+    Duration::from_millis(base * 1000 + jitter)
+}
+
+/// The base backoff in SECONDS: `1 << (restarts-1)`, capped at 32. Pure.
+fn backoff_base_secs(restarts: u32) -> u64 {
+    let shift = restarts.saturating_sub(1).min(5);
+    (1u64 << shift).min(32)
+}
+
+/// Jitter in ms, in `0..=ceiling`, from a cheap hash of (seed, restarts). No
+/// `rand` dependency and no wall clock — both would make the schedule
+/// untestable; this only needs to DECORRELATE concurrent supervisors, not be
+/// cryptographic. Pure.
+fn backoff_jitter_ms(seed: i32, restarts: u32, ceiling: u64) -> u64 {
+    if ceiling == 0 {
+        return 0;
+    }
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    seed.hash(&mut h);
+    restarts.hash(&mut h);
+    h.finish() % (ceiling + 1)
+}
+
+/// Writes the first-start handshake to the pipe: one status byte (`1` = the
+/// agent started), then — on failure — the error text behind it. Mirrors
+/// `supervise::run_supervised`'s handshake; the parent drains it in
+/// [`read_handshake`].
+fn write_handshake(wr: i32, ok: bool, err: Option<&Error>) {
+    let b = [u8::from(ok)];
+    // SAFETY: writes one byte, then the reason, to our own write end.
+    unsafe {
+        libc::write(wr, b.as_ptr() as *const libc::c_void, 1);
+        if !ok {
+            if let Some(e) = err {
+                let msg = e.to_string();
+                let bytes = msg.as_bytes();
+                libc::write(wr, bytes.as_ptr() as *const libc::c_void, bytes.len());
+            }
+        }
+    }
+}
+
+/// Reads the first-start handshake: `(started, reason)`. Never waits longer than
+/// the supervisor lives — it polls the pipe AND `waitpid`s the supervisor, so a
+/// supervisor that dies before writing is reported as `(false, "")` rather than
+/// hanging the CLI forever (the lingering-writer defect `supervise` documents,
+/// adapted here where the agent could inherit the write end if pipe2 ever lost
+/// its `O_CLOEXEC`).
+fn read_handshake(rd: i32, sup: libc::pid_t) -> (bool, String) {
+    let mut data: Vec<u8> = Vec::new();
+    let mut exited = false;
+    loop {
+        let mut pfd = libc::pollfd {
+            fd: rd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pfd` is valid for the call; poll keeps no pointer.
+        let ready = unsafe { libc::poll(&mut pfd, 1, if exited { 0 } else { 100 }) };
+        if ready > 0 {
+            let mut buf = [0u8; 512];
+            // SAFETY: reads into our own buffer from the descriptor poll flagged.
+            let k = unsafe { libc::read(rd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if k <= 0 {
+                break; // EOF: the write end is gone.
+            }
+            data.extend_from_slice(&buf[..k as usize]);
+            if data[0] == 1 {
+                break; // Started; nothing follows a success.
+            }
+            continue;
+        }
+        if ready < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            break;
+        }
+        if exited {
+            break; // The supervisor is gone and the pipe is drained.
+        }
+        let mut st = 0;
+        // SAFETY: `sup` is this process's own child; WNOHANG never blocks.
+        let r = unsafe { libc::waitpid(sup, &mut st, libc::WNOHANG) };
+        exited = r == sup || r < 0;
+    }
+    let started = data.first().copied() == Some(1);
+    let reason = String::from_utf8_lossy(data.get(1..).unwrap_or_default())
+        .trim()
+        .to_string();
+    (started, reason)
 }
 
 /// Spawns `bin(args)` detached (setsid) with stdout+stderr to this tunnel's
@@ -794,7 +1184,6 @@ fn spawn_and_capture(
     extract: impl Fn(&str) -> Option<String>,
 ) -> Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
-    use std::os::unix::process::CommandExt;
     let path = log_path(&rec.name);
     let log = std::fs::OpenOptions::new()
         .write(true)
@@ -826,14 +1215,12 @@ fn spawn_and_capture(
     if let Some((k, v)) = secret_env {
         cmd.env(k, v);
     }
-    // SAFETY: setsid in the child (post-fork, pre-exec) detaches it from this
-    // process so it survives the CLI exiting — same pattern as `ingress_proxy`.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
+    // No `setsid` here anymore: this runs INSIDE the supervisor (a `fork` that
+    // already `setsid`'d), so the agent inherits that session and process group.
+    // Staying in the group is what lets `signal_supervisor`'s `killpg` tear the
+    // agent down with its supervisor — and the supervisor, as the agent's
+    // parent, is what `waitpid`s it to drive the respawn. Detachment from the
+    // CLI comes from the supervisor, not from the agent itself.
     let child = cmd.spawn().map_err(|e| Error::Runtime {
         context: "spawn tunnel agent",
         message: super::po::tf(
@@ -842,6 +1229,10 @@ fn spawn_and_capture(
         ),
     })?;
     rec.pid = Some(child.id() as i32);
+    // Pin the exact process instance so a recycled pid is never signalled as if
+    // it were this agent (see `agent_alive`). Read now, while we know the child
+    // is this very process.
+    rec.pid_starttime = proc_starttime(child.id() as i32);
     std::thread::sleep(Duration::from_millis(400));
     if !pid_alive(child.id() as i32) {
         let tail = std::fs::read_to_string(&path).unwrap_or_default();
@@ -1408,8 +1799,31 @@ pub(crate) fn cmd_describe(name: &str) -> Result<()> {
         "Public URL",
         rec.public_url.as_deref().unwrap_or("(not yet known)"),
     );
+    // Status anchors on the SUPERVISOR for a supervised tunnel: the tunnel is
+    // "Running" while the supervisor lives, even in the backoff window between
+    // an agent dying and its respawn — which the second line makes explicit so
+    // a momentarily-dead agent is not mistaken for a stopped tunnel.
     d.field("Status", if alive { "Running" } else { "Stopped" });
-    d.field_opt("PID", rec.pid.map(|p| p.to_string()).as_deref());
+    if rec.supervisor_pid.is_some() {
+        d.field(
+            "Agent",
+            if agent_alive(&rec) {
+                "connected"
+            } else if alive {
+                "reconnecting"
+            } else {
+                "stopped"
+            },
+        );
+        d.field_opt(
+            "Supervisor PID",
+            rec.supervisor_pid.map(|p| p.to_string()).as_deref(),
+        );
+    }
+    d.field_opt("Agent PID", rec.pid.map(|p| p.to_string()).as_deref());
+    if rec.restarts > 0 {
+        d.field("Restarts", rec.restarts.to_string());
+    }
     d.field_opt(
         "Agent Web Port",
         rec.agent_web_port.map(|p| p.to_string()).as_deref(),
@@ -1629,6 +2043,10 @@ mod tests {
             hostname: None,
             config_hash: "x".to_string(),
             pid: Some(1),
+            pid_starttime: None,
+            supervisor_pid: None,
+            supervisor_starttime: None,
+            restarts: 0,
             public_url: None,
             created_unix: 0,
             started_unix: None,
@@ -1798,6 +2216,10 @@ mod tests {
             hostname: None,
             config_hash: "x".to_string(),
             pid: None,
+            pid_starttime: None,
+            supervisor_pid: None,
+            supervisor_starttime: None,
+            restarts: 0,
             public_url: None,
             created_unix: 0,
             started_unix: None,
@@ -1816,6 +2238,10 @@ mod tests {
             hostname: None,
             config_hash: "x".to_string(),
             pid: Some(1),
+            pid_starttime: None,
+            supervisor_pid: None,
+            supervisor_starttime: None,
+            restarts: 0,
             public_url: None,
             created_unix: 0,
             started_unix: None,
@@ -1841,6 +2267,10 @@ mod tests {
             hostname: None,
             config_hash: "x".to_string(),
             pid: Some(std::process::id() as i32),
+            pid_starttime: None,
+            supervisor_pid: None,
+            supervisor_starttime: None,
+            restarts: 0,
             public_url: None,
             created_unix: 0,
             started_unix: None,
@@ -1878,6 +2308,10 @@ mod tests {
             hostname: None,
             config_hash: "x".to_string(),
             pid: Some(std::process::id() as i32),
+            pid_starttime: None,
+            supervisor_pid: None,
+            supervisor_starttime: None,
+            restarts: 0,
             public_url: None,
             created_unix: 0,
             started_unix: None,
@@ -1922,6 +2356,10 @@ mod tests {
             hostname: None,
             config_hash: "x".to_string(),
             pid: Some(std::process::id() as i32),
+            pid_starttime: None,
+            supervisor_pid: None,
+            supervisor_starttime: None,
+            restarts: 0,
             public_url: None,
             created_unix: 0,
             started_unix: None,
@@ -1948,5 +2386,83 @@ mod tests {
     #[test]
     fn the_pinggy_config_names_the_token_as_the_user_and_nothing_else() {
         assert_eq!(super::pinggy_ssh_config("t0k"), "Host *\n  User t0k\n");
+    }
+
+    #[test]
+    fn backoff_base_doubles_and_caps_at_32s() {
+        // restarts is 1-based: the first respawn waits 1s, then 2,4,8,16,32,
+        // and 32 forever after — a crash-looping agent can never busy-spin.
+        let seq: Vec<u64> = (1..=8).map(backoff_base_secs).collect();
+        assert_eq!(seq, vec![1, 2, 4, 8, 16, 32, 32, 32]);
+        // Monotonic non-decreasing and never above the cap, for any restart.
+        let mut prev = 0;
+        for r in 1..100 {
+            let b = backoff_base_secs(r);
+            assert!(b >= prev && b <= 32, "restart {r}: {b}");
+            prev = b;
+        }
+    }
+
+    #[test]
+    fn backoff_jitter_stays_within_its_ceiling_and_varies() {
+        // Never exceeds the ceiling (so the total delay stays bounded).
+        for r in 1..40u32 {
+            let ceiling = backoff_base_secs(r) * 250;
+            for seed in [1, 7, 12345, i32::MAX, -3] {
+                assert!(backoff_jitter_ms(seed, r, ceiling) <= ceiling);
+            }
+        }
+        // A zero ceiling is a no-op, not a divide-by-zero.
+        assert_eq!(backoff_jitter_ms(42, 1, 0), 0);
+        // Different supervisors (seeds) decorrelate: two tunnels that crash on
+        // the same restart do not all wake at the identical instant.
+        let a = backoff_jitter_ms(1000, 3, 1000);
+        let b = backoff_jitter_ms(2000, 3, 1000);
+        assert_ne!(a, b, "distinct seeds must not collapse to one delay");
+    }
+
+    #[test]
+    fn backoff_delay_is_base_plus_jitter_and_bounded() {
+        // The full delay is the base second-count plus at most 25% jitter.
+        for r in 1..20u32 {
+            let base_ms = backoff_base_secs(r) * 1000;
+            let d = backoff_delay(r, 98765).as_millis() as u64;
+            assert!(d >= base_ms, "restart {r}: {d} < {base_ms}");
+            assert!(d <= base_ms + base_ms / 4, "restart {r}: {d} over ceiling");
+        }
+    }
+
+    #[test]
+    fn should_keep_running_stops_on_removal_and_config_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JsonStore::<TunnelRecord>::open(tmp.path()).unwrap();
+        // No record yet (`rm` already happened): stop.
+        assert!(!should_keep_running(&store, "t", "h1"));
+        let mut rec = guard_rec("pinggy", 8080);
+        rec.name = "t".to_string();
+        rec.config_hash = "h1".to_string();
+        store.save("t", &rec).unwrap();
+        // Same config the supervisor was started for: keep going.
+        assert!(should_keep_running(&store, "t", "h1"));
+        // A newer apply wrote a different hash (and forked its own supervisor):
+        // this one must bow out rather than fight over the agent/port.
+        assert!(!should_keep_running(&store, "t", "h1-old"));
+    }
+
+    #[test]
+    fn is_alive_anchors_on_the_supervisor_when_one_is_recorded() {
+        // A supervised record whose SUPERVISOR is this (alive) process reads as
+        // Running even though its agent pid is bogus — the backoff-window state
+        // an operator wants called "Running (reconnecting)", not "Stopped".
+        let mut rec = guard_rec("pinggy", 8080);
+        rec.supervisor_pid = Some(std::process::id() as i32);
+        rec.supervisor_starttime = proc_starttime(std::process::id() as i32);
+        rec.pid = Some(i32::MAX - 1); // no such agent
+        assert!(is_alive(&rec), "supervisor alive ⇒ tunnel Running");
+        assert!(!agent_alive(&rec), "but the agent itself is not");
+        // A dead supervisor flips it to Stopped.
+        rec.supervisor_pid = Some(i32::MAX - 1);
+        rec.supervisor_starttime = None;
+        assert!(!is_alive(&rec));
     }
 }
