@@ -1195,7 +1195,7 @@
       "type": "object"
     },
     "HostSpec": {
-      "anyOf": [
+      "oneOf": [
         {
           "required": [
             "ip"
@@ -2730,7 +2730,8 @@
     },
     "ShareBlock": {
       "additionalProperties": false,
-      "anyOf": [
+      "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
+      "oneOf": [
         {
           "required": [
             "from"
@@ -2742,7 +2743,6 @@
           ]
         }
       ],
-      "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
       "properties": {
         "from": {
           "description": "Name of the volume to carve this one out of — typically a network volume\n(`nfs:`/`cifs:`/`webdav:`), which is the case the feature exists for, but\nany volume works: the mechanism is a real subdirectory of its mountpoint.\n\n`storageRef` is the spelling `kind: ShareVolume` used, kept as an alias so\na manifest that only renames its Kind does not also have to rename this.",
@@ -2876,6 +2876,12 @@
       "type": "object"
     },
     "SshSpec": {
+      "not": {
+        "required": [
+          "key",
+          "keyPath"
+        ]
+      },
       "properties": {
         "key": {
           "description": "`keyPath` is the canonical name (the one in the templates); `key` stays accepted\nso as not to break manifests written before this restructuring.",

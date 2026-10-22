@@ -6321,6 +6321,23 @@ k8sVersion: \"1.31\"
         assert_eq!(spec.pod_subnet, default_pod_subnet());
     }
 
+    /// Each alias is one spelling OR the other: serde refuses both together
+    /// («duplicate field»). The schema writes the same rule from
+    /// `schema::NESTED_ALIASES`, and this is the engine's side of it.
+    #[test]
+    fn an_aliased_host_or_ssh_field_is_refused_under_both_spellings() {
+        for one in ["ip: 10.0.0.1", "address: 10.0.0.1"] {
+            assert!(serde_yaml::from_str::<HostSpec>(one).is_ok(), "{one}");
+        }
+        let both = serde_yaml::from_str::<HostSpec>("{ip: 10.0.0.1, address: 10.0.0.1}");
+        assert!(both.is_err(), "{both:?}");
+        for one in ["key: /k", "keyPath: /k"] {
+            assert!(serde_yaml::from_str::<SshSpec>(one).is_ok(), "{one}");
+        }
+        let both = serde_yaml::from_str::<SshSpec>("{key: /k, keyPath: /k}");
+        assert!(both.is_err(), "{both:?}");
+    }
+
     /// The manual `Default` of `ClusterSpec` has to be indistinguishable from an
     /// empty manifest — if it diverges, the tests above start exercising a
     /// spec the parser would never produce.

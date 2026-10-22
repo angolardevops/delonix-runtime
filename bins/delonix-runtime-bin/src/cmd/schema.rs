@@ -456,6 +456,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
     // becomes «one of the two», rather than dropping the requirement, which
     // would let a host entry with neither spelling validate clean and then fail
     // at apply.
+    //
+    // «One of», not «at least one»: serde refuses the field written under BOTH
+    // spellings (`duplicate field`), so `anyOf` here green-ticked
+    // `share: {from: x, storageRef: x}`, which `plan` refuses. An optional field
+    // gets the same rule without the requirement: never both.
     for (def_name, canonical, alias) in NESTED_ALIASES {
         let Some(obj) = defs.get_mut(*def_name).and_then(|d| d.as_object_mut()) else {
             continue;
@@ -475,19 +480,29 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             .and_then(|r| r.as_array())
             .cloned()
             .unwrap_or_default();
-        if required.iter().any(|x| x.as_str() == Some(*canonical)) {
+        let (keyword, rule) = if required.iter().any(|x| x.as_str() == Some(*canonical)) {
             let rest: Vec<_> = required
                 .into_iter()
                 .filter(|x| x.as_str() != Some(*canonical))
                 .collect();
             obj.insert("required".into(), serde_json::Value::Array(rest));
-            obj.insert(
-                "anyOf".into(),
+            (
+                "oneOf",
                 serde_json::json!([
                     { "required": [canonical] },
                     { "required": [alias] },
                 ]),
-            );
+            )
+        } else {
+            ("not", serde_json::json!({ "required": [canonical, alias] }))
+        };
+        // One aliased field per type today. A second would overwrite the first
+        // rule here and reopen it, so it has to be written as an `allOf` first.
+        if obj.insert(keyword.into(), rule).is_some() {
+            return Err(Error::Invalid(format!(
+                "internal: `{def_name}` already has a `{keyword}` — a second aliased \
+                 field would overwrite the first one's rule"
+            )));
         }
     }
     // **A typo in a field name is the number-one mistake when writing a
@@ -749,8 +764,8 @@ fn deref(node: serde_json::Value, defs: &serde_json::Value) -> serde_json::Value
         None => node,
     };
     // Only when the node has no `properties` of its own. An `anyOf` NEXT TO
-    // properties is a constraint on one object (`NESTED_ALIASES` writes one to
-    // say «either `ip` or `address`»), not a choice between two shapes —
+    // properties is a constraint on one object (as the `oneOf` `NESTED_ALIASES`
+    // writes to say «either `ip` or `address`»), not a choice between two shapes —
     // following it there would throw the whole object away and answer from a
     // bare `{"required": [...]}`, which is how `explain Cluster.controlPlane`
     // would have started reporting a type with no fields.
