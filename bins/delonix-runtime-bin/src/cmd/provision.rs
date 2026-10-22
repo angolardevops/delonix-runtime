@@ -429,10 +429,9 @@ mod tests {
     /// it cannot drift: add a field to the struct and the matching test fails
     /// until the const lists it — the guard `SHAREVOLUME_SPEC_FIELDS` never had.
     #[test]
-    fn provision_fields_cobre_exactamente_o_struct() {
+    fn provision_fields_cover_exactly_the_struct() {
         let from_struct = crate::cmd::manifest::schema_field_names::<ProvisionSpec>();
-        let mut from_const: Vec<String> =
-            PROVISION_FIELDS.iter().map(|s| s.to_string()).collect();
+        let mut from_const: Vec<String> = PROVISION_FIELDS.iter().map(|s| s.to_string()).collect();
         from_const.sort();
         assert_eq!(
             from_struct, from_const,
@@ -441,10 +440,9 @@ mod tests {
     }
 
     #[test]
-    fn truenas_fields_cobre_exactamente_o_struct() {
+    fn truenas_fields_cover_exactly_the_struct() {
         let from_struct = crate::cmd::manifest::schema_field_names::<TrueNasSpec>();
-        let mut from_const: Vec<String> =
-            TRUENAS_FIELDS.iter().map(|s| s.to_string()).collect();
+        let mut from_const: Vec<String> = TRUENAS_FIELDS.iter().map(|s| s.to_string()).collect();
         from_const.sort();
         assert_eq!(
             from_struct, from_const,
