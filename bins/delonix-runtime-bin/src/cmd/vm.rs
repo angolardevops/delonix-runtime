@@ -1215,12 +1215,24 @@ pub enum VmCmd {
     Start {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
+        /// After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running.
+        #[arg(long)]
+        wait: bool,
+        /// Seconds to wait with --wait (default 120).
+        #[arg(long = "boot-timeout", default_value_t = 120)]
+        boot_timeout: u64,
     },
     /// Stop (if running) then start — always a real reboot, unlike `start`.
     /// Same recovered-fields limits as `start`.
     Restart {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
+        /// After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running.
+        #[arg(long)]
+        wait: bool,
+        /// Seconds to wait with --wait (default 120).
+        #[arg(long = "boot-timeout", default_value_t = 120)]
+        boot_timeout: u64,
     },
     /// Move a VM to another `delonix` host — real downtime, no shared storage.
     ///
@@ -4088,14 +4100,28 @@ pub fn run(action: VmCmd) -> Result<()> {
             after_stopped(&base, &name);
             Ok(())
         }
-        VmCmd::Start { name } => {
+        VmCmd::Start {
+            name,
+            wait,
+            boot_timeout,
+        } => {
             delonix_vm::start(&base, &name)?;
             println!("{name}");
+            if wait {
+                wait_for_boot(&base, &name, std::time::Duration::from_secs(boot_timeout))?;
+            }
             Ok(())
         }
-        VmCmd::Restart { name } => {
+        VmCmd::Restart {
+            name,
+            wait,
+            boot_timeout,
+        } => {
             delonix_vm::restart(&base, &name)?;
             println!("{name}");
+            if wait {
+                wait_for_boot(&base, &name, std::time::Duration::from_secs(boot_timeout))?;
+            }
             Ok(())
         }
         VmCmd::Migrate {
