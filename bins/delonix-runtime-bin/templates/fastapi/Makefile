@@ -7,8 +7,17 @@ URL ?= http://localhost:__PORT__
 # or Delonix' own path with `make up ENGINE="delonix compose"`.
 ENGINE ?= docker compose
 
+# `up` flags differ by engine: Docker/Podman need `--build` to rebuild the image
+# from source changes, while `delonix compose up` ALWAYS builds and rejects the
+# flag (`error: unexpected argument '--build'`). Pick the right set per engine.
+ifeq ($(findstring delonix,$(ENGINE)),delonix)
+UP_FLAGS := -d
+else
+UP_FLAGS := -d --build
+endif
+
 .PHONY: lock install fmt fmt-check lint typecheck test cover audit build openapi run dev smoke check \
-        up down logs ps scan
+        up down logs ps scan tls
 
 lock:        ## resolve the dependencies and write uv.lock (commit it)
 	uv lock
@@ -41,8 +50,12 @@ openapi:     ## regenerate the checked-in contract from the routes
 	mv api/openapi.json.tmp api/openapi.json
 run:         ## the production entry point
 	$(RUN) python -m __MODULE__
-dev:         ## auto-reload on change
-	$(RUN) uvicorn __MODULE__.server:dev_app --factory --reload --port __PORT__
+tls: tls/tls.crt   ## ensure ./tls has a local certificate (mkcert, else self-signed)
+tls/tls.crt:
+	sh ./scripts/tls.sh
+dev: tls     ## auto-reload on change; HTTPS on __TLS_PORT__ from ./tls
+	$(RUN) uvicorn __MODULE__.server:dev_app --factory --reload \
+	  --port __TLS_PORT__ --ssl-certfile tls/tls.crt --ssl-keyfile tls/tls.key
 smoke:       ## against a running instance: make smoke URL=http://localhost:__PORT__
 	sh ./scripts/smoke.sh $(URL)
 check: install fmt-check lint typecheck test build  ## what CI runs
@@ -50,7 +63,7 @@ check: install fmt-check lint typecheck test build  ## what CI runs
 # ---- the stack (compose.yaml): app + Redis + RabbitMQ; +SonarQube with the
 # `quality` profile). Works with Docker/Podman Compose and `delonix compose`. --
 up:          ## build and start the app, Redis and RabbitMQ (detached)
-	$(ENGINE) up -d --build
+	$(ENGINE) up $(UP_FLAGS)
 down:        ## stop the stack (keeps the named volumes / data)
 	$(ENGINE) down
 logs:        ## follow the app's logs

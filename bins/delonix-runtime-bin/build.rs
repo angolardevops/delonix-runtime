@@ -82,6 +82,8 @@ fn main() {
                     "lock",
                     "wait",
                     "tls",
+                    "tls_redirect",
+                    "tls_key_mode",
                     "open",
                     "login",
                     "password",

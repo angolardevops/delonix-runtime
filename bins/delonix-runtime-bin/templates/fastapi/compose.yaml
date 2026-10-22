@@ -30,15 +30,25 @@ services:
     environment:
       APP_ENV: production
       LOG_LEVEL: info
+      # Local HTTPS: the app listens with TLS on __PORT__ inside the container,
+      # using the certificate `delonix init` generated into ./tls (mounted
+      # read-only below). The host reaches it over HTTPS on __TLS_PORT__.
+      TLS_CERT_FILE: /app/tls/tls.crt
+      TLS_KEY_FILE: /app/tls/tls.key
     ports:
-      - "__PORT__:__PORT__"
+      # host __TLS_PORT__ (HTTPS) → container __PORT__.
+      - "__TLS_PORT__:__PORT__"
+    volumes:
+      # Certificate + key, read-only, never baked into the image. The key must
+      # be readable by the `app` user (see README → "Local HTTPS").
+      - "./tls:/app/tls:ro"
     depends_on:
       redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:__PORT__/api/v1/health/live', timeout=2)"]
+      test: ["CMD", "python", "-c", "import ssl, urllib.request as u; u.urlopen('https://127.0.0.1:__PORT__/api/v1/health/live', timeout=2, context=ssl._create_unverified_context())"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -14,11 +14,18 @@ spec:
   # applies an image's USER only when the manifest asks for it.
   user: "app"
   ports:
-    - "__PORT__:__PORT__"
+    # host __TLS_PORT__ (HTTPS) → container __PORT__. The app serves TLS itself
+    # from the certificate in ./tls (local development; in production TLS is
+    # terminated by the ingress and these two lines go away).
+    - "__TLS_PORT__:__PORT__"
+  volumes:
+    - "./tls:/app/tls:ro"           # certificate + key, never baked into the image
   env:
     - "APP_ENV=production"
     - "LOG_LEVEL=info"
     - "SHUTDOWN_TIMEOUT=15s"
+    - "TLS_CERT_FILE=/app/tls/tls.crt"
+    - "TLS_KEY_FILE=/app/tls/tls.key"
   # Webhook secrets come from a Delonix secret, never from this file:
   #   delonix secret create __NAME__-webhooks --from-literal WEBHOOK_INBOUND_SECRET=whsec_...
   # then add under env (grouped form):

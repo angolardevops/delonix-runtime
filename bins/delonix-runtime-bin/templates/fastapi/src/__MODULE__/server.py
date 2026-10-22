@@ -114,6 +114,7 @@ def main() -> None:
     telemetry = setup_telemetry(settings.service_name, __version__, settings.app_env)
     app = create_app(settings, telemetry)
     readiness: Readiness = app.state.readiness
+    tls = settings.tls
     config = uvicorn.Config(
         app,
         host=settings.http_host,
@@ -124,6 +125,18 @@ def main() -> None:
         timeout_keep_alive=max(1, int(settings.http_keepalive_timeout)),
         # In-flight requests get what the deadline leaves after the drain delay.
         timeout_graceful_shutdown=max(1, int(settings.shutdown_timeout - settings.drain_delay)),
+        # HTTPS when a certificate is configured (local development); plain HTTP
+        # otherwise, with TLS terminated by the ingress in front in production.
+        ssl_certfile=str(tls[0]) if tls else None,
+        ssl_keyfile=str(tls[1]) if tls else None,
+    )
+    log.info(
+        "serving",
+        extra={
+            "scheme": "https" if tls else "http",
+            "host": settings.http_host,
+            "port": settings.port,
+        },
     )
     server = GracefulServer(config, readiness, settings)
     server.run()

@@ -4,3 +4,11 @@ version=0.142
 versions=0.141,0.142
 lock=uv.lock
 vm_support=yes
+tls=8443
+open=/api/v1/health/ready
+tls_redirect=no
+# The app terminates TLS itself, running as the non-root `app` user (uid 10001).
+# A rootless bind mount surfaces the host-owned ./tls/tls.key as root:root inside
+# the user namespace, so the key needs the world-read bit or uvicorn gets EACCES.
+# Local, localhost-only dev certificate (tls/ is git-ignored) — never a prod key.
+tls_key_mode=0644

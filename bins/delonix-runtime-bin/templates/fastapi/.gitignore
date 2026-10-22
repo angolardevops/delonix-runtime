@@ -10,4 +10,5 @@ coverage.xml
 dist/
 *.egg-info/
 .env
+tls/
 .DS_Store
