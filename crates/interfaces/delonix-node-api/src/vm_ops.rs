@@ -437,6 +437,10 @@ pub fn create_with_fn(
             req.name
         )));
     }
+    // A network this node never declared is `NOT_FOUND` now, not an operation
+    // that is acknowledged and then fails inside — the engine makes the same
+    // refusal before the overlay, this only moves it ahead of the `begin`.
+    delonix_vm::refuse_undeclared_network(&cfg).map_err(|e| status_of(&e.into()))?;
     let rec = match operations::begin(root, "create", &target, &req.request_id, &fp)? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
@@ -759,6 +763,65 @@ mod tests {
         }
     }
 
+    /// A LOCAL backend (it does not own its storage), so the engine asks it
+    /// the network question. Never booted: the tests that use it are refused
+    /// before the overlay.
+    struct LocalFake;
+    impl VmBackend for LocalFake {
+        fn id(&self) -> &'static str {
+            LOCAL
+        }
+        fn available(&self) -> bool {
+            true
+        }
+        fn boot(
+            &self,
+            _vmdir: &Path,
+            cfg: &VmConfig,
+            _overlay: &str,
+            _on: &dyn Fn(CreateStage),
+        ) -> delonix_model::Result<Boot> {
+            panic!("'{}' reached boot: the refusal must come first", cfg.name)
+        }
+        fn is_running(&self, _vm: &delonix_compute::Vm) -> bool {
+            false
+        }
+        fn ip(&self, _vm: &delonix_compute::Vm) -> Option<String> {
+            None
+        }
+        fn stop(&self, _vmdir: &Path, _vm: &delonix_compute::Vm) -> delonix_model::Result<()> {
+            Ok(())
+        }
+    }
+    const LOCAL: &str = "fake-vm-local";
+
+    /// The node's network for this test binary: it declares `lab-net` only.
+    struct LabNet;
+    impl delonix_compute::ports::VmNetwork for LabNet {
+        fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
+            Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(name == "lab-net")
+        }
+        fn attach_tap(
+            &self,
+            _vm: &str,
+            _network: &str,
+            _mac: &str,
+            _namespace: &str,
+        ) -> delonix_model::Result<String> {
+            Ok("tap0".into())
+        }
+        fn lease_ip(&self, _network: &str, _mac: &str) -> Option<String> {
+            None
+        }
+        fn detach_tap(&self, _vm: &str, _lease: Option<&str>) {}
+        fn join_argv(&self) -> Option<Vec<String>> {
+            None
+        }
+    }
+
     /// `register_backend` is process-global, like every other `delonix-vm`
     /// test that seeds one (see `vms.rs`): registering twice with the same
     /// id is refused, so this runs once per test binary. Tests share the
@@ -790,8 +853,82 @@ mod tests {
                 }),
             })
             .unwrap();
+            delonix_vm::register_backend(BackendRegistration {
+                id: LOCAL,
+                aliases: &[],
+                auto_selectable: false,
+                new: Box::new(|| Ok(Box::new(LocalFake) as Box<dyn VmBackend>)),
+                report: Box::new(|| {
+                    ProviderReport::build(
+                        LOCAL,
+                        ProviderKind::Compute,
+                        true,
+                        ProviderHealth {
+                            status: HealthStatus::Healthy,
+                            reason: "Test",
+                            message: String::new(),
+                        },
+                        |_| CapabilityState::NotImplemented,
+                    )
+                }),
+            })
+            .unwrap();
+            delonix_vm::set_network(Box::new(LabNet));
         }
         "fake-vm-ops"
+    }
+
+    /// A network this node never declared is `NOT_FOUND`, with DX-4505 and the
+    /// command that declares it — and NOTHING is acknowledged: no operation,
+    /// no `vms/`. Before, the create was accepted and failed inside, after the
+    /// overlay and the domain, on the hypervisor's own «no network with
+    /// matching name».
+    #[test]
+    fn an_undeclared_network_is_not_found_before_anything_is_acknowledged() {
+        seeded();
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = create_req("web-net", "");
+        let spec = req.spec.as_mut().unwrap();
+        spec.provider = LOCAL.into();
+        spec.networks = vec![NetworkAttachment {
+            network: "cf-nope".into(),
+            ..Default::default()
+        }];
+        let err = create_in(dir.path(), &req).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound, "{err:?}");
+        assert!(
+            err.message().contains("'cf-nope'")
+                && err.message().contains("delonix network create cf-nope"),
+            "{}",
+            err.message()
+        );
+        assert_eq!(
+            err.metadata().get(crate::network_ops::DX_METADATA).unwrap(),
+            "4505"
+        );
+        assert_eq!(operations_on_disk(dir.path()), 0);
+        // `exists` opens the store, so `vms/` may be there — empty: no record,
+        // no overlay, no seed.
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("vms"))
+            .map(|d| d.map(|e| e.unwrap().file_name()).collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// The same request on a backend that owns its storage is not refused
+    /// here: a remote node maps (or refuses) a network name itself.
+    #[test]
+    fn a_remote_backend_is_not_asked_whether_this_node_declares_its_network() {
+        let remote = seeded();
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = create_req("web-net-far", "");
+        req.spec.as_mut().unwrap().networks = vec![NetworkAttachment {
+            network: "vmbr9".into(),
+            ..Default::default()
+        }];
+        assert_eq!(req.spec.as_ref().unwrap().provider, remote);
+        let op = create_in(dir.path(), &req).unwrap();
+        assert_eq!(op.state, OperationState::Succeeded as i32);
     }
 
     fn create_req(name: &str, request_id: &str) -> CreateVirtualMachineRequest {

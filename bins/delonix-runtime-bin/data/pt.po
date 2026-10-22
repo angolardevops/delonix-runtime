@@ -13979,6 +13979,15 @@ msgstr "O nó respondeu HTTP 404, ou disse que o ficheiro de configuração da V
 msgid "Check the VM id in the record against `qm list` on the node; a VM removed on the node side leaves a record with nothing behind it."
 msgstr "Confere o id da VM no registo com o `qm list` do nó; uma VM removida do lado do nó deixa um registo sem nada por trás."
 
+msgid "no such network for the VM"
+msgstr "essa rede não existe para a VM"
+
+msgid "The VM names a network that is not declared on this node. The create stopped before building anything."
+msgstr "A VM nomeia uma rede que não está declarada neste nó. A criação parou antes de construir fosse o que fosse."
+
+msgid "Create it first with `delonix network create <name>` (or a `kind: Network`), or leave `--network` out for the default network."
+msgstr "Cria-a primeiro com `delonix network create <nome>` (ou um `kind: Network`), ou omite o `--network` para usar a rede por omissão."
+
 msgid "the Proxmox node reports a conflict"
 msgstr "o nó Proxmox reporta um conflito"
 

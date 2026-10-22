@@ -7276,6 +7276,27 @@ check "vm console: a VM that does not exist is 4" 4 "$BIN" vm console "l3vm-$PFX
 check "vm ssh: a name that is not a VM is 4" 4 "$BIN" vm ssh "l3vm-$PFX" -- true
 check "vm migrate: a VM that does not exist is 4, before any SSH" 4 "$BIN" vm migrate "l3vm-$PFX" --host e2e@l3.invalid --network l3
 
+# --- vm create on a network nobody declared: 4, before anything is built ----
+# Measured 2026-10-21: libvirt built the overlay, defined the domain and died on
+# its own «no network with matching name» (rc 1), and Cloud Hypervisor CREATED
+# the network instead. The engine now asks first, so no hypervisor is reached;
+# it still needs a backend to select and a disk to name.
+if command -v qemu-img >/dev/null 2>&1 \
+   && { command -v cloud-hypervisor || command -v virsh; } >/dev/null 2>&1; then
+  UNDIR="$OUT/vm-undeclared-net"; mkdir -p "$UNDIR"
+  qemu-img create -f qcow2 "$UNDIR/d.qcow2" 64M >/dev/null 2>&1
+  check "vm create: a network nobody declared is 4 (DX-4505), and nothing is left behind" ok bash -c "
+    out=\$(\"$BIN\" vm create un-$PFX --disk \"$UNDIR/d.qcow2\" --network un-nope-$PFX 2>&1); rc=\$?
+    [ \$rc -eq 4 ] || { echo \"rc=\$rc: \$out\"; exit 1; }
+    case \"\$out\" in *DX-4505*'delonix network create un-nope-$PFX'*) ;; *) echo \"\$out\"; exit 1;; esac
+    ls \"\$DELONIX_ROOT/vms\" 2>/dev/null | grep -q 'un-$PFX' && { echo 'a VM artifact was left'; exit 1; }
+    nl=\$(\"$BIN\" network ls 2>&1) || { echo \"network ls failed: \$nl\"; exit 1; }
+    case \"\$nl\" in *'un-nope-$PFX'*) echo 'the network was created'; exit 1;; esac
+    exit 0"
+else
+  skip "vm create: undeclared network" "no qemu-img, or no VM backend (cloud-hypervisor/virsh) to select"
+fi
+
 # --- mcp serve: one stdio session, and it ENDS with its client ---------------
 # The server is a child process of the AI client for one session, not a daemon:
 # it answers `initialize` and `tools/list` and exits when stdin closes. A
