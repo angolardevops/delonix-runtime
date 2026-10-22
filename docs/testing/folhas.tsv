@@ -296,6 +296,26 @@ cli	workload describe	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1
 cli	workload ls	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	workload rm	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
 cli	workload stop	A	scripts/cli_exec_trace.tsv (2026-10-16, e5be0903, PASS=1324 FAIL=0)
+cli	run	B	atalho Docker/Podman; partilha a struct de 'container run' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	create	B	atalho Docker/Podman; partilha a struct de 'container create' (classe B); a bateria nao exerce nenhuma das formas
+cli	ps	B	atalho Docker/Podman; partilha a struct de 'container ps' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	start	B	atalho Docker/Podman; partilha a struct de 'container start' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	stop	B	atalho Docker/Podman; partilha a struct de 'container stop' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	restart	B	atalho Docker/Podman; partilha a struct de 'container restart' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	rm	B	atalho Docker/Podman; partilha a struct de 'container rm' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	exec	B	atalho Docker/Podman; partilha a struct de 'container exec' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	logs	B	atalho Docker/Podman; partilha a struct de 'container logs' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	pull	B	atalho Docker/Podman; partilha a struct de 'image pull' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	kill	B	atalho Docker/Podman; partilha a struct de 'container kill' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	attach	B	atalho Docker/Podman; partilha a struct de 'container attach' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	stats	B	atalho Docker/Podman; partilha a struct de 'container stats' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	images	B	atalho Docker/Podman; partilha a struct de 'image ls' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	rmi	B	atalho Docker/Podman; partilha a struct de 'image remove' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	tag	B	atalho Docker/Podman; partilha a struct de 'image tag' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	save	B	atalho Docker/Podman; partilha a struct de 'image save' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	load	B	atalho Docker/Podman; partilha a struct de 'image load' (classe A no trace); a bateria exerce a forma canonica, nao o atalho de raiz
+cli	push	B	atalho Docker/Podman; partilha a struct de 'image push' (classe E, registry OCI local); a bateria nao exerce a forma canonica
+cli	container create	B	nenhum teste assere 'container create'; o trace exerce 'container run', nao 'create'; sobe a A quando um check a conduzir
 node-api	ApplyStack	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
 node-api	BuildImage	D	servico inteiro declarado e nao registado em service.rs:router() — decisao do dono 2026-10-18: implementar
 node-api	CancelOperation	C	implementada mas por desenho nunca cancela (DX-5002); so componente

@@ -10,6 +10,11 @@ dependencies = [
     "dj-database-url>=3.0",
     "gunicorn>=23.0",
     "httpx>=0.28",
+    # Redis cache (django-redis over redis-py) and RabbitMQ pub/sub (pika,
+    # AMQP 0-9-1). Both are reached only when REDIS_URL / RABBITMQ_URL are set;
+    # pika is imported lazily, so the app runs without either.
+    "django-redis>=5.4",
+    "pika>=1.3",
     "opentelemetry-api>=1.39",
     "opentelemetry-sdk>=1.39",
     "opentelemetry-exporter-otlp-proto-http>=1.39",

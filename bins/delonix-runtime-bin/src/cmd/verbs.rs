@@ -330,7 +330,9 @@ pub(crate) fn get(
             all_namespaces: false,
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
-        k if k == kinds::IMAGE => super::image::run(super::image::ImageCmd::Ls { output }),
+        k if k == kinds::IMAGE => {
+            super::image::run(super::image::ImageCmd::Ls(super::image::LsArgs { output }))
+        }
         k if k == kinds::CLUSTER => super::cluster::cmd_ls(true),
         k if k == kinds::GATEWAY => super::tunnel::cmd_ls(output),
         k if k == kinds::HTTP_ROUTE => super::httproute::cmd_ls(output),
@@ -502,10 +504,10 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
         }
         k if k == kinds::IMAGE => {
             for n in names {
-                super::image::run(super::image::ImageCmd::Remove {
+                super::image::run(super::image::ImageCmd::Remove(super::image::RemoveArgs {
                     image: n.clone(),
                     force,
-                })?;
+                }))?;
             }
             Ok(())
         }

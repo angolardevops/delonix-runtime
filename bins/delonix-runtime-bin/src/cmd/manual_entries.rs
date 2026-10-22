@@ -125,6 +125,89 @@ pub static ENTRIES: &[Entry] = &[
         ],
         see_also: &["image pull", "image ls", "run"],
     },
+    // The rest of the Docker/Podman table, same discipline: example COMMENTS
+    // reused VERBATIM from the `container <verb>`/`image <verb>` entries (so no
+    // new pt.po debt), only the command line rewritten to the root form.
+    Entry {
+        path: "kill",
+        group: "Workloads",
+        examples: &[
+            ("SIGKILL, no waiting", "delonix kill web"),
+            ("any signal, by name or number — this one asks nginx to reload", "delonix kill -s HUP web"),
+        ],
+        see_also: &["stop", "restart", "container kill"],
+    },
+    Entry {
+        path: "attach",
+        group: "Workloads",
+        examples: &[
+            ("re-attach to the output of a detached container (output only)", "delonix attach web"),
+        ],
+        see_also: &["logs", "exec", "container attach"],
+    },
+    Entry {
+        path: "stats",
+        group: "Workloads",
+        examples: &[
+            ("CPU, memory and PIDs of everything running, one sample", "delonix stats"),
+            ("just these two", "delonix stats web db"),
+        ],
+        see_also: &["ps", "container stats", "system df"],
+    },
+    Entry {
+        path: "images",
+        group: "Artifacts",
+        examples: &[
+            ("what is on disk, newest first", "delonix images"),
+            ("as JSON, for a script to read instead of a table meant for eyes", "delonix images -o json"),
+        ],
+        see_also: &["pull", "rmi", "image ls"],
+    },
+    Entry {
+        path: "rmi",
+        group: "Artifacts",
+        examples: &[
+            ("remove an image nothing is using", "delonix rmi alpine:3.19"),
+            ("remove it even though a container still references it", "delonix rmi -f odoo:16"),
+        ],
+        see_also: &["images", "rm", "image remove"],
+    },
+    Entry {
+        path: "tag",
+        group: "Artifacts",
+        examples: &[
+            ("a second name for the same content — nothing is copied", "delonix tag postgres:16 db:stable"),
+            ("the shape a locally-built image needs before it can be pushed to your registry", "delonix tag kaeso-odoo:18 ghcr.io/angolardevops/kaeso-odoo:18"),
+        ],
+        see_also: &["push", "images", "image tag"],
+    },
+    Entry {
+        path: "save",
+        group: "Artifacts",
+        examples: &[
+            ("move an image to another machine with no registry in between", "delonix save postgres:16 -o postgres-16.tar"),
+            ("pipe it straight into gzip instead of writing the plain archive", "delonix save nginx -o /dev/stdout | gzip > nginx.tar.gz"),
+        ],
+        see_also: &["load", "push", "image save"],
+    },
+    Entry {
+        path: "load",
+        group: "Artifacts",
+        examples: &[
+            ("read back an archive written by `save`, `docker save` or `podman save`", "delonix load -i postgres-16.tar"),
+            ("a gzipped archive has to be gunzipped first", "gunzip -c nginx.tar.gz > nginx.tar && delonix load -i nginx.tar"),
+        ],
+        see_also: &["save", "images", "image load"],
+    },
+    Entry {
+        path: "push",
+        group: "Artifacts",
+        examples: &[
+            ("publish under the image's own reference", "delonix push ghcr.io/angolardevops/app:1.2.0"),
+            ("publish a locally-named image under another reference, without tagging it first", "delonix push kaeso-odoo:18 ghcr.io/angolardevops/kaeso-odoo:18"),
+        ],
+        see_also: &["tag", "images", "image push"],
+    },
     Entry {
         path: "cluster",
         group: "Clusters",
@@ -754,10 +837,11 @@ pub static ENTRIES: &[Entry] = &[
         path: "wait",
         group: "Declarative",
         examples: &[
+            ("block until it exits, then print the exit code", "delonix wait web"),
             ("block until the manifest's resources are ready", "delonix wait -f delonix-manifest.yaml"),
             ("give up after a minute (exit 124)", "delonix wait -f delonix-manifest.yaml --timeout 60"),
         ],
-        see_also: &["apply", "plan"],
+        see_also: &["apply", "plan", "container wait"],
     },
     Entry {
         path: "manifest",

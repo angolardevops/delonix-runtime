@@ -2244,7 +2244,16 @@ _ROOT_VERB_ALIASES = {
     "rm": ("container", "container rm"),
     "exec": ("container", "container exec"),
     "logs": ("container", "container logs"),
+    "kill": ("container", "container kill"),
+    "attach": ("container", "container attach"),
+    "stats": ("container", "container stats"),
     "pull": ("image", "image pull"),
+    "images": ("image", "image ls"),
+    "rmi": ("image", "image remove"),
+    "tag": ("image", "image tag"),
+    "save": ("image", "image save"),
+    "load": ("image", "image load"),
+    "push": ("image", "image push"),
 }
 
 

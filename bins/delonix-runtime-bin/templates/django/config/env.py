@@ -52,6 +52,9 @@ class Config:
     secret_key: str
     allowed_hosts: tuple[str, ...]
     database_url: str
+    redis_url: str
+    cache_ttl: float
+    rabbitmq_url: str
     trusted_proxy: tuple[str, ...]
     ssl_redirect: bool
     hsts_seconds: int
@@ -222,6 +225,21 @@ def load(environ: dict[str, str] | None = None, base_dir: Path | None = None) ->
     elif urlsplit(database_url).scheme not in ("sqlite", "postgres", "postgresql", "pgsql"):
         errors.append("DATABASE_URL: scheme must be sqlite:// or postgres://")
 
+    # Redis cache (Django's cache framework). Unset = the in-process LocMem
+    # cache, so local runs and tests need no Redis; compose.yaml points this at
+    # the redis service. The URL carries the password and is never logged.
+    redis_url = get("REDIS_URL")
+    if redis_url and urlsplit(redis_url).scheme not in ("redis", "rediss"):
+        errors.append("REDIS_URL: scheme must be redis:// or rediss://")
+    cache_ttl = duration("CACHE_TTL", 300.0)
+
+    # RabbitMQ pub/sub for note.created. Unset = off (the app serves normally,
+    # the consumer command prints that there is nothing to consume). compose
+    # points this at the rabbitmq service; the password is in the URL.
+    rabbitmq_url = get("RABBITMQ_URL")
+    if rabbitmq_url and urlsplit(rabbitmq_url).scheme not in ("amqp", "amqps"):
+        errors.append("RABBITMQ_URL: scheme must be amqp:// or amqps://")
+
     trusted_proxy = csv("TRUSTED_PROXY")
     ssl_redirect = boolean("SECURE_SSL_REDIRECT", production)
     hsts_seconds = integer("SECURE_HSTS_SECONDS", 31_536_000 if production else 0, 0, 10**9)
@@ -274,6 +292,9 @@ def load(environ: dict[str, str] | None = None, base_dir: Path | None = None) ->
         secret_key=secret_key,
         allowed_hosts=allowed_hosts,
         database_url=database_url,
+        redis_url=redis_url,
+        cache_ttl=cache_ttl,
+        rabbitmq_url=rabbitmq_url,
         trusted_proxy=trusted_proxy,
         ssl_redirect=ssl_redirect,
         hsts_seconds=hsts_seconds,

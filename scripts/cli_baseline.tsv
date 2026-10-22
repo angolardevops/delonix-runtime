@@ -289,3 +289,12 @@
 ~	workload ls
 ~	workload rm
 ~	workload stop
+~	attach
+~	images
+~	kill
+~	load
+~	push
+~	rmi
+~	save
+~	stats
+~	tag
