@@ -600,6 +600,56 @@ pub(crate) enum CertSource {
 }
 
 /// Writes `bytes` to `path` readable by the owner only, replacing what is there.
+/// Renders a `.env.tmpl` into `<dir>/.env`: the named secrets are filled in
+/// and the file is written 0600. An existing `.env` is NEVER overwritten (not
+/// even with `--force`) — the secrets in it may already be in use, and silently
+/// rotating them is worse than refusing. Returns whether a file was written.
+fn write_env_file(dir: &Path, template: &str) -> Result<bool> {
+    let dest = dir.join(".env");
+    refuse_symlinks(dir, &dest)?;
+    if dest.exists() {
+        super::output::warn(super::po::t(
+            ".env already exists — kept as is (delete it to regenerate the secrets)",
+        ));
+        return Ok(false);
+    }
+    write_private(&dest, fill_env_secrets(template)?.as_bytes())?;
+    Ok(true)
+}
+
+/// Replaces every `__SECRET_<NAME>__` token with a fresh URL-safe random value;
+/// the SAME `<NAME>` gets the SAME value (so a password reused in a connection
+/// URL and in the service's own variable match), a DIFFERENT name an
+/// independent one. URL-safe base64, so a secret is safe inside a `scheme://`.
+fn fill_env_secrets(template: &str) -> Result<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut rest = template;
+    while let Some(p) = rest.find("__SECRET_") {
+        let body = &rest[p + "__SECRET_".len()..];
+        let Some(end) = body.find("__") else { break };
+        let name = body[..end].to_string();
+        if !names.contains(&name) {
+            names.push(name);
+        }
+        rest = &body[end + 2..];
+    }
+    let mut out = template.to_string();
+    for name in names {
+        out = out.replace(&format!("__SECRET_{name}__"), &random_secret(24)?);
+    }
+    Ok(out)
+}
+
+/// `n` random bytes as URL-safe base64 (no padding). From `/dev/urandom`, no
+/// fallback: a secret that is not random is worse than an error.
+fn random_secret(n: usize) -> Result<String> {
+    use base64::Engine;
+    use std::io::Read;
+    let mut bytes = vec![0u8; n];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -808,7 +858,7 @@ fn render_planned(
     } else {
         None
     };
-    let outputs: Vec<(PathBuf, String, bool)> = files
+    let all_outputs: Vec<(PathBuf, String, bool)> = files
         .iter()
         .filter(|(rel, _, _)| !adopt || ADOPT_FILES.contains(rel))
         .filter(|(rel, _, _)| ci_skip.is_none() || !CI_FILES.contains(rel))
@@ -820,6 +870,13 @@ fn render_planned(
             )
         })
         .collect();
+    // `.env.tmpl` is not written as-is: it is the SOURCE of the project's
+    // `.env`, rendered once with fresh random secrets (`__SECRET_<NAME>__`),
+    // written 0600, and never overwritten. Everything else is a plain write.
+    let is_env_tmpl = |dest: &Path| dest.file_name().and_then(|s| s.to_str()) == Some(".env.tmpl");
+    let (env_tmpl, outputs): (Vec<_>, Vec<_>) = all_outputs
+        .into_iter()
+        .partition(|(dest, _, _)| is_env_tmpl(dest));
     // Every destination is checked before the first write, so a refusal
     // leaves the directory exactly as it was.
     for (dest, _, _) in &outputs {
@@ -830,6 +887,9 @@ fn render_planned(
     let mut n = 0;
     for (dest, content, exec) in &outputs {
         n += usize::from(write_file_mode(&o.dir, dest, content, o.force, *exec)?);
+    }
+    for (_, content, _) in &env_tmpl {
+        n += usize::from(write_env_file(&o.dir, content)?);
     }
     if let Some(why) = &ci_skip {
         super::output::warn(&super::po::tf(
@@ -2579,6 +2639,10 @@ mod tests {
                     }
                     if p.is_dir() {
                         stack.push(p);
+                    } else if p.file_name().and_then(|n| n.to_str()) == Some(".env") {
+                        // `.env` holds freshly generated random secrets — different
+                        // on every render by design, so it is not byte-comparable.
+                        continue;
                     } else {
                         let rel = p.strip_prefix(&dir).unwrap().to_path_buf();
                         files.insert(rel, std::fs::read(&p).unwrap());
@@ -2594,6 +2658,94 @@ mod tests {
         assert!(
             !template_names().contains(&"python"),
             "an alias is not listed as a template"
+        );
+    }
+
+    /// The FastAPI project ships the single compose stack (`compose.yaml`),
+    /// its `Dockerfile`, and a generated `.env` with INDEPENDENT random secrets
+    /// written 0600 — and never leaks the `.env.tmpl` source or an unresolved
+    /// `__SECRET_…__` token.
+    #[test]
+    fn fastapi_generates_compose_dockerfile_and_a_secret_env() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_tmp, dir) = scratch();
+        render_template(
+            "fastapi",
+            &opts(dir.clone(), "myapi", "fastapi", None),
+            false,
+        )
+        .unwrap();
+
+        assert!(
+            dir.join("compose.yaml").is_file(),
+            "compose.yaml is written"
+        );
+        assert!(dir.join("Dockerfile").is_file(), "Dockerfile is written");
+        assert!(
+            !dir.join(".env.tmpl").exists(),
+            ".env.tmpl is the source, never written into the project"
+        );
+
+        let env_path = dir.join(".env");
+        let env = std::fs::read_to_string(&env_path).unwrap();
+        assert!(
+            !env.contains("__SECRET_"),
+            "every secret token is filled:\n{env}"
+        );
+        let mode = std::fs::metadata(&env_path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, ".env is private");
+
+        // A name reused across variables gets the SAME value; two different
+        // names get independent ones.
+        let kv = |key: &str| -> String {
+            env.lines()
+                .find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))
+                .unwrap_or_else(|| panic!("{key} in .env:\n{env}"))
+                .to_string()
+        };
+        let rabbit = kv("RABBITMQ_DEFAULT_PASS");
+        assert!(
+            kv("RABBITMQ_URL").contains(&format!("app:{rabbit}@")),
+            "the broker password is reused verbatim in the URL"
+        );
+        assert_eq!(
+            kv("SONAR_JDBC_PASSWORD"),
+            kv("POSTGRES_PASSWORD"),
+            "Sonar reuses its database password"
+        );
+        assert_ne!(
+            rabbit,
+            kv("POSTGRES_PASSWORD"),
+            "independent secrets differ"
+        );
+
+        // The committed .gitignore keeps the generated secrets out of git.
+        let gitignore = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert!(
+            gitignore.lines().any(|l| l.trim() == ".env"),
+            ".env is ignored"
+        );
+    }
+
+    /// A second render over an existing `.env` keeps it: rotating secrets a
+    /// project may already be using is worse than refusing.
+    #[test]
+    fn a_second_render_never_overwrites_an_existing_env() {
+        let (_tmp, dir) = scratch();
+        render_template(
+            "fastapi",
+            &opts(dir.clone(), "myapi", "fastapi", None),
+            false,
+        )
+        .unwrap();
+        let first = std::fs::read_to_string(dir.join(".env")).unwrap();
+        let mut again = opts(dir.clone(), "myapi", "fastapi", None);
+        again.force = true;
+        render_template("fastapi", &again, false).unwrap();
+        assert_eq!(
+            first,
+            std::fs::read_to_string(dir.join(".env")).unwrap(),
+            "--force does not rotate the secrets in an existing .env"
         );
     }
 

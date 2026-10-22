@@ -1,0 +1,18 @@
+# Test threads get a main-thread-sized stack.
+#
+# `delonix`'s clap tree is large, and exposing the everyday container/image
+# verbs at the ROOT (`delonix run`/`ps`/`exec`/… as true aliases of `container
+# <verb>`/`image <verb>`) declares each big arg surface — `run` alone is ~80
+# flags — at two places in the tree. Building AND parsing that tree in a debug
+# build is stack-hungry: the `#[derive(Parser)]` glue and the recursive drop of
+# the parsed value together need ~3 MiB, and a parse test (e.g.
+# `exec_separator_tests`, `rbackup`) runs on a Rust test-harness thread whose
+# default stack is only 2 MiB — so `cargo test` aborted with a stack overflow
+# while the shipped binary (an 8 MiB main thread) parsed the very same argv fine.
+#
+# `RUST_MIN_STACK` sizes SPAWNED threads only; the shipped binary's main thread
+# is unaffected, so this changes no runtime behaviour — it only gives test
+# threads the same room the real `main` already has. 8 MiB leaves headroom for
+# the further root verbs this surface is growing (create/kill/wait/… ).
+[env]
+RUST_MIN_STACK = "8388608"

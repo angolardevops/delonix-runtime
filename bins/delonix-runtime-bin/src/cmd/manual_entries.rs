@@ -25,6 +25,106 @@ pub static ENTRIES: &[Entry] = &[
         ],
         see_also: &["image ls", "image push", "container run", "init"],
     },
+    // Docker/Podman root verbs. Aliases of `container <verb>`/`image pull`, so
+    // the example COMMENTS are reused VERBATIM from those entries (already in
+    // `pt.po` — no new translation debt); only the command line is rewritten to
+    // the root form it documents.
+    Entry {
+        path: "run",
+        group: "Workloads",
+        examples: &[
+            ("detached, published on the host, with a name of your own", "delonix run -d -p 8080:80 --name web nginx"),
+            ("a database with a named volume and a network of its own, so the data outlives the container", "delonix run -d --net app -v pgdata:/var/lib/postgresql/data -e POSTGRES_PASSWORD=dev postgres:16"),
+            ("in the foreground, removed on exit — the shape for a one-off task", "delonix run --rm alpine echo hello"),
+            ("with a memory and CPU cap, and a restart policy", "delonix run -d -m 512M --cpus 1.5 --restart on-failure nginx"),
+        ],
+        see_also: &["ps", "logs", "stop", "container run"],
+    },
+    Entry {
+        path: "create",
+        group: "Workloads",
+        examples: &[
+            ("prepare a container now, to start later with the same configuration", "delonix create --name web nginx"),
+            ("with ports and a named volume, ready for `start` to bring up", "delonix create -p 8080:80 -v pgdata:/var/lib/postgresql/data postgres:16"),
+        ],
+        see_also: &["run", "start", "ps", "container create"],
+    },
+    Entry {
+        path: "ps",
+        group: "Workloads",
+        examples: &[
+            ("the running ones", "delonix ps"),
+            ("all of them, stopped included", "delonix ps -a"),
+            ("just the IDs, to feed another command", "delonix ps -q"),
+        ],
+        see_also: &["run", "logs", "container ps"],
+    },
+    Entry {
+        path: "start",
+        group: "Workloads",
+        examples: &[
+            ("bring a stopped container back, with the same ports, volumes and network", "delonix start web"),
+            ("several at once", "delonix start web db cache"),
+        ],
+        see_also: &["stop", "restart", "ps"],
+    },
+    Entry {
+        path: "stop",
+        group: "Workloads",
+        examples: &[
+            ("SIGTERM, then SIGKILL if it does not leave", "delonix stop web"),
+            ("give it 30 seconds to shut down cleanly", "delonix stop -t 30 db"),
+        ],
+        see_also: &["start", "rm", "ps"],
+    },
+    Entry {
+        path: "restart",
+        group: "Workloads",
+        examples: &[
+            ("stop and start again, keeping the original configuration", "delonix restart web"),
+        ],
+        see_also: &["start", "stop", "container restart"],
+    },
+    Entry {
+        path: "rm",
+        group: "Workloads",
+        examples: &[
+            ("remove a stopped container", "delonix rm web"),
+            ("force it even while running", "delonix rm -f web"),
+            ("everything that has already exited", "delonix rm $(delonix ps -aq)"),
+        ],
+        see_also: &["stop", "ps", "container rm"],
+    },
+    Entry {
+        path: "exec",
+        group: "Workloads",
+        examples: &[
+            ("run a command inside a container that is already up", "delonix exec web nginx -t"),
+            ("an interactive shell, no command needed — tries bash, falls back to sh", "delonix exec -it web"),
+            ("as another user, in another directory, with an extra variable", "delonix exec -u root -w /srv -e DEBUG=1 web env"),
+        ],
+        see_also: &["logs", "ps", "container exec"],
+    },
+    Entry {
+        path: "logs",
+        group: "Workloads",
+        examples: &[
+            ("everything the container has written", "delonix logs web"),
+            ("follow it live", "delonix logs -f web"),
+            ("the last 50 lines with timestamps (needs --log-cri at run time)", "delonix logs --tail 50 --timestamps web"),
+        ],
+        see_also: &["ps", "exec", "container logs"],
+    },
+    Entry {
+        path: "pull",
+        group: "Artifacts",
+        examples: &[
+            ("the common case — repository and tag", "delonix pull postgres:16"),
+            ("a registry other than Docker Hub — write it out in the reference", "delonix pull ghcr.io/angolardevops/kaeso-odoo:18"),
+            ("refuse the image unless it carries a cosign signature made by this key", "delonix pull --verify cosign.pub ghcr.io/angolardevops/app:1.2.0"),
+        ],
+        see_also: &["image pull", "image ls", "run"],
+    },
     Entry {
         path: "cluster",
         group: "Clusters",
@@ -416,6 +516,15 @@ pub static ENTRIES: &[Entry] = &[
             ("with a memory and CPU cap, and a restart policy", "delonix container run -d -m 512M --cpus 1.5 --restart on-failure nginx"),
         ],
         see_also: &["container ps", "container logs", "container stop", "container update"],
+    },
+    Entry {
+        path: "container create",
+        group: "Lifecycle",
+        examples: &[
+            ("prepare a container now, to start later with the same configuration", "delonix container create --name web nginx"),
+            ("with ports and a named volume, ready for `start` to bring up", "delonix container create -p 8080:80 -v pgdata:/var/lib/postgresql/data postgres:16"),
+        ],
+        see_also: &["container run", "container start", "container ps"],
     },
     Entry {
         path: "container start",

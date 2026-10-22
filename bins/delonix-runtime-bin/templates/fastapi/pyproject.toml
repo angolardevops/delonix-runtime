@@ -13,6 +13,11 @@ dependencies = [
     # Outbound webhooks. `httpx`, not `httpx2`: the OpenTelemetry httpx
     # instrumentation instruments `httpx`.
     "httpx>=0.28",
+    # Redis cache (asyncio client) and RabbitMQ messaging (AMQP 0-9-1). Both
+    # are only reached when REDIS_URL / RABBITMQ_URL are set; the app imports
+    # them lazily and runs without either.
+    "redis>=5.2",
+    "aio-pika>=9.5",
     "opentelemetry-api>=1.45",
     "opentelemetry-sdk>=1.45",
     "opentelemetry-exporter-otlp-proto-http>=1.45",

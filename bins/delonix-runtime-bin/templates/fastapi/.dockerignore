@@ -6,6 +6,7 @@
 .env
 .env.*
 !.env.example
+compose.yaml
 .venv
 __pycache__
 *.pyc

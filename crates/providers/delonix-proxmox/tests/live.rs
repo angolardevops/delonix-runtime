@@ -3091,6 +3091,83 @@ fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
     );
 }
 
+/// `vm.disk.resize` on an EXISTING Proxmox VM — the path the capability
+/// matrix carried as `partial` ("`PUT …/resize` on an existing VM too now,
+/// grow-only … no battery/live evidence yet for the existing-VM path"). This
+/// is the `delonix vm resize --disk-size` path (`VmBackend::resize_disk`),
+/// asserted from the node's own `boot_disk` read, never from the call's
+/// answer:
+///
+/// - the VM is created with a 1 GiB boot disk the node reads back as such;
+/// - a SHRINK is refused and the node's disk is unchanged after it;
+/// - stopped, a GROW to 2 GiB lands, and the node reads the boot disk back at
+///   exactly 2 GiB — the number a tenant's quota is counted against.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn a_stopped_vms_boot_disk_grows_and_the_node_reads_it_back() {
+    let t = target().expect(NEEDS_TARGET);
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxdiskres{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = record_of(&name, &cfg, &boot);
+    let client = b.client();
+
+    // Created at 1 GiB, read from the node (not the call that made it).
+    let (key, bytes) = client.boot_disk(vmid).expect("boot disk");
+    assert_eq!(
+        bytes,
+        1 << 30,
+        "created with a 1 GiB `{key}`: {bytes} bytes"
+    );
+
+    // Stop first: `resize_disk` is a cold resize and reads the NODE's power
+    // state, not the record's.
+    b.stop(vmdir, &vm).expect("stop");
+
+    // A shrink is refused, and the node's disk is unchanged after the refusal.
+    let err = b
+        .resize_disk(vmdir, &vm, 512 << 20)
+        .expect_err("a shrink must be refused");
+    let (_, bytes) = client
+        .boot_disk(vmid)
+        .expect("re-read after refused shrink");
+    assert_eq!(
+        bytes,
+        1 << 30,
+        "a refused shrink changed the disk to {bytes} bytes: {err}"
+    );
+
+    // Grow to 2 GiB on the existing VM; the node reads it back.
+    b.resize_disk(vmdir, &vm, 2 << 30)
+        .expect("grow the boot disk to 2 GiB");
+    let (_, bytes) = client.boot_disk(vmid).expect("re-read after grow");
+    assert_eq!(
+        bytes,
+        2 << 30,
+        "the node did not grow `{key}` to 2 GiB: {bytes} bytes"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
+
 /// `extraDisks`/`extraNics` on Proxmox (`vm.disks.extra`/`vm.nics.extra`),
 /// asserted from the node's own config and storage, never from the call's
 /// answer: the extra disks exist on the storage under this VM's id, in the
