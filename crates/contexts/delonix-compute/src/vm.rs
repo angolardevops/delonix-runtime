@@ -595,6 +595,30 @@ where
         // outlived every destroy, so «removes everything» was not quite true.
         // Nothing holds it once the record is gone.
         let _ = std::fs::remove_file(vmdir.join(format!(".{name}.lock")));
+        // The hypervisor-side network goes with its LAST user. The backend
+        // decides, because only it knows which network a record is on (libvirt:
+        // an explicit `bridge` before `network`); this side hands it every
+        // record of the same backend that is left, stopped ones included — a
+        // stopped VM still needs the network at its next `start`. Unreadable
+        // records release nothing. A failure does not undo an `rm` that has
+        // already happened; it is said, not swallowed.
+        if let (Some(vm), Ok(all)) = (&record, st.list()) {
+            let remaining: Vec<Vm> = all
+                .into_iter()
+                .filter(|o| o.backend == vm.backend)
+                .collect();
+            if let Err(e) = self
+                .backends
+                .for_vm(vm)
+                .and_then(|b| b.release_network(vm, &remaining))
+            {
+                tracing::warn!(
+                    vm = %name,
+                    network = %vm.network,
+                    "the VM is removed, but the network its backend defined for it could not be released: {e}"
+                );
+            }
+        }
         Ok(out)
     }
     /// Stops the VM via ITS backend (CH/libvirt) but **preserves** the record and disk
@@ -1197,7 +1221,20 @@ where
                 Error::from(e)
             }
         })?;
-        self.create(&config_from(&vm))
+        self.create(&self.restart_config(&vm))
+    }
+    /// The config a `start`/`restart` boots from: [`config_from`] the record,
+    /// plus the subnet declared NOW for the network the VM's NIC names (an
+    /// explicit `bridge`, else `network`), which the record does not keep.
+    /// With it the backend can define again a hypervisor-side network that has
+    /// gone, and judge one left on another subnet, the same way `create` does.
+    fn restart_config(&self, vm: &Vm) -> VmConfig {
+        let mut cfg = config_from(vm);
+        if cfg.network_subnet.is_none() {
+            let name = cfg.bridge.as_deref().unwrap_or(&cfg.network);
+            cfg.network_subnet = self.network.and_then(|n| n.subnet_of(name));
+        }
+        cfg
     }
     /// Stops (if running) then starts — always a real reboot, unlike `start`
     /// (which no-ops when already running). Same recovered-fields caveat as
@@ -1214,7 +1251,7 @@ where
         if self.backends.for_vm(&vm)?.is_running(&vm) {
             self.stop(name)?;
         }
-        self.create(&config_from(&vm))
+        self.create(&self.restart_config(&vm))
     }
     /// Current state of a VM, with `status`/`ip` reconciled by its backend.
     pub fn status(&self, name: &str) -> Result<Vm> {
@@ -1554,20 +1591,12 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         devices: _,
         backend: _,
         net_mode: _,
-        // NOT restored, and the reason is narrow: this subnet only ever feeds
-        // `ensure_libvirt_network`'s DEFINE branch. By the time a `vm start`
-        // runs, the network it describes already exists, so that branch is not
-        // taken and the value would be dead. `network` IS persisted, and
-        // `boot` re-derives `bridge` from it, so the VM goes back onto the same
-        // network it was created on.
-        //
-        // The one case this gives up on: if the libvirt network is removed out
-        // of band between `create` and `start`, the restart cannot redefine it
-        // (no subnet) and `ensure_libvirt_network` warns and leaves it. The
-        // domain then names a network the daemon does not have and `virsh
-        // start` fails — loudly, which is the point. Persisting the subnet
-        // would need a new flat `Vm` field; worth doing if that case shows up
-        // in practice.
+        // NOT persisted: the subnet is a property of the NETWORK, declared in
+        // its own registry, and can change after the VM was created. A `start`
+        // resolves the current one through the network port
+        // (`VmEngine::restart_config`), which is what lets the backend define
+        // again a hypervisor-side network that has gone, and refuse or redefine
+        // one left on another subnet.
         network_subnet: _,
         // Consumido em `prepare_local_overlay` no momento da criação: depois de
         // o overlay existir, o tamanho é uma propriedade DELE e não há nada a
@@ -1762,9 +1791,9 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         // the net mode string there. For Cloud Hypervisor it IS a device name
         // and must not be misread as one.
         net_mode: (vm.backend == "libvirt").then(|| vm.tap.clone()),
-        // `None` on purpose — see the `network_subnet` note in `boot_spec_of`:
-        // only the DEFINE branch reads it, and a restart's network already
-        // exists. `network` above is what puts the VM back on it.
+        // `None` here — see the `network_subnet` note in `boot_spec_of`: the
+        // record does not keep it, and `VmEngine::restart_config` resolves the
+        // declared one when a `start` needs it.
         network_subnet: None,
         // `None` de propósito: o overlay já tem o tamanho com que nasceu, e um
         // restart não o redimensiona. Reafirmar aqui um número seria convidar um
@@ -2070,6 +2099,14 @@ mod tests {
         fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
             self.0.calls.borrow_mut().push(format!("stop {}", vm.name));
             *self.0.running.borrow_mut() = false;
+            Ok(())
+        }
+        fn release_network(&self, vm: &Vm, remaining: &[Vm]) -> delonix_model::Result<()> {
+            let left: Vec<&str> = remaining.iter().map(|o| o.name.as_str()).collect();
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("release_network {} {left:?}", vm.name));
             Ok(())
         }
         fn resize_cold(
@@ -3177,5 +3214,117 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.to_string().contains("52:54:00:00:00:09"), "{err}");
+    }
+
+    /// The backend is asked to release the network on every `rm`, handed the
+    /// records of the same backend that are LEFT — stopped ones included: a
+    /// libvirt `stop` undefines the domain, so asking the hypervisor would
+    /// have pulled the network from under the stopped one's next `start`.
+    /// Measured 2026-10-21: before, nothing was released at all and the
+    /// libvirt network, its bridge and route outlived `vm rm` and `stack
+    /// destroy`. Which of those records is on the network is the backend's to
+    /// say (libvirt's `still_on_network`), so the whole list goes.
+    #[test]
+    fn the_backend_releases_with_the_records_that_are_left() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        // Both networks declared: a create on an undeclared one is refused
+        // before anything is built (#905), which is not what this measures.
+        let nets = DeclaredNets(&["lab-net", "other-net"]);
+        let mut e = engine(root.path(), seen.clone());
+        e.network = Some(&nets);
+        let on = |n: &str, net: &str| VmConfig {
+            network: net.into(),
+            ..cfg(n)
+        };
+        e.create(&on("a", "lab-net")).expect("create a");
+        e.create(&on("b", "lab-net")).expect("create b");
+        e.create(&on("c", "other-net")).expect("create c");
+        e.stop("b").expect("stop b");
+        let released = |s: &Seen| -> Vec<String> {
+            calls(s)
+                .into_iter()
+                .filter(|c| c.starts_with("release_network"))
+                .collect()
+        };
+        e.destroy("a", false, false).expect("rm a");
+        e.destroy("b", false, false).expect("rm b");
+        e.destroy("c", false, false).expect("rm c");
+        assert_eq!(
+            released(&seen),
+            [
+                r#"release_network a ["b", "c"]"#,
+                r#"release_network b ["c"]"#,
+                "release_network c []",
+            ]
+        );
+    }
+
+    /// A network port that declares one subnet per name — and only those
+    /// names, since a start onto an undeclared network is refused (#905).
+    struct DeclaredSubnets(BTreeMap<&'static str, &'static str>);
+
+    impl VmNetwork for DeclaredSubnets {
+        fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
+            Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(self.0.contains_key(name))
+        }
+        fn attach_tap(&self, _: &str, _: &str, _: &str, _: &str) -> delonix_model::Result<String> {
+            Ok("tap0".into())
+        }
+        fn lease_ip(&self, _network: &str, _mac: &str) -> Option<String> {
+            None
+        }
+        fn detach_tap(&self, _vm: &str, _lease: Option<&str>) {}
+        fn join_argv(&self) -> Option<Vec<String>> {
+            None
+        }
+        fn subnet_of(&self, name: &str) -> Option<String> {
+            self.0.get(name).map(|s| s.to_string())
+        }
+    }
+
+    /// BUG-1b/GAP-2 of the same run: a `start` rebuilt its config from the
+    /// record, which does not keep the subnet, so a libvirt network removed
+    /// meanwhile (by another state root's last `rm`) could not be defined
+    /// again and the start failed with «Network not found»; and one left on
+    /// an old subnet was never judged. The subnet declared NOW travels with
+    /// the start — by the NIC's network: an explicit `bridge` first.
+    #[test]
+    fn a_start_carries_the_subnet_declared_now() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let nets = DeclaredSubnets(BTreeMap::from([
+            ("lab-net", "10.231.80.0/24"),
+            ("br-net", "10.231.81.0/24"),
+        ]));
+        let mut e = engine(root.path(), seen.clone());
+        e.network = Some(&nets);
+        let on_net = VmConfig {
+            network: "lab-net".into(),
+            ..cfg("a")
+        };
+        let on_bridge = VmConfig {
+            bridge: Some("br-net".into()),
+            ..cfg("b")
+        };
+        assert_eq!(
+            e.restart_config(&e.create(&on_net).unwrap())
+                .network_subnet
+                .as_deref(),
+            Some("10.231.80.0/24")
+        );
+        assert_eq!(
+            e.restart_config(&e.create(&on_bridge).unwrap())
+                .network_subnet
+                .as_deref(),
+            Some("10.231.81.0/24")
+        );
+        // No port, or nothing declared: nothing invented.
+        e.network = None;
+        let vm = e.repo.get("a").unwrap();
+        assert_eq!(e.restart_config(&vm).network_subnet, None);
     }
 }

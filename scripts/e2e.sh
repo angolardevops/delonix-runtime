@@ -4956,14 +4956,29 @@ while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") a
 assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op'
       check "node API: a rede libvirt nasce com a sub-rede declarada (virsh net-dumpxml)" ok bash -c \
         "virsh -c qemu:///system net-dumpxml '$NVNET' | grep -q \"address='10.237.$NVOCT.1' netmask='255.255.255.0'\""
+      # The node API's DELETE of the network's last VM takes the libvirt
+      # network with it — the release the use case owns. Measured through the
+      # API because that is where it stayed behind (cli-tester, 2026-10-21).
+      check "node API: o DELETE da última VM leva a rede libvirt que o motor definiu" ok \
+        env NODESOCK="$NODESOCK" NVVM="$NVVM" NVNET="$NVNET" python3 -c '
+import json,os,subprocess,time
+def call(method, path):
+    out=subprocess.run(["curl","-s","-X",method,"--unix-socket",os.environ["NODESOCK"],"http://localhost"+path],capture_output=True,text=True).stdout
+    return json.loads(out)
+op=call("DELETE","/v1/namespaces/default/virtualmachines/"+os.environ["NVVM"])
+assert "id" in op, op
+deadline=time.time()+120
+while op.get("state") in ("OPERATION_STATE_PENDING","OPERATION_STATE_RUNNING") and time.time()<deadline:
+    time.sleep(1); op=call("GET","/v1/operations/"+op["id"])
+assert op.get("state")=="OPERATION_STATE_SUCCEEDED", op
+gone=subprocess.run(["virsh","-c","qemu:///system","net-info",os.environ["NVNET"]],capture_output=True).returncode!=0
+assert gone, "the libvirt network outlived its last VM"'
     fi
     "$BIN" delete vm "$NVVM" -f >/dev/null 2>&1
     kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
-    # By hand, and that is a KNOWN defect, not the design: neither the
-    # node API's DELETE nor `network rm` removes the libvirt network the
-    # provider defined, and a later declaration with another subnet reuses
-    # the stale one (cli-tester, 2026-10-21). When teardown owns it, this
-    # becomes a check that `net-info` fails after `network rm`.
+    # Only a safety net: the check above is what proves the release. A FAIL
+    # there must not leave this block's network on the host, and it is still
+    # the one this block saw absent and then created.
     if virsh -c qemu:///system net-info "$NVNET" >/dev/null 2>&1; then
       virsh -c qemu:///system net-destroy "$NVNET" >/dev/null 2>&1
       virsh -c qemu:///system net-undefine "$NVNET" >/dev/null 2>&1
@@ -5033,6 +5048,118 @@ elif command -v cloud-hypervisor >/dev/null; then
   rm -rf "$FDIR"
 else
   skip "CH: boot falhado não deixa ficheiros em vms/" "sem cloud-hypervisor instalado"
+fi
+
+########################################
+section "vm: a rede libvirt de uma rede declarada tem a sub-rede declarada, e sai com a última VM"
+########################################
+# Medido a 2026-10-21 (cli-tester, root isolado, 2× por `vm create` e por
+# `stack apply`): desde o #866 o `vm create --network <rede declarada>` define
+# uma rede NAT libvirt com o mesmo nome, e (1) nada a removia — nem `vm rm`,
+# nem `network rm`, nem `stack destroy`: ficavam a rede, o virbrN e a rota; (2)
+# com essa rede deixada para trás, redeclarar a rede noutra sub-rede e criar
+# uma VM nela dava rc 0 com a VM na sub-rede ANTIGA. Agora a rede leva a marca
+# de posse do motor, só se usa na sub-rede declarada, redefine-se só se é nossa
+# e nenhum domínio está nela, e sai com o último registo que a nomeia. Uma rede
+# sem a marca nunca se toca. As redes e o domínio «alheios» abaixo são
+# definidos por esta secção (sem `net-start`: nem bridge nem rota no host).
+if libvirt_system_usable; then
+  LNET="lvn-$PFX"; LSTALE="lvs-$PFX"; LFOR="lvf-$PFX"; LDOM="lvd-$PFX"
+  LV1="lvn1-$PFX"; LV2="lvn2-$PFX"; LV3="lvn3-$PFX"; LV4="lvn4-$PFX"; LV5="lvn5-$PFX"
+  LMARK='delonix.io/xmlns/libvirt/network/1'
+  for v in "$LV1" "$LV2" "$LV3" "$LV4" "$LV5"; do qemu-img create -f qcow2 "$OUT/$v.qcow2" 64M >/dev/null 2>&1; done
+  lv_net_has() { virsh -c qemu:///system net-dumpxml "$1" 2>/dev/null | grep -q "$2"; }
+  lv_net_gone() { ! virsh -c qemu:///system net-info "$1" >/dev/null 2>&1; }
+  lv_create() { "$BIN" vm create "$1" --disk "$OUT/$1.qcow2" --backend libvirt --memory 256M --network "$2"; }
+  # Uma rede libvirt definida à mão; `$3` = a marca do motor ou nada.
+  lv_define_net() {
+    printf "<network><name>%s</name>%s<forward mode='nat'/><ip address='%s' netmask='255.255.255.0'/></network>\n" \
+      "$1" "$3" "$2" >"$OUT/$1.xml"
+    virsh -c qemu:///system net-define "$OUT/$1.xml" >/dev/null 2>&1
+  }
+  lv_undefine_net() {
+    virsh -c qemu:///system net-destroy "$1" >/dev/null 2>&1
+    virsh -c qemu:///system net-undefine "$1" >/dev/null 2>&1
+  }
+
+  # 1. O caminho do motor: define com a marca, partilha, e sai com o ÚLTIMO
+  #    registo — uma VM parada (o `stop` faz undefine do domínio) ainda conta,
+  #    e uma posta na rede por `--bridge` (registo `network: ingress`) também:
+  #    o cli-tester mediu (2026-10-21, BUG-1) o `rm` da outra a tirar a rede e o
+  #    `start` desta a falhar com «Network not found».
+  "$BIN" network create "$LNET" --subnet 10.231.91.0/24 >/dev/null 2>&1
+  if check_then "vm create libvirt numa rede declarada (posse)" ok lv_create "$LV1" "$LNET"; then
+    check "a rede libvirt que o motor define leva a marca de posse e a sub-rede declarada" ok bash -c \
+      "$(declare -f lv_net_has); lv_net_has '$LNET' '$LMARK' && lv_net_has '$LNET' \"address='10.231.91.1'\""
+    check "uma segunda VM na mesma rede declarada" ok lv_create "$LV2" "$LNET"
+    check "uma terceira VM na mesma rede, por --bridge" ok bash -c \
+      "'$BIN' vm create '$LV5' --disk '$OUT/$LV5.qcow2' --backend libvirt --memory 256M --net-mode nat --bridge '$LNET' >/dev/null && virsh -c qemu:///system domiflist '$LV5' | grep -q ' $LNET '"
+    check "vm stop (posse)" ok "$BIN" vm stop "$LV1"
+    check "vm stop (posse, --bridge)" ok "$BIN" vm stop "$LV5"
+    check "vm rm com outra VM (parada) na mesma rede deixa a rede libvirt" ok bash -c \
+      "'$BIN' vm rm '$LV2' >/dev/null && virsh -c qemu:///system net-info '$LNET' >/dev/null"
+    check "vm rm com uma VM (parada) na rede por --bridge deixa a rede libvirt" ok bash -c \
+      "'$BIN' vm rm '$LV1' >/dev/null && virsh -c qemu:///system net-info '$LNET' >/dev/null"
+    check "vm start da VM por --bridge depois do rm da outra" ok bash -c \
+      "'$BIN' vm start '$LV5' >/dev/null && virsh -c qemu:///system domiflist '$LV5' | grep -q ' $LNET '"
+    # A rede desapareceu entretanto (o último `rm` de OUTRO root a tirou, ou à
+    # mão): o `start` resolve a sub-rede declarada e define-a outra vez.
+    "$BIN" vm stop "$LV5" >/dev/null 2>&1
+    lv_undefine_net "$LNET"
+    check "vm start define outra vez a rede que desapareceu, com a marca e a sub-rede declarada" ok bash -c \
+      "$(declare -f lv_net_has); '$BIN' vm start '$LV5' >/dev/null && lv_net_has '$LNET' '$LMARK' && lv_net_has '$LNET' \"address='10.231.91.1'\""
+    check "vm rm do último utilizador tira a rede libvirt que o motor definiu" ok bash -c \
+      "$(declare -f lv_net_gone); '$BIN' vm rm '$LV5' >/dev/null && lv_net_gone '$LNET'"
+  fi
+  for v in "$LV1" "$LV2" "$LV5"; do "$BIN" vm rm "$v" -f >/dev/null 2>&1; done
+  e2e_net_rm "$LNET"
+  lv_net_has "$LNET" "$LMARK" && lv_undefine_net "$LNET"
+
+  # 2. Um resto NOSSO noutra sub-rede (um `vm rm -f` cuja libertação falhou):
+  #    com um domínio nele — aqui um do operador — recusa (5) e nomeia-o; sem
+  #    domínios, redefine-o na sub-rede declarada.
+  if lv_define_net "$LSTALE" 10.231.95.1 "<metadata><d:network xmlns:d='https://$LMARK' subnet='10.231.95.0/24'/></metadata>"; then
+    printf "<domain type='qemu'><name>%s</name><memory unit='MiB'>64</memory><os><type>hvm</type></os><devices><interface type='network'><source network='%s'/></interface></devices></domain>\n" \
+      "$LDOM" "$LSTALE" >"$OUT/$LDOM.xml"
+    virsh -c qemu:///system define "$OUT/$LDOM.xml" >/dev/null 2>&1
+    "$BIN" network create "$LSTALE" --subnet 10.231.96.0/24 >/dev/null 2>&1
+    check "rede nossa noutra sub-rede com um domínio nela: o vm create recusa (5) e nomeia-o" ok bash -c \
+      "out=\$($(declare -f lv_create); BIN='$BIN' OUT='$OUT' lv_create '$LV3' '$LSTALE' 2>&1); rc=\$?; [ \$rc -eq 5 ] && printf '%s' \"\$out\" | grep -q '$LDOM'"
+    check "a recusa não definiu o domínio da VM nem mexeu na rede" ok bash -c \
+      "$(declare -f lv_net_has); ! virsh -c qemu:///system domstate '$LV3' >/dev/null 2>&1 && lv_net_has '$LSTALE' \"address='10.231.95.1'\""
+    virsh -c qemu:///system undefine "$LDOM" >/dev/null 2>&1
+    "$BIN" vm rm "$LV3" -f >/dev/null 2>&1
+    check "rede nossa noutra sub-rede sem domínios: o vm create redefine-a na declarada" ok bash -c \
+      "$(declare -f lv_net_has lv_create); BIN='$BIN' OUT='$OUT' lv_create '$LV3' '$LSTALE' >/dev/null && lv_net_has '$LSTALE' \"address='10.231.96.1'\" && lv_net_has '$LSTALE' '$LMARK'"
+    check "vm rm leva a rede redefinida com a VM" ok bash -c \
+      "$(declare -f lv_net_gone); '$BIN' vm rm '$LV3' >/dev/null && lv_net_gone '$LSTALE'"
+  else
+    skip "rede nossa noutra sub-rede" "o virsh net-define da rede de teste falhou neste host"
+  fi
+  "$BIN" vm rm "$LV3" -f >/dev/null 2>&1
+  virsh -c qemu:///system undefine "$LDOM" >/dev/null 2>&1
+  e2e_net_rm "$LSTALE"
+  lv_undefine_net "$LSTALE"
+
+  # 3. Uma rede SEM a marca (do operador, ou deixada por um binário anterior a
+  #    esta correcção) noutra sub-rede: recusa (5), e fica como estava.
+  if lv_define_net "$LFOR" 10.231.93.1 ""; then
+    "$BIN" network create "$LFOR" --subnet 10.231.94.0/24 >/dev/null 2>&1
+    check "rede libvirt do operador noutra sub-rede: o vm create recusa (5) e diz que não é nossa" ok bash -c \
+      "out=\$($(declare -f lv_create); BIN='$BIN' OUT='$OUT' lv_create '$LV4' '$LFOR' 2>&1); rc=\$?; [ \$rc -eq 5 ] && printf '%s' \"\$out\" | grep -q 'did not define'"
+    check "a rede do operador continua lá, parada e sem a marca" ok bash -c \
+      "virsh -c qemu:///system net-dumpxml '$LFOR' | grep -q 10.231.93.1 && ! virsh -c qemu:///system net-dumpxml '$LFOR' | grep -q '$LMARK' && virsh -c qemu:///system net-info '$LFOR' | grep -q 'Active: *no'"
+  else
+    skip "rede libvirt do operador com o mesmo nome" "o virsh net-define da rede de teste falhou neste host"
+  fi
+  "$BIN" vm rm "$LV4" -f >/dev/null 2>&1
+  e2e_net_rm "$LFOR"
+  lv_undefine_net "$LFOR"
+  for v in "$LV1" "$LV2" "$LV3" "$LV4" "$LV5" "$LSTALE" "$LFOR" "$LDOM"; do
+    rm -f "$OUT/$v.qcow2" "$OUT/$v.xml"
+  done
+else
+  skip "vm: rede libvirt de uma rede declarada" "sem virsh/qemu-img/qemu-system-x86_64, ou sem ligação libvirt de sistema"
 fi
 
 ########################################

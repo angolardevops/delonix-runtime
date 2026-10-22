@@ -14649,6 +14649,16 @@ msgstr "O `vm move` foi recusado antes de começar: a VM está no estado de ener
 msgid "Stop or start the VM to match `--live`; for a precheck refusal, put the VM's disks on a storage the whole cluster shares, or remove the local device."
 msgstr "Pára ou arranca a VM de acordo com o `--live`; numa recusa da pré-verificação, põe os discos da VM num storage partilhado por todo o cluster, ou retira o dispositivo local."
 
+# DX-5508 — a rede do hipervisor não está na sub-rede declarada
+msgid "the hypervisor's network is not on the declared subnet"
+msgstr "a rede do hipervisor não está na sub-rede declarada"
+
+msgid "The hypervisor already has a network with the name the VM asked for, on a different subnet than the one declared for it. The engine redefines such a network only when it defined it itself and no VM is on it; otherwise it refuses, because attaching the VM would put it on a subnet nobody declared."
+msgstr "O hipervisor já tem uma rede com o nome que a VM pediu, numa sub-rede diferente da que foi declarada para ela. O motor só redefine uma rede assim quando foi ele que a definiu e nenhuma VM está nela; caso contrário recusa, porque ligar a VM colocá-la-ia numa sub-rede que ninguém declarou."
+
+msgid "Remove the VMs still on the old network first, or give the delonix network another name. A network the engine did not define is the operator's: change or remove it with `virsh net-edit`/`virsh net-undefine` if that is what you want."
+msgstr "Remove primeiro as VMs que ainda estão na rede antiga, ou dá outro nome à rede do delonix. Uma rede que o motor não definiu é do operador: altera-a ou remove-a com `virsh net-edit`/`virsh net-undefine`, se é isso que queres."
+
 msgid "Move a VM to another node of its cluster — same VM, same record"
 msgstr "Move uma VM para outro nó do seu cluster — a mesma VM, o mesmo registo"
 

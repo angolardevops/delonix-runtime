@@ -4623,6 +4623,46 @@ no publish), e separa "alcançáveis a partir de VMs" (endereço:porta) dos
 seguro. Parsers puros e testados (`parse_ip_gateways_pega_so_as_virbr`,
 `parse_ss_binds_classifica_loopback_vs_gateway`).
 
+### A rede libvirt de uma rede declarada: posse marcada, sub-rede verificada (2026-10-21)
+
+Desde o #866 o `vm create --network <rede declarada>` define em `qemu:///system` uma rede
+NAT libvirt com o mesmo nome. Medido pelo cli-tester, em root isolado: **nada a removia**
+(`vm rm`, `network rm`, `stack destroy` deixavam a rede, o virbrN e a rota no host), e o
+`ensure_libvirt_network` **confiava no nome** — com essa rede deixada para trás, redeclarar
+a rede noutra sub-rede e criar uma VM nela dava rc 0 com a VM na sub-rede ANTIGA, e o
+`stack plan`/`drift` calados.
+
+- **A posse lê-se do objecto, nunca do nome.** A rede que o motor define leva um
+  `<metadata>` no namespace `https://delonix.io/xmlns/libvirt/network/1` (o libvirt
+  guarda-o; medido no 10.0, devolvido com `"`). Só uma rede com a marca se redefine ou
+  remove; o host tem redes do operador com nomes que uma rede do delonix também pode ter.
+- **`libvirt_network_plan` (pura, tabela testada):** usa-se só na sub-rede declarada (ou
+  sem nada declarado para comparar); fora dela, redefine-se se é nossa E nenhum domínio
+  (do operador incluído, parado incluído) está nela; em tudo o resto recusa com
+  **DX-5508** (classe 5). Uma rede sem marca deixada por um binário anterior também
+  recusa — não se distingue de uma do operador, e a mensagem diz o `virsh` a usar.
+- **Quem conta os utilizadores é o caso de uso; quem diz em que rede está cada um é o
+  backend.** `VmBackend::release_network(vm, remaining)` (default: nada) recebe, em cada
+  `rm`, os registos do mesmo backend que ficam — parados incluídos: perguntar só ao
+  libvirt contaria uma VM PARADA como ausente (o `stop` faz undefine do domínio). A
+  primeira versão comparava `o.network == vm.network` no caso de uso, e o cli-tester
+  apanhou-a (BUG-1): uma VM posta na rede por `--bridge X` fica com `network: ingress`,
+  não contava, e o `rm` da outra tirava a rede de baixo do `start` dela. O libvirt decide
+  com o mesmo mapeamento do `boot` (`bridge` antes de `network`, `still_on_network`).
+- **O `start` leva a sub-rede declarada AGORA** (`VmEngine::restart_config`, pelo novo
+  `VmNetwork::subnet_of`). Um root não vê os registos de outro, e o `qemu:///system` é
+  partilhado: o último `rm` de um root pode tirar a rede de que uma VM parada de outro
+  root precisa (BUG-1b). Com a sub-rede, o `start` define-a outra vez — e julga uma que
+  tenha ficado noutra sub-rede, como o `create`. Um `boot` que falha depois de definir a
+  rede leva-a consigo.
+- De caminho: o `destroy` libertava a reserva de IP estático do `default` numa VM com
+  `--network`, porque o `boot` mapeia a rede para `bridge` e o registo não o guarda.
+- **Gate**: secção «a rede libvirt de uma rede declarada…» no `scripts/e2e.sh`, dentro do
+  `libvirt_system_usable`, com as redes e o domínio «alheios» definidos pela própria secção
+  e nunca arrancados. 17/17 com a correcção; 14/17 com a versão que contava por `network`
+  (os três do BUG-1 e do `start`); 4/12 com o binário anterior a tudo isto (que ainda
+  deixou a rede para trás).
+
 ## VM↔container por IP directo (`vm bridge`) — EXPERIMENTAL, privilegiado, opt-in
 
 A ÚNICA coisa que o modelo rootless não faz sozinho: dar a uma VM libvirt (em

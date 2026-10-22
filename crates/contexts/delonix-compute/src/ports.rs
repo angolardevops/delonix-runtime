@@ -132,6 +132,16 @@ pub trait VmNetwork: Send + Sync {
     /// The argv prefix that runs a command inside the infra's namespaces, or
     /// `None` when the infra is not up.
     fn join_argv(&self) -> Option<Vec<String>>;
+    /// The subnet declared for the network `name` (`10.231.80.0/24`), or
+    /// `None` when none is declared. Default: `None`.
+    ///
+    /// A `vm start` rebuilds its config from the record, which does not keep
+    /// the subnet; without it a hypervisor-side network that has gone (removed
+    /// with its last VM by another state root, or out of band) could not be
+    /// defined again, and one left on an old subnet could not be judged.
+    fn subnet_of(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 /// The VM backends a node has, as the VM use cases ask for them

@@ -610,6 +610,25 @@ pub trait VmBackend {
         self.stop(vmdir, vm)
     }
 
+    /// Releases what this backend defined in the HYPERVISOR for the network
+    /// `vm` was on, when none of `remaining` — every record of this backend
+    /// still on the node, stopped VMs included — is on it. The use case calls
+    /// it after the record is gone: it is the one that sees every record, and a
+    /// libvirt `stop` undefines the domain, so the hypervisor alone would count
+    /// a stopped VM as gone and pull the network from under its next `start`.
+    /// Which network a record is on is the backend's to say (libvirt: an
+    /// explicit `bridge` before `network`), which is why it gets the records
+    /// and not a yes/no.
+    ///
+    /// Default: nothing to release. libvirt overrides it because `vm create
+    /// --network <name>` defines a libvirt network of that name, which outlived
+    /// every `rm` (its bridge and route stayed on the host). An implementation
+    /// removes only what it can prove it defined, never an object the operator
+    /// made.
+    fn release_network(&self, _vm: &Vm, _remaining: &[Vm]) -> delonix_model::Result<()> {
+        Ok(())
+    }
+
     /// Suspends a RUNNING VM's vCPUs, guest memory intact — the same notion
     /// as `container pause`'s cgroup freezer, not [`VmBackend::snapshot`]
     /// (which persists a checkpoint to disk; this never touches storage).
