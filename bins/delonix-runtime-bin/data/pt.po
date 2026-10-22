@@ -16946,3 +16946,21 @@ msgstr "{name} (bridge do host)"
 
 msgid "{name} (libvirt network)"
 msgstr "{name} (rede do libvirt)"
+
+msgid "Wait for containers to exit (`docker wait <id>…`), or for a manifest's resources to be ready"
+msgstr "Espera que containers saiam (`docker wait <id>…`), ou que os recursos de um manifesto estejam prontos"
+
+msgid "Wait for containers to exit (`docker wait <id>…`), or for a manifest's resources to be ready.\n\nONE verb, two forms, selected by GRAMMAR — never by guessing. One or more positional CONTAINER operands select the container form (blocks until each exits, prints its exit code, like `container wait`). Zero operands select the manifest form (blocks until the manifest's resources are ready). The two grammars are disjoint; mixing them — a container operand together with `-f`/`--timeout`, which belong only to the manifest form — is refused, not silently resolved."
+msgstr "Espera que containers saiam (`docker wait <id>…`), ou que os recursos de um manifesto estejam prontos.\n\nUM verbo, duas formas, escolhidas pela GRAMÁTICA — nunca por adivinhação. Um ou mais operandos posicionais de CONTAINER escolhem a forma de container (bloqueia até cada um sair, imprime o código de saída, como `container wait`). Zero operandos escolhem a forma de manifesto (bloqueia até os recursos do manifesto estarem prontos). As duas gramáticas são disjuntas; misturá-las — um operando de container junto de `-f`/`--timeout`, que pertencem só à forma de manifesto — é recusado, não resolvido em silêncio."
+
+msgid "Containers to wait on (the `docker wait` form). With none, the manifest form runs instead"
+msgstr "Containers em que esperar (a forma `docker wait`). Sem nenhum, corre antes a forma de manifesto"
+
+msgid "Manifest file (manifest form only)"
+msgstr "Ficheiro de manifesto (só na forma de manifesto)"
+
+msgid "Seconds to wait before giving up (exit 124). Manifest form only"
+msgstr "Segundos a esperar antes de desistir (saída 124). Só na forma de manifesto"
+
+msgid "`delonix wait <container>…` is the container form (docker wait); `-f`/`--timeout` belong to the manifest form `delonix wait -f <file>`. Use one or the other, not both."
+msgstr "`delonix wait <container>…` é a forma de container (docker wait); `-f`/`--timeout` pertencem à forma de manifesto `delonix wait -f <file>`. Usa uma ou a outra, não ambas."

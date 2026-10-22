@@ -21,10 +21,12 @@ mais do que isso: é o contrato de semver do projecto.
 Docker e Podman lhes dão:
 
 ```
-container run   ps   stop   start   restart   kill   rm   exec   logs
+container run  create  ps  stop  start  restart  kill  rm  exec  logs  attach  stats
                 wait   inspect   port   rename   pause   unpause
-image     pull  ls    remove    build (delonix build)
-raiz      run  create  ps  start  stop  restart  rm  exec  logs  pull   (aliases dos de cima)
+image     pull  ls  remove (rm)  tag  save  load  push   build (delonix build)
+raiz      run  create  ps  start  stop  restart  kill  rm  exec  logs  attach  stats
+          pull  images  rmi  tag  save  load  push            (aliases dos de cima)
+          wait                                        (polimórfico — ver abaixo)
 ```
 
 Concretamente, garante-se:
@@ -68,10 +70,37 @@ Concretamente, garante-se:
 > caminho de código a divergir, e o `--help` é o mesmo módulo a módulo. É por
 > isso que entram na promessa de estabilidade acima, e não numa à parte: o que
 > `delonix container run` promete, `delonix run` promete pela mesma linha. O
-> conjunto reintroduzido é o dos fluxos mais frequentes; os restantes
-> (`kill`, `wait`, `attach`, `inspect`, `stats`, `push`, `images`,
-> `rmi`, `tag`, `login`, `logout`) seguem o mesmo padrão à medida que forem
-> acrescentados.
+> conjunto reintroduzido na primeira passagem foi o dos fluxos mais frequentes.
+
+> **Tabela completada depois da v5.1.1.** Os restantes verbos da tabela
+> Docker/Podman entraram pelo mesmo mecanismo — subcomando `clap` de pleno
+> direito, MESMA struct de argumentos, MESMO handler do grupo: os de container
+> `kill`, `attach`, `stats`, e os de imagem `images` (alias de `image ls`),
+> `rmi` (alias de `image rm`), `tag`, `save`, `load`, `push`. Ficam de fora só
+> `login`/`logout` — não constam da tabela pedida, e a sua forma de grupo
+> (`image login`/`logout`) chega.
+>
+> **Comandos genéricos: política de resolução, nunca adivinhação.** Três nomes
+> da tabela colidem com significados que este motor já tinha ou que seriam
+> ambíguos; resolvem-se por regra escrita, não por palpite:
+>
+> * **`wait` é um só verbo com duas formas, escolhidas pela GRAMÁTICA.** Um ou
+>   mais operandos posicionais de container ⇒ a forma `docker wait` (bloqueia
+>   até cada um sair e imprime o código de saída — o MESMO handler que
+>   `container wait`). Zero operandos ⇒ a forma de manifesto (`delonix wait -f
+>   <ficheiro>`, a que este motor já tinha). As duas gramáticas são disjuntas;
+>   misturá-las — um operando de container junto de `-f`/`--timeout` — é
+>   RECUSADO em voz alta, nunca resolvido em silêncio. A forma de container
+>   herda a promessa do grupo `container`; a de manifesto continua classificada
+>   com o resto da superfície de manifesto (NÃO estável).
+> * **`inspect` e `diff` ficam COM TIPO (type-scoped).** Não há um `delonix
+>   inspect <nome>` genérico que decida sozinho se o nome é um container ou uma
+>   imagem: `container inspect` resolve só containers (JSON de `docker
+>   inspect`), `image describe` só imagens, `container diff` só containers, e
+>   `delonix diff`/`delonix wait -f` na raiz são do MANIFESTO. É a mesma regra
+>   que mantém separadas operações com efeitos diferentes (remover um recurso vs
+>   limpar os não usados): um resolvedor genérico que adivinhasse o Kind é
+>   exactamente o que esta CLI recusa fazer.
 
 > **Quebra de contrato na próxima major (ADR-0062).** `container run` de uma
 > imagem que declara `USER` passa a correr como esse utilizador, como no Docker

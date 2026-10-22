@@ -1549,6 +1549,46 @@ pub struct LogsArgs {
     timestamps: bool,
 }
 
+// The flags of the verbs this engine ALSO exposes at the root as Docker/Podman
+// aliases (`delonix kill`/`attach`/`stats` + the polymorphic `delonix wait`).
+// Carved into `#[derive(clap::Args)]` structs — not left inline in the enum —
+// for the exact reason #930 did it for run/ps/stop/…: the root alias and the
+// `container <verb>` form MUST share ONE flag definition, or the day they drift
+// the alias silently stops accepting a flag the group still takes.
+#[derive(clap::Args)]
+pub struct KillArgs {
+    #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+    ids: Vec<String>,
+    /// Signal name (`KILL`, `SIGKILL`, case-insensitive, `SIG` prefix
+    /// optional) or number (`9`).
+    #[arg(short = 's', long, default_value = "KILL")]
+    signal: String,
+}
+
+#[derive(clap::Args)]
+pub struct WaitArgs {
+    // `pub(crate)` because the polymorphic root `delonix wait` (main.rs) builds
+    // this struct by hand after deciding, by grammar, that the operands are
+    // containers — reaching the SAME handler as `container wait`.
+    #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+    pub(crate) ids: Vec<String>,
+}
+
+#[derive(clap::Args)]
+pub struct StatsArgs {
+    #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+    ids: Vec<String>,
+}
+
+#[derive(clap::Args)]
+pub struct AttachArgs {
+    #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+    id: String,
+    /// Refused: stdin forwarding isn't supported (see the command's own doc above).
+    #[arg(short, long)]
+    interactive: bool,
+}
+
 // FIXME(follow-up): variants with a large size disparity (≥880 B). Boxing the
 // fat variants is a real optimization but awkward with clap's `#[derive(Subcommand)]`
 // — left for a dedicated change; the cost here is a short-lived CLI.
@@ -1610,20 +1650,10 @@ pub enum ContainerCmd {
     /// Unlike `stop`, does not wait or force a `Stopped` status: the real
     /// outcome (e.g. `Crashed` for a `KILL`) is picked up on the next
     /// observation.
-    Kill {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-        /// Signal name (`KILL`, `SIGKILL`, case-insensitive, `SIG` prefix
-        /// optional) or number (`9`).
-        #[arg(short = 's', long, default_value = "KILL")]
-        signal: String,
-    },
+    Kill(KillArgs),
     /// Block until one or more containers exit, then print their exit code
     /// (one per line, in the order given).
-    Wait {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-    },
+    Wait(WaitArgs),
     /// Stop then start one or more containers.
     ///
     /// Reuses the persistent rootfs and the original run configuration, like
@@ -1762,10 +1792,7 @@ pub enum ContainerCmd {
     /// Resource usage (CPU/memory/PIDs) of the running containers.
     ///
     /// One sample and exits (no stream). With no IDs, shows all running ones.
-    Stats {
-        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-    },
+    Stats(StatsArgs),
     /// Show the logs (detached containers).
     Logs(LogsArgs),
     /// Re-attach to a running container's output stream (output only).
@@ -1775,13 +1802,7 @@ pub enum ContainerCmd {
     /// engine keeps no live conduit to it once started, unlike a persistent
     /// per-container shim) — `-i`/`--stdin` is refused with a clear error
     /// instead of silently doing nothing.
-    Attach {
-        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        id: String,
-        /// Refused: stdin forwarding isn't supported (see the command's own doc above).
-        #[arg(short, long)]
-        interactive: bool,
-    },
+    Attach(AttachArgs),
     /// Apply the `kind: Container` documents of a manifest (idempotent by name).
     ///
     /// An existing container with that name is neither recreated nor checked
@@ -2033,8 +2054,10 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Stop(StopArgs { ids, time }) => {
             for_each_id(&ids, |id| cmd_stop(&store, id, time))
         }
-        ContainerCmd::Kill { ids, signal } => for_each_id(&ids, |id| cmd_kill(&store, id, &signal)),
-        ContainerCmd::Wait { ids } => for_each_id(&ids, |id| cmd_wait(&store, id)),
+        ContainerCmd::Kill(KillArgs { ids, signal }) => {
+            for_each_id(&ids, |id| cmd_kill(&store, id, &signal))
+        }
+        ContainerCmd::Wait(WaitArgs { ids }) => for_each_id(&ids, |id| cmd_wait(&store, id)),
         ContainerCmd::Restart(RestartArgs { ids, time }) => {
             for_each_id(&ids, |id| cmd_restart(&images, &store, id, time))
         }
@@ -2098,7 +2121,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 cpus,
             },
         ),
-        ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
+        ContainerCmd::Stats(StatsArgs { ids }) => cmd_stats(&store, &ids),
         ContainerCmd::Logs(LogsArgs {
             id,
             follow,
@@ -2106,7 +2129,9 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             since,
             timestamps,
         }) => cmd_logs(&images, &store, &id, follow, tail, since, timestamps),
-        ContainerCmd::Attach { id, interactive } => cmd_attach(&images, &store, &id, interactive),
+        ContainerCmd::Attach(AttachArgs { id, interactive }) => {
+            cmd_attach(&images, &store, &id, interactive)
+        }
         ContainerCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
