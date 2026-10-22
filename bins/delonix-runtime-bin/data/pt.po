@@ -4023,6 +4023,9 @@ msgstr "Nome da stack (dono dos recursos). Omissão: o nome de um `kind: Stack`,
 msgid "Exit 2 when there are changes, 5 when the plan holds a conflict `stack apply` would refuse (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
 msgstr "Sai com 2 quando há alterações, 5 quando o plano tem um conflito que o `stack apply` recusaria (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
 
+msgid "Plan what `stack apply --prune` would do: what this stack owns and the manifest no longer declares counts as a change, to remove. Without it, it is listed as KEPT — `apply` removes nothing without `--prune` — and does not count for `--detailed-exitcode`."
+msgstr "Planeia o que o `stack apply --prune` faria: o que esta stack possui e o manifesto já não declara conta como alteração, a remover. Sem ela, aparece como MANTIDO — o `apply` não remove nada sem `--prune` — e não conta para o `--detailed-exitcode`."
+
 msgid "to create"
 msgstr "a criar"
 
@@ -4114,6 +4117,12 @@ msgstr "já existe e não pertence a nenhuma stack — vai ser adoptado"
 
 msgid "no longer declared in the manifest"
 msgstr "já não está declarado no manifesto"
+
+msgid "no longer declared in the manifest — kept, `--prune` removes it"
+msgstr "já não está declarado no manifesto — mantido, o `--prune` remove-o"
+
+msgid "kept, no longer declared (`--prune` removes)"
+msgstr "mantido(s), já não declarado(s) (o `--prune` remove)"
 
 msgid "this Kind is ensure-present in this version"
 msgstr "este Kind é «garante presente» nesta versão"
@@ -5342,8 +5351,8 @@ msgstr "Nome do cluster (usado nos nomes de VM `<nome>-cp1`/`<nome>-w1` e no con
 msgid "Device/export (`nfs` driver)"
 msgstr "Dispositivo/export (driver `nfs`)"
 
-msgid "Don't apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run"
-msgstr "Não aplica nada — imprime o manifesto completo com todos os defaults preenchidos (como o `kubectl apply --dry-run=client -o yaml`). Os stacks são expandidos e os Kinds canonicalizados, por isso vês exactamente o que CORRERIA"
+msgid "Don't apply anything — print the full manifest with every default filled in, then plan it against the machine and refuse what `apply` would refuse, with the same exit (like `kubectl apply --dry-run=server -o yaml`). A resource another stack owns exits 5 (DX-5601). Nothing is applied; `manifest render` is the offline view"
+msgstr "Não aplica nada — imprime o manifesto completo com todos os defaults preenchidos, depois planeia-o contra a máquina e recusa o que o `apply` recusaria, com a mesma saída (como o `kubectl apply --dry-run=server -o yaml`). Um recurso que outra stack possui sai com 5 (DX-5601). Nada é aplicado; o `manifest render` é a vista sem a máquina"
 
 msgid "Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`)"
 msgstr "Export/partilha: caminho NFS (`/mnt/pool/media`), nome da partilha CIFS (`media`), ou o caminho no URL WebDAV (`/remote.php/dav/...`)"
@@ -5441,8 +5450,8 @@ msgstr "Tipo: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownClou
 msgid "Vault secret with the `password` key (cifs/webdav) — does not leak in shell history"
 msgstr "Segredo do cofre com a chave `password` (cifs/webdav) — não vaza no histórico da shell"
 
-msgid "Wait for every node to report `Ready` (CNI up) before fetching the kubeconfig, then MERGE it into `~/.kube/config` as its own cluster/user/context (named after `--name`) instead of leaving other clusters' contexts untouched only by accident. Without this, the kubeconfig is still written to `<root>/clusters/<name>-kubeconfig.yaml` right after `kubeadm join`, before the CNI has necessarily finished"
-msgstr "Espera que todos os nós reportem `Ready` (CNI de pé) antes de ir buscar o kubeconfig, e FUNDE-O depois no `~/.kube/config` como cluster/user/contexto próprios (com o nome do `--name`), em vez de deixar os contextos dos outros clusters intactos só por acaso. Sem isto, o kubeconfig continua a ser escrito em `<root>/clusters/<nome>-kubeconfig.yaml` logo a seguir ao `kubeadm join`, antes de o CNI ter necessariamente terminado"
+msgid "Wait for every node to report `Ready` (CNI up) before the command returns. It does NOT decide anything about the kubeconfig, despite the name: that is cached to `<root>/clusters/<name>-kubeconfig.yaml` and merged into `~/.kube/config` as its own cluster/user/context (named after `--name`) on EVERY run, as soon as `kubeadm init` has written it — so the commands a later failure tells you to run can actually run. A pod-network profile waits with or without this flag"
+msgstr "Espera que todos os nós reportem `Ready` (CNI de pé) antes de o comando terminar. NÃO decide nada sobre o kubeconfig, apesar do nome: esse é guardado em `<root>/clusters/<nome>-kubeconfig.yaml` e fundido no `~/.kube/config` como cluster/user/contexto próprios (com o nome do `--name`) em TODAS as corridas, assim que o `kubeadm init` o escreveu — para que os comandos que uma falha posterior mande correr possam mesmo correr. Um perfil de rede de pods espera com ou sem esta flag"
 
 msgid "Which container (its short name inside the pod). Default: the first"
 msgstr "Qual container (o nome curto dele dentro do pod). Por omissão: o primeiro"
@@ -6706,6 +6715,9 @@ msgstr "o que um apply mudaria — a máquina não é tocada"
 
 msgid "a drift gate in CI: exit 2 means the machine no longer matches the file"
 msgstr "um gate de deriva em CI: saída 2 quer dizer que a máquina já não bate certo com o ficheiro"
+
+msgid "the same gate when the pipeline applies with --prune: what left the file counts as a removal"
+msgstr "o mesmo portão quando o pipeline aplica com --prune: o que saiu do ficheiro conta como remoção"
 
 msgid "machine-readable, for a bot to comment on a pull request"
 msgstr "legível por máquina, para um bot comentar num pull request"
@@ -9818,13 +9830,13 @@ msgstr "O que esta stack aplicou, e quando (ADR-0019)"
 msgid ""
 "What this stack applied, and when (ADR-0019).\n"
 "\n"
-"One revision per `apply`, failed ones included and marked — after an incident the question is what the machine was ASKED to do, not what it managed to do. `--show <n>` prints that revision's rendered manifest.\n"
+"One revision per `apply` that asked for a change, failed ones included and marked — after an incident the question is what the machine was ASKED to do, not what it managed to do. An apply with nothing to change (what left the manifest, without `--prune`, is kept) writes none. `--show <n>` prints that revision's rendered manifest.\n"
 "\n"
 "This is a RECORD, never a source of truth: nothing here is read to decide what exists. Delete `<root>/stacks/` and every other stack command keeps working — only the history is lost."
 msgstr ""
 "O que esta stack aplicou, e quando (ADR-0019).\n"
 "\n"
-"Uma revisão por `apply`, incluindo as falhadas e marcadas como tal — depois de um incidente a pergunta é o que a máquina foi MANDADA fazer, não o que conseguiu. `--show <n>` imprime o manifesto renderizado dessa revisão.\n"
+"Uma revisão por cada `apply` que pediu uma alteração, incluindo as falhadas e marcadas como tal — depois de um incidente a pergunta é o que a máquina foi MANDADA fazer, não o que conseguiu. Um apply sem nada a mudar (o que saiu do manifesto, sem `--prune`, fica mantido) não grava nenhuma. `--show <n>` imprime o manifesto renderizado dessa revisão.\n"
 "\n"
 "Isto é um REGISTO, nunca uma fonte de verdade: nada aqui é lido para decidir o que existe. Apaga `<root>/stacks/` e todos os outros comandos de stack continuam a funcionar — só se perde o histórico."
 
@@ -9834,8 +9846,8 @@ msgstr "Imprime o manifesto renderizado da revisão N em vez da lista"
 msgid "Output format: `table` (default) or `json` (ADR-0005) — `json` carries the FULL error of a failed revision, which the table truncates"
 msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005) — o `json` traz o erro COMPLETO de uma revisão falhada, que a tabela trunca"
 
-msgid "no revisions recorded for stack '{stack}' — one is written per `stack apply`"
-msgstr "sem revisões registadas para a stack '{stack}' — grava-se uma por cada `stack apply`"
+msgid "no revisions recorded for stack '{stack}' — one is written per `stack apply` that asks for a change, or fails"
+msgstr "sem revisões registadas para a stack '{stack}' — grava-se uma por cada `stack apply` que pede uma alteração, ou que falha"
 
 msgid "what this stack applied, and when"
 msgstr "o que esta stack aplicou, e quando"
@@ -10135,8 +10147,8 @@ msgstr "Verifica um manifesto contra o schema, as referências e o grafo"
 msgid "Print the manifest as the engine will read it, with defaults filled in"
 msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos"
 
-msgid "Print the manifest as the engine will read it, with defaults filled in.\n\nThe spelling the CLI restructuring asks for is `render`; what it does is what `stack apply --dry-run` already did — round-trip every document through its typed spec so the `#[serde(default)]` values become visible. Secrets are NOT resolved: a rendered manifest is meant to be read by a person and pasted into a review."
-msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos.\n\nA grafia que a reestruturação da CLI pede é `render`; o que ele faz é o que o `stack apply --dry-run` já fazia — passar cada documento pela sua spec tipada para os valores `#[serde(default)]` ficarem visíveis. Os segredos NÃO são resolvidos: um manifesto renderizado é para ser lido por uma pessoa e colado numa revisão."
+msgid "Print the manifest as the engine will read it, with defaults filled in.\n\nThe spelling the CLI restructuring asks for is `render`: round-trip every document through its typed spec so the `#[serde(default)]` values become visible — the manifest `stack apply --dry-run` prints, without the plan it then runs against the machine. Secrets are NOT resolved: a rendered manifest is meant to be read by a person and pasted into a review."
+msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos.\n\nA grafia que a reestruturação da CLI pede é `render`: passar cada documento pela sua spec tipada para os valores `#[serde(default)]` ficarem visíveis — o manifesto que o `stack apply --dry-run` imprime, sem o plano que ele corre depois contra a máquina. Os segredos NÃO são resolvidos: um manifesto renderizado é para ser lido por uma pessoa e colado numa revisão."
 
 msgid "The JSON Schema, generated from the Rust types (ADR-0007)"
 msgstr "O JSON Schema, gerado dos tipos Rust (ADR-0007)"
@@ -10144,14 +10156,17 @@ msgstr "O JSON Schema, gerado dos tipos Rust (ADR-0007)"
 msgid "Stack name to own the resources with (`delonix.io/stack`)"
 msgstr "Nome da stack que fica dona dos recursos (`delonix.io/stack`)"
 
-msgid "Print what would be applied, and apply nothing"
-msgstr "Imprime o que seria aplicado, e não aplica nada"
+msgid "Print what would be applied, and apply nothing — exiting as the apply would refuse (5 for a resource another stack owns, DX-5601)"
+msgstr "Imprime o que seria aplicado, e não aplica nada — saindo como o apply recusaria (5 para um recurso que outra stack possui, DX-5601)"
 
 msgid "Authorize the recreate of a resource whose cold field changed"
 msgstr "Autoriza a recriação de um recurso cujo campo frio mudou"
 
 msgid "0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`)"
 msgstr "0 = sem alterações, 2 = há alterações, 5 = um conflito que o apply recusaria, 1 = erro (`terraform plan`)"
+
+msgid "Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept"
+msgstr "Planeia o que o `apply --prune` faria; sem ela, o que o manifesto já não declara aparece como mantido"
 
 msgid "Print WHICH fields the plan compares, per Kind, and exit"
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai"
@@ -10180,6 +10195,9 @@ msgstr "o que um apply mudaria"
 
 msgid "a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would refuse, 1 error"
 msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 5 um conflito que o apply recusaria, 1 erro"
+
+msgid "the same gate for a pipeline that applies with --prune: removals count"
+msgstr "o mesmo portão para um pipeline que aplica com --prune: as remoções contam"
 
 msgid "which fields are compared, per Kind"
 msgstr "que campos são comparados, por Kind"
@@ -10426,8 +10444,8 @@ msgstr "as verificações de armazenamento/binário de que a sessão de um clien
 msgid "the full risk table as JSON, for a client or a human to read before enabling mutations"
 msgstr "a tabela de risco completa em JSON, para um cliente ou um humano ler antes de activar mutações"
 
-msgid "device passthrough ({devices}) is refused by this node's runtime policy — a passed-through device gives the guest DMA to host hardware"
-msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — um dispositivo passado dá ao convidado DMA ao hardware do host"
+msgid "device passthrough ({devices}) is refused by this node's runtime policy — it hands the guest host hardware directly (a PCI device's DMA, or a host disk)"
+msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — entrega hardware do host directamente ao convidado (o DMA de um dispositivo PCI, ou um disco do host)"
 
 msgid "VM image '{image}': this node's runtime policy refuses `:latest` and untagged references — pin a version"
 msgstr "imagem de VM '{image}': a política de runtime deste nó recusa `:latest` e referências sem etiqueta — fixa uma versão"
@@ -13539,6 +13557,12 @@ msgstr "[{label}] a CLI delonix do nó é diferente desta (sha256 {sha}) — a s
 msgid "`delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version."
 msgstr "Binário `delonix-cri` a instalar nos nós. Omitido = o que está ao lado do `delonix`, senão o asset da release desta versão."
 
+msgid "Point `kubectl` at this cluster once it is up, so a bare `kubectl get nodes` reaches it. Without this flag a `~/.kube/config` that already selects a usable context keeps it — the cluster's context is merged either way, and the command to switch to it is printed"
+msgstr "Aponta o `kubectl` para este cluster quando ele estiver de pé, para que um `kubectl get nodes` simples o alcance. Sem esta flag, um `~/.kube/config` que já selecciona um contexto utilizável mantém-no — o contexto do cluster é fundido de qualquer maneira, e o comando para mudar para ele é impresso"
+
+msgid "to point kubectl at this cluster, run:"
+msgstr "para apontar o kubectl para este cluster, corre:"
+
 msgid "destroyed {name} — {n} local artifact(s), {size} freed here; disks and snapshots released on {backend}"
 msgstr "destruída {name} — {n} artefacto(s) locais, {size} libertados aqui; discos e snapshots libertados em {backend}"
 
@@ -13815,8 +13839,8 @@ msgstr "Isto remove todas as regras que o nó impõe hoje na admissão. Continua
 msgid "could not remove {path}: {err}"
 msgstr "não consegui remover {path}: {err}"
 
-msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
-msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
+msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
+msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
 
 msgid "about to remove {path} — {summary}"
 msgstr "prestes a remover {path} — {summary}"
@@ -14649,6 +14673,16 @@ msgstr "O `vm move` foi recusado antes de começar: a VM está no estado de ener
 msgid "Stop or start the VM to match `--live`; for a precheck refusal, put the VM's disks on a storage the whole cluster shares, or remove the local device."
 msgstr "Pára ou arranca a VM de acordo com o `--live`; numa recusa da pré-verificação, põe os discos da VM num storage partilhado por todo o cluster, ou retira o dispositivo local."
 
+# DX-5508 — a rede do hipervisor não está na sub-rede declarada
+msgid "the hypervisor's network is not on the declared subnet"
+msgstr "a rede do hipervisor não está na sub-rede declarada"
+
+msgid "The hypervisor already has a network with the name the VM asked for, on a different subnet than the one declared for it. The engine redefines such a network only when it defined it itself and no VM is on it; otherwise it refuses, because attaching the VM would put it on a subnet nobody declared."
+msgstr "O hipervisor já tem uma rede com o nome que a VM pediu, numa sub-rede diferente da que foi declarada para ela. O motor só redefine uma rede assim quando foi ele que a definiu e nenhuma VM está nela; caso contrário recusa, porque ligar a VM colocá-la-ia numa sub-rede que ninguém declarou."
+
+msgid "Remove the VMs still on the old network first, or give the delonix network another name. A network the engine did not define is the operator's: change or remove it with `virsh net-edit`/`virsh net-undefine` if that is what you want."
+msgstr "Remove primeiro as VMs que ainda estão na rede antiga, ou dá outro nome à rede do delonix. Uma rede que o motor não definiu é do operador: altera-a ou remove-a com `virsh net-edit`/`virsh net-undefine`, se é isso que queres."
+
 msgid "Move a VM to another node of its cluster — same VM, same record"
 msgstr "Move uma VM para outro nó do seu cluster — a mesma VM, o mesmo registo"
 
@@ -15063,8 +15097,8 @@ msgstr "Passa `--restart` para o parar, mover e arrancar no destino, ou `--with-
 msgid "a resource the manifest declares is held by someone else — nothing was changed"
 msgstr "um recurso que o manifesto declara pertence a outrem — nada foi alterado"
 
-msgid "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, and `stack plan --detailed-exitcode` exits with this code instead of 0 or 2. No flag authorises it."
-msgstr "O plano tem um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o `stack apply` recusa o apply inteiro antes de se tocar em qualquer coisa, e o `stack plan --detailed-exitcode` sai com este código em vez de 0 ou 2. Nenhuma flag o autoriza."
+msgid "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, `stack apply --dry-run` exits with this code after printing the manifest, and `stack plan --detailed-exitcode` exits with it instead of 0 or 2. No flag authorises it."
+msgstr "O plano tem um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o `stack apply` recusa o apply inteiro antes de se tocar em qualquer coisa, o `stack apply --dry-run` sai com este código depois de imprimir o manifesto, e o `stack plan --detailed-exitcode` sai com ele em vez de 0 ou 2. Nenhuma flag o autoriza."
 
 msgid "Apply it from the stack that owns it, remove it there first, or rename it in this manifest; `stack plan` names the owner."
 msgstr "Aplica-o a partir da stack que é dona dele, remove-o lá primeiro, ou muda-lhe o nome neste manifesto; o `stack plan` diz quem é o dono."
@@ -15456,6 +15490,15 @@ msgstr "Um container pediu uma excepção à anti-spoof (`--allow-source` ou `--
 
 msgid "Ask the node administrator to grant it in the runtime policy (`kind: RuntimePolicy`), or drop the flag. A prefix must sit inside one the policy grants."
 msgstr "Pede ao administrador do nó que o conceda na política de runtime (`kind: RuntimePolicy`), ou retira a flag. Um prefixo tem de caber dentro de um que a política conceda."
+
+msgid "refused by the node's runtime policy"
+msgstr "recusado pela política de runtime do nó"
+
+msgid "The node's admission point (`policy.json`, `kind: RuntimePolicy`) refused the workload before anything was created: a container, pod or VM asked for something the policy forbids (privileged, host network, an unlisted registry, device passthrough, or what `workloadSecurity: baseline` refuses). Every reason is named, and the refusal is in the event log. It is a permission refusal, so it exits 77 like the other policy refusals."
+msgstr "O ponto de admissão do nó (`policy.json`, `kind: RuntimePolicy`) recusou o workload antes de se criar fosse o que fosse: um container, pod ou VM pediu algo que a política proíbe (privilegiado, rede do host, um registo fora da lista, passthrough de dispositivos, ou o que o `workloadSecurity: baseline` recusa). Todas as razões são nomeadas, e a recusa fica no registo de eventos. É uma recusa de permissão, por isso sai com 77, como as outras recusas da política."
+
+msgid "Drop what the policy forbids from the request, or ask the node administrator to change the runtime policy (`kind: RuntimePolicy`). `delonix describe runtimepolicies` prints what is in force."
+msgstr "Retira do pedido o que a política proíbe, ou pede ao administrador do nó que mude a política de runtime (`kind: RuntimePolicy`). `delonix describe runtimepolicies` mostra o que está em vigor."
 
 # ADR-0067: storage pools (dicionário de códigos e ajuda)
 msgid "the storage pool request cannot be served as written"
@@ -16263,6 +16306,42 @@ msgstr "repositório git criado em `main` e tudo preparado, mas o commit precisa
 
 msgid "git repository created on `main` and everything staged, but the commit failed: {why}"
 msgstr "repositório git criado em `main` e tudo preparado, mas o commit falhou: {why}"
+
+# RuntimePolicy workloadSecurity: baseline (OWASP K01)
+msgid "--cap-add {caps}: beyond the capabilities this node's runtime policy allows (workloadSecurity: baseline)"
+msgstr "--cap-add {caps}: para além das capacidades que a política de runtime deste nó permite (workloadSecurity: baseline)"
+
+msgid "the host's {namespaces} namespace is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "o namespace {namespaces} do host é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "{profiles}=unconfined is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "{profiles}=unconfined é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "bind mount of the host path {paths} is refused by this node's runtime policy (workloadSecurity: baseline) — use a named volume"
+msgstr "o bind mount do caminho do host {paths} é recusado pela política de runtime deste nó (workloadSecurity: baseline) — usa um volume nomeado"
+
+msgid "host device {devices} is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "o dispositivo do host {devices} é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "this node refuses `--privileged` but admits what it is made of (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — set `workloadSecurity: baseline` to refuse those too"
+msgstr "este nó recusa `--privileged` mas admite aquilo de que ele é feito (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — define `workloadSecurity: baseline` para recusar também esses"
+
+
+msgid "token cannot be empty or contain whitespace or control characters"
+msgstr "o token não pode estar vazio nem conter espaços ou caracteres de controlo"
+
+# DX-1349 network.opnsense_insecure_target
+msgid "the OPNsense URL would send the API key in the clear"
+msgstr "o URL do OPNsense mandaria a chave da API em claro"
+
+msgid "The OPNsense target URL is not https://, names no host, or carries userinfo (`user:pass@`). The key/secret pair goes in every request's Authorization header, so plain HTTP hands it to anything on the path, and userinfo is a password in the configuration under another name."
+msgstr "O URL do OPNsense não é https://, não nomeia um host, ou traz userinfo (`user:pass@`). O par key/secret vai no cabeçalho Authorization de cada pedido, por isso HTTP simples entrega-o a qualquer coisa no caminho, e userinfo é uma palavra-passe na configuração com outro nome."
+
+msgid "Use https://<host> (with `tls.insecureSkipVerify: true` or a `caFile` for the appliance's self-signed certificate) and keep the credential in `auth`."
+msgstr "Usa https://<host> (com `tls.insecureSkipVerify: true` ou um `caFile` para o certificado auto-assinado da appliance) e mantém a credencial em `auth`."
+
+msgid "a --masked-path/--readonly-path list that leaves {paths} unprotected is refused by this node's runtime policy (workloadSecurity: baseline) — a custom list replaces the default one, so include them"
+msgstr "uma lista --masked-path/--readonly-path que deixa {paths} desprotegido é recusada pela política de runtime deste nó (workloadSecurity: baseline) — uma lista própria substitui a de omissão, por isso inclui-os"
 
 # ---- Sprint 24 GitOps ----
 msgid "Pull sources: one reconcile pass, status, suspend and resume (ADR-0021)"

@@ -80,6 +80,36 @@ jobs:
       - name: Executed CLI leaves against the recorded baseline
         run: python3 scripts/cli_exec_ratchet.py
 
+  # ---- The leaves of the other five surfaces, and their DENOMINATORS ----
+  #
+  # `cli-exec` above keeps one surface honest. Nothing did that for node-api,
+  # mgmt-api, MCP, CRI or the kinds, and the first measurement of them
+  # (2026-10-18, `docs/testing/folhas-inventario.md`) says why it matters: 1 of
+  # 40 mgmt operations runs over real HTTP, 0 of 15 MCP tools has ever gone
+  # through the protocol, and 24 of 59 node RPCs are invoked by no test.
+  #
+  # The part that earns a gate rather than a table is the DENOMINATOR. For each
+  # surface this reads the leaf names out of the CODE — the `.proto`,
+  # `delonix-mgmt/src/lib.rs`, `delonix-mcp/src/lib.rs`,
+  # `delonix-stack/src/kinds.rs` — never out of the table, so a leaf the code
+  # has and `docs/testing/folhas.tsv` does not is a failure that names it, and
+  # so is a row for a leaf that no longer exists. Before this, a new MCP tool or
+  # a new mgmt route could land with no test and nothing to notice:
+  # `cli_baseline.tsv` only ever covered the CLI.
+  # `scripts/folhas_baseline.json` then holds the class-`A` count per surface in
+  # both directions, the `lang_ratchet.py` semantics.
+  #
+  # Its own job, and not a step in `arch` below, for the reason `cli-exec` is
+  # its own job: a leaf-count regression has to read as a leaf-count failure.
+  # Deliberately no toolchain and no build — it reads source files, stdlib only.
+  folhas:
+    name: leaf inventory ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Leaves of the six surfaces with a denominator in the code
+        run: python3 scripts/folhas_gate.py
+
   # ---- The dependency direction of ADR-0040, enforced while the move happens ----
   # Phase P0: the rails go in BEFORE any crate moves, so the restructuring cannot
   # regress while it is under way. The rules (layer direction, purity of the

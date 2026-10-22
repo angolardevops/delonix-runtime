@@ -74,6 +74,14 @@ impl VmNetwork for HostVmNetwork {
     fn join_argv(&self) -> Option<Vec<String>> {
         crate::infra::infra_join_argv()
     }
+
+    fn subnet_of(&self, name: &str) -> Option<String> {
+        crate::NetworkStore::open(&self.state_root)
+            .ok()?
+            .get(name)
+            .ok()
+            .map(|n| n.subnet)
+    }
 }
 
 /// The `NetworkStore` record of a network the VM engine asks for by name.

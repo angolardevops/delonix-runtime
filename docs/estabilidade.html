@@ -224,6 +224,33 @@ recusaria, e ganha ao <code>2</code>. Um gate escrito como «<code>0</code> pass
 resto é erro» fica certo sem mudança; quem só testava <code>[ $? -eq 0 ]</code> passa a ver
 vermelho exactamente onde o <code>apply</code> ia falhar. Sem a flag, o <code>plan</code> continua a
 responder <code>0</code>.</p>
+<p><strong>Alteração de contrato depois da v5.1.1 (2).</strong> O <code>stack plan</code> (e o <code>plan</code>)
+ganhou <code>--prune</code>, e passou a planear com as flags do <code>apply</code>. Sem <code>--prune</code>, um
+recurso que esta stack possui e o manifesto já não declara continua listado
+(<code>-</code>), mas como <strong>mantido</strong>: <code>changed: false</code> no <code>-o json</code> e fora do
+<code>--detailed-exitcode</code>. Antes contava como alteração, e um gate de deriva sem
+poda respondia <code>2</code> para sempre, porque o <code>apply</code> que o acompanha nunca o remove.
+Com <code>--prune</code> responde como antes: a remoção é uma alteração (<code>2</code>). Quem fazia o
+gate dar <code>2</code> com recursos que saíram do manifesto passa a precisar de
+<code>--prune</code>. O <code>action</code> continua <code>delete</code>, e o <code>planDigest</code> não muda.</p>
+<p><strong>Alteração de contrato depois da v5.1.1 (3).</strong> O <code>stack apply --dry-run</code> (e o
+<code>delonix apply --dry-run</code>, o mesmo caminho) só imprimia o manifesto com os
+defaults e respondia <code>0</code> sem ler a máquina — um plano que o <code>apply</code> recusa
+passava na pré-visualização. Continua a imprimir o mesmo manifesto no stdout,
+mas agora corre tudo o que o <code>apply</code> corre antes da primeira escrita e sai
+como ele sairia:</p>
+<ul>
+<li><code>5</code> (<code>DX-5601</code>) com um recurso que outra stack carimbou;</li>
+<li><code>5</code> (<code>DX-5390</code>) com um <code>--plan-digest</code> que já não é o plano;</li>
+<li><code>1</code> (<code>DX-1000</code>) com um Replace ou um Reboot sem <code>--replace</code> ou <code>--reboot</code>,
+  com uma gralha nessas flags, ou com um valor que não tem a forma
+  <code>&lt;Kind&gt;/&lt;nome&gt;</code>, nome ou <code>all</code>;</li>
+<li><code>77</code> (<code>DX-7000</code>) quando o root do estado não se deixa ler e preparar.</li>
+</ul>
+<p>Nenhum recurso é criado nem mudado e nenhuma revisão é gravada. Mas o root
+não fica intocado: os stores criam as suas directorias e a chave do keyring
+dos túneis, como o <code>stack validate</code> já fazia. Quem queria só o manifesto, sem
+a máquina, tem o <code>delonix manifest render</code>, que continua a responder <code>0</code>.</p>
 </blockquote>
 <table>
 <thead>
@@ -255,7 +282,7 @@ responder <code>0</code>.</p>
 </tr>
 <tr>
 <td><code>5</code></td>
-<td><strong>conflito</strong> — o nome já está tomado; e, em <code>stack plan --detailed-exitcode</code>, um plano com um recurso que outra stack carimbou (<code>DX-5601</code>)</td>
+<td><strong>conflito</strong> — o nome já está tomado; e, em <code>stack plan --detailed-exitcode</code> e <code>stack apply --dry-run</code>, um plano com um recurso que outra stack carimbou (<code>DX-5601</code>)</td>
 </tr>
 <tr>
 <td><code>69</code></td>

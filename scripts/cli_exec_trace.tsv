@@ -1,9 +1,9 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: 2026-10-21, this host, isolated root OUT=/tmp/dlxpt3 (DELONIX_ROOT=/tmp/dlxpt3/root), scripts/e2e.sh with the five release binaries side by side (commit f4af5a9b7 = origin/main 75cc9c5b + the e2e_port change), run for the ephemeral-port fix: PASS=1440 FAIL=0 SKIP=15; all 15 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, wg and virt-customize present, no VM images in the isolated store, no DELONIX_UPGRADE_FROM, CRI root/CNI path, boot units outside the root, stack init --up over 180 s); the 3 libvirt vm create SKIPs of the previous trace pass after #901
-# commit: f4af5a9b
-# executed: 268
+# recorded: 2026-10-22, this host, isolated root DELONIX_ROOT=~/.cache/wpr889-1823822005/root DELONIX_NET_RUNTIME_DIR=~/.cache/wpr889-1823822005/n, scripts/e2e.sh invoked with the five siblings side by side from ~/.cache/delonix-target-pr889/release (built at fa34383b, the merge of origin/main 4b860b51 into PR #889): PASS=1577 FAIL=0 SKIP=14, one results.jsonl line per verdict; the 14 SKIP are host properties (no OPNsense/Proxmox credentials, no NFS NAS, CRI root/CNI hostPort path, wg and virt-customize present, no VM images in the isolated store, no DELONIX_UPGRADE_FROM, template port 8443 held by the host's nginx)
+# commit: fa34383b
+# executed: 272
 # leaves: 280
 api-resources
 apply
@@ -130,6 +130,8 @@ net ingress policy
 net ingress publish
 net ingress rm
 net ingress unpublish
+net l4guard clear
+net l4guard set
 net l4guard status
 net netns attach
 net netns detach
@@ -199,6 +201,8 @@ stack prune
 stack rollback
 stack validate
 stack wait
+system boot disable
+system boot enable
 system boot status
 system df
 system doctor

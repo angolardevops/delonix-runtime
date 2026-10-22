@@ -616,6 +616,10 @@ impl DelonixMcp {
             args.push("--tail".to_string());
             args.push(t.to_string());
         }
+        // `--` before the name: it comes from the model, which may have read
+        // attacker-controlled text (a container's own logs), and a value
+        // starting with `-` must never be parsed as a flag of the CLI.
+        args.push("--".to_string());
         args.push(name.clone());
         let call_args = json!({ "name": name, "tail": tail });
         match run_cli(&self.base, args) {
@@ -728,7 +732,12 @@ impl DelonixMcp {
             .spawn("container.restart", risk.as_str(), move || {
                 run_cli_blocking(
                     &base,
-                    vec!["container".to_string(), "restart".to_string(), target],
+                    vec![
+                        "container".to_string(),
+                        "restart".to_string(),
+                        "--".to_string(),
+                        target,
+                    ],
                 )
                 .map(|(ok, output)| json!({ "ok": ok, "output": output }))
             });

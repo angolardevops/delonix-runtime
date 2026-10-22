@@ -414,6 +414,13 @@ const SUPPORTED_VOLUME_MOUNT: &[&str] = &["type", "source", "target", "read_only
 const SUPPORTED_BUILD: &[&str] = &["context", "dockerfile", "args", "target"];
 /// Long-form service `networks: { net: { ipv4_address: ... } }` entry.
 const SUPPORTED_SERVICE_NETWORK_ENTRY: &[&str] = &["ipv4_address"];
+/// Long-form `ports: - { target:, published:, protocol:, host_ip: }` entry. The
+/// short form carries the same information positionally (`host_ip:host:cont/proto`)
+/// and the two must honour the same set — so `host_ip` is read here just as the
+/// short form reads it. `mode`/`name`/`app_protocol` are spec keys this engine
+/// does NOT act on; they are refused by this allowlist (named, not dropped),
+/// never accepted and ignored.
+const SUPPORTED_PORT_LONG: &[&str] = &["target", "published", "protocol", "host_ip"];
 /// Long-form `ulimits: { nofile: { soft:, hard: } }` entry (the short form is a
 /// bare number).
 const SUPPORTED_ULIMIT_ENTRY: &[&str] = &["soft", "hard"];
@@ -853,6 +860,16 @@ enum ComposePort {
         target: StringOrNum,
         published: Option<StringOrNum>,
         protocol: Option<String>,
+        /// The interface the host port binds to (`127.0.0.1` for loopback-only).
+        /// Present here for the SAME reason the short form's three-part
+        /// `127.0.0.1:9000:80` passes verbatim: without it, a long-form port
+        /// asking for loopback-only was parsed into a struct that had no field
+        /// for it and the restriction vanished without a word — the file said
+        /// "host only", the engine published on every interface, and `config`
+        /// printed the wider form as if that were what was asked. The short
+        /// form already honours this; the two shapes of the same key must not
+        /// disagree about who can reach the port.
+        host_ip: Option<String>,
     },
 }
 
@@ -2094,6 +2111,18 @@ fn check_nested_service_fields(svc: &str, svc_map: &serde_yaml::Mapping) -> Resu
             }
         }
     }
+    // Long-form ports are list items that are mappings (`target: 80, published: …`);
+    // a short `- "8080:80"` string carries no sub-keys. Without this walk a
+    // long-form `host_ip:`/`mode:` reached `ComposePort::Long` — which has no
+    // `deny_unknown_fields` — and was dropped in silence, the same loopback-only
+    // leak the short form was fixed for (see `resolve_ports`).
+    if let Some(serde_yaml::Value::Sequence(ports)) = svc_map.get("ports") {
+        for port in ports {
+            if let serde_yaml::Value::Mapping(m) = port {
+                refuse_unknown_nested(svc, m, "ports", SUPPORTED_PORT_LONG)?;
+            }
+        }
+    }
     // `build` has two shapes: a short context string and a long map — only the
     // long form has sub-keys.
     if let Some(serde_yaml::Value::Mapping(build)) = svc_map.get("build") {
@@ -2489,6 +2518,7 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                 target,
                 published,
                 protocol,
+                host_ip,
             } => {
                 let host_s = match published {
                     Some(host) => host.as_string(),
@@ -2504,7 +2534,15 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                 // lados, em vez de truncadas em silêncio.
                 let proto = protocol.as_deref().unwrap_or("tcp");
                 let suffix = if proto == "udp" { "/udp" } else { "" };
-                out.push(format!("{host_s}:{}{suffix}", target.as_string()));
+                // `host_ip` prepended exactly as the short form's three-part
+                // `127.0.0.1:9000:80` carries it — same verbatim string the
+                // engine's `parse_publish_addr` reads (`[hostIp:]hostPort:contPort`).
+                // Dropping it here (as the long form did before `host_ip` was a
+                // field) published a loopback-only port on every interface.
+                match host_ip {
+                    Some(ip) => out.push(format!("{ip}:{host_s}:{}{suffix}", target.as_string())),
+                    None => out.push(format!("{host_s}:{}{suffix}", target.as_string())),
+                }
             }
         }
     }
@@ -4514,6 +4552,7 @@ services:
                 target: StringOrNum::Num(443),
                 published: Some(StringOrNum::Num(8443)),
                 protocol: None,
+                host_ip: None,
             },
         ];
         let out = resolve_ports(&ports, "svc").unwrap();
@@ -4538,6 +4577,7 @@ services:
             target: StringOrNum::Num(443),
             published: None,
             protocol: None,
+            host_ip: None,
         }];
         let out2 = resolve_ports(&bare_long, "svc").unwrap();
         let (host2, cont2) = out2[0].split_once(':').unwrap();
@@ -4582,10 +4622,64 @@ services:
             target: StringOrNum::Str("9000-9002".into()),
             published: Some(StringOrNum::Str("8000-8002".into())),
             protocol: None,
+            host_ip: None,
         }];
         assert_eq!(
             resolve_ports(&ports, "svc").unwrap(),
             vec!["8000-8002:9000-9002".to_string()]
+        );
+    }
+
+    /// Long-form `host_ip:` survives into the published string exactly as the
+    /// short form's three-part `127.0.0.1:9000:80` does — the two shapes of the
+    /// same key must not disagree about who can reach the port.
+    ///
+    /// BUG FOUND (resilience/security pass): `ComposePort::Long` had no
+    /// `host_ip` field, so a long-form loopback-only port was parsed into a
+    /// struct that dropped it in silence and `config` printed `8080:80` —
+    /// published on EVERY interface, the exact leak the short form was fixed
+    /// for one commit earlier.
+    #[test]
+    fn resolve_ports_long_form_honours_host_ip_like_the_short_form() {
+        let long_form = vec![ComposePort::Long {
+            target: StringOrNum::Num(80),
+            published: Some(StringOrNum::Num(8080)),
+            protocol: None,
+            host_ip: Some("127.0.0.1".into()),
+        }];
+        let short_form =
+            resolve_ports(&[ComposePort::Short("127.0.0.1:8080:80".into())], "svc").unwrap();
+        assert_eq!(
+            resolve_ports(&long_form, "svc").unwrap(),
+            short_form,
+            "the long form with host_ip must resolve the same as the short form — same restriction"
+        );
+
+        // host_ip + udp: the IP leads, the protocol suffix trails, as in the short form.
+        let udp = vec![ComposePort::Long {
+            target: StringOrNum::Num(53),
+            published: Some(StringOrNum::Num(5353)),
+            protocol: Some("udp".into()),
+            host_ip: Some("127.0.0.1".into()),
+        }];
+        assert_eq!(
+            resolve_ports(&udp, "svc").unwrap(),
+            vec!["127.0.0.1:5353:53/udp".to_string()]
+        );
+    }
+
+    /// A long-form port key this engine does not act on (`mode`/`name`/
+    /// `app_protocol`) is refused BY NAME, never parsed into `ComposePort::Long`
+    /// and dropped — same policy as every other nested map.
+    #[test]
+    fn an_unsupported_long_port_key_is_refused_by_name() {
+        let yaml = "services:\n  web:\n    image: nginx\n    ports:\n      - target: 80\n        published: 8080\n        mode: host\n";
+        let v = parse_compose_value(yaml).unwrap();
+        let err = check_unsupported_value(&v).expect_err("`mode:` must be refused, not accepted");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("ports.mode"),
+            "must name the full dotted path: {msg}"
         );
     }
 
@@ -5324,6 +5418,7 @@ volumes:
                 SUPPORTED_DEPENDS_ON_ENTRY,
             ),
             (long_mount, SUPPORTED_VOLUME_MOUNT),
+            (variant_block("ComposePort", "Long"), SUPPORTED_PORT_LONG),
             (variant_block("ComposeBuild", "Full"), SUPPORTED_BUILD),
             (
                 struct_block("ComposeServiceNetworkEntry"),

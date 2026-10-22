@@ -197,6 +197,8 @@ fn child_error(code: Option<i32>, stderr: &str, fallback: String) -> Error {
         Some(x::CONFLICT) => Error::Conflict(body("conflict: ")),
         Some(x::UNAVAILABLE) => Error::Unavailable(body("unavailable: ")),
         Some(x::TIMEOUT) => Error::Timeout(body("timed out: ")),
+        // The node's runtime policy (and a state root it cannot write) exit 77.
+        Some(x::NO_PERMISSION) => Error::PermissionDenied(body("permission denied: ")),
         _ if msg.contains("invalid argument: ") => Error::Invalid(body("invalid argument: ")),
         _ => Error::Runtime {
             context: "container",
@@ -614,9 +616,9 @@ fn error_status(e: &Error) -> StatusCode {
         Class::Conflict | Class::NotRunning => StatusCode::CONFLICT,
         Class::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         Class::Timeout => StatusCode::GATEWAY_TIMEOUT,
-        Class::Success | Class::Usage | Class::PermissionDenied | Class::SystemFailure => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        // What Docker answers when an authorization plugin refuses a request.
+        Class::PermissionDenied => StatusCode::FORBIDDEN,
+        Class::Success | Class::Usage | Class::SystemFailure => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -2432,6 +2434,11 @@ mod error_tests {
             child_error(Some(4), "error no such container: zz", String::new()).into_root(),
             Error::NotFound(m) if m == "container: zz"
         ));
+        // A refusal by the node's runtime policy exits 77 and stays a permission.
+        assert!(matches!(
+            child_error(Some(77), "error[DX-7802] permission denied: refused by this node's runtime policy", String::new()).into_root(),
+            Error::PermissionDenied(m) if m.starts_with("refused by this node's runtime policy")
+        ));
         // Class 1 is split by the template: an invalid argument is the request's
         assert!(matches!(
             child_error(Some(1), "error s1: invalid argument: s1 is already running", String::new()).into_root(),
@@ -2474,6 +2481,14 @@ mod error_tests {
         assert_eq!(
             error_status(&Error::NotFound("container: zz".into())),
             StatusCode::NOT_FOUND
+        );
+        // A refusal by the node's runtime policy is a 403, not a server error.
+        assert_eq!(
+            error_status(&Error::coded(
+                7802,
+                Error::PermissionDenied("refused".into())
+            )),
+            StatusCode::FORBIDDEN
         );
         // A runtime failure whose text happens to say «not found» is still a
         // server error — the old message match read it as 404.
