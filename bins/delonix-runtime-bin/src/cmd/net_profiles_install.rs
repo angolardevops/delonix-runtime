@@ -636,6 +636,37 @@ mod tests {
         .expect("a valid plan")
     }
 
+    /// The kind-mode create path records this exact shape for `cni: default`.
+    /// `cluster network status`'s drift checks (DX-6703/DX-6704) only fire when
+    /// the desired `cni` is non-empty — that is the whole reason a kind cluster
+    /// now writes a record at all. kindnet ships inside the node image, so it
+    /// has no fetched-artefact digest, no dataplane and no delonix-managed MTU;
+    /// those stay at their defaults and the status display skips them.
+    #[test]
+    fn the_kindnet_record_carries_a_non_empty_cni_and_round_trips() {
+        let rec = ProfileRecord {
+            cni: "default".to_string(),
+            version: "kindnet".to_string(),
+            kube_proxy: "iptables".to_string(),
+            pod_subnet: "10.244.0.0/16".to_string(),
+            service_subnet: "10.96.0.0/12".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            !rec.cni.is_empty(),
+            "drift can only be detected against a non-empty desired CNI"
+        );
+        assert!(rec.artefact_sha256.is_empty());
+        assert!(rec.dataplane.is_empty());
+        assert_eq!(rec.mtu, 0);
+        let back: ProfileRecord =
+            serde_json::from_str(&serde_json::to_string(&rec).unwrap()).unwrap();
+        assert_eq!(back.cni, "default");
+        assert_eq!(back.version, "kindnet");
+        assert_eq!(back.pod_subnet, "10.244.0.0/16");
+        assert_eq!(back.service_subnet, "10.96.0.0/12");
+    }
+
     #[test]
     fn a_cidr_round_trips_through_the_text_form() {
         for s in ["10.244.0.0/16", "192.168.0.0/24", "0.0.0.0/0"] {
