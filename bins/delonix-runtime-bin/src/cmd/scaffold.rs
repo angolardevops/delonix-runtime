@@ -873,10 +873,10 @@ fn render_planned(
     // `.env.tmpl` is not written as-is: it is the SOURCE of the project's
     // `.env`, rendered once with fresh random secrets (`__SECRET_<NAME>__`),
     // written 0600, and never overwritten. Everything else is a plain write.
-    let is_env_tmpl =
-        |dest: &Path| dest.file_name().and_then(|s| s.to_str()) == Some(".env.tmpl");
-    let (env_tmpl, outputs): (Vec<_>, Vec<_>) =
-        all_outputs.into_iter().partition(|(dest, _, _)| is_env_tmpl(dest));
+    let is_env_tmpl = |dest: &Path| dest.file_name().and_then(|s| s.to_str()) == Some(".env.tmpl");
+    let (env_tmpl, outputs): (Vec<_>, Vec<_>) = all_outputs
+        .into_iter()
+        .partition(|(dest, _, _)| is_env_tmpl(dest));
     // Every destination is checked before the first write, so a refusal
     // leaves the directory exactly as it was.
     for (dest, _, _) in &outputs {
@@ -2669,9 +2669,17 @@ mod tests {
     fn fastapi_generates_compose_dockerfile_and_a_secret_env() {
         use std::os::unix::fs::PermissionsExt;
         let (_tmp, dir) = scratch();
-        render_template("fastapi", &opts(dir.clone(), "myapi", "fastapi", None), false).unwrap();
+        render_template(
+            "fastapi",
+            &opts(dir.clone(), "myapi", "fastapi", None),
+            false,
+        )
+        .unwrap();
 
-        assert!(dir.join("compose.yaml").is_file(), "compose.yaml is written");
+        assert!(
+            dir.join("compose.yaml").is_file(),
+            "compose.yaml is written"
+        );
         assert!(dir.join("Dockerfile").is_file(), "Dockerfile is written");
         assert!(
             !dir.join(".env.tmpl").exists(),
@@ -2705,11 +2713,18 @@ mod tests {
             kv("POSTGRES_PASSWORD"),
             "Sonar reuses its database password"
         );
-        assert_ne!(rabbit, kv("POSTGRES_PASSWORD"), "independent secrets differ");
+        assert_ne!(
+            rabbit,
+            kv("POSTGRES_PASSWORD"),
+            "independent secrets differ"
+        );
 
         // The committed .gitignore keeps the generated secrets out of git.
         let gitignore = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
-        assert!(gitignore.lines().any(|l| l.trim() == ".env"), ".env is ignored");
+        assert!(
+            gitignore.lines().any(|l| l.trim() == ".env"),
+            ".env is ignored"
+        );
     }
 
     /// A second render over an existing `.env` keeps it: rotating secrets a
@@ -2717,7 +2732,12 @@ mod tests {
     #[test]
     fn a_second_render_never_overwrites_an_existing_env() {
         let (_tmp, dir) = scratch();
-        render_template("fastapi", &opts(dir.clone(), "myapi", "fastapi", None), false).unwrap();
+        render_template(
+            "fastapi",
+            &opts(dir.clone(), "myapi", "fastapi", None),
+            false,
+        )
+        .unwrap();
         let first = std::fs::read_to_string(dir.join(".env")).unwrap();
         let mut again = opts(dir.clone(), "myapi", "fastapi", None);
         again.force = true;
