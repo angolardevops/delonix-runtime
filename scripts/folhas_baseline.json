@@ -3,9 +3,9 @@
   "surfaces": {
     "cli": {
       "proved": 272,
-      "leaves": 280,
+      "leaves": 291,
       "A": 272,
-      "B": 0,
+      "B": 11,
       "C": 0,
       "D": 0,
       "E": 8
