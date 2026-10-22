@@ -1121,6 +1121,434 @@ pub(crate) fn pod_member_run_opts(
     out
 }
 
+#[derive(clap::Args)]
+pub struct RunArgs {
+    /// Run in the background and print the ID.
+    #[arg(short, long)]
+    detach: bool,
+    /// Container name (default: `dlx-<id>`).
+    #[arg(long)]
+    name: Option<String>,
+    /// Hostname inside the container (UTS namespace + `/etc/hostname`). Default:
+    /// the container name (docker `--hostname`).
+    #[arg(long)]
+    hostname: Option<String>,
+    /// Run the process as this user: `uid[:gid]` or `name[:group]` (docker
+    /// `--user`). Names are resolved in the image's `/etc/passwd`/`/etc/group`.
+    #[arg(short = 'u', long)]
+    user: Option<String>,
+    /// Network: `host` (shares the host's, default), `none` (isolated netns with
+    /// no connectivity), or the NAME of a network created with `delonix network create`.
+    #[arg(long, default_value = "host", add = ArgValueCandidates::new(super::complete::networks))]
+    net: String,
+    /// Logical ISOLATION namespace (default `default`). Containers in different
+    /// namespaces cannot reach each other (even on the same network); only a
+    /// `kind: Dependency` crosses the boundary.
+    #[arg(long, add = ArgValueCandidates::new(super::complete::namespaces))]
+    namespace: Option<String>,
+    /// Auto-register this container's HTTP port in the L7 proxy under its internal
+    /// FQDN `<name>.<namespace>.delonix.internal` (reachable via the proxy). Needs
+    /// `--net <network>`. Removed automatically on `container rm`.
+    #[arg(long)]
+    expose: Option<u16>,
+    /// Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable.
+    #[arg(short = 'v', long = "volume")]
+    volumes: Vec<String>,
+    /// Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable.
+    /// SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable
+    /// from the host itself, NOT from a browser on another machine. Name the address to
+    /// widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the
+    /// libvirt gateway to reach it from VMs (see `delonix vm reach`).
+    /// With `--net host` (the default) the container moves to its own netns with
+    /// userspace NAT (slirp4netns, like rootless podman); with `--net
+    /// <network>` it publishes via the ingress (nft DNAT + hostfwd on the single slirp).
+    #[arg(short = 'p', long = "publish")]
+    publish: Vec<String>,
+    /// Privileged container (all caps, seccomp off) — trusted workloads.
+    #[arg(long)]
+    privileged: bool,
+    /// Override the image's ENTRYPOINT (COMMAND becomes the arguments to this
+    /// binary; `--entrypoint ""` clears it and runs just the COMMAND).
+    #[arg(long)]
+    entrypoint: Option<String>,
+    /// Working directory the container's process starts in (default: the
+    /// image's own configured workdir, or `/`). Persists in the record — an
+    /// `exec -w` overrides it for that one call only.
+    #[arg(short = 'w', long = "workdir")]
+    workdir: Option<String>,
+    /// Remove the container when the process exits (with `-d`, a detached
+    /// watcher handles removal when the container dies).
+    #[arg(long)]
+    rm: bool,
+    /// Restart policy (only with `-d`): `no` (default), `on-failure[:max]`,
+    /// `always`, `unless-stopped`. A detached supervisor (one per container,
+    /// ephemeral — there's no daemon) becomes the container's parent, captures
+    /// the real exit code, and restarts it according to the policy.
+    #[arg(long, default_value = "no", value_parser = parse_restart_policy)]
+    restart: String,
+    /// Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container's
+    /// `/dev` is a tmpfs with a curated list (null/zero/tty/...); this
+    /// adds real host nodes to it, like `docker --device`.
+    #[arg(long = "device")]
+    devices: Vec<String>,
+    /// Additional environment variables (`KEY=VAL`), repeatable.
+    #[arg(short = 'e', long = "env")]
+    env: Vec<String>,
+    /// Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane`
+    /// enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`).
+    #[arg(long = "label")]
+    labels: Vec<String>,
+    // ---- resources (cgroup v2) ----
+    /// Memory limit (`64M`, `2G`, `max`). Default: a quarter of the engine's
+    /// budget (`DELONIX_DEFAULT_PCT`); `max` lifts the cap entirely.
+    #[arg(short = 'm', long)]
+    memory: Option<String>,
+    /// CPU quota (number of cores, e.g. `0.5`, `2`). Default: the lesser of
+    /// 1.0 and a quarter of the engine's budget.
+    #[arg(short = 'c', long)]
+    cpus: Option<String>,
+    /// Relative CPU weight (`cpu.weight`, 1–10000) under contention.
+    #[arg(long = "cpu-weight", value_parser = parse_cgroup_weight)]
+    cpu_weight: Option<String>,
+    /// CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`).
+    #[arg(long)]
+    cpuset: Option<String>,
+    /// Internal: the kubelet's cgroup for this pod (CRI `cgroup_parent`, ADR 0038).
+    /// Unspecified limits mean no limit under it.
+    #[arg(long = "kube-cgroup-parent", hide = true)]
+    kube_cgroup_parent: Option<String>,
+    /// Internal: CRI `LinuxContainerResources.oom_score_adj` (ADR 0038 item 3),
+    /// written to `/proc/<pid>/oom_score_adj` at spawn.
+    #[arg(long = "oom-score-adj", hide = true)]
+    oom_score_adj: Option<i32>,
+    /// Internal: CRI `LinuxContainerResources.cpuset_mems` (ADR 0038 item 3),
+    /// mirrors `--kube-cgroup-parent`/`--oom-score-adj` so this field is
+    /// reachable without a kubelet. NOT spelled `--cpuset-mems` — that is a
+    /// Docker-ism this engine deliberately does not have on the stable CLI
+    /// (see `the_docker_spellings_are_not_ours`), and this flag only exists
+    /// for debugging the CRI path.
+    #[arg(long = "kube-cpuset-mems", hide = true)]
+    cpuset_mems: Option<String>,
+    /// Internal: CRI `LinuxContainerResources.hugepage_limits` (ADR 0038 item 3),
+    /// repeatable `<page_size>=<limit_bytes>` (e.g. `2MB=1048576`).
+    #[arg(long = "hugepage-limit", hide = true, value_parser = parse_hugepage_limit)]
+    hugepage_limits: Vec<(String, u64)>,
+    /// Internal: CRI `LinuxContainerResources.unified` (ADR 0038 item 3),
+    /// repeatable `<cgroup file>=<value>` (e.g. `memory.high=100000000`).
+    #[arg(long = "unified", hide = true, value_parser = parse_unified_entry)]
+    unified: Vec<(String, String)>,
+    /// Relative I/O weight (`io.weight`, 1–10000).
+    #[arg(long = "io-weight", value_parser = parse_cgroup_weight)]
+    io_weight: Option<String>,
+    /// Absolute read limit from the store's disk (`10mb`, `1g`). Docker's `--device-read-bps`.
+    #[arg(long = "device-read-bps")]
+    device_read_bps: Option<String>,
+    /// Absolute write limit to the store's disk (`10mb`, `1g`). Docker's `--device-write-bps`.
+    #[arg(long = "device-write-bps")]
+    device_write_bps: Option<String>,
+    /// Absolute read IOPS limit from the store's disk.
+    #[arg(long = "device-read-iops")]
+    device_read_iops: Option<String>,
+    /// Absolute write IOPS limit to the store's disk.
+    #[arg(long = "device-write-iops")]
+    device_write_iops: Option<String>,
+    // ---- security ----
+    /// Read-only rootfs (writes go to tmpfs/volumes).
+    #[arg(long = "read-only")]
+    read_only: bool,
+    /// Add a capability (e.g. `NET_ADMIN`). Repeatable.
+    #[arg(long = "cap-add")]
+    cap_add: Vec<String>,
+    /// Drop a capability. Repeatable.
+    #[arg(long = "cap-drop")]
+    cap_drop: Vec<String>,
+    /// Let this container send from a source prefix besides its own address, for
+    /// a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix
+    /// the node policy grants (`allowedSourcePrefixes`); every use is logged.
+    #[arg(long = "allow-source", value_name = "PREFIX")]
+    allow_source: Vec<String>,
+    /// Switch anti-spoofing off for this container. Exceptional: only when the
+    /// node policy grants it (`allowSourceCheckOptOut`); every use is logged.
+    #[arg(long = "no-source-check")]
+    no_source_check: bool,
+    /// Security options (docker-style), repeatable:
+    /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
+    /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
+    /// stricter than docker/podman).
+    #[arg(long = "security-opt")]
+    security_opt: Vec<String>,
+    /// AppArmor profile to apply (`unconfined`, `delonix-default`, or an
+    /// already-loaded name). `delonix-default` is loaded automatically.
+    #[arg(long)]
+    apparmor: Option<String>,
+    /// SELinux context/profile to apply.
+    #[arg(long)]
+    selinux: Option<String>,
+    /// User namespace: enables the subuid mapping (default in rootless).
+    #[arg(long)]
+    userns: bool,
+    /// Disable the automatic activation of the user namespace.
+    #[arg(long = "no-userns")]
+    no_userns: bool,
+    /// Share the host's PID namespace (`--pid host`).
+    #[arg(long = "host-pid")]
+    host_pid: bool,
+    /// Share the host's IPC namespace.
+    #[arg(long = "host-ipc")]
+    host_ipc: bool,
+    /// Detection mode: seccomp in log mode (doesn't block), to discover syscalls.
+    #[arg(long)]
+    detect: bool,
+    // ---- secrets & env ----
+    /// Inject a secret from the vault (`name`), as an environment variable.
+    /// Repeatable. With `--secret-files`, it goes to `/run/secrets/<name>`.
+    #[arg(long, add = ArgValueCandidates::new(super::complete::secrets))]
+    secret: Vec<String>,
+    /// The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env.
+    #[arg(long = "secret-files")]
+    secret_files: bool,
+    /// Load variables from a `.env` file (`KEY=VAL` per line). Repeatable.
+    #[arg(long = "env-file")]
+    env_file: Vec<String>,
+    /// (internal) `KEY=VAL` entries separated by NUL — the `/proc/<pid>/environ`
+    /// format. Used by `delonix-cri`: values arrive byte-exact (newlines,
+    /// spaces) and never on the argv. Applied before `-e`, which still wins.
+    #[arg(long = "env-file0", hide = true)]
+    env_file0: Vec<String>,
+    // ---- fs & limits ----
+    /// Mount a tmpfs (`/path[:options]`). Repeatable.
+    #[arg(long)]
+    tmpfs: Vec<String>,
+    /// Ulimit (`nofile=1024:2048`). Repeatable.
+    #[arg(long)]
+    ulimit: Vec<String>,
+    /// DNS server for the container's `/etc/resolv.conf`. Repeatable.
+    /// Overrides the resolver the engine would pick (network gateway, slirp,
+    /// or the host's copy).
+    #[arg(long = "dns")]
+    dns: Vec<String>,
+    /// DNS search domain. Repeatable.
+    #[arg(long = "dns-search")]
+    dns_search: Vec<String>,
+    /// `resolv.conf` option (`ndots:2`, `timeout:1`). Repeatable.
+    #[arg(long = "dns-option")]
+    dns_option: Vec<String>,
+    /// Supplementary group id for the process (`--group-add 1234`).
+    /// Repeatable. Applied even when the container runs as root — a root
+    /// process still needs a group to reach a mounted share.
+    #[arg(long = "group-add")]
+    group_add: Vec<String>,
+    /// Make a path unreadable inside the container (`--masked-path /proc/kcore`).
+    /// Repeatable. A file is covered with `/dev/null`, a directory with an
+    /// empty read-only tmpfs.
+    #[arg(long = "masked-path")]
+    masked_path: Vec<String>,
+    /// Remount a path read-only inside the container (`--readonly-path /proc/sys`).
+    /// Repeatable.
+    #[arg(long = "readonly-path")]
+    readonly_path: Vec<String>,
+    /// Container sysctl (`net.core.somaxconn=1024`). Repeatable.
+    #[arg(long)]
+    sysctl: Vec<String>,
+    /// Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes).
+    #[arg(long)]
+    gpus: Option<String>,
+    // ---- network (only with `--net <network>`) ----
+    /// Fixed IP on the network (`--net <network>`), e.g. `10.89.0.10`.
+    #[arg(long)]
+    ip: Option<String>,
+    /// The container's DNS alias on the network. Repeatable.
+    #[arg(long = "network-alias")]
+    network_alias: Vec<String>,
+    /// Extra `/etc/hosts` entry, `name:ip` (as Docker/Podman). Repeatable.
+    /// PERSISTED: survives `stop`/`start` and `restart`, which rewrite
+    /// `/etc/hosts` from scratch.
+    #[arg(long = "add-host")]
+    add_host: Vec<String>,
+    /// With `-d`, block until the image's `HEALTHCHECK` passes (or the
+    /// timeout elapses). Replaces the `until curl ...; do sleep; done`
+    /// that every script ends up writing. No `HEALTHCHECK` in the image
+    /// is a clear error, never a silent instant return.
+    #[arg(long = "wait")]
+    wait_healthy: bool,
+    /// How long `--wait` waits before giving up (seconds).
+    #[arg(long = "wait-timeout", default_value_t = 60)]
+    wait_timeout: u64,
+    // ---- continuous health check ----
+    /// Probe command, run with `/bin/sh -c` inside the container. Without
+    /// it, the image's own `HEALTHCHECK` is monitored; any other
+    /// `--health-*` flag turns monitoring on for an image that has one.
+    #[arg(long = "health-cmd")]
+    health_cmd: Option<String>,
+    /// Seconds between probes.
+    #[arg(long = "health-interval", default_value_t = 30)]
+    health_interval: u64,
+    /// A probe that runs longer than this counts as a failure. The probe
+    /// kills ITSELF (the wrapper is `sh`), so nothing is left stuck inside
+    /// the container.
+    #[arg(long = "health-timeout", default_value_t = 30)]
+    health_timeout: u64,
+    /// Consecutive failures before the container is `unhealthy`.
+    #[arg(long = "health-retries", default_value_t = 3)]
+    health_retries: u32,
+    /// Grace at startup: failures inside this window do not count, and the
+    /// container reads `starting` rather than `unhealthy`.
+    #[arg(long = "health-start-period", default_value_t = 0)]
+    health_start_period: u64,
+    /// Restrict DNS resolution to these containers (isolation). Repeatable.
+    #[arg(long, add = ArgValueCandidates::new(super::complete::containers))]
+    knows: Vec<String>,
+    /// The container resolves NO other container by name.
+    #[arg(long = "knows-none")]
+    knows_none: bool,
+    /// Join a pod's netns (`--net <network>`), sharing IP/ports.
+    #[arg(long, add = ArgValueCandidates::new(super::complete::pods))]
+    pod: Option<String>,
+    /// (internal) init PID of the pod's infra container — join its IPC/UTS
+    /// namespaces (shared pod IPC + hostname). Set by `delonix pod`.
+    #[arg(long = "pod-infra-pid", hide = true)]
+    pod_infra_pid: Option<i32>,
+    /// Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net <network>`.
+    #[arg(long = "net-bps")]
+    net_bps: Option<String>,
+    /// Burst for the bandwidth cap. Only with `--net-bps`.
+    #[arg(long = "net-burst")]
+    net_burst: Option<String>,
+    // ---- logs ----
+    /// Log driver (`json`, `cri`, ...).
+    #[arg(long = "log-driver")]
+    log_driver: Option<String>,
+    /// Log file path (overrides the default).
+    #[arg(long = "log-file")]
+    log_file: Option<String>,
+    /// CRI format in the log file (for the kubelet/`crictl logs`).
+    #[arg(long = "log-cri")]
+    log_cri: bool,
+    /// Image (e.g. `alpine:3.19`).
+    #[arg(add = ArgValueCandidates::new(super::complete::images))]
+    image: String,
+    /// Command + arguments (default: the image's ENTRYPOINT/CMD).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    command: Vec<String>,
+}
+
+#[derive(clap::Args)]
+pub struct PsArgs {
+    /// Include stopped/failed ones.
+    #[arg(short, long)]
+    all: bool,
+    /// Print only the IDs (to compose with `stop`/`rm`).
+    #[arg(short, long)]
+    quiet: bool,
+    /// Output format: `table` (default) or `json` (ADR-0005). `json` honors
+    /// `--all` (same filter as the table) and ignores `--quiet`.
+    #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+    output: super::output::OutputFormat,
+    /// Show only the containers of this isolation namespace. Omit to list every one.
+    #[arg(short = 'n', long, add = ArgValueCandidates::new(super::complete::namespaces))]
+    namespace: Option<String>,
+    /// Show the SIZE column — each container's own writable-layer usage
+    /// (never the shared read-only image layers). Off by default: it
+    /// walks a directory tree per container, the same cost `volumes
+    /// inspect` already opts into rather than pays on every listing.
+    #[arg(short = 's', long)]
+    size: bool,
+    /// Add USER and PASSWORD: each container's login (ADR-0048) — declared
+    /// with `credentials:`, the documented default of a known image, or `-`.
+    /// The password shows where it lives (`(secret NAME)`), not its value.
+    #[arg(long)]
+    credentials: bool,
+    /// With `--credentials`: print the password itself.
+    #[arg(long, requires = "credentials")]
+    reveal: bool,
+}
+
+#[derive(clap::Args)]
+pub struct StartArgs {
+    #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+    ids: Vec<String>,
+}
+
+#[derive(clap::Args)]
+pub struct StopArgs {
+    #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+    ids: Vec<String>,
+    /// Seconds until SIGKILL.
+    #[arg(short, long, default_value_t = 10)]
+    time: u64,
+}
+
+#[derive(clap::Args)]
+pub struct RestartArgs {
+    #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+    ids: Vec<String>,
+    /// Seconds until SIGKILL, for the `stop` half.
+    #[arg(short, long, default_value_t = 10)]
+    time: u64,
+}
+
+#[derive(clap::Args)]
+pub struct RmArgs {
+    #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+    ids: Vec<String>,
+    /// Force (kill it if running).
+    #[arg(short, long)]
+    force: bool,
+}
+
+#[derive(clap::Args)]
+pub struct ExecArgs {
+    /// Interactive (attaches stdin).
+    #[arg(short = 'i', long)]
+    interactive: bool,
+    /// Allocate a pseudo-terminal.
+    #[arg(short = 't', long)]
+    tty: bool,
+    /// Extra environment variable (`KEY=VAL`) for this call only, on top of
+    /// the container's own env. Repeatable.
+    #[arg(short = 'e', long = "env")]
+    pub(crate) env: Vec<String>,
+    /// Working directory for this call only (default: the container's own
+    /// configured `workdir`, or `/`).
+    #[arg(short = 'w', long = "workdir")]
+    workdir: Option<String>,
+    /// Run as this user for this call only: `uid[:gid]` or `name[:group]`
+    /// (resolved against the container's own `/etc/passwd`/`/etc/group`).
+    /// Default: the container's own configured user.
+    #[arg(short = 'u', long = "user")]
+    pub(crate) user: Option<String>,
+    #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+    id: String,
+    /// Command + arguments. Omit it for the bash/sh fallback shell.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(crate) command: Vec<String>,
+}
+
+#[derive(clap::Args)]
+pub struct LogsArgs {
+    #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+    id: String,
+    /// Follow the log continuously (exits when the container stops).
+    #[arg(short, long)]
+    follow: bool,
+    /// Show only the last N lines. Requires the container to have been run
+    /// with `--log-cri` (per-line timestamps needed to find "the last N" —
+    /// see `--timestamps`'s doc for why).
+    #[arg(long)]
+    tail: Option<usize>,
+    /// Show only lines at or after this Unix timestamp (seconds). Same
+    /// `--log-cri` requirement as `--tail`.
+    #[arg(long)]
+    since: Option<u64>,
+    /// Prefix each line with its RFC3339 timestamp. Only available for
+    /// containers run with `--log-cri` (`container run --log-cri`) — the
+    /// plain log format is raw bytes with no per-line timestamp to show;
+    /// a container without it gets a clear error naming the flag, not a
+    /// silently-blank column.
+    #[arg(long)]
+    timestamps: bool,
+}
+
 // FIXME(follow-up): variants with a large size disparity (≥880 B). Boxing the
 // fat variants is a real optimization but awkward with clap's `#[derive(Subcommand)]`
 // — left for a dedicated change; the cost here is a short-lived CLI.
@@ -1161,363 +1589,22 @@ pub enum ContainerCmd {
         edge: super::scaffold::EdgeArgs,
     },
     /// Run a container from an image (pulls it if missing).
-    Run {
-        /// Run in the background and print the ID.
-        #[arg(short, long)]
-        detach: bool,
-        /// Container name (default: `dlx-<id>`).
-        #[arg(long)]
-        name: Option<String>,
-        /// Hostname inside the container (UTS namespace + `/etc/hostname`). Default:
-        /// the container name (docker `--hostname`).
-        #[arg(long)]
-        hostname: Option<String>,
-        /// Run the process as this user: `uid[:gid]` or `name[:group]` (docker
-        /// `--user`). Names are resolved in the image's `/etc/passwd`/`/etc/group`.
-        #[arg(short = 'u', long)]
-        user: Option<String>,
-        /// Network: `host` (shares the host's, default), `none` (isolated netns with
-        /// no connectivity), or the NAME of a network created with `delonix network create`.
-        #[arg(long, default_value = "host", add = ArgValueCandidates::new(super::complete::networks))]
-        net: String,
-        /// Logical ISOLATION namespace (default `default`). Containers in different
-        /// namespaces cannot reach each other (even on the same network); only a
-        /// `kind: Dependency` crosses the boundary.
-        #[arg(long, add = ArgValueCandidates::new(super::complete::namespaces))]
-        namespace: Option<String>,
-        /// Auto-register this container's HTTP port in the L7 proxy under its internal
-        /// FQDN `<name>.<namespace>.delonix.internal` (reachable via the proxy). Needs
-        /// `--net <network>`. Removed automatically on `container rm`.
-        #[arg(long)]
-        expose: Option<u16>,
-        /// Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable.
-        #[arg(short = 'v', long = "volume")]
-        volumes: Vec<String>,
-        /// Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable.
-        /// SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable
-        /// from the host itself, NOT from a browser on another machine. Name the address to
-        /// widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the
-        /// libvirt gateway to reach it from VMs (see `delonix vm reach`).
-        /// With `--net host` (the default) the container moves to its own netns with
-        /// userspace NAT (slirp4netns, like rootless podman); with `--net
-        /// <network>` it publishes via the ingress (nft DNAT + hostfwd on the single slirp).
-        #[arg(short = 'p', long = "publish")]
-        publish: Vec<String>,
-        /// Privileged container (all caps, seccomp off) — trusted workloads.
-        #[arg(long)]
-        privileged: bool,
-        /// Override the image's ENTRYPOINT (COMMAND becomes the arguments to this
-        /// binary; `--entrypoint ""` clears it and runs just the COMMAND).
-        #[arg(long)]
-        entrypoint: Option<String>,
-        /// Working directory the container's process starts in (default: the
-        /// image's own configured workdir, or `/`). Persists in the record — an
-        /// `exec -w` overrides it for that one call only.
-        #[arg(short = 'w', long = "workdir")]
-        workdir: Option<String>,
-        /// Remove the container when the process exits (with `-d`, a detached
-        /// watcher handles removal when the container dies).
-        #[arg(long)]
-        rm: bool,
-        /// Restart policy (only with `-d`): `no` (default), `on-failure[:max]`,
-        /// `always`, `unless-stopped`. A detached supervisor (one per container,
-        /// ephemeral — there's no daemon) becomes the container's parent, captures
-        /// the real exit code, and restarts it according to the policy.
-        #[arg(long, default_value = "no", value_parser = parse_restart_policy)]
-        restart: String,
-        /// Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container's
-        /// `/dev` is a tmpfs with a curated list (null/zero/tty/...); this
-        /// adds real host nodes to it, like `docker --device`.
-        #[arg(long = "device")]
-        devices: Vec<String>,
-        /// Additional environment variables (`KEY=VAL`), repeatable.
-        #[arg(short = 'e', long = "env")]
-        env: Vec<String>,
-        /// Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane`
-        /// enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`).
-        #[arg(long = "label")]
-        labels: Vec<String>,
-        // ---- resources (cgroup v2) ----
-        /// Memory limit (`64M`, `2G`, `max`). Default: a quarter of the engine's
-        /// budget (`DELONIX_DEFAULT_PCT`); `max` lifts the cap entirely.
-        #[arg(short = 'm', long)]
-        memory: Option<String>,
-        /// CPU quota (number of cores, e.g. `0.5`, `2`). Default: the lesser of
-        /// 1.0 and a quarter of the engine's budget.
-        #[arg(short = 'c', long)]
-        cpus: Option<String>,
-        /// Relative CPU weight (`cpu.weight`, 1–10000) under contention.
-        #[arg(long = "cpu-weight", value_parser = parse_cgroup_weight)]
-        cpu_weight: Option<String>,
-        /// CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`).
-        #[arg(long)]
-        cpuset: Option<String>,
-        /// Internal: the kubelet's cgroup for this pod (CRI `cgroup_parent`, ADR 0038).
-        /// Unspecified limits mean no limit under it.
-        #[arg(long = "kube-cgroup-parent", hide = true)]
-        kube_cgroup_parent: Option<String>,
-        /// Internal: CRI `LinuxContainerResources.oom_score_adj` (ADR 0038 item 3),
-        /// written to `/proc/<pid>/oom_score_adj` at spawn.
-        #[arg(long = "oom-score-adj", hide = true)]
-        oom_score_adj: Option<i32>,
-        /// Internal: CRI `LinuxContainerResources.cpuset_mems` (ADR 0038 item 3),
-        /// mirrors `--kube-cgroup-parent`/`--oom-score-adj` so this field is
-        /// reachable without a kubelet. NOT spelled `--cpuset-mems` — that is a
-        /// Docker-ism this engine deliberately does not have on the stable CLI
-        /// (see `the_docker_spellings_are_not_ours`), and this flag only exists
-        /// for debugging the CRI path.
-        #[arg(long = "kube-cpuset-mems", hide = true)]
-        cpuset_mems: Option<String>,
-        /// Internal: CRI `LinuxContainerResources.hugepage_limits` (ADR 0038 item 3),
-        /// repeatable `<page_size>=<limit_bytes>` (e.g. `2MB=1048576`).
-        #[arg(long = "hugepage-limit", hide = true, value_parser = parse_hugepage_limit)]
-        hugepage_limits: Vec<(String, u64)>,
-        /// Internal: CRI `LinuxContainerResources.unified` (ADR 0038 item 3),
-        /// repeatable `<cgroup file>=<value>` (e.g. `memory.high=100000000`).
-        #[arg(long = "unified", hide = true, value_parser = parse_unified_entry)]
-        unified: Vec<(String, String)>,
-        /// Relative I/O weight (`io.weight`, 1–10000).
-        #[arg(long = "io-weight", value_parser = parse_cgroup_weight)]
-        io_weight: Option<String>,
-        /// Absolute read limit from the store's disk (`10mb`, `1g`). Docker's `--device-read-bps`.
-        #[arg(long = "device-read-bps")]
-        device_read_bps: Option<String>,
-        /// Absolute write limit to the store's disk (`10mb`, `1g`). Docker's `--device-write-bps`.
-        #[arg(long = "device-write-bps")]
-        device_write_bps: Option<String>,
-        /// Absolute read IOPS limit from the store's disk.
-        #[arg(long = "device-read-iops")]
-        device_read_iops: Option<String>,
-        /// Absolute write IOPS limit to the store's disk.
-        #[arg(long = "device-write-iops")]
-        device_write_iops: Option<String>,
-        // ---- security ----
-        /// Read-only rootfs (writes go to tmpfs/volumes).
-        #[arg(long = "read-only")]
-        read_only: bool,
-        /// Add a capability (e.g. `NET_ADMIN`). Repeatable.
-        #[arg(long = "cap-add")]
-        cap_add: Vec<String>,
-        /// Drop a capability. Repeatable.
-        #[arg(long = "cap-drop")]
-        cap_drop: Vec<String>,
-        /// Let this container send from a source prefix besides its own address, for
-        /// a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix
-        /// the node policy grants (`allowedSourcePrefixes`); every use is logged.
-        #[arg(long = "allow-source", value_name = "PREFIX")]
-        allow_source: Vec<String>,
-        /// Switch anti-spoofing off for this container. Exceptional: only when the
-        /// node policy grants it (`allowSourceCheckOptOut`); every use is logged.
-        #[arg(long = "no-source-check")]
-        no_source_check: bool,
-        /// Security options (docker-style), repeatable:
-        /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
-        /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
-        /// stricter than docker/podman).
-        #[arg(long = "security-opt")]
-        security_opt: Vec<String>,
-        /// AppArmor profile to apply (`unconfined`, `delonix-default`, or an
-        /// already-loaded name). `delonix-default` is loaded automatically.
-        #[arg(long)]
-        apparmor: Option<String>,
-        /// SELinux context/profile to apply.
-        #[arg(long)]
-        selinux: Option<String>,
-        /// User namespace: enables the subuid mapping (default in rootless).
-        #[arg(long)]
-        userns: bool,
-        /// Disable the automatic activation of the user namespace.
-        #[arg(long = "no-userns")]
-        no_userns: bool,
-        /// Share the host's PID namespace (`--pid host`).
-        #[arg(long = "host-pid")]
-        host_pid: bool,
-        /// Share the host's IPC namespace.
-        #[arg(long = "host-ipc")]
-        host_ipc: bool,
-        /// Detection mode: seccomp in log mode (doesn't block), to discover syscalls.
-        #[arg(long)]
-        detect: bool,
-        // ---- secrets & env ----
-        /// Inject a secret from the vault (`name`), as an environment variable.
-        /// Repeatable. With `--secret-files`, it goes to `/run/secrets/<name>`.
-        #[arg(long, add = ArgValueCandidates::new(super::complete::secrets))]
-        secret: Vec<String>,
-        /// The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env.
-        #[arg(long = "secret-files")]
-        secret_files: bool,
-        /// Load variables from a `.env` file (`KEY=VAL` per line). Repeatable.
-        #[arg(long = "env-file")]
-        env_file: Vec<String>,
-        /// (internal) `KEY=VAL` entries separated by NUL — the `/proc/<pid>/environ`
-        /// format. Used by `delonix-cri`: values arrive byte-exact (newlines,
-        /// spaces) and never on the argv. Applied before `-e`, which still wins.
-        #[arg(long = "env-file0", hide = true)]
-        env_file0: Vec<String>,
-        // ---- fs & limits ----
-        /// Mount a tmpfs (`/path[:options]`). Repeatable.
-        #[arg(long)]
-        tmpfs: Vec<String>,
-        /// Ulimit (`nofile=1024:2048`). Repeatable.
-        #[arg(long)]
-        ulimit: Vec<String>,
-        /// DNS server for the container's `/etc/resolv.conf`. Repeatable.
-        /// Overrides the resolver the engine would pick (network gateway, slirp,
-        /// or the host's copy).
-        #[arg(long = "dns")]
-        dns: Vec<String>,
-        /// DNS search domain. Repeatable.
-        #[arg(long = "dns-search")]
-        dns_search: Vec<String>,
-        /// `resolv.conf` option (`ndots:2`, `timeout:1`). Repeatable.
-        #[arg(long = "dns-option")]
-        dns_option: Vec<String>,
-        /// Supplementary group id for the process (`--group-add 1234`).
-        /// Repeatable. Applied even when the container runs as root — a root
-        /// process still needs a group to reach a mounted share.
-        #[arg(long = "group-add")]
-        group_add: Vec<String>,
-        /// Make a path unreadable inside the container (`--masked-path /proc/kcore`).
-        /// Repeatable. A file is covered with `/dev/null`, a directory with an
-        /// empty read-only tmpfs.
-        #[arg(long = "masked-path")]
-        masked_path: Vec<String>,
-        /// Remount a path read-only inside the container (`--readonly-path /proc/sys`).
-        /// Repeatable.
-        #[arg(long = "readonly-path")]
-        readonly_path: Vec<String>,
-        /// Container sysctl (`net.core.somaxconn=1024`). Repeatable.
-        #[arg(long)]
-        sysctl: Vec<String>,
-        /// Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes).
-        #[arg(long)]
-        gpus: Option<String>,
-        // ---- network (only with `--net <network>`) ----
-        /// Fixed IP on the network (`--net <network>`), e.g. `10.89.0.10`.
-        #[arg(long)]
-        ip: Option<String>,
-        /// The container's DNS alias on the network. Repeatable.
-        #[arg(long = "network-alias")]
-        network_alias: Vec<String>,
-        /// Extra `/etc/hosts` entry, `name:ip` (as Docker/Podman). Repeatable.
-        /// PERSISTED: survives `stop`/`start` and `restart`, which rewrite
-        /// `/etc/hosts` from scratch.
-        #[arg(long = "add-host")]
-        add_host: Vec<String>,
-        /// With `-d`, block until the image's `HEALTHCHECK` passes (or the
-        /// timeout elapses). Replaces the `until curl ...; do sleep; done`
-        /// that every script ends up writing. No `HEALTHCHECK` in the image
-        /// is a clear error, never a silent instant return.
-        #[arg(long = "wait")]
-        wait_healthy: bool,
-        /// How long `--wait` waits before giving up (seconds).
-        #[arg(long = "wait-timeout", default_value_t = 60)]
-        wait_timeout: u64,
-        // ---- continuous health check ----
-        /// Probe command, run with `/bin/sh -c` inside the container. Without
-        /// it, the image's own `HEALTHCHECK` is monitored; any other
-        /// `--health-*` flag turns monitoring on for an image that has one.
-        #[arg(long = "health-cmd")]
-        health_cmd: Option<String>,
-        /// Seconds between probes.
-        #[arg(long = "health-interval", default_value_t = 30)]
-        health_interval: u64,
-        /// A probe that runs longer than this counts as a failure. The probe
-        /// kills ITSELF (the wrapper is `sh`), so nothing is left stuck inside
-        /// the container.
-        #[arg(long = "health-timeout", default_value_t = 30)]
-        health_timeout: u64,
-        /// Consecutive failures before the container is `unhealthy`.
-        #[arg(long = "health-retries", default_value_t = 3)]
-        health_retries: u32,
-        /// Grace at startup: failures inside this window do not count, and the
-        /// container reads `starting` rather than `unhealthy`.
-        #[arg(long = "health-start-period", default_value_t = 0)]
-        health_start_period: u64,
-        /// Restrict DNS resolution to these containers (isolation). Repeatable.
-        #[arg(long, add = ArgValueCandidates::new(super::complete::containers))]
-        knows: Vec<String>,
-        /// The container resolves NO other container by name.
-        #[arg(long = "knows-none")]
-        knows_none: bool,
-        /// Join a pod's netns (`--net <network>`), sharing IP/ports.
-        #[arg(long, add = ArgValueCandidates::new(super::complete::pods))]
-        pod: Option<String>,
-        /// (internal) init PID of the pod's infra container — join its IPC/UTS
-        /// namespaces (shared pod IPC + hostname). Set by `delonix pod`.
-        #[arg(long = "pod-infra-pid", hide = true)]
-        pod_infra_pid: Option<i32>,
-        /// Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net <network>`.
-        #[arg(long = "net-bps")]
-        net_bps: Option<String>,
-        /// Burst for the bandwidth cap. Only with `--net-bps`.
-        #[arg(long = "net-burst")]
-        net_burst: Option<String>,
-        // ---- logs ----
-        /// Log driver (`json`, `cri`, ...).
-        #[arg(long = "log-driver")]
-        log_driver: Option<String>,
-        /// Log file path (overrides the default).
-        #[arg(long = "log-file")]
-        log_file: Option<String>,
-        /// CRI format in the log file (for the kubelet/`crictl logs`).
-        #[arg(long = "log-cri")]
-        log_cri: bool,
-        /// Image (e.g. `alpine:3.19`).
-        #[arg(add = ArgValueCandidates::new(super::complete::images))]
-        image: String,
-        /// Command + arguments (default: the image's ENTRYPOINT/CMD).
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
+    Run(RunArgs),
+    /// Create a container from an image WITHOUT starting it — the engine's `docker create`.
+    ///
+    /// The record is registered in `Created` state and the rootfs prepared, but no process runs; `container start <id>` launches it later from the same record. Takes every flag `run` does, and pulls the image if missing.
+    Create(RunArgs),
     /// List containers.
     #[command(visible_alias = "ls")]
-    Ps {
-        /// Include stopped/failed ones.
-        #[arg(short, long)]
-        all: bool,
-        /// Print only the IDs (to compose with `stop`/`rm`).
-        #[arg(short, long)]
-        quiet: bool,
-        /// Output format: `table` (default) or `json` (ADR-0005). `json` honors
-        /// `--all` (same filter as the table) and ignores `--quiet`.
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: super::output::OutputFormat,
-        /// Show only the containers of this isolation namespace. Omit to list every one.
-        #[arg(short = 'n', long, add = ArgValueCandidates::new(super::complete::namespaces))]
-        namespace: Option<String>,
-        /// Show the SIZE column — each container's own writable-layer usage
-        /// (never the shared read-only image layers). Off by default: it
-        /// walks a directory tree per container, the same cost `volumes
-        /// inspect` already opts into rather than pays on every listing.
-        #[arg(short = 's', long)]
-        size: bool,
-        /// Add USER and PASSWORD: each container's login (ADR-0048) — declared
-        /// with `credentials:`, the documented default of a known image, or `-`.
-        /// The password shows where it lives (`(secret NAME)`), not its value.
-        #[arg(long)]
-        credentials: bool,
-        /// With `--credentials`: print the password itself.
-        #[arg(long, requires = "credentials")]
-        reveal: bool,
-    },
+    Ps(PsArgs),
     /// (Re)start stopped/crashed containers. Always detached.
     ///
     /// Reuses the persistent rootfs (writes made inside the container
     /// survive, like in docker) and the same network/ports/volumes as the
     /// original `run`.
-    Start {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-    },
+    Start(StartArgs),
     /// Stop one or more containers (SIGTERM, then SIGKILL).
-    Stop {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-        /// Seconds until SIGKILL.
-        #[arg(short, long, default_value_t = 10)]
-        time: u64,
-    },
+    Stop(StopArgs),
     /// Send a signal to one or more containers (default SIGKILL).
     ///
     /// Unlike `stop`, does not wait or force a `Stopped` status: the real
@@ -1541,13 +1628,7 @@ pub enum ContainerCmd {
     ///
     /// Reuses the persistent rootfs and the original run configuration, like
     /// `start`.
-    Restart {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-        /// Seconds until SIGKILL, for the `stop` half.
-        #[arg(short, long, default_value_t = 10)]
-        time: u64,
-    },
+    Restart(RestartArgs),
     /// Give a container a new name.
     Rename {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
@@ -1560,13 +1641,7 @@ pub enum ContainerCmd {
         id: String,
     },
     /// Remove one or more containers.
-    Rm {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
-        ids: Vec<String>,
-        /// Force (kill it if running).
-        #[arg(short, long)]
-        force: bool,
-    },
+    Rm(RmArgs),
     /// Remove every stopped container and the rootfs debris they left behind.
     ///
     /// Also sweeps what no `rm` will ever reach: **orphan rootfs directories**
@@ -1623,32 +1698,7 @@ pub enum ContainerCmd {
     /// Execute a command inside a running container.
     ///
     /// With no command, tries `bash` and falls back to `sh` (which exists in any image) — `container exec -it <id>` is the interactive shell, same as `container exec -it <id> bash` would give if `bash` is there.
-    Exec {
-        /// Interactive (attaches stdin).
-        #[arg(short = 'i', long)]
-        interactive: bool,
-        /// Allocate a pseudo-terminal.
-        #[arg(short = 't', long)]
-        tty: bool,
-        /// Extra environment variable (`KEY=VAL`) for this call only, on top of
-        /// the container's own env. Repeatable.
-        #[arg(short = 'e', long = "env")]
-        env: Vec<String>,
-        /// Working directory for this call only (default: the container's own
-        /// configured `workdir`, or `/`).
-        #[arg(short = 'w', long = "workdir")]
-        workdir: Option<String>,
-        /// Run as this user for this call only: `uid[:gid]` or `name[:group]`
-        /// (resolved against the container's own `/etc/passwd`/`/etc/group`).
-        /// Default: the container's own configured user.
-        #[arg(short = 'u', long = "user")]
-        user: Option<String>,
-        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        id: String,
-        /// Command + arguments. Omit it for the bash/sh fallback shell.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
+    Exec(ExecArgs),
     /// Show the full spec of one or more containers (Store JSON).
     Inspect {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
@@ -1717,29 +1767,7 @@ pub enum ContainerCmd {
         ids: Vec<String>,
     },
     /// Show the logs (detached containers).
-    Logs {
-        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        id: String,
-        /// Follow the log continuously (exits when the container stops).
-        #[arg(short, long)]
-        follow: bool,
-        /// Show only the last N lines. Requires the container to have been run
-        /// with `--log-cri` (per-line timestamps needed to find "the last N" —
-        /// see `--timestamps`'s doc for why).
-        #[arg(long)]
-        tail: Option<usize>,
-        /// Show only lines at or after this Unix timestamp (seconds). Same
-        /// `--log-cri` requirement as `--tail`.
-        #[arg(long)]
-        since: Option<u64>,
-        /// Prefix each line with its RFC3339 timestamp. Only available for
-        /// containers run with `--log-cri` (`container run --log-cri`) — the
-        /// plain log format is raw bytes with no per-line timestamp to show;
-        /// a container without it gets a clear error naming the flag, not a
-        /// silently-blank column.
-        #[arg(long)]
-        timestamps: bool,
-    },
+    Logs(LogsArgs),
     /// Re-attach to a running container's output stream (output only).
     ///
     /// Same log file `logs -f` reads. Unlike `docker attach`, this is
@@ -1762,6 +1790,188 @@ pub enum ContainerCmd {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
+}
+
+/// Converts the shared `RunArgs` — the flags `run` and `create` have in common —
+/// into a [`RunOpts`]. `no_start` is the ONE thing that differs between the two
+/// verbs: `create` persists the record in `Created` state and stops (the engine's
+/// `docker create`), `run` goes on to launch the process; see `cmd_run`. A single
+/// conversion here is what keeps the two verbs' behaviour byte-identical save for
+/// that one bit.
+fn run_opts_from_args(args: RunArgs, no_start: bool) -> Result<RunOpts> {
+    let RunArgs {
+        detach,
+        name,
+        hostname,
+        user,
+        net,
+        volumes,
+        publish,
+        privileged,
+        entrypoint,
+        workdir,
+        rm,
+        restart,
+        devices,
+        env,
+        labels,
+        memory,
+        cpus,
+        cpu_weight,
+        cpuset,
+        kube_cgroup_parent,
+        oom_score_adj,
+        cpuset_mems,
+        hugepage_limits,
+        unified,
+        io_weight,
+        device_read_bps,
+        device_write_bps,
+        device_read_iops,
+        device_write_iops,
+        read_only,
+        cap_add,
+        cap_drop,
+        allow_source,
+        no_source_check,
+        security_opt,
+        apparmor,
+        selinux,
+        userns,
+        no_userns,
+        host_pid,
+        host_ipc,
+        detect,
+        secret,
+        secret_files,
+        env_file,
+        env_file0,
+        tmpfs,
+        ulimit,
+        dns,
+        dns_search,
+        dns_option,
+        group_add,
+        masked_path,
+        readonly_path,
+        sysctl,
+        gpus,
+        ip,
+        network_alias,
+        add_host,
+        wait_healthy,
+        wait_timeout,
+        health_cmd,
+        health_interval,
+        health_timeout,
+        health_retries,
+        health_start_period,
+        knows,
+        knows_none,
+        pod,
+        pod_infra_pid,
+        net_bps,
+        net_burst,
+        log_driver,
+        log_file,
+        log_cri,
+        image,
+        command,
+        namespace,
+        expose,
+    } = args;
+    Ok(RunOpts {
+        policy_hold: false,
+        no_start,
+        detach,
+        name,
+        hostname,
+        user,
+        net,
+        namespace,
+        expose,
+        volumes,
+        ports: publish,
+        privileged,
+        entrypoint: entrypoint_argv(entrypoint),
+        workdir,
+        rm,
+        restart,
+        devices,
+        env: with_env_file0(&env_file0, env)?,
+        labels,
+        image,
+        command,
+        quiet: false,
+        memory,
+        cpus,
+        cpu_weight,
+        cpuset,
+        // Sem flag de CLI: o nível de grupo entra pelo MANIFESTO
+        // (`cgroupParent`), que é quem sabe agrupar cargas.
+        cgroup_parent: None,
+        kube_cgroup_parent,
+        oom_score_adj,
+        cpuset_mems,
+        hugepage_limits,
+        unified,
+        io_weight,
+        no_supervisor: false,
+        io_max: compose_io_max(
+            device_read_bps.as_deref(),
+            device_write_bps.as_deref(),
+            device_read_iops.as_deref(),
+            device_write_iops.as_deref(),
+        )
+        .map_err(delonix_model::Error::Invalid)?,
+        read_only,
+        cap_add,
+        cap_drop,
+        allow_source,
+        no_source_check,
+        security_opt,
+        apparmor,
+        selinux,
+        userns,
+        no_userns,
+        host_pid,
+        host_ipc,
+        detect,
+        secret,
+        secret_files,
+        env_file,
+        tmpfs,
+        ulimit,
+        dns,
+        dns_search,
+        dns_option,
+        group_add,
+        masked_path,
+        readonly_path,
+        sysctl,
+        gpus,
+        ip,
+        network_alias,
+        add_host,
+        wait_healthy,
+        wait_timeout,
+        health: health_opts(
+            health_cmd,
+            health_interval,
+            health_timeout,
+            health_retries,
+            health_start_period,
+        ),
+        knows,
+        knows_none,
+        pod,
+        pod_infra_pid,
+        net_bps,
+        net_burst,
+        log_driver,
+        log_file,
+        log_cri,
+    })
 }
 
 pub fn run(action: ContainerCmd) -> Result<()> {
@@ -1792,182 +2002,12 @@ pub fn run(action: ContainerCmd) -> Result<()> {
     match action {
         // Handled at the top of `run` (returns early).
         ContainerCmd::Init { .. } => unreachable!("handled above"),
-        ContainerCmd::Run {
-            detach,
-            name,
-            hostname,
-            user,
-            net,
-            volumes,
-            publish,
-            privileged,
-            entrypoint,
-            workdir,
-            rm,
-            restart,
-            devices,
-            env,
-            labels,
-            memory,
-            cpus,
-            cpu_weight,
-            cpuset,
-            kube_cgroup_parent,
-            oom_score_adj,
-            cpuset_mems,
-            hugepage_limits,
-            unified,
-            io_weight,
-            device_read_bps,
-            device_write_bps,
-            device_read_iops,
-            device_write_iops,
-            read_only,
-            cap_add,
-            cap_drop,
-            allow_source,
-            no_source_check,
-            security_opt,
-            apparmor,
-            selinux,
-            userns,
-            no_userns,
-            host_pid,
-            host_ipc,
-            detect,
-            secret,
-            secret_files,
-            env_file,
-            env_file0,
-            tmpfs,
-            ulimit,
-            dns,
-            dns_search,
-            dns_option,
-            group_add,
-            masked_path,
-            readonly_path,
-            sysctl,
-            gpus,
-            ip,
-            network_alias,
-            add_host,
-            wait_healthy,
-            wait_timeout,
-            health_cmd,
-            health_interval,
-            health_timeout,
-            health_retries,
-            health_start_period,
-            knows,
-            knows_none,
-            pod,
-            pod_infra_pid,
-            net_bps,
-            net_burst,
-            log_driver,
-            log_file,
-            log_cri,
-            image,
-            command,
-            namespace,
-            expose,
-        } => cmd_run(
-            &images,
-            &store,
-            RunOpts {
-                policy_hold: false,
-                detach,
-                name,
-                hostname,
-                user,
-                net,
-                namespace,
-                expose,
-                volumes,
-                ports: publish,
-                privileged,
-                entrypoint: entrypoint_argv(entrypoint),
-                workdir,
-                rm,
-                restart,
-                devices,
-                env: with_env_file0(&env_file0, env)?,
-                labels,
-                image,
-                command,
-                quiet: false,
-                memory,
-                cpus,
-                cpu_weight,
-                cpuset,
-                // Sem flag de CLI: o nível de grupo entra pelo MANIFESTO
-                // (`cgroupParent`), que é quem sabe agrupar cargas.
-                cgroup_parent: None,
-                kube_cgroup_parent,
-                oom_score_adj,
-                cpuset_mems,
-                hugepage_limits,
-                unified,
-                io_weight,
-                no_supervisor: false,
-                io_max: compose_io_max(
-                    device_read_bps.as_deref(),
-                    device_write_bps.as_deref(),
-                    device_read_iops.as_deref(),
-                    device_write_iops.as_deref(),
-                )
-                .map_err(delonix_model::Error::Invalid)?,
-                read_only,
-                cap_add,
-                cap_drop,
-                allow_source,
-                no_source_check,
-                security_opt,
-                apparmor,
-                selinux,
-                userns,
-                no_userns,
-                host_pid,
-                host_ipc,
-                detect,
-                secret,
-                secret_files,
-                env_file,
-                tmpfs,
-                ulimit,
-                dns,
-                dns_search,
-                dns_option,
-                group_add,
-                masked_path,
-                readonly_path,
-                sysctl,
-                gpus,
-                ip,
-                network_alias,
-                add_host,
-                wait_healthy,
-                wait_timeout,
-                health: health_opts(
-                    health_cmd,
-                    health_interval,
-                    health_timeout,
-                    health_retries,
-                    health_start_period,
-                ),
-                knows,
-                knows_none,
-                pod,
-                pod_infra_pid,
-                net_bps,
-                net_burst,
-                log_driver,
-                log_file,
-                log_cri,
-            },
-        ),
-        ContainerCmd::Ps {
+        // `run` and `create` share every flag (the same `RunArgs`); the only
+        // difference is `no_start` — `create` persists the record in `Created`
+        // state and stops, `run` goes on to launch. See `run_opts_from_args`.
+        ContainerCmd::Run(args) => cmd_run(&images, &store, run_opts_from_args(args, false)?),
+        ContainerCmd::Create(args) => cmd_run(&images, &store, run_opts_from_args(args, true)?),
+        ContainerCmd::Ps(PsArgs {
             all,
             quiet,
             output,
@@ -1975,7 +2015,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             size,
             credentials,
             reveal,
-        } => cmd_ps(
+        }) => cmd_ps(
             &images,
             &store,
             all,
@@ -1987,20 +2027,24 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 credentials: credentials.then_some(reveal),
             },
         ),
-        ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
-        ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
+        ContainerCmd::Start(StartArgs { ids }) => {
+            for_each_id(&ids, |id| cmd_start(&images, &store, id))
+        }
+        ContainerCmd::Stop(StopArgs { ids, time }) => {
+            for_each_id(&ids, |id| cmd_stop(&store, id, time))
+        }
         ContainerCmd::Kill { ids, signal } => for_each_id(&ids, |id| cmd_kill(&store, id, &signal)),
         ContainerCmd::Wait { ids } => for_each_id(&ids, |id| cmd_wait(&store, id)),
-        ContainerCmd::Restart { ids, time } => {
+        ContainerCmd::Restart(RestartArgs { ids, time }) => {
             for_each_id(&ids, |id| cmd_restart(&images, &store, id, time))
         }
         ContainerCmd::Rename { id, new_name } => cmd_rename(&store, &id, &new_name),
         ContainerCmd::Port { id } => cmd_port(&store, &id),
-        ContainerCmd::Rm { ids, force } => {
+        ContainerCmd::Rm(RmArgs { ids, force }) => {
             for_each_id(&ids, |id| cmd_rm(&images, &store, id, force))
         }
         ContainerCmd::Prune { force } => cmd_prune(&images, &store, force),
-        ContainerCmd::Exec {
+        ContainerCmd::Exec(ExecArgs {
             interactive,
             tty,
             env,
@@ -2008,7 +2052,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             user,
             id,
             command,
-        } => cmd_exec(
+        }) => cmd_exec(
             &images,
             &store,
             &id,
@@ -2055,13 +2099,13 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             },
         ),
         ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
-        ContainerCmd::Logs {
+        ContainerCmd::Logs(LogsArgs {
             id,
             follow,
             tail,
             since,
             timestamps,
-        } => cmd_logs(&images, &store, &id, follow, tail, since, timestamps),
+        }) => cmd_logs(&images, &store, &id, follow, tail, since, timestamps),
         ContainerCmd::Attach { id, interactive } => cmd_attach(&images, &store, &id, interactive),
         ContainerCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -3170,6 +3214,33 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         c.firewall = Some(policy_hold_firewall(&c.namespace));
         c.annotations
             .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
+    }
+
+    // `create` (the engine's `docker create`): persist the record in its born
+    // `Created` state — `build_record` already set it, and `reconcile_status`
+    // leaves `Created` alone — and stop here, BEFORE any network attach or
+    // launch. The rootfs `resolve_run` prepared stays on disk (disarm the guard
+    // that would otherwise discard it), for the `container start` that launches
+    // it later from this very record, exactly as `start` does a stopped one. The
+    // desired network/ports/expose are recorded so that `start` reproduces them.
+    if opts_copy.no_start {
+        c.ports = ports.clone();
+        c.network = custom_net_name(&net);
+        c.expose = opts_copy.expose;
+        store.save(&c)?;
+        unstarted.armed = false;
+        delonix_node::events::emit(
+            &super::util::state_root(),
+            "container",
+            "create",
+            &c.id,
+            &c.name,
+            Some(&image),
+        );
+        if !quiet {
+            println!("{id}");
+        }
+        return Ok(());
     }
 
     let custom_net = custom_net_name(&net);
