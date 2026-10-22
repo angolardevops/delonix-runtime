@@ -1,0 +1,5 @@
+port=8080
+health=/wp-login.php
+version=6.7
+wait=180
+open=/wp-admin/install.php

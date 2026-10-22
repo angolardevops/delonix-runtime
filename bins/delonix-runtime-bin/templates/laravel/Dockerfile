@@ -25,8 +25,10 @@ RUN --mount=type=cache,target=/tmp/composer-cache \
 FROM dunglas/frankenphp:1-php8.4
 # The image already has pdo_sqlite, mbstring, openssl, tokenizer, ctype, curl,
 # dom and opcache. ext-pcntl is added so the queue worker finishes the job in
-# hand on SIGTERM and enforces a job's timeout.
-RUN install-php-extensions pcntl \
+# hand on SIGTERM and enforces a job's timeout; ext-redis is the client for the
+# Redis cache store (compose sets CACHE_STORE=redis); ext-sockets is used by
+# the RabbitMQ queue connection (php-amqplib).
+RUN install-php-extensions pcntl redis sockets \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
     && groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent app

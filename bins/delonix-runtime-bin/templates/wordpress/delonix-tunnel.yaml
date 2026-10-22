@@ -1,0 +1,38 @@
+# Puts __NAME__ on the internet through an OUTBOUND tunnel: no public IP, no
+# port opened on the router, no certificate to manage — the provider serves
+# HTTPS with its own. Nothing here runs until you apply it, and `stack apply`
+# on delonix-manifest.yaml does not touch it.
+#
+#   delonix stack apply -f delonix-tunnel.yaml   # open it (needs `cloudflared` on PATH)
+#   delonix get gateways                         # the public URL
+#   delonix delete gateways __NAME__-tunnel      # close it
+#
+# As written: a Cloudflare QUICK tunnel. No account, a random
+# https://<words>.trycloudflare.com that changes every time it opens.
+#
+# Your own domain (a stable https://blog.example.org): the domain's DNS must be
+# on Cloudflare (a free account is enough). Create a tunnel in the dashboard
+# with a public hostname whose service is http://localhost:__PORT__, keep its
+# token in a Delonix secret, and uncomment the `spec:` block below. README.md,
+# "On the internet without a public IP", has every step.
+#
+# Finish the WordPress install and set a STRONG admin password (README.md)
+# BEFORE opening this: the tunnel puts the site — and its /wp-admin login — on
+# the internet.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: __NAME__-tunnel
+spec:
+  # Three providers, same spec: replace the `type:` value and nothing else
+  # here changes. `cloudflare` (below) needs `cloudflared` on PATH; `pinggy`
+  # needs NOTHING extra (plain `ssh`, no account) and is the quickest way to
+  # check a tunnel works at all; `ngrok` needs the `ngrok` agent on PATH.
+  #   type: pinggy      # no extra binary, no account, ephemeral URL
+  #   type: ngrok       # needs `ngrok` on PATH; one ngrok tunnel per host
+  provider:
+    type: cloudflare
+    # spec:
+    #   tokenSecretRef: __NAME__-tunnel   # the secret's `token` key holds the tunnel token
+    #   hostname: blog.example.org        # informational: the route lives in the Cloudflare dashboard
+  localPort: __PORT__

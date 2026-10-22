@@ -17,11 +17,13 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"__NAME__/internal/cache"
 	"__NAME__/internal/config"
 	"__NAME__/internal/health"
 	"__NAME__/internal/httpapi"
 	"__NAME__/internal/logging"
 	"__NAME__/internal/memstore"
+	"__NAME__/internal/messaging"
 	"__NAME__/internal/notes"
 	"__NAME__/internal/telemetry"
 	"__NAME__/internal/webhook"
@@ -58,8 +60,12 @@ func run() error {
 			return fmt.Errorf("WEBHOOK_INBOUND_SECRET: %w", err)
 		}
 	}
+
+	// The note publishers: the outbound webhook dispatcher and/or RabbitMQ.
+	// Wiring both is a fan-out, not a choice (CompositePublisher). Each is
+	// non-blocking and bounded, so a slow or down target never stalls a request.
+	var publishers []notes.Publisher
 	var dispatcher *webhook.Dispatcher
-	var publisher notes.Publisher
 	if cfg.OutboundWebhookURL != "" {
 		key, err := webhook.ParseSecret(cfg.OutboundWebhookSecret)
 		if err != nil {
@@ -74,15 +80,49 @@ func run() error {
 			BaseBackoff: 500 * time.Millisecond,
 			QueueSize:   100,
 		}, log)
-		publisher = dispatcher
+		publishers = append(publishers, dispatcher)
+	}
+	var rabbitPub *messaging.RabbitPublisher
+	if cfg.RabbitURL != "" {
+		rabbitPub = messaging.NewRabbitPublisher(cfg.RabbitURL, messaging.DialSink, log)
+		rabbitPub.Start()
+		publishers = append(publishers, rabbitPub)
+	}
+	var publisher notes.Publisher
+	switch len(publishers) {
+	case 0:
+	case 1:
+		publisher = publishers[0]
+	default:
+		publisher = messaging.NewComposite(publishers...)
+	}
+
+	// The read-through cache: Redis when REDIS_URL is set, the in-process cache
+	// otherwise. It wraps the (traced) use cases from the outside.
+	var noteCache cache.Cache = cache.NewInMemory()
+	if cfg.RedisURL != "" {
+		rc, err := cache.NewRedis(cfg.RedisURL, cache.WithLogger(log))
+		if err != nil {
+			return fmt.Errorf("REDIS_URL: %w", err)
+		}
+		noteCache = rc
+	}
+
+	// The consumer side of messaging: a down broker logs and is skipped, never
+	// crashing startup.
+	var consumer *messaging.RabbitConsumer
+	if cfg.RabbitURL != "" {
+		consumer = messaging.NewRabbitConsumer(cfg.RabbitURL, messaging.LogHandler(log), log)
+		consumer.Start(ctx)
 	}
 
 	svc := notes.NewService(memstore.New(), publisher)
+	cachedNotes := cache.NewCachedNotes(telemetry.TracedNotes{Next: svc}, noteCache, cfg.CacheTTL, log)
 	ready := health.New(nil)
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: httpapi.New(httpapi.Deps{
-			Notes:        telemetry.TracedNotes{Next: svc},
+			Notes:        cachedNotes,
 			Readiness:    ready,
 			Log:          log,
 			MaxBodyBytes: cfg.MaxBodyBytes,
@@ -130,6 +170,19 @@ func run() error {
 		if err := dispatcher.Close(sctx); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if rabbitPub != nil {
+		if !rabbitPub.Close(sctx) {
+			log.Warn("rabbit publish queue not drained before the deadline")
+		}
+	}
+	if consumer != nil {
+		if err := consumer.Close(sctx); err != nil {
+			log.Warn("rabbit consumer close failed", "error", err.Error())
+		}
+	}
+	if err := noteCache.Close(); err != nil {
+		log.Warn("cache close failed", "error", err.Error())
 	}
 	// A collector that is down loses the last batch; it does not turn a
 	// clean stop into a failed one.

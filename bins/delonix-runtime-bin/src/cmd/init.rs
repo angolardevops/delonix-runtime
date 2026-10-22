@@ -204,6 +204,9 @@ pub(crate) fn detect(has: &dyn Fn(&str) -> bool, m: &Manifests) -> Detection {
     if has("__manifest__.py") || has("odoo.conf") {
         return Detection::tpl("odoo", "__manifest__.py/odoo.conf");
     }
+    if has("wp-config.php") || has("wp-content") {
+        return Detection::tpl("wordpress", "wp-config.php/wp-content");
+    }
     if has("manage.py") {
         return Detection::tpl("django", "manage.py");
     }
@@ -221,6 +224,9 @@ pub(crate) fn detect(has: &dyn Fn(&str) -> bool, m: &Manifests) -> Detection {
     }
     if has("go.mod") {
         return Detection::tpl("go", "go.mod");
+    }
+    if has("Cargo.toml") {
+        return Detection::tpl("rust", "Cargo.toml");
     }
     if let Some(text) = &m.package_json {
         // Read from the manifest itself, not from a lockfile or a directory name: the

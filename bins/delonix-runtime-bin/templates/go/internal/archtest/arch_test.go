@@ -20,10 +20,29 @@ var rules = map[string][]string{
 		"__NAME__/internal/webhook",
 		"__NAME__/internal/telemetry",
 		"__NAME__/internal/config",
+		"__NAME__/internal/cache",
+		"__NAME__/internal/messaging",
 	},
 	// Adapters implement ports; they do not call the transport.
 	"../memstore": {"net/http", "__NAME__/internal/httpapi"},
 	"../webhook":  {"__NAME__/internal/httpapi", "__NAME__/internal/memstore"},
+	// The cache wraps the use cases from the outside; it knows nothing of the
+	// transport, of a storage adapter, or of messaging.
+	"../cache": {
+		"net/http",
+		"__NAME__/internal/httpapi",
+		"__NAME__/internal/webhook",
+		"__NAME__/internal/messaging",
+	},
+	// Messaging names the two notes ports; it does not reach the transport, a
+	// storage adapter, or the cache.
+	"../messaging": {
+		"net/http",
+		"__NAME__/internal/httpapi",
+		"__NAME__/internal/memstore",
+		"__NAME__/internal/webhook",
+		"__NAME__/internal/cache",
+	},
 	// The transport reaches the use cases through its Notes interface, never
 	// a storage adapter directly.
 	"../httpapi": {"__NAME__/internal/memstore"},

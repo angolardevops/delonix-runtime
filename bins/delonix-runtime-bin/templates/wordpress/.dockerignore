@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.secrets.env
+README.md
+CONTRIBUTING.md
+compose.yaml
+delonix-manifest.yaml
+delonix-manifest.dev.yaml
+delonix-tunnel.yaml
+.editorconfig
+scripts/
+.github/
+.gitlab-ci.yml
+sonar-project.properties
+wp-content/uploads/

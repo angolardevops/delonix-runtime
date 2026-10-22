@@ -5,6 +5,10 @@
 # is a different thing entirely.
 .secrets.env
 
+# `.env` is the compose stack's generated secrets (`delonix init` writes it
+# 0600 from .env.tmpl with a fresh Postgres password). Same rule: never commit.
+.env
+
 # Python bytecode from an addon you are working on.
 __pycache__/
 *.py[cod]

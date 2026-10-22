@@ -1,0 +1,30 @@
+# Delonixfile — same grammar as a Dockerfile. Build with:
+#   delonix build -t __NAME__:dev .
+#
+# Two stages: the toolchain compiles a release binary, and only the binary, the
+# CA roots and a tiny entrypoint reach the runtime image (tens of MB instead of
+# the ~1.5 GB toolchain). Cargo.toml is copied first so the dependency build is
+# cached until it changes. The build context is filtered by .dockerignore.
+FROM rust:__TEMPLATE_VERSION__-slim AS build
+WORKDIR /src
+COPY Cargo.toml ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs \
+    && cargo build --release --quiet || true
+COPY . /src
+RUN cargo build --release --quiet
+RUN cp "target/release/__NAME__" /usr/local/bin/__NAME__
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent app
+COPY --from=build /usr/local/bin/__NAME__ /usr/local/bin/__NAME__
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+ENV APP_ENV=production LOG_LEVEL=info
+EXPOSE __PORT__
+HEALTHCHECK CMD curl -fsS http://127.0.0.1:__PORT__/api/v1/health/live || exit 1
+STOPSIGNAL SIGTERM
+USER app
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

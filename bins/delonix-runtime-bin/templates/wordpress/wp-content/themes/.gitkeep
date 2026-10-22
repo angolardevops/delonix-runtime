@@ -1,0 +1,5 @@
+# Drop your custom WordPress themes here — one directory per theme (each with
+# its own style.css carrying the `Theme Name:` header and an index.php). They
+# are baked into the image by the Delonixfile (prod) and bind-mounted by
+# delonix-manifest.dev.yaml (live dev). WordPress's own bundled themes stay in
+# the image; these are added on top.

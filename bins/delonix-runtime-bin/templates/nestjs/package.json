@@ -39,8 +39,10 @@
     "@opentelemetry/resources": "^2.11.0",
     "@opentelemetry/sdk-metrics": "^2.11.0",
     "@opentelemetry/sdk-node": "^0.222.0",
+    "amqplib": "^0.10.4",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "ioredis": "^5.4.1",
     "pino": "^10.3.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -50,6 +52,7 @@
     "@nestjs/cli": "^__TEMPLATE_VERSION__",
     "@nestjs/testing": "^__TEMPLATE_VERSION__",
     "@opentelemetry/context-async-hooks": "^2.11.0",
+    "@types/amqplib": "^0.10.5",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",

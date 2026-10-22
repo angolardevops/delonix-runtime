@@ -1,0 +1,23 @@
+# The same gate as .github/workflows/ci.yml — whichever forge runs it, the
+# check is identical: cargo fmt --check, clippy -D warnings, cargo test. Keep
+# the two in step so a green pipeline means the same thing on both.
+stages: [check]
+
+variables:
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cargo/
+    - target/
+
+check:
+  stage: check
+  image: rust:__TEMPLATE_VERSION__-slim
+  before_script:
+    - rustup component add rustfmt clippy
+  script:
+    - cargo fmt --all --check
+    - cargo clippy --all-targets -- -D warnings
+    - cargo test --all-targets

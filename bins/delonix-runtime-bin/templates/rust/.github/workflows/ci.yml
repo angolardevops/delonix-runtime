@@ -1,0 +1,43 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup toolchain install stable --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --all-targets
+
+  # Opt-in: builds with the `amqp` feature and runs the messaging integration
+  # against a real RabbitMQ. Kept separate so the fast lane needs no broker.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      rabbitmq:
+        image: rabbitmq:4.0-management-alpine
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 15s --health-timeout 10s --health-retries 5
+    env:
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build with the broker feature
+        run: cargo build --features amqp

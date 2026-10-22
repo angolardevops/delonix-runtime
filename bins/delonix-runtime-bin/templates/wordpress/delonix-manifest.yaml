@@ -1,0 +1,96 @@
+# WordPress __TEMPLATE_VERSION__ + MariaDB, wired over a Delonix bridge network
+# — the PROD-shaped manifest: wp-content/ is baked into the image by the
+# Delonixfile, nothing bind-mounted. For local development with live reload,
+# use delonix-manifest.dev.yaml instead.
+#
+# Bring the WHOLE stack up (network -> volumes -> secret -> db -> wordpress)
+# with one command:
+#     delonix build -t __NAME__:dev .     # bakes wp-content/ into the image
+#     delonix stack apply
+# WordPress will not install without the database, so `stack apply` (not a lone
+# `container run`) is the way in.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: __NAME__-net
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-dbdata
+spec:
+  driver: local
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-wordpress
+spec:
+  driver: local
+---
+# ONE secret feeding both images' own env-var names — MYSQL_* for the official
+# MariaDB image, WORDPRESS_DB_* for the official WordPress image — so rotating a
+# credential means editing this ONE document, not two container specs. The DB
+# password is shared: MYSQL_PASSWORD and WORDPRESS_DB_PASSWORD carry the same
+# value, both sides of the same connection.
+#
+# `stringData` in cleartext is the DEV default (`delonix stack apply` will
+# print a WARNING about exactly this). Before a real deployment, replace it
+# with `fromEnvFile: .secrets.env` (a file you keep OUT of git — see
+# .dockerignore) or run `delonix secret create __NAME__-db-credentials
+# --from-env-file - --force` and drop `stringData` from this document.
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: __NAME__-db-credentials
+spec:
+  stringData:
+    MYSQL_DATABASE: wordpress
+    MYSQL_USER: wordpress
+    MYSQL_PASSWORD: wordpress
+    MYSQL_ROOT_PASSWORD: wordpress
+    WORDPRESS_DB_USER: wordpress
+    WORDPRESS_DB_PASSWORD: wordpress
+    WORDPRESS_DB_NAME: wordpress
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__-db
+  labels: { app: __NAME__, tier: db }
+spec:
+  image: mariadb:11
+  restart: always
+  network: __NAME__-net
+  networkAlias: [db]            # WordPress reaches MariaDB at host `db`
+  env:
+    secrets:
+      - __NAME__-db-credentials
+  volumes:
+    - "__NAME__-dbdata:/var/lib/mysql"
+  memory: 512M
+  cpus: "1.0"
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels: { app: __NAME__, tier: web }
+spec:
+  image: __NAME__:dev
+  restart: always
+  network: __NAME__-net
+  ports:
+    - "__PORT__:80"
+  env:
+    vars:
+      - "WORDPRESS_DB_HOST=db"  # matches the db container's networkAlias
+    secrets:
+      - __NAME__-db-credentials
+  volumes:
+    - "__NAME__-wordpress:/var/www/html"
+  memory: 1G
+  cpus: "2.0"

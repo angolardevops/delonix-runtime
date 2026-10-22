@@ -1,0 +1,97 @@
+# WordPress __TEMPLATE_VERSION__ — DEV manifest: wp-content/plugins and
+# wp-content/themes are BIND-MOUNTED (not baked into the image), so you edit
+# PHP/CSS on the host and WordPress picks it up on the next request — no
+# `delonix build` needed for a plugin/theme edit, only for a Delonixfile or
+# base-image change.
+#
+#     delonix stack apply -f delonix-manifest.dev.yaml
+#
+# Uses the STOCK wordpress:__TEMPLATE_VERSION__ image (no build) and keeps the
+# bundled core/themes in the named volume; your custom code is overlaid on top
+# of it from the host. Shares the network/volumes/secret names with
+# delonix-manifest.yaml on purpose — this is the SAME stack run with the dev
+# override. Don't `stack apply` both manifests against the same delonix root at
+# once.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: __NAME__-net
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-dbdata
+spec:
+  driver: local
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-wordpress
+spec:
+  driver: local
+---
+# Same secret/credentials as delonix-manifest.yaml — see that file for why a
+# single Secret feeds both images' own env-var names, and how to replace the
+# cleartext dev default before using this outside a laptop.
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: __NAME__-db-credentials
+spec:
+  stringData:
+    MYSQL_DATABASE: wordpress
+    MYSQL_USER: wordpress
+    MYSQL_PASSWORD: wordpress
+    MYSQL_ROOT_PASSWORD: wordpress
+    WORDPRESS_DB_USER: wordpress
+    WORDPRESS_DB_PASSWORD: wordpress
+    WORDPRESS_DB_NAME: wordpress
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__-db
+  labels: { app: __NAME__, tier: db }
+spec:
+  image: mariadb:11
+  restart: always
+  network: __NAME__-net
+  networkAlias: [db]
+  env:
+    secrets:
+      - __NAME__-db-credentials
+  volumes:
+    - "__NAME__-dbdata:/var/lib/mysql"
+  memory: 512M
+  cpus: "1.0"
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels: { app: __NAME__, tier: web }
+spec:
+  image: wordpress:__TEMPLATE_VERSION__
+  restart: always
+  network: __NAME__-net
+  ports:
+    - "__PORT__:80"
+  env:
+    vars:
+      - "WORDPRESS_DB_HOST=db"
+    secrets:
+      - __NAME__-db-credentials
+  volumes:
+    # The named volume holds WordPress core and the bundled themes; the bind
+    # mounts below overlay YOUR code from the host for live editing. A theme
+    # you are building goes in wp-content/themes and shows up without a
+    # rebuild. (Resolved from the CWD `stack apply` runs in — the project root.)
+    - "__NAME__-wordpress:/var/www/html"
+    - "./wp-content/plugins:/var/www/html/wp-content/plugins"
+    - "./wp-content/themes:/var/www/html/wp-content/themes"
+  memory: 1G
+  cpus: "2.0"

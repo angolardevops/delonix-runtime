@@ -41,6 +41,12 @@ export class AppConfig {
     /** Receiver of `note.created`. Empty: nothing is sent. */
     readonly webhookTargetUrl: string,
     readonly webhookTargetSecret: string,
+    /** `redis://` / `rediss://` cache backend. Empty: the in-process cache. */
+    readonly redisUrl: string,
+    /** Cache-aside entry lifetime, milliseconds. */
+    readonly cacheTtlMs: number,
+    /** `amqp://` / `amqps://` broker for `note.created`. Empty: messaging off. */
+    readonly rabbitmqUrl: string,
   ) {}
 
   get isProduction(): boolean {
@@ -134,6 +140,15 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     }
   }
 
+  const redisUrl = get("REDIS_URL", "");
+  if (redisUrl !== "" && !/^rediss?:\/\//.test(redisUrl)) {
+    problems.push(`REDIS_URL: "${redisUrl}" is not a redis:// or rediss:// URL`);
+  }
+  const rabbitmqUrl = get("RABBITMQ_URL", "");
+  if (rabbitmqUrl !== "" && !/^amqps?:\/\//.test(rabbitmqUrl)) {
+    problems.push(`RABBITMQ_URL: "${rabbitmqUrl}" is not an amqp:// or amqps:// URL`);
+  }
+
   const config = new AppConfig(
     get("SERVICE_NAME", DEFAULT_SERVICE_NAME),
     get("APP_VERSION", "dev"),
@@ -150,6 +165,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     inboundSecret,
     targetUrl,
     targetSecret,
+    redisUrl,
+    duration("CACHE_TTL", "300s"),
+    rabbitmqUrl,
   );
   if (problems.length > 0) {
     throw new ConfigError(problems);

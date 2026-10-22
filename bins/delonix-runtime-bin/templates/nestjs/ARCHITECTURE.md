@@ -13,14 +13,17 @@ and ports as abstract classes that double as injection tokens.
               │
    ┌──────────┴───────────────┬───────────────────────────┬──────────────┐
    ▼                          ▼                           ▼              ▼
- NotesModule            InboundWebhookModule       OutboundWebhookModule  HealthModule
+ NotesModule            InboundWebhookModule       MessagingModule        HealthModule
  NotesController ──┐    InboundWebhookController   provides NotePublisher ReadinessService
                    ▼            │                        ▲
               NotesService ◄────┘ (same use case)        │ implements
-              (TracedNotesService)                       │
+              (CachedNotesService →                      │
+               TracedNotesService)                       │
                    │ depends on ports                    │
                    ├──► NoteRepository  ◄── InMemoryNoteRepository
-                   └──► NotePublisher   ◄── WebhookDispatcher / NoopNotePublisher
+                   ├──► Cache           ◄── RedisCache / InMemoryCache  (CacheModule)
+                   └──► NotePublisher   ◄── WebhookDispatcher + RabbitPublisher
+                                            (CompositePublisher) / NoopNotePublisher
 ```
 
 ## Dependency rules (enforced by `src/architecture.spec.ts`)
@@ -30,9 +33,13 @@ and ports as abstract classes that double as injection tokens.
 - Controllers reach the use cases through `NotesService`, never a repository.
 - Adapters implement ports; they do not import the HTTP transport.
 - `config` and `logging` import no feature; `health` does not import features.
-- Telemetry reaches the use cases by decoration: `NotesModule` provides
-  `NotesService` as `TracedNotesService` (a subclass that opens a span and
-  calls `super`), so the rules never import OpenTelemetry.
+- Telemetry and caching reach the use cases by decoration: `NotesModule`
+  provides `NotesService` as `CachedNotesService` (cache-aside) which extends
+  `TracedNotesService` (a span per use case) — both subclass and call `super`,
+  so the use-case rules never import OpenTelemetry or the cache.
+- `MessagingModule` owns the single `NotePublisher`, composing the outbound
+  webhook dispatcher and the RabbitMQ publisher (`CompositePublisher`) from the
+  configuration; `CacheModule` binds `Cache` to Redis or the in-process cache.
 
 Framework concession: the use-case class carries `@Injectable()`. That
 decorator is Nest's DI marker and nothing else; keeping it avoids a factory
