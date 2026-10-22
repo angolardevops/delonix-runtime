@@ -1008,6 +1008,68 @@ mod tests {
         }
     }
 
+    /// The load refuses an unknown key INSIDE a Volume block (ADR-0069 D1:
+    /// `nfs: { readOnlyy: true }` is refused before any effect), and the schema
+    /// has to give the same answer. It closed only `VolumeSpec` itself, so an
+    /// editor checking against the published schema green-ticked `readOnlyy`
+    /// while `validate` and `apply` refused it.
+    ///
+    /// The expected properties are the SAME allowlists the load counts with, so
+    /// the schema cannot accept a key the load refuses nor refuse one it takes —
+    /// `storageRef` included, the `ShareBlock` alias schemars cannot see.
+    #[test]
+    fn every_nested_volume_block_refuses_an_unknown_field() {
+        let blocks: &[(&str, &[&str])] = &[
+            ("NetShareSpec", super::super::storage::NET_SHARE_FIELDS),
+            ("ShareBlock", super::super::volume::SHARE_BLOCK_FIELDS),
+            ("ProvisionSpec", super::super::provision::PROVISION_FIELDS),
+            ("TrueNasSpec", super::super::provision::TRUENAS_FIELDS),
+            ("ShareSpec", super::super::provision::TRUENAS_SHARE_FIELDS),
+            ("OwnerSpec", super::super::provision::OWNER_FIELDS),
+        ];
+        for only in [None, Some("Volume")] {
+            let s = manifest_schema(only).unwrap();
+            for (def_name, accepted) in blocks {
+                let def = &s["$defs"][*def_name];
+                assert_eq!(
+                    def["additionalProperties"],
+                    serde_json::Value::Bool(false),
+                    "{def_name} accepts unknown fields ({only:?}) — the schema \
+                     green-ticks a typo the load refuses"
+                );
+                let mut props: Vec<&str> = def["properties"]
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{def_name} has no properties ({only:?})"))
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+                props.sort_unstable();
+                let mut want = accepted.to_vec();
+                want.sort_unstable();
+                assert_eq!(
+                    props, want,
+                    "{def_name}: the schema's properties and the load's allowlist \
+                     disagree ({only:?})"
+                );
+            }
+        }
+        // The alias must not drop the requirement: a share with neither
+        // spelling would validate clean and fail at the load.
+        let s = manifest_schema(Some("Volume")).unwrap();
+        let share = &s["$defs"]["ShareBlock"];
+        assert!(
+            !share["required"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|x| x == "from")),
+            "`from` is still required — `storageRef` alone would be refused"
+        );
+        assert_eq!(
+            share["anyOf"].as_array().map(Vec::len),
+            Some(2),
+            "{share:#?}"
+        );
+    }
+
     /// **schemars não vê `#[serde(alias = ...)]`**, só `rename`. No topo de um
     /// Kind isso não custa nada (a lista de aceites já carrega as duas grafias),
     /// mas um tipo ANINHADO não tem lista nenhuma — e o `HostSpec` tem o
