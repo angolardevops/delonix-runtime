@@ -23,6 +23,12 @@ export interface Config {
   /** Receives a signed `note.created` per new note. Undefined: nothing is sent. */
   outboundWebhookUrl?: string;
   outboundWebhookSecret?: string;
+  /** Redis read-through cache. Undefined: an in-process cache is used instead. */
+  redisUrl?: string;
+  /** How long a cached note lives. */
+  cacheTtlMs: number;
+  /** RabbitMQ async messaging. Undefined: publishing and consuming are off. */
+  rabbitUrl?: string;
 }
 
 export class ConfigError extends Error {
@@ -90,6 +96,9 @@ export function loadConfig(env: NodeJS.ProcessEnv, version: string): Config {
     inboundWebhookSecret: get("WEBHOOK_INBOUND_SECRET"),
     outboundWebhookUrl: get("WEBHOOK_TARGET_URL"),
     outboundWebhookSecret: get("WEBHOOK_TARGET_SECRET"),
+    redisUrl: get("REDIS_URL"),
+    cacheTtlMs: dur("CACHE_TTL", 300_000),
+    rabbitUrl: get("RABBITMQ_URL"),
   };
 
   if (cfg.outboundWebhookUrl !== undefined) {

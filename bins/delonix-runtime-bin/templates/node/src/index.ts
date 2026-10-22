@@ -4,12 +4,18 @@
  * (signals, readiness, ordered shutdown).
  */
 import { buildApp } from "./app.js";
+import { CachedNotes } from "./cache/cached-notes.js";
+import { InMemoryCache } from "./cache/memory.js";
+import type { Cache } from "./cache/ports.js";
+import { RedisCache } from "./cache/redis.js";
 import { ConfigError, loadConfig } from "./config.js";
 import { Readiness } from "./health/readiness.js";
 import { shutdownTelemetry } from "./instrumentation.js";
 import { createLogger } from "./logging.js";
+import { RabbitConsumer } from "./messaging/consumer.js";
+import { amqpOpener, CompositePublisher, RabbitPublisher } from "./messaging/publisher.js";
 import { MemoryNoteStore } from "./notes/memory-store.js";
-import { NotesService } from "./notes/notes.js";
+import { NotesService, type NotePublisher, type NotesUseCases } from "./notes/notes.js";
 import { tracedNotes } from "./telemetry/traced-notes.js";
 import { Dedup } from "./webhooks/dedup.js";
 import { WebhookDispatcher } from "./webhooks/dispatcher.js";
@@ -43,10 +49,37 @@ async function main(): Promise<void> {
       )
     : undefined;
 
+  // Async messaging: publish `note.created` to RabbitMQ, and consume it back.
+  // Both are off with no RABBITMQ_URL; the app starts and serves regardless.
+  const rabbitPublisher = cfg.rabbitUrl
+    ? new RabbitPublisher({ url: cfg.rabbitUrl, opener: amqpOpener, log })
+    : undefined;
+  rabbitPublisher?.start();
+  const consumer = cfg.rabbitUrl ? new RabbitConsumer({ url: cfg.rabbitUrl, log }) : undefined;
+  await consumer?.start();
+
+  // The webhook dispatcher and the Rabbit publisher are both NotePublishers;
+  // wiring both means fanning each note out to both, never choosing.
+  const publishers: NotePublisher[] = [];
+  if (dispatcher) publishers.push(dispatcher);
+  if (rabbitPublisher) publishers.push(rabbitPublisher);
+  const publisher = publishers.length > 1 ? new CompositePublisher(publishers) : publishers[0];
+
+  // Read-through cache: Redis when configured, an in-process cache otherwise.
+  const cache: Cache = cfg.redisUrl
+    ? await RedisCache.fromUrl(cfg.redisUrl, log)
+    : new InMemoryCache();
+  const notes: NotesUseCases = new CachedNotes(
+    tracedNotes(new NotesService(new MemoryNoteStore(), publisher)),
+    cache,
+    cfg.cacheTtlMs / 1000,
+    log,
+  );
+
   const readiness = new Readiness();
   const app = await buildApp({
     logger: log,
-    notes: tracedNotes(new NotesService(new MemoryNoteStore(), dispatcher)),
+    notes,
     readiness,
     maxBodyBytes: cfg.maxBodyBytes,
     inboundWebhook: inboundKey ? { key: inboundKey, dedup: new Dedup(4096) } : undefined,
@@ -75,8 +108,13 @@ async function main(): Promise<void> {
     readiness.setDraining();
     await new Promise((resolve) => setTimeout(resolve, cfg.drainDelayMs));
     await app.close();
-    const drained = dispatcher ? await dispatcher.close(left()) : true;
-    if (!drained) log.error("webhook queue not drained before the deadline");
+    await consumer?.close();
+    const webhookDrained = dispatcher ? await dispatcher.close(left()) : true;
+    const rabbitDrained = rabbitPublisher ? await rabbitPublisher.close(left()) : true;
+    const drained = webhookDrained && rabbitDrained;
+    if (!webhookDrained) log.error("webhook queue not drained before the deadline");
+    if (!rabbitDrained) log.error("rabbit queue not drained before the deadline");
+    await cache.close();
     // A collector that is down loses the last batch; it does not turn a clean
     // stop into a failed one.
     if (!(await shutdownTelemetry(Math.min(left(), 5000)))) log.warn("telemetry flush failed");
