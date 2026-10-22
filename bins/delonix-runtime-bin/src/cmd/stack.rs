@@ -979,6 +979,34 @@ fn mark_unpruned(mut changes: Vec<Change>, prune: bool) -> Vec<Change> {
     changes
 }
 
+/// What an apply records (ADR-0019): whether it asked the machine for anything,
+/// and the counts of its revision. Both read the plan as THIS apply runs it —
+/// `mark_unpruned` with its own `--prune` —, the same reading `stack plan
+/// --detailed-exitcode` answers with. A `Delete` the apply keeps is counted as
+/// `kept`, never as `delete`: a revision says what was asked for, and saying
+/// it removed what it left would send whoever reads the history after an
+/// incident looking for a removal that never happened. Pure.
+fn revision_of(
+    changes: &[Change],
+    prune: bool,
+) -> (bool, std::collections::BTreeMap<String, usize>) {
+    let as_run = mark_unpruned(changes.to_vec(), prune);
+    let asked = as_run.iter().any(|c| c.changed);
+    let mut counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&as_run)
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let kept = as_run
+        .iter()
+        .filter(|c| c.action == Action::Delete && !c.changed)
+        .count();
+    if kept > 0 {
+        counts.remove("delete");
+        counts.insert("kept".to_string(), kept);
+    }
+    (asked, counts)
+}
+
 /// The exit `--detailed-exitcode` answers for a plan, `None` being 0. A plan
 /// with a `Conflict` is the error the apply would refuse it with (DX-5601,
 /// exit 5), and it outranks «there are changes»: a conflict is not a change
@@ -2158,14 +2186,13 @@ pub(crate) fn apply_docs(
     // GitOps target reconciling on a 60s timer (ADR-0021) would erase its own
     // useful history in twenty minutes.
     //
-    // The predicate is `Action::is_change` and not a second one written here: it
-    // already decides the `--detailed-exitcode` contract, so «a revision was
-    // written» and «the plan reported changes» cannot drift apart.
-    let asked_for_something = changes.iter().any(|c| c.action.is_change());
-    let counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&changes)
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect();
+    // The predicate is the one `--detailed-exitcode` reads — `changed`, after
+    // `mark_unpruned` with THIS apply's `--prune` — and not a second one written
+    // here, so «a revision was written» and «the plan reported changes» cannot
+    // drift apart. They did once: the plan stopped counting a `Delete` an apply
+    // without `--prune` keeps, while this still counted it, and every such
+    // apply wrote a revision saying `delete` for what it left in place.
+    let (asked_for_something, counts) = revision_of(&changes, do_prune);
     let manifest_shown = path.display().to_string();
 
     if let Err(e) = run_layers(&mut layers, docs, base) {
@@ -4582,6 +4609,68 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         let before = change_digest(&a_delete("old"));
         let kept = mark_unpruned(vec![a_delete("old")], false);
         assert_eq!(change_digest(&kept[0]), before);
+    }
+
+    /// An apply WITHOUT `--prune` whose only «change» is a resource that left
+    /// the manifest asks for nothing: no revision, and the counts say `kept`.
+    /// It used to write a revision with `delete` on every run — three re-applies
+    /// took a stack from 2 revisions to 5, all «delete», nothing removed.
+    #[test]
+    fn an_apply_that_keeps_what_left_the_manifest_records_no_revision() {
+        let (asked, counts) = revision_of(&[a_delete("old")], false);
+        assert!(!asked);
+        assert_eq!(counts.get("kept"), Some(&1));
+        assert_eq!(counts.get("delete"), None, "{counts:?}");
+    }
+
+    /// `--prune` removes it, so the revision is written and says `delete`.
+    #[test]
+    fn an_apply_with_prune_records_the_delete() {
+        let (asked, counts) = revision_of(&[a_delete("old")], true);
+        assert!(asked);
+        assert_eq!(counts.get("delete"), Some(&1));
+        assert_eq!(counts.get("kept"), None);
+    }
+
+    /// A real change next to a kept resource still writes a revision, and the
+    /// revision names both for what they were.
+    #[test]
+    fn a_kept_resource_next_to_a_real_change_is_recorded_as_kept() {
+        let mut upd = with_action(a_change("Container", "db"), Action::Update);
+        upd.changed = true;
+        let mut same = with_action(a_change("Volume", "v"), Action::NoOp);
+        same.changed = false;
+        let (asked, counts) = revision_of(&[a_delete("old"), upd, same], false);
+        assert!(asked);
+        assert_eq!(counts.get("kept"), Some(&1));
+        assert_eq!(counts.get("update"), Some(&1));
+        assert_eq!(counts.get("unchanged"), Some(&1));
+        assert_eq!(counts.get("delete"), None);
+    }
+
+    /// The revision predicate and `--detailed-exitcode` read the plan the same
+    /// way, for every mix — the drift that produced the bug cannot come back.
+    #[test]
+    fn a_revision_is_written_exactly_when_the_detailed_plan_reports_changes() {
+        let mut upd = with_action(a_change("Container", "db"), Action::Update);
+        upd.changed = true;
+        let mut same = with_action(a_change("Volume", "v"), Action::NoOp);
+        same.changed = false;
+        let mixes: Vec<Vec<Change>> = vec![
+            vec![],
+            vec![same.clone()],
+            vec![a_delete("old")],
+            vec![a_delete("old"), same.clone()],
+            vec![a_delete("old"), upd.clone()],
+            vec![upd.clone(), same.clone()],
+        ];
+        for prune in [false, true] {
+            for m in &mixes {
+                let (asked, _) = revision_of(m, prune);
+                let reported = detailed_exit(&mark_unpruned(m.clone(), prune)).unwrap() == Some(2);
+                assert_eq!(asked, reported, "prune={prune} {m:?}");
+            }
+        }
     }
 
     /// Without a conflict, a missing `--replace` stays what it was.

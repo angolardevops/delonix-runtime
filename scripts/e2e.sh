@@ -3756,6 +3756,24 @@ check "stack plan --prune: a remoção conta, o --detailed-exitcode é 2" 2 bash
   printf '%s\n' \"\$out\"
   [[ \$rc == 2 ]] && { grep -q 'Usage:' <<<\"\$out\" || ! grep -q '1 to remove' <<<\"\$out\"; } && exit 99
   exit \$rc"
+# Um `apply` sem `--prune` não remove o hv2, por isso não pede nada à máquina:
+# não grava revisão. Gravava uma por cada corrida, com `delete` no resumo — três
+# applies levavam a stack de N a N+3 revisões a dizer que o hv2 tinha saído, com
+# o hv2 lá. Com retenção de 20, um ciclo de CI ou de GitOps sem poda empurrava o
+# histórico útil para fora.
+check "três applies sem --prune com um recurso que saiu do manifesto não gastam revisões" ok bash -c "
+  n() { '$BIN' stack history -f '$HWORK/so1.yaml' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+  before=\$(n); for i in 1 2 3; do '$BIN' stack apply -f '$HWORK/so1.yaml' >/dev/null 2>&1 || exit 1; done
+  after=\$(n); echo \"revisões: \$before -> \$after\"
+  '$BIN' volume inspect 'hv2-$PFX' >/dev/null || { echo 'o hv2 desapareceu sem --prune'; exit 1; }
+  [[ \$before == \$after ]]"
+# A última revisão continua a ser a do `rollback --to 1` sem `--prune`, que mudou
+# o hv e deixou o hv2: o resumo diz `kept` para o hv2, nunca `delete`.
+check "…e a revisão do rollback sem --prune diz kept, não delete" ok bash -c "
+  '$BIN' stack history -f '$HWORK/so1.yaml' -o json | python3 -c 'import json,sys
+r=json.load(sys.stdin)[-1]; s=r.get(\"summary\") or {}
+print(r.get(\"number\"), r.get(\"rollback_of\"), s)
+sys.exit(0 if s.get(\"kept\")==1 and not s.get(\"delete\") else 1)'"
 # Só o stderr, e a frase que só o aviso tem: desde que o plano escreve «kept,
 # `--prune` removes it» no stdout, procurar `--prune` em `2>&1` passava mesmo
 # sem o aviso.

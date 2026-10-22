@@ -69,6 +69,14 @@ directory. A gate asserts this rather than the ADR asserting it.
 > destroying the history this ADR exists to keep. A FAILED apply is still
 > recorded whatever its plan said. The decision below is unchanged; only its
 > granularity is.
+>
+> **Clarified 2026-10-22:** «asked for something» reads the plan as the apply
+> runs it — with its own `--prune` —, the same reading `stack plan
+> --detailed-exitcode` answers with. A resource this stack owns and the manifest
+> no longer declares is not asked for by an apply without `--prune` (it is
+> kept), so on its own it spends no revision, and in a revision's counts it is
+> `kept`, never `delete`. Before this, every unpruned apply wrote a revision
+> saying `delete` for what it left in place.
 
 ### What a revision holds
 
