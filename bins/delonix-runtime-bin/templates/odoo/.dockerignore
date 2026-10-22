@@ -1,6 +1,8 @@
 .git
 .gitignore
 .secrets.env
+.env
+compose.yaml
 README.md
 delonix-manifest.yaml
 delonix-manifest.dev.yaml
