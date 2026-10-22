@@ -1165,6 +1165,14 @@ pub enum ClusterCmd {
         /// until you apply yours — plain kubeadm behavior).
         #[arg(long, default_value = "default", value_parser = ["default", "none"])]
         cni: String,
+        /// A real `kind` config file (`kind.x-k8s.io/v1alpha4`), the one
+        /// `kind create cluster --config` reads. delonix honours the fields it
+        /// can (`nodes[].role`, `name`, `networking.{podSubnet,serviceSubnet,
+        /// apiServerPort,disableDefaultCNI}`) and REFUSES the rest by name
+        /// (DX-1707) instead of ignoring them. The config is the source of
+        /// truth: a value it sets wins over the matching flag's default.
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
+        config: Option<PathBuf>,
     },
     /// Reclaim the state of clusters that have no nodes left.
     ///
@@ -1520,10 +1528,44 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             ref pod_subnet,
             ref service_subnet,
             ref cni,
+            ref config,
         } => {
             let (images, store) = super::util::open_stores()?;
-            let name = match name {
-                Some(n) => n.clone(),
+            // `--config <kind.yaml>` makes the kind config the source of truth
+            // for everything it declares; a value it omits falls back to the
+            // flag (or kind's default). The two cannot silently disagree:
+            // `kind_cluster_from_config` refuses a flag that the config also
+            // sets to a different value.
+            let kcfg = if let Some(path) = config {
+                let path = super::manifest::resolve_path(Some(path.clone()))?;
+                let text = std::fs::read_to_string(&path).map_err(|e| {
+                    Error::not_found_or_io(e, || {
+                        super::po::tf(
+                            "reading kind config {path}",
+                            &[("path", &path.display().to_string())],
+                        )
+                    })
+                })?;
+                Some(super::kindconfig::parse(
+                    &text,
+                    &path.display().to_string(),
+                )?)
+            } else {
+                None
+            };
+            let kind_cluster = build_create_kind_cluster(CreateKindArgs {
+                name: name.clone(),
+                api_port,
+                workers,
+                control_planes,
+                image: image.clone(),
+                pod_subnet: pod_subnet.clone(),
+                service_subnet: service_subnet.clone(),
+                cni: cni.clone(),
+                config: kcfg,
+            })?;
+            let name = match kind_cluster.name {
+                Some(n) => n,
                 None => super::kindmode::random_cluster_name(&store)?,
             };
             return super::kindmode::create(
@@ -1531,16 +1573,14 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 &store,
                 &super::kindmode::KindCluster {
                     name,
-                    image: image
-                        .clone()
-                        .unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
-                    api_port,
-                    pod_subnet: pod_subnet.clone(),
-                    service_subnet: service_subnet.clone(),
-                    control_planes,
-                    cni: cni.clone(),
+                    image: kind_cluster.image,
+                    api_port: kind_cluster.api_port,
+                    pod_subnet: kind_cluster.pod_subnet,
+                    service_subnet: kind_cluster.service_subnet,
+                    control_planes: kind_cluster.control_planes,
+                    cni: kind_cluster.cni,
                     k8s_version: None,
-                    workers,
+                    workers: kind_cluster.workers,
                 },
             );
         }
@@ -1631,6 +1671,18 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         ClusterCmd::Kube { action } => super::kube::run(action),
         ClusterCmd::Apply { file, cri_bin } => {
             let path = manifest::resolve_path(file)?;
+            // A real kind config (`kind.x-k8s.io/v1alpha4`) is NOT a delonix
+            // manifest — the manifest loader would reject its apiVersion group.
+            // Detect it first and route it to the kind parser; the delonix
+            // path is unchanged for everything else.
+            let text = std::fs::read_to_string(&path).map_err(|e| {
+                Error::not_found_or_io(e, || {
+                    super::po::tf("reading {path}", &[("path", &path.display().to_string())])
+                })
+            })?;
+            if super::kindconfig::looks_like_kind_config(&text) {
+                return apply_kind_config(&text, &path.display().to_string());
+            }
             let docs = manifest::load(&path)?;
             apply(&docs, cri_bin.as_deref())
         }
@@ -2368,6 +2420,140 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
             control_planes: 1,
         },
     )
+}
+
+/// `cluster apply` of a real kind config (`kind.x-k8s.io/v1alpha4`).
+///
+/// The same parser and the same `kindmode::create` as `cluster create
+/// --config`; only the name resolution differs — a config with no `name:` gets
+/// an invented one, matching `cluster create`'s no-`--name` behaviour.
+fn apply_kind_config(text: &str, label: &str) -> Result<()> {
+    let cfg = super::kindconfig::parse(text, label)?;
+    let (images, store) = super::util::open_stores()?;
+    let name = match &cfg.name {
+        Some(n) => n.clone(),
+        None => super::kindmode::random_cluster_name(&store)?,
+    };
+    super::kindmode::create(
+        &images,
+        &store,
+        &super::kindmode::KindCluster {
+            name,
+            image: cfg
+                .image
+                .clone()
+                .unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
+            api_port: cfg.api_port,
+            pod_subnet: cfg.pod_subnet_or_default(),
+            service_subnet: cfg.service_subnet_or_default(),
+            cni: cfg.cni().to_string(),
+            k8s_version: None,
+            workers: cfg.workers,
+            control_planes: cfg.control_planes,
+        },
+    )
+}
+
+/// The flag defaults of `cluster create`, named so the merge with a
+/// `--config` can tell "the user left the flag alone" from "the user set it".
+/// They MUST match the `#[arg(default_value…)]` on the `Create` variant.
+const CREATE_DEFAULT_POD_SUBNET: &str = "10.244.0.0/16";
+const CREATE_DEFAULT_SERVICE_SUBNET: &str = "10.96.0.0/12";
+const CREATE_DEFAULT_CNI: &str = "default";
+
+/// The raw `cluster create` flags plus the parsed `--config`, handed to
+/// [`build_create_kind_cluster`] to resolve into one [`ResolvedKindCreate`].
+struct CreateKindArgs {
+    name: Option<String>,
+    api_port: Option<u16>,
+    workers: u32,
+    control_planes: u32,
+    image: Option<String>,
+    pod_subnet: String,
+    service_subnet: String,
+    cni: String,
+    config: Option<super::kindconfig::KindConfig>,
+}
+
+/// A fully-resolved kind-mode cluster request — every field decided, except
+/// `name`, which stays `Option` so the caller can invent one when neither the
+/// flag nor the config named it.
+struct ResolvedKindCreate {
+    name: Option<String>,
+    image: String,
+    api_port: Option<u16>,
+    pod_subnet: String,
+    service_subnet: String,
+    cni: String,
+    control_planes: u32,
+    workers: u32,
+}
+
+/// Resolves the `cluster create` request from the flags and the optional kind
+/// `--config`.
+///
+/// Without `--config` this is the historical flag path. With it, the config is
+/// the source of truth for the node topology and the networking, and the
+/// node/network flags become mutually exclusive with it — a flag set to a
+/// NON-default value alongside `--config` is refused by name rather than
+/// silently dropped (the "reports success, does nothing" trap). `--name` and
+/// `--image` are the two exceptions: they remain overrides, since a kind config
+/// has no CLI-only identity and `kind --name` overrides the config too.
+fn build_create_kind_cluster(a: CreateKindArgs) -> Result<ResolvedKindCreate> {
+    let Some(cfg) = a.config else {
+        return Ok(ResolvedKindCreate {
+            name: a.name,
+            image: a
+                .image
+                .unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
+            api_port: a.api_port,
+            pod_subnet: a.pod_subnet,
+            service_subnet: a.service_subnet,
+            cni: a.cni,
+            control_planes: a.control_planes,
+            workers: a.workers,
+        });
+    };
+
+    // Refuse a node/network flag that would fight the config, instead of
+    // quietly letting one win. Each entry is (flag name, was-it-set).
+    let conflicts: &[(&str, bool)] = &[
+        ("--workers", a.workers != 0),
+        ("--control-planes", a.control_planes != 1),
+        ("--pod-subnet", a.pod_subnet != CREATE_DEFAULT_POD_SUBNET),
+        (
+            "--service-subnet",
+            a.service_subnet != CREATE_DEFAULT_SERVICE_SUBNET,
+        ),
+        ("--api-port", a.api_port.is_some()),
+        ("--cni", a.cni != CREATE_DEFAULT_CNI),
+    ];
+    if let Some((flag, _)) = conflicts.iter().find(|(_, set)| *set) {
+        return Err(Error::coded(
+            1707,
+            Error::Invalid(super::po::tf(
+                "`{flag}` cannot be combined with `--config`: the kind config already decides the \
+                 nodes and the networking. Set it in the config file, or drop `--config` and use \
+                 the flags",
+                &[("flag", flag)],
+            )),
+        ));
+    }
+
+    Ok(ResolvedKindCreate {
+        // Flag name wins, then the config's `name:`, then invent one later.
+        name: a.name.or(cfg.name.clone()),
+        image: a
+            .image
+            .or_else(|| cfg.image.clone())
+            .unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
+        api_port: cfg.api_port,
+        pod_subnet: cfg.pod_subnet_or_default(),
+        service_subnet: cfg.service_subnet_or_default(),
+        cni: cfg.cni().to_string(),
+        control_planes: cfg.control_planes,
+        workers: cfg.workers,
+    })
 }
 
 /// `mode: vm` — provisions VMs from the golden image and bootstraps them over SSH.

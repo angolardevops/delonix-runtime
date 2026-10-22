@@ -660,6 +660,25 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // (and `delete` runs `remove_dir_all` on the former): a `--name ../..` must
     // never get that far.
     super::cluster::check_cluster_name(&cfg.name)?;
+
+    // Fail-fast addressing check, BEFORE the network, the state dir or the
+    // ~425 MB image pull — a bad pair left a half-built cluster (orphan network
+    // + state) before. The same DX-1704 helper the declarative path uses, so a
+    // cluster is refused identically whether it arrives as a manifest, as
+    // `cluster create` flags, or as a `kind.x-k8s.io` `--config`. On the kind
+    // path the size check always applies: kindnet and a bring-your-own CNI both
+    // take their per-node /24 pod range from the controller-manager.
+    let pod = super::net_profiles::parse_cidr_field("--pod-subnet", &cfg.pod_subnet)?;
+    let service = super::net_profiles::parse_cidr_field("--service-subnet", &cfg.service_subnet)?;
+    super::net_profiles::validate_cluster_cidrs(
+        pod,
+        &cfg.pod_subnet,
+        service,
+        &cfg.service_subnet,
+        cfg.control_planes + cfg.workers,
+        true,
+    )?;
+
     let node = format!("{}-control-plane", cfg.name); // kind naming convention
     if store.list()?.iter().any(|c| c.name == node) {
         return Err(Error::Invalid(super::po::tf(
