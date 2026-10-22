@@ -184,18 +184,21 @@ fn default_context() -> PathBuf {
 // justification `VmSub` already carries. `Vm { action: VmSub }` became the
 // outlier once the VM-only variants (build/convert/import/init) moved OUT of
 // this enum and into `VmSub` alone.
+#[derive(clap::Args)]
+pub struct PullArgs {
+    image: String,
+    /// Verify the cosign signature with this public key (PEM) AFTER the
+    /// pull, and fail if it does not match. Without this, a pull is not
+    /// authenticated beyond the registry's own digest.
+    #[arg(value_hint = clap::ValueHint::FilePath, long, value_name = "PEM")]
+    verify: Option<PathBuf>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ImageCmd {
     /// Pull an image from a registry.
-    Pull {
-        image: String,
-        /// Verify the cosign signature with this public key (PEM) AFTER the
-        /// pull, and fail if it does not match. Without this, a pull is not
-        /// authenticated beyond the registry's own digest.
-        #[arg(value_hint = clap::ValueHint::FilePath, long, value_name = "PEM")]
-        verify: Option<PathBuf>,
-    },
+    Pull(PullArgs),
     /// List local images.
     Ls {
         /// Output format: `table` (default) or `json` (ADR-0005).
@@ -408,7 +411,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
     }
     let (images, store) = open_stores()?;
     match action {
-        ImageCmd::Pull { image, verify } => cmd_pull(&images, &image, verify.as_deref()),
+        ImageCmd::Pull(PullArgs { image, verify }) => cmd_pull(&images, &image, verify.as_deref()),
         ImageCmd::Ls { output } => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),

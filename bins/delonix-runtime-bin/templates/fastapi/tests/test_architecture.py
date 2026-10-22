@@ -28,6 +28,12 @@ CORE: dict[str, set[str]] = {
     "webhooks.signature": set(),
     "webhooks.dedup": {"webhooks.signature"},
     "lifecycle": set(),
+    # The messaging wire format and the cache boundary stay pure too: the event
+    # envelope and the cache port/decorator know the domain, never a client.
+    "messaging.events": {"notes.domain"},
+    "cache.ports": set(),
+    "cache.memory": set(),
+    "cache.cached_notes": {"notes.domain", "cache.ports"},
 }
 # Only the composition root may name the storage adapter.
 ADAPTER_USERS = {"notes.memory": {"app"}}

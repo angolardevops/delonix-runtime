@@ -4436,6 +4436,18 @@ msgstr "Inicia um projecto com um Delonixfile + manifesto — ficheiros JÁ PREE
 msgid "Run a container from an image (pulls it if missing)."
 msgstr "Corre um container a partir de uma imagem (puxa-a se faltar)."
 
+msgid "Create a container from an image WITHOUT starting it — the engine's `docker create`."
+msgstr "Cria um container a partir de uma imagem SEM o arrancar — o `docker create` do motor."
+
+msgid "Create a container from an image WITHOUT starting it — the engine's `docker create`.\n\nThe record is registered in `Created` state and the rootfs prepared, but no process runs; `container start <id>` launches it later from the same record. Takes every flag `run` does, and pulls the image if missing."
+msgstr "Cria um container a partir de uma imagem SEM o arrancar — o `docker create` do motor.\n\nO registo fica no estado `Created` e o rootfs preparado, mas nenhum processo corre; `container start <id>` arranca-o depois a partir do mesmo registo. Aceita todas as flags do `run` e puxa a imagem se faltar."
+
+msgid "prepare a container now, to start later with the same configuration"
+msgstr "prepara um container agora, para arrancar depois com a mesma configuração"
+
+msgid "with ports and a named volume, ready for `start` to bring up"
+msgstr "com portas e um volume nomeado, pronto para o `start` levantar"
+
 msgid "(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached."
 msgstr "(Re)arranca containers parados/caídos, reaproveitando o rootfs persistente (o que foi escrito lá dentro sobrevive, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre desanexado."
 

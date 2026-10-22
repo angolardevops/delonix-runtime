@@ -119,6 +119,12 @@ pub struct RunOpts {
     /// leaves it `false`.
     #[serde(default)]
     pub no_supervisor: bool,
+    /// Create the container's record in `Created` state WITHOUT starting its
+    /// process — the engine's `docker create`. `container start` later launches
+    /// it from the record, exactly as it does a stopped container. Only the
+    /// `create` / `container create` verb sets it; `run` leaves it `false`.
+    #[serde(default)]
+    pub no_start: bool,
     // (see `compose_io_max` for how the four `--device-*` flags become this)
     #[serde(default)]
     pub read_only: bool,
