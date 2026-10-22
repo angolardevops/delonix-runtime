@@ -1,0 +1,21 @@
+# Delonixfile — WordPress __TEMPLATE_VERSION__ (official image). WordPress IS
+# the image; MariaDB and the network that wires them live in
+# delonix-manifest.yaml — bring the whole thing up with `delonix stack apply`
+# (WordPress needs a database to install; a bare `container run` of this image
+# alone will not become healthy).
+#
+# This image BAKES your custom themes/plugins from wp-content/ for the
+# PROD-shaped manifest. delonix-manifest.dev.yaml bind-mounts wp-content/
+# instead, so you edit PHP on the host with no rebuild. The stock image already
+# ships WordPress core and the bundled themes; this only ADDS what is under
+# wp-content/ on top.
+#
+# Build with:  delonix build -t __NAME__:dev .
+FROM wordpress:__TEMPLATE_VERSION__
+# Your custom code lands beside WordPress's own, never replacing it:
+# wp-content/plugins and wp-content/themes are COPIED on top of the bundled
+# content the base image already holds under /var/www/html/wp-content.
+# (delonix-manifest.dev.yaml bind-mounts these for live reload instead.)
+COPY wp-content/plugins/ /var/www/html/wp-content/plugins/
+COPY wp-content/themes/ /var/www/html/wp-content/themes/
+# health: WordPress serves /wp-login.php (see delonix-manifest.yaml + template.meta).

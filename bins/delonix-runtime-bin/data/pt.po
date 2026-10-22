@@ -11224,6 +11224,9 @@ msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código 
 msgid "pick the template's version — an image tag for `odoo` (Odoo 20 when omitted)"
 msgstr "escolhe a versão do template — uma tag de imagem para o `odoo` (Odoo 20 quando omitida)"
 
+msgid "...or an image tag for `wordpress` (WordPress 6.7 when omitted)"
+msgstr "...ou uma tag de imagem para o `wordpress` (WordPress 6.7 quando omitida)"
+
 msgid "...or a bare major/major.minor for `django`, pinned as `==X.Y.*`"
 msgstr "...ou um major/major.minor nu para o `django`, fixado como `==X.Y.*`"
 

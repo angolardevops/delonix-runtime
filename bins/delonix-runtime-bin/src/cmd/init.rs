@@ -204,6 +204,9 @@ pub(crate) fn detect(has: &dyn Fn(&str) -> bool, m: &Manifests) -> Detection {
     if has("__manifest__.py") || has("odoo.conf") {
         return Detection::tpl("odoo", "__manifest__.py/odoo.conf");
     }
+    if has("wp-config.php") || has("wp-content") {
+        return Detection::tpl("wordpress", "wp-config.php/wp-content");
+    }
     if has("manage.py") {
         return Detection::tpl("django", "manage.py");
     }

@@ -1094,6 +1094,7 @@ pub static ENTRIES: &[Entry] = &[
             ("regenerate on top of files that already exist", "delonix init --force"),
             ("adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched", "delonix init ./my-existing-app"),
             ("pick the template's version — an image tag for `odoo` (Odoo 20 when omitted)", "delonix init -t odoo -v 19.0"),
+            ("...or an image tag for `wordpress` (WordPress 6.7 when omitted)", "delonix init -t wordpress -v 6.7 myblog"),
             ("...or a bare major/major.minor for `django`, pinned as `==X.Y.*`", "delonix init -t django -v 5.2 myapp"),
             ("...or a framework version for `laravel`/`nextjs`/`nestjs`/`node`", "delonix init -t laravel -v 12.5 myapp"),
             ("an HTTPS edge on ports of your choice, with a certificate that also covers your own name", "delonix init -t nginx --port 9080 --tls-port 9443 --hostname shop.test edge"),

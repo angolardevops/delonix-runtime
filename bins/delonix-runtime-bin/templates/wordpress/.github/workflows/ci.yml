@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions pinned by commit SHA (the tag is in the comment); Dependabot
+      # (.github/dependabot.yml) proposes the updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@2282b8057d1b96d3bf01fc4e9e4c41dd36c1f9e2 # v2.36.0
+        with:
+          php-version: "8.3"
+      # The themes/plugins under wp-content/ are this project's code: this is
+      # the gate that covers them from the first PHP file you write. `php -l`
+      # is a pure syntax check — no WordPress runtime, no database — so it is
+      # honest about exactly what it verifies. A near-empty wp-content/ passes
+      # (nothing to lint yet); add a WordPress-Coding-Standards (phpcs) step
+      # here once you have code worth styling.
+      - name: Lint custom PHP (wp-content)
+        run: |
+          set -eu
+          fail=0
+          any=0
+          for f in $(find wp-content -type f -name '*.php'); do
+            any=1
+            php -l "$f" || fail=1
+          done
+          [ "$any" -eq 0 ] && echo "no PHP under wp-content yet — nothing to lint"
+          [ "$fail" -eq 0 ]
+      # Validates the Compose file parses (does not start anything).
+      - name: Validate compose.yaml
+        run: docker compose config >/dev/null

@@ -1,0 +1,18 @@
+# The database credentials never go into git. `delonix init` generates .env
+# with fresh random secrets; the README and the manifests tell you to move the
+# production credentials into .secrets.env — and the project is a git
+# repository from the moment `delonix init` finishes, so this file is what
+# makes that promise true. `.dockerignore` keeps a file out of an IMAGE, which
+# is a different thing entirely.
+.env
+.secrets.env
+
+# WordPress runtime state, if you ever bind-mount it next to the project.
+wp-content/uploads/
+wp-content/cache/
+wp-content/upgrade/
+*.log
+
+# PHP dependency trees from a theme/plugin you are building.
+vendor/
+node_modules/

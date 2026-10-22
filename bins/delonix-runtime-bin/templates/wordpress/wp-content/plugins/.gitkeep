@@ -1,0 +1,5 @@
+# Drop your custom WordPress plugins here — one directory per plugin (each with
+# its own main plugin file carrying the `Plugin Name:` header). They are baked
+# into the image by the Delonixfile (prod) and bind-mounted by
+# delonix-manifest.dev.yaml (live dev). WordPress's own bundled plugins stay in
+# the image; these are added on top.
