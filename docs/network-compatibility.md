@@ -124,8 +124,32 @@ nesta sessão, `cluster kubeadm --control-plane 1 --workers 1 --cni cilium
 | L7 | **Os dois nós registam-se no cluster** | **PASS** — `kubectl get nodes` mostra os 2, `v1.34.12`, e **`CONTAINER-RUNTIME: delonix://5.1.1`** — este CRI a servir um kubelet real em dois nós |
 | L8 | O DaemonSet do Cilium agenda | **PASS** — `DESIRED 2, CURRENT 2` |
 | L9 | **O agente Cilium arranca** | **FAIL** — `CrashLoopBackOff` nos dois nós |
-| L10 | A espera por prontidão **falha honestamente** | **PASS** — `✗ … 7m00s` e `DX-6704`: «its agent is Ready on 0/0 node(s) and 0/2 node(s) report Ready … nothing was deleted or rolled back». Não reportou sucesso, não apagou a prova, e nomeou os comandos de diagnóstico |
+| L10 | A espera por prontidão **falha honestamente** | **PASS** — `✗ … 7m00s` e `DX-6704`: «its agent is Ready on 0/0 node(s) and 0/2 node(s) report Ready … nothing was deleted or rolled back». Não reportou sucesso, não apagou a prova, e nomeou os comandos de diagnóstico — mas **esses comandos não corriam**, ver a correcção a seguir à tabela |
 | L11 | Cross-node, DNS, ClusterIP, MTU, NetworkPolicy | **NOT RUN** — dependem de L9 |
+
+**Correcção ao L10, medida a 2026-10-20 e já corrigida no código.** O que o
+L10 observou continua verdade: a espera falha, com as contagens, sem apagar
+nada. O que ninguém experimentou nessa sessão foi **correr** os dois comandos
+que o DX-6704 nomeia. Não corriam: `delonix cluster <nome> -n <ns> describe
+daemonset <ds>` resolve o kubeconfig em cache
+(`<root>/clusters/<nome>-kubeconfig.yaml`), e o `apply_ssh` ia buscá-lo no
+**último** passo — depois da instalação do perfil e depois da espera. A única
+corrida que imprime o conselho era, por construção, a corrida que regressava
+antes de o ficheiro existir. Reproduzido a 2026-10-20 num cluster de 3
+control-planes + 2 workers com `--cni flannel`: `DX-6704` aos 420s e depois
+`error[DX-1000] … no kubeconfig for cluster 'ngolacloud'`, com a directoria do
+cluster a conter apenas `id_ed25519`, `id_ed25519.pub` e
+`network-profile.json`.
+
+O kubeconfig passa a ser guardado **logo a seguir ao `kubeadm init`**, que é o
+primeiro momento em que o `admin.conf` existe; no caminho de sucesso não custa
+nada, e nos de falha é a diferença entre um conselho e um segundo erro. Dois
+testes seguram a ordem: a do plano (`bootstrap_plan`) e a das chamadas reais
+dentro do `apply_ssh` (`tests/architecture.rs`).
+
+**A lição, que é a mesma do §4:** nomear comandos de diagnóstico não é o
+critério — corrê-los é. Um «PASS» dado à redacção de uma mensagem não viu
+metade do que a mensagem promete.
 
 **A causa-raiz de L9, medida:**
 

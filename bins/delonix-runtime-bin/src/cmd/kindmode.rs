@@ -1754,13 +1754,48 @@ pub(crate) fn prune(doomed: &[String]) -> Result<usize> {
 /// be gone), except the kubeconfig context, where a failure is reported —
 /// silently leaving a context pointing at a dead port is the defect.
 fn collect_leftovers(name: &str) {
-    let _ = std::fs::remove_file(kubeconfig_path(name));
-    let _ = std::fs::remove_dir_all(cluster_dir(name));
+    // The network goes first here, unlike in `delete`, where it has to wait
+    // for the nodes: this path's precondition is that there are NO nodes and
+    // no VMs, so nothing holds the bridge and the order is free.
     remove_cluster_network(name);
-    if let Err(e) = remove_kubecontext(name) {
+    collect_leftovers_in(
+        &super::util::state_root(),
+        user_kubeconfig_path().as_deref(),
+        name,
+    );
+}
+
+/// The removal half of [`collect_leftovers`], over the two locations it
+/// touches — the state root and the operator's kubeconfig — taken as
+/// parameters so BOTH naming conventions can be exercised without mutating
+/// `$HOME` or the real state root. The network is removed by the caller: it
+/// lives in a store, not under either of these paths.
+///
+/// Both conventions are cleaned here because `cluster destroy` funnels both
+/// kinds of cluster through this one path. A kind cluster's three entries are
+/// all named `delonix-<name>`; a `mode: ssh` cluster — remote hosts this
+/// engine never created a machine for, so it has no VMs and never reaches
+/// `cluster::destroy_vm_cluster` — is merged as `<name>`/`<name>`/
+/// `<name>-admin` instead. Cleaning only the first convention is what left an
+/// ssh cluster's three entries in `~/.kube/config` after its kubeconfig and
+/// state directory were already gone.
+fn collect_leftovers_in(root: &std::path::Path, kubeconfig: Option<&std::path::Path>, name: &str) {
+    let clusters = root.join("clusters");
+    let _ = std::fs::remove_file(clusters.join(format!("{name}-kubeconfig.yaml")));
+    let _ = std::fs::remove_dir_all(clusters.join(name));
+    let Some(dest) = kubeconfig else {
+        return;
+    };
+    if let Err(e) = remove_kubecontext_at(dest, &context_name(name)) {
         super::output::warn(&super::po::tf(
             "could not remove context '{ctx}' from kubeconfig: {err}",
             &[("ctx", &context_name(name)), ("err", &e.to_string())],
+        ));
+    }
+    if let Err(e) = super::cluster::remove_ssh_kubeconfig_entries(dest, name) {
+        super::output::warn(&super::po::tf(
+            "could not remove context '{ctx}' from kubeconfig: {err}",
+            &[("ctx", name), ("err", &e.to_string())],
         ));
     }
 }
@@ -2549,12 +2584,21 @@ pub(crate) fn health(store: &Store, name: Option<&str>) -> Result<()> {
 /// Removes this cluster's entries from the user's kubeconfig. Best-effort and
 /// idempotent: a cluster that never got to install a context is not an error.
 fn remove_kubecontext(cluster: &str) -> Result<()> {
-    use serde_yaml::Value;
-    let name = context_name(cluster);
     let Some(dest) = user_kubeconfig_path() else {
         return Ok(());
     };
-    let Ok(txt) = std::fs::read_to_string(&dest) else {
+    remove_kubecontext_at(&dest, &context_name(cluster))
+}
+
+/// [`remove_kubecontext`] against an explicit kubeconfig and an explicit entry
+/// name. Split out so the leftover collection can be driven over a temporary
+/// file instead of the operator's real `~/.kube/config`, and because the name
+/// is the whole difference between the two conventions this cleanup has to
+/// cover — in kind mode all three entries share one name, which is why this
+/// takes the entry name and not a cluster name.
+fn remove_kubecontext_at(dest: &std::path::Path, name: &str) -> Result<()> {
+    use serde_yaml::Value;
+    let Ok(txt) = std::fs::read_to_string(dest) else {
         return Ok(());
     };
     if txt.trim().is_empty() {
@@ -2571,13 +2615,13 @@ fn remove_kubecontext(cluster: &str) -> Result<()> {
     for chave in ["clusters", "users", "contexts"] {
         if let Some(seq) = cfg.get_mut(chave).and_then(|v| v.as_sequence_mut()) {
             let antes = seq.len();
-            seq.retain(|e| e.get("name").and_then(|n| n.as_str()) != Some(name.as_str()));
+            seq.retain(|e| e.get("name").and_then(|n| n.as_str()) != Some(name));
             mexeu |= seq.len() != antes;
         }
     }
     // If the current context was ours, leaving it pointing to a context that no
     // longer exists would make kubectl fail at EVERYTHING — remove it.
-    if cfg.get("current-context").and_then(|v| v.as_str()) == Some(name.as_str()) {
+    if cfg.get("current-context").and_then(|v| v.as_str()) == Some(name) {
         if let Some(m) = cfg.as_mapping_mut() {
             m.remove(Value::from("current-context"));
         }
@@ -2589,7 +2633,7 @@ fn remove_kubecontext(cluster: &str) -> Result<()> {
     let out = serde_yaml::to_string(&cfg).map_err(|e| Error::Invalid(e.to_string()))?;
     let tmp = dest.with_extension("delonix.tmp");
     std::fs::write(&tmp, out)?;
-    std::fs::rename(&tmp, &dest)?;
+    std::fs::rename(&tmp, dest)?;
     Ok(())
 }
 
@@ -2957,7 +3001,153 @@ mod pod_cidr_tests {
 /// every node and is what makes an orphan reachable by name.
 #[cfg(test)]
 mod leftover_tests {
-    use super::{doomed_in, leftovers_in, partition_doomed};
+    use super::{collect_leftovers_in, doomed_in, leftovers_in, partition_doomed};
+
+    /// A kubeconfig with the entries named exactly as given, and a selection.
+    /// Written by hand and not through the real merge functions because those
+    /// are private to their own modules — the two conventions themselves are
+    /// pinned where they are produced (`cluster::merge_into_local_kubeconfig`
+    /// for `<name>`/`<name>-admin`, [`super::install_kubecontext`] for
+    /// `delonix-<name>`); what is under test here is that the leftover
+    /// collection reaches BOTH.
+    fn write_kubeconfig(
+        path: &std::path::Path,
+        clusters: &[&str],
+        users: &[&str],
+        contexts: &[&str],
+        current: &str,
+    ) {
+        let seq = |key: &str, names: &[&str]| -> String {
+            let mut s = format!("{key}:\n");
+            for n in names {
+                s.push_str(&format!("- name: {n}\n"));
+            }
+            s
+        };
+        std::fs::write(
+            path,
+            format!(
+                "apiVersion: v1\nkind: Config\n{}{}{}current-context: {current}\n",
+                seq("clusters", clusters),
+                seq("users", users),
+                seq("contexts", contexts),
+            ),
+        )
+        .unwrap();
+    }
+
+    fn entries(path: &std::path::Path, key: &str) -> Vec<String> {
+        let cfg: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        cfg[key]
+            .as_sequence()
+            .map(|s| {
+                s.iter()
+                    .map(|e| e["name"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn current_context(path: &std::path::Path) -> Option<String> {
+        let cfg: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        cfg.get("current-context")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+
+    /// BUG FIXED HERE: a `mode: ssh` cluster has no VMs by definition — the
+    /// hosts were already live — so `cluster destroy <name>` never reaches
+    /// `cluster::destroy_vm_cluster` and lands in this leftover collection
+    /// instead. It removed the cached kubeconfig and the state directory, but
+    /// its context cleanup only ever looked for `delonix-<name>`, which
+    /// matches NONE of the three names such a cluster is merged under. All
+    /// three survived the destroy, so `kubectl config get-contexts` kept
+    /// listing a cluster whose hosts were gone.
+    #[test]
+    fn collect_leftovers_removes_an_ssh_clusters_file_and_three_entries() {
+        let root = state_root_with(&["lab"], &["lab"]);
+        let kube = root.path().join("kubeconfig");
+        write_kubeconfig(
+            &kube,
+            &["lab", "other"],
+            &["lab-admin", "other-admin"],
+            &["lab", "other"],
+            "lab",
+        );
+
+        collect_leftovers_in(root.path(), Some(&kube), "lab");
+
+        assert!(
+            !leftovers_in(root.path(), "lab").any(),
+            "the cached kubeconfig and the state directory must both be gone"
+        );
+        assert_eq!(entries(&kube, "clusters"), vec!["other"]);
+        assert_eq!(entries(&kube, "contexts"), vec!["other"]);
+        assert_eq!(entries(&kube, "users"), vec!["other-admin"]);
+        assert!(
+            current_context(&kube).is_none(),
+            "a selection left pointing at the destroyed cluster makes a bare \
+             kubectl fail at everything, not just this cluster"
+        );
+    }
+
+    /// The same collection still has to clean a KIND cluster, whose three
+    /// entries all share the one `delonix-<name>` name. Pinned alongside the
+    /// ssh case so a future change cannot fix one convention by dropping the
+    /// other.
+    #[test]
+    fn collect_leftovers_removes_a_kind_clusters_entries() {
+        let root = state_root_with(&["kc"], &["kc"]);
+        let kube = root.path().join("kubeconfig");
+        write_kubeconfig(
+            &kube,
+            &["delonix-kc", "delonix-keep"],
+            &["delonix-kc", "delonix-keep"],
+            &["delonix-kc", "delonix-keep"],
+            "delonix-kc",
+        );
+
+        collect_leftovers_in(root.path(), Some(&kube), "kc");
+
+        assert!(!leftovers_in(root.path(), "kc").any());
+        assert_eq!(entries(&kube, "clusters"), vec!["delonix-keep"]);
+        assert_eq!(entries(&kube, "contexts"), vec!["delonix-keep"]);
+        assert_eq!(entries(&kube, "users"), vec!["delonix-keep"]);
+        assert!(current_context(&kube).is_none());
+    }
+
+    /// The guard on the ssh convention: a VM/SSH cluster's cluster and context
+    /// entries are named after the cluster and NOTHING else, so an operator
+    /// may hold an unrelated, hand-written context of the same name. Only the
+    /// `<name>-admin` user entry is a name this engine invents — without it,
+    /// collecting a leftover must leave the triple strictly alone rather than
+    /// delete a context for a cluster this engine never created.
+    #[test]
+    fn collect_leftovers_leaves_a_foreign_context_of_the_same_name_alone() {
+        let root = state_root_with(&["lab"], &["lab"]);
+        let kube = root.path().join("kubeconfig");
+        // No `lab-admin`: these entries are somebody else's.
+        write_kubeconfig(&kube, &["lab"], &["lab-sa"], &["lab"], "lab");
+
+        collect_leftovers_in(root.path(), Some(&kube), "lab");
+
+        // Our own on-disk state still goes — that part is unambiguous.
+        assert!(!leftovers_in(root.path(), "lab").any());
+        assert_eq!(entries(&kube, "clusters"), vec!["lab"]);
+        assert_eq!(entries(&kube, "contexts"), vec!["lab"]);
+        assert_eq!(entries(&kube, "users"), vec!["lab-sa"]);
+        assert_eq!(current_context(&kube).as_deref(), Some("lab"));
+    }
+
+    /// No kubeconfig to clean is not a failure — the on-disk state still goes.
+    #[test]
+    fn collect_leftovers_without_a_kubeconfig_still_collects_the_state() {
+        let root = state_root_with(&["lab"], &["lab"]);
+        collect_leftovers_in(root.path(), None, "lab");
+        assert!(!leftovers_in(root.path(), "lab").any());
+    }
 
     /// A state root with the two shapes a cluster's state takes on disk: the
     /// directory `<name>/` and the exported `<name>-kubeconfig.yaml`.

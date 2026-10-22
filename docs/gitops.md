@@ -16,7 +16,7 @@ fluxo completo.
 ## Os cinco comandos
 
 ```bash
-delonix stack plan       # o que mudaria — não muda nada
+delonix stack plan       # o que mudaria — não muda nada (`--prune`: o que o apply --prune faria)
 delonix stack apply      # converge
 delonix stack apply --prune   # converge e remove o que saiu do manifesto
 delonix stack wait       # bloqueia até estar mesmo de pé
@@ -36,7 +36,7 @@ mexe).
 | `+~` | existe, não pertence a stack nenhuma — vai ser **adoptado** |
 | `~` | converge **a quente**, sem recriar e sem mudar o PID |
 | `-/+` | tem de ser **destruído e recriado** — o `apply` recusa sem `--replace` |
-| `-` | pertence a esta stack e saiu do manifesto — só sai com `--prune` |
+| `-` | pertence a esta stack e saiu do manifesto — só sai com `--prune`. Num `plan` sem `--prune` aparece como **mantido** e não conta para o `--detailed-exitcode` |
 | `=` | já bate certo |
 | `✗` | pertence a **outra** stack — nunca é tocado |
 | `!` | este Kind não converge nesta versão |
@@ -152,6 +152,15 @@ serve-o directamente — mesmo contrato do `terraform plan -detailed-exitcode`:
 | `5` | o plano tem um **conflito de posse** (`DX-5601`) — o `stack apply` recusá-lo-ia inteiro |
 | `1` | o comando falhou |
 
+**O gate planeia com as flags do `apply` que o acompanha.** O `plan` responde
+pelo que esse `apply` faria, e um `apply` sem `--prune` não remove nada. Por isso,
+sem `--prune`, um recurso que saiu do manifesto aparece como **mantido** e não
+conta: o gate fica verde, porque o `apply` também o deixa ficar. Um pipeline que
+aplica com `--prune`, como o de cima, planeia com `stack plan --prune
+--detailed-exitcode`, e aí a remoção conta como alteração (`2`). Até aqui o `plan`
+não tinha `--prune`, contava sempre a remoção, e um gate sem poda ficava a `2`
+para sempre.
+
 Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de `1` — `4` se o
 manifesto nomear um recurso que não existe, por exemplo (a tabela completa está
 em [cli-stability.md](cli-stability.md)). Os dois sinais positivos não mudam:
@@ -172,7 +181,7 @@ nenhum deles.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: delonix stack plan --detailed-exitcode
+      - run: delonix stack plan --prune --detailed-exitcode
 ```
 
 ```yaml
@@ -232,7 +241,8 @@ No terminal:
 delonix explain Container
 delonix explain Container.ports
 delonix explain Pod.containers.image
-delonix stack apply --dry-run   # o manifesto com TODOS os defaults preenchidos
+delonix manifest render         # o manifesto com TODOS os defaults preenchidos, sem ler a máquina
+delonix stack apply --dry-run   # o mesmo, e sai como o apply sairia (5 num conflito de posse)
 ```
 
 ## Validado ao vivo, com um container real

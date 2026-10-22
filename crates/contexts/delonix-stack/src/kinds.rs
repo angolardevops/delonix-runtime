@@ -87,7 +87,6 @@ pub const WORKLOAD: &str = "Workload";
 pub const DEPENDENCY: &str = "Dependency";
 pub const SHARE_VOLUME: &str = "ShareVolume";
 pub const STORAGE: &str = "Storage";
-pub const EGRESS: &str = "Egress";
 pub const STACK: &str = "Stack";
 /// A pull source a node reconciles from on a timer (ADR-0021): a git
 /// repository, a ref and a path, applied by a short-lived pass — never a

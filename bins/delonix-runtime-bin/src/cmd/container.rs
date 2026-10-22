@@ -2836,6 +2836,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // No policy file = no ceiling, byte for byte the old behaviour. A file that
     // exists and does not parse is an ERROR: somebody's intent is unknown, and
     // running anyway is the silent degradation this engine refuses elsewhere.
+    //
+    // The hardening the request asks to relax goes in too, read from the same
+    // fields the run will honour: a policy that judged `--privileged` alone
+    // admitted the same container as `--cap-add ALL -v /:/host`.
+    let security = delonix_compute::run::parse_security_opts(&opts.security_opt)?;
+    let apparmor_unconfined = security.apparmor.as_deref() == Some("unconfined")
+        || opts.apparmor.as_deref() == Some("unconfined");
+    // What every container already gets: re-asking for it (the CRI's
+    // capability ceiling always does) is not a request for more.
+    let engine_default_caps: Vec<&'static str> = delonix_linux::capabilities::KEPT_CAPS
+        .iter()
+        .filter_map(|&n| delonix_linux::capabilities::cap_name(n))
+        .collect();
     super::policy::enforce(
         &super::util::state_root(),
         opts.name.as_deref().unwrap_or(&opts.image),
@@ -2843,7 +2856,20 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &opts.image,
             opts.privileged,
             opts.net.is_empty() || opts.net == "host",
-        ),
+        )
+        .with_hardening(super::policy::ContainerHardening {
+            cap_add: &opts.cap_add,
+            default_caps: &engine_default_caps,
+            host_pid: opts.host_pid,
+            host_ipc: opts.host_ipc,
+            seccomp_unconfined: security.seccomp_unconfined,
+            apparmor_unconfined,
+            volumes: &opts.volumes,
+            devices: &opts.devices,
+            gpus: opts.gpus.as_deref(),
+            masked_paths: &opts.masked_path,
+            readonly_paths: &opts.readonly_path,
+        }),
     )?;
     // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
     // the ceiling above, absent from the policy means NOT granted.
@@ -6215,6 +6241,26 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         for one in delonix_sdn::expand_publish_range(spec)? {
             publish_live(store, &mut c, &one)?;
         }
+    }
+    // A hot-added host path is a bind mount like `run -v /…`, judged by the
+    // same `workloadSecurity` rule — the CLI gate found `update --volume-add
+    // /etc:/x` reading the host's files on a baseline node. Asked only when a
+    // host path is named, so a named volume logs no admission event. The
+    // image is not part of the question: an update does not pull anything.
+    if !delonix_security_runtime::admission::host_path_sources(&o.volume_add).is_empty() {
+        super::policy::enforce(
+            &super::util::state_root(),
+            &c.name,
+            &super::policy::Request {
+                image: None,
+                ..super::policy::Request::container("", false, false).with_hardening(
+                    super::policy::ContainerHardening {
+                        volumes: &o.volume_add,
+                        ..Default::default()
+                    },
+                )
+            },
+        )?;
     }
     for spec in &o.volume_add {
         let mounts = delonix_compute::ports::StorageProvider::resolve_mounts(

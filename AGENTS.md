@@ -1291,6 +1291,8 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
 - **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI; um
   plano com um `Conflict` sai **5** (`DX-5601`, o erro do `apply`) e ganha ao 2.
+  O `plan` planeia com as flags do `apply`: sem `--prune`, um `Delete` fica listado mas
+  **mantido** (`changed: false`, fora do exit code — `mark_unpruned`); `plan --prune` conta-o.
 - **Âmbito: 12 dos 13 Kinds convergem** (`CONVERGING_KINDS`) — Network/NetworkRoute/Volume/
   ShareVolume/Image/VirtualMachine/Container/Pod/NetworkPolicy/HTTPRoute/Ingress/Gateway. **Esta
   linha já esteve errada duas vezes** (dizia 8, depois 11 de 12 quando o `KINDS` já tinha 13, e
@@ -4019,6 +4021,99 @@ vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker
 com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
 fixo nem deixa restos), e o `container run` normal sem regressão.
 
+## Auditoria de segurança #4 (2026-10-12) — OWASP K8s/Docker Top 10, Kinds e providers
+
+Lente: OWASP Kubernetes Top 10 (K01 configuração de workload, K04 política centralizada,
+K08 segredos) e Docker Top 10 (D04/D05), aplicados à admissão do nó, ao CRI, aos Kinds e
+aos providers. **Os dois defaults que a skill `delonix-runtime-sec` dava como abertos já
+estavam fechados** (tecto de caps do CRI seguro por omissão; unpack limitado a 64 GiB e
+4 M entradas) — a baseline da skill está desactualizada. Sete achados novos, todos
+corrigidos, cada um medido antes (vermelho) e depois (verde, ao vivo quando o caminho o
+permitia, com os dois roots isolados):
+
+1. **ALTO — `kubectl exec <pod> -- -u 0 sh` corria como root no container.** A CLI lê
+   opções DEPOIS do nome do container (`container exec x -u` responde «a value is
+   required for '--user'»), e o CRI passava o comando do utilizador logo a seguir ao
+   nome — nos dois caminhos, streaming e `ExecSync`. Contornava `runAsNonRoot`/
+   `runAsUser` com só `pods/exec`. Agora `exec <nome> -- <cmd>`; um teste da CLI faz o
+   parse do argv exacto que o CRI constrói e exige `user == None`.
+2. **ALTO — `denyPrivileged` julgava UMA flag.** Medido: `--cap-add ALL --security-opt
+   seccomp=unconfined --host-pid -v /:/host --device /dev/sda` passava a admissão de um
+   nó com `denyPrivileged: true`. Campo novo, opt-in, `workloadSecurity: baseline` — o
+   perfil *baseline* dos Pod Security Standards no ÚNICO ponto de admissão (CLI,
+   manifesto, compose, Docker API e CRI convergem em `cmd_run`): caps fora da lista
+   baseline, `--host-pid/--host-ipc`, `seccomp/apparmor=unconfined`, bind de caminho do
+   host e `--device`. Regras `ADM-BASELINE-*`. A rede do host fica com `denyHostNetwork`
+   (é a rede por omissão do motor); `restricted` é recusado pelo nome (precisa do
+   utilizador efectivo da imagem, que a admissão não tem). Uma política só com
+   `denyPrivileged` passa a denunciar o próprio buraco (`POLICY-PRIVILEGE-EQUIVALENTS-OPEN`).
+   **As capabilities do conjunto por omissão do motor não contam como pedido**
+   (corrigido a 2026-10-21, no resgate do #841). A primeira versão comparava cada
+   `--cap-add` só com a lista do PSS, e o CRI, ao aplicar o tecto de capabilities,
+   reescreve o conjunto por omissão inteiro como `--cap-drop ALL` mais um `--cap-add`
+   por capability, com `NET_RAW`, `NET_BROADCAST` e `SYS_CHROOT` incluídas. Medido com
+   o `crictl`: num nó baseline, um pod sem capabilities pedidas era recusado por
+   `NET_BROADCAST,NET_RAW` e nenhum pod arrancava, os static pods incluídos. O critério
+   passa a ser o efeito: pedir de novo o que todo o container já recebe
+   (`KEPT_CAPS`, entregue à admissão em `ContainerHardening::default_caps`) não alarga
+   nada. Ficámos mais permissivos que o PSS num ponto, e de propósito: o PSS recusa um
+   `add: [NET_RAW]` explícito, mas aqui o resultado desse pedido é o mesmo que o de um
+   container que não pediu nada. Gate: `re_stating_the_engine_defaults_is_not_asking_for_more`.
+3. **ALTO — `kind: VirtualMachine` não passava pela admissão.** Só o `vm create` da CLI
+   chamava `policy::enforce`; o mesmo VM por manifesto contornava `denyDevicePassthrough`,
+   `denyLatestVmImage` e `allowedImageUrlHosts`. E um manifesto tem mais portas de
+   passthrough do que a CLI: `devices`, um `extraDisks` com origem num dispositivo do host,
+   e XML cru do libvirt (não validado — conta sempre). O `vm update --disk-add` (hotplug)
+   também. A detecção segue symlinks (`./innocent.qcow2 → /dev/sda` é recusado, medido).
+4. **MÉDIO — o proxy L7 deixava o cliente escrever `X-Forwarded-*`.** Era a borda e não
+   escrevia os seus; um backend que confia neles (os templates do `init` mandam
+   `TRUSTED_PROXY=*` atrás do túnel) aceitava IP e `https` forjados. Os do cliente são
+   descartados e o proxy escreve peer, esquema do listener e Host. Medido com o
+   `ingress-proxy` e um backend de eco.
+5. **MÉDIO — credenciais de túnel no argv** (`--token`, `--authtoken`, `token@host`):
+   legíveis por qualquer utilizador local em `/proc/<pid>/cmdline`. Passam por ambiente
+   (`TUNNEL_TOKEN`, `NGROK_AUTHTOKEN`, medidos nos binários reais) ou por um ssh config
+   `0600` (pinggy); o log do agente é `0600` porque o ngrok escreve lá o authtoken quando
+   o recusa.
+6. **MÉDIO — o cliente OPNsense aceitava `http://` e userinfo** e mandava key/secret em
+   claro; os outros três providers já recusavam. DX-1349, validado dentro do `connect`.
+7. **BAIXO — o MCP passava o `name` do modelo ao argv sem `--`** (o modelo pode ter lido
+   logs controlados por um atacante).
+
+**O portão funcional (`cli-tester`) chumbou a primeira versão, e com razão:** o
+*baseline* fechava o `run` e deixava três portas abertas no mesmo nó —
+`container update --volume-add /etc:/x` (o container leu o hostname do host),
+`--gpus dri` (nós `/dev/dri` crus) e `--masked-path /x` (uma lista própria SUBSTITUI a de
+omissão, e `/proc/interrupts` voltou a ter 142 linhas). Fechadas as três; o
+`--masked-path` exige o núcleo que todo o kubelet manda, **sem** o
+`/sys/devices/virtual/powercap`, que só os kubelets recentes mandam — exigi-lo recusaria
+todos os pods de um kubelet mais antigo num nó *baseline*. `--gpus nvidia` e um
+`--device` CDI continuam permitidos (são o *device plugin* do motor). Também: o disco de
+arranque de uma VM que seja um dispositivo conta como passthrough, e o DX-1349 chegava ao
+operador como DX-1000 (passava por `into_root`, que deita fora o número). A bateria
+`scripts/e2e.sh` tem agora uma secção que fixa tudo isto pela MENSAGEM da política.
+
+**Dois defeitos de correcção apanhados de caminho, os dois silenciosos:** o
+`hot_fields(RuntimePolicy)` listava 8 dos 12 campos comparados, por isso ligar
+`denyPrivateEgress` num manifesto já aplicado planeava um `Replace` impossível (há agora um
+teste que exige as duas listas iguais); e um `devices: ['0000:01:00.0']` plano num
+`kind: VirtualMachine` era deitado fora (`merge_device_options` fazia `remove` dentro de um
+`let … else` antes de o padrão falhar — o dry-run imprimia `devices: []`, rc 0).
+
+**Lição de método, a reter:** a classe dos achados 1 e 7 é a mesma que a auditoria #1
+fechou para `ssh`/`virsh` — um valor de outro lado no argv de um binário com opções — e
+reapareceu na CLI do PRÓPRIO motor, porque «é o nosso binário» lia-se como «é seguro».
+Qualquer argv construído para `delonix …` a partir de um valor de fora leva `--` antes
+dele. E a classe dos achados 2 e 3 é «o portão tem uma segunda porta»: uma regra de
+política vale o que vale o caminho MENOS guardado até ela.
+
+**Por fazer, com a razão:** o `delonix drift` ignora o `RuntimePolicy` (não tem dono,
+e a deriva só compara recursos carimbados) — um `policy.json` editado à mão não aparece,
+enquanto o `stack plan` o vê; é anterior a esta auditoria. Verificação de assinatura no pull exigida pela política
+(`image verify` existe e é manual — ligá-lo à admissão é uma feature com chave do nó, não
+uma linha); o perfil `restricted`; e `ExecSync`/streaming provados por teste do parser
+real e não por um `crictl exec` contra um kubelet (o argv é o mesmo).
+
 ## CRI num nó kubeadm: eviction sem estatísticas e `kubeadm reset` com órfãos (2026-09-15)
 
 Os dois defeitos foram medidos contra um kubelet real (VM da `delonix-vm-k8s:1.36`, k8s 1.36.4)
@@ -4622,6 +4717,46 @@ no publish), e separa "alcançáveis a partir de VMs" (endereço:porta) dos
 `DELONIX_PUBLISH_ADDR=<gw>`). Read-only, zero privilégio, zero mudança ao default
 seguro. Parsers puros e testados (`parse_ip_gateways_pega_so_as_virbr`,
 `parse_ss_binds_classifica_loopback_vs_gateway`).
+
+### A rede libvirt de uma rede declarada: posse marcada, sub-rede verificada (2026-10-21)
+
+Desde o #866 o `vm create --network <rede declarada>` define em `qemu:///system` uma rede
+NAT libvirt com o mesmo nome. Medido pelo cli-tester, em root isolado: **nada a removia**
+(`vm rm`, `network rm`, `stack destroy` deixavam a rede, o virbrN e a rota no host), e o
+`ensure_libvirt_network` **confiava no nome** — com essa rede deixada para trás, redeclarar
+a rede noutra sub-rede e criar uma VM nela dava rc 0 com a VM na sub-rede ANTIGA, e o
+`stack plan`/`drift` calados.
+
+- **A posse lê-se do objecto, nunca do nome.** A rede que o motor define leva um
+  `<metadata>` no namespace `https://delonix.io/xmlns/libvirt/network/1` (o libvirt
+  guarda-o; medido no 10.0, devolvido com `"`). Só uma rede com a marca se redefine ou
+  remove; o host tem redes do operador com nomes que uma rede do delonix também pode ter.
+- **`libvirt_network_plan` (pura, tabela testada):** usa-se só na sub-rede declarada (ou
+  sem nada declarado para comparar); fora dela, redefine-se se é nossa E nenhum domínio
+  (do operador incluído, parado incluído) está nela; em tudo o resto recusa com
+  **DX-5508** (classe 5). Uma rede sem marca deixada por um binário anterior também
+  recusa — não se distingue de uma do operador, e a mensagem diz o `virsh` a usar.
+- **Quem conta os utilizadores é o caso de uso; quem diz em que rede está cada um é o
+  backend.** `VmBackend::release_network(vm, remaining)` (default: nada) recebe, em cada
+  `rm`, os registos do mesmo backend que ficam — parados incluídos: perguntar só ao
+  libvirt contaria uma VM PARADA como ausente (o `stop` faz undefine do domínio). A
+  primeira versão comparava `o.network == vm.network` no caso de uso, e o cli-tester
+  apanhou-a (BUG-1): uma VM posta na rede por `--bridge X` fica com `network: ingress`,
+  não contava, e o `rm` da outra tirava a rede de baixo do `start` dela. O libvirt decide
+  com o mesmo mapeamento do `boot` (`bridge` antes de `network`, `still_on_network`).
+- **O `start` leva a sub-rede declarada AGORA** (`VmEngine::restart_config`, pelo novo
+  `VmNetwork::subnet_of`). Um root não vê os registos de outro, e o `qemu:///system` é
+  partilhado: o último `rm` de um root pode tirar a rede de que uma VM parada de outro
+  root precisa (BUG-1b). Com a sub-rede, o `start` define-a outra vez — e julga uma que
+  tenha ficado noutra sub-rede, como o `create`. Um `boot` que falha depois de definir a
+  rede leva-a consigo.
+- De caminho: o `destroy` libertava a reserva de IP estático do `default` numa VM com
+  `--network`, porque o `boot` mapeia a rede para `bridge` e o registo não o guarda.
+- **Gate**: secção «a rede libvirt de uma rede declarada…» no `scripts/e2e.sh`, dentro do
+  `libvirt_system_usable`, com as redes e o domínio «alheios» definidos pela própria secção
+  e nunca arrancados. 17/17 com a correcção; 14/17 com a versão que contava por `network`
+  (os três do BUG-1 e do `start`); 4/12 com o binário anterior a tudo isto (que ainda
+  deixou a rede para trás).
 
 ## VM↔container por IP directo (`vm bridge`) — EXPERIMENTAL, privilegiado, opt-in
 

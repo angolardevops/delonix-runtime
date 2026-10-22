@@ -173,6 +173,9 @@ Options:
       --detailed-exitcode
           0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`)
 
+      --prune
+          Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept
+
       --fields
           Print WHICH fields the plan compares, per Kind, and exit
 
@@ -186,6 +189,9 @@ EXAMPLES:
   # a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would
   # refuse, 1 error
   delonix plan -f delonix-manifest.yaml --detailed-exitcode
+
+  # the same gate for a pipeline that applies with --prune: removals count
+  delonix plan -f delonix-manifest.yaml --prune --detailed-exitcode
 
   # which fields are compared, per Kind
   delonix plan --fields

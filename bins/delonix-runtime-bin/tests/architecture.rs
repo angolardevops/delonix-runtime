@@ -268,3 +268,71 @@ fn find_baked_indent(s: &str) -> Option<String> {
     }
     None
 }
+
+/// An error that names a command the operator cannot run is worse than an
+/// error that names none: it spends their attention and returns a second,
+/// unrelated error.
+///
+/// DX-6704 («the {cni} pod network did not converge within {secs}s») tells
+/// them to look with `delonix cluster <name> -n <ns> describe daemonset
+/// <ds>`. That passthrough resolves `<root>/clusters/<name>-kubeconfig.yaml`
+/// — and `apply_ssh` used to fetch that file in its LAST step, after the
+/// pod-network install and after the readiness wait. So the one run that
+/// prints the advice is precisely the run that returns before the file
+/// exists. Measured 2026-10-20 on a 3-control-plane + 2-worker flannel
+/// cluster: DX-6704 after 420s, then the very command it named → DX-1000
+/// «no kubeconfig for cluster». The run is written up in
+/// `docs/network-compatibility.md` (the correction to L10), which is where
+/// the cluster's name is allowed to live.
+///
+/// `bootstrap_plan` has a unit test for the ANNOUNCED order. This gate is
+/// the other half, and the half that would still be false if only the plan
+/// were fixed: the order of the real calls inside `apply_ssh`, which is a
+/// 300-line function with live SSH in every branch and therefore nothing a
+/// unit test reaches. Reading the source is the cheapest thing that can
+/// tell — the same reason `no_message_carries_the_indentation_of_its_source_line`
+/// above reads it.
+#[test]
+fn the_bootstrap_caches_the_kubeconfig_before_the_steps_whose_errors_name_it() {
+    let src =
+        std::fs::read_to_string(repo_root().join("bins/delonix-runtime-bin/src/cmd/cluster.rs"))
+            .expect("cluster.rs is readable");
+    let start = src
+        .find("\nfn apply_ssh(")
+        .expect("apply_ssh still exists in cmd/cluster.rs");
+    // The next item at column 0 ends the function: `apply_ssh` is the only
+    // region whose call order this gate judges.
+    let body = &src[start + 1..];
+    let end = body
+        .find("\n}\n")
+        .expect("apply_ssh has a closing brace at column 0");
+    let body = &body[..end];
+    let at = |needle: &str| {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("`{needle}` is no longer called in apply_ssh"))
+    };
+    let fetch = at("fetch_kubeconfig(");
+    let init = at("kubeadm_init(");
+    // `admin.conf` is written by `kubeadm init`; there is nothing to cache
+    // before it.
+    assert!(
+        init < fetch,
+        "apply_ssh fetches the kubeconfig before `kubeadm init` wrote admin.conf"
+    );
+    for (what, needle) in [
+        // DX-6704, all four of its uses — the artefact ones say «nothing was
+        // installed», but the convergence one names the two passthrough
+        // commands.
+        ("the pod-network install", "install_network_profile("),
+        // The 0/N refusal in `wait_for_cluster_ready` and the DX-6704
+        // timeout in `wait_until_ready`.
+        ("the readiness wait", "wait_for_cluster_ready("),
+        ("the profile readiness wait", "wait_until_ready("),
+    ] {
+        assert!(
+            fetch < at(needle),
+            "apply_ssh runs {what} before caching the kubeconfig, so a failure there \
+             names `delonix cluster <name> …` commands that answer DX-1000 instead"
+        );
+    }
+}

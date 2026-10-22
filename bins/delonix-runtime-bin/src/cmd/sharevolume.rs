@@ -47,8 +47,6 @@ pub(crate) struct ShareVolumeSpec {
     alert_pct: Option<u8>,
 }
 
-pub const SHAREVOLUME_SPEC_FIELDS: &[&str] = &["storageRef", "quota", "alertPct"];
-
 /// Applies one `kind: Volume` that carries a `share:` block.
 ///
 /// The single entry point from the declarative side (`cmd::volume::apply`)

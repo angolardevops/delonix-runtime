@@ -254,7 +254,8 @@ enum Cmd {
         /// Stack name to own the resources with (`delonix.io/stack`).
         #[arg(long)]
         name: Option<String>,
-        /// Print what would be applied, and apply nothing.
+        /// Print what would be applied, and apply nothing — exiting as the apply
+        /// would refuse (5 for a resource another stack owns, DX-5601).
         #[arg(long)]
         dry_run: bool,
         /// Authorize the recreate of a resource whose cold field changed.
@@ -285,6 +286,9 @@ enum Cmd {
         /// 0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`).
         #[arg(long)]
         detailed_exitcode: bool,
+        /// Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept.
+        #[arg(long)]
+        prune: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit.
         #[arg(long)]
         fields: bool,
@@ -1066,12 +1070,14 @@ fn run() -> Result<()> {
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         } => cmd::stack::run(cmd::stack::StackCmd::Plan {
             file,
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         }),
         Cmd::Wait { file, timeout } => {
@@ -2152,5 +2158,56 @@ mod dead_command_reference_tests {
             bad.len(),
             bad.join("\n  ")
         );
+    }
+}
+
+#[cfg(test)]
+mod exec_separator_tests {
+    use super::{Cli, Cmd};
+    use crate::cmd::container::ContainerCmd;
+    use clap::Parser;
+
+    fn exec_of(argv: &[&str]) -> (Option<String>, Vec<String>, Vec<String>) {
+        let cli = Cli::try_parse_from(argv).expect("parses");
+        match cli.cmd {
+            Cmd::Container {
+                action:
+                    ContainerCmd::Exec {
+                        user, env, command, ..
+                    },
+            } => (user, env, command),
+            _ => panic!("not container exec"),
+        }
+    }
+
+    /// The argv the CRI builds for `kubectl exec <pod> -- -u 0 sh`
+    /// (`delonix_cri::streaming::subprocess_args`): the command stays the
+    /// command, and the container's own user stays in force.
+    #[test]
+    fn a_command_after_the_separator_is_never_an_option_of_exec() {
+        let (user, env, command) = exec_of(&[
+            "delonix",
+            "container",
+            "exec",
+            "cri-a",
+            "--",
+            "-u",
+            "0",
+            "-e",
+            "X=1",
+            "sh",
+        ]);
+        assert_eq!(user, None);
+        assert!(env.is_empty());
+        assert_eq!(command, ["-u", "0", "-e", "X=1", "sh"]);
+    }
+
+    /// Why the separator is needed: without it, the same tokens are options.
+    #[test]
+    fn without_the_separator_the_tokens_after_the_name_are_options() {
+        let (user, _, command) =
+            exec_of(&["delonix", "container", "exec", "cri-a", "-u", "0", "sh"]);
+        assert_eq!(user.as_deref(), Some("0"));
+        assert_eq!(command, ["sh"]);
     }
 }
