@@ -15,6 +15,12 @@ pub enum Error {
     #[error("{0}")]
     ClientBuild(String),
 
+    /// The target URL would put the key/secret on the wire in the clear
+    /// (`http://`), names no host, or carries userinfo. Refused before
+    /// the client is built, so nothing is ever sent.
+    #[error("{0}")]
+    InsecureTarget(String),
+
     /// The request to the appliance could not be sent or answered at the
     /// transport level (DNS, TCP, TLS) — not a status it returned.
     #[error("{0}")]
@@ -104,6 +110,7 @@ impl Error {
         match self {
             Error::RouteNotFound(_) => 4304,
             Error::ClientBuild(_) => 9302,
+            Error::InsecureTarget(_) => 1349,
             Error::HttpStatus(_) => 9304,
             Error::ResponseTooLarge(_) => 9307,
             Error::Decode(_) => 9308,
@@ -127,6 +134,7 @@ impl Error {
             }
             Error::RouteNotFound(_)
             | Error::ClientBuild(_)
+            | Error::InsecureTarget(_)
             | Error::HttpStatus(_)
             | Error::ResponseTooLarge(_)
             | Error::Decode(_)
@@ -156,7 +164,9 @@ impl From<Error> for delonix_model::Error {
         let number = e.number();
         let class = match e {
             Error::RouteNotFound(text) => delonix_model::Error::NotFound(text),
-            Error::Validation(text) => delonix_model::Error::Invalid(text),
+            Error::Validation(text) | Error::InsecureTarget(text) => {
+                delonix_model::Error::Invalid(text)
+            }
             Error::Request(text) => delonix_model::Error::Unavailable(text),
             Error::Unauthorized(text) | Error::Forbidden(text) => {
                 delonix_model::Error::PermissionDenied(text)
@@ -187,6 +197,7 @@ mod tests {
     fn every_variant() -> Vec<Error> {
         vec![
             Error::ClientBuild("could not build the https client: x".into()),
+            Error::InsecureTarget("the OPNsense url 'http://fw' is plain http".into()),
             Error::Request("connection refused".into()),
             Error::HttpStatus("HTTP 500: {\"errorMessage\":\"x\"}".into()),
             Error::Unauthorized(
