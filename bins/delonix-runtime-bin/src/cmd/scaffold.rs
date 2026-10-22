@@ -715,7 +715,12 @@ fn ensure_tls(dir: &Path, hosts: &[String], key_mode: u32) -> Result<CertSource>
 }
 
 /// [`ensure_tls`] with the `mkcert` program named by the caller.
-fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str, key_mode: u32) -> Result<CertSource> {
+fn ensure_tls_with(
+    dir: &Path,
+    hosts: &[String],
+    mkcert: &str,
+    key_mode: u32,
+) -> Result<CertSource> {
     let tls = dir.join("tls");
     std::fs::create_dir_all(&tls)?;
     let (crt, key, pem) = (
@@ -2698,7 +2703,10 @@ mod tests {
                         // `.env` holds freshly generated random secrets — different
                         // on every render by design, so it is not byte-comparable.
                         continue;
-                    } else if p.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+                    } else if p
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
                         == Some("tls")
                     {
                         // `tls/` holds a freshly generated certificate and key —
@@ -2818,18 +2826,35 @@ mod tests {
     fn laravel_generates_the_single_compose_stack_and_a_valid_app_key() {
         use base64::Engine;
         let (_tmp, dir) = scratch();
-        render_template("laravel", &opts(dir.clone(), "myapp", "laravel", None), false).unwrap();
+        render_template(
+            "laravel",
+            &opts(dir.clone(), "myapp", "laravel", None),
+            false,
+        )
+        .unwrap();
 
-        assert!(dir.join("compose.yaml").is_file(), "compose.yaml is written");
+        assert!(
+            dir.join("compose.yaml").is_file(),
+            "compose.yaml is written"
+        );
         assert!(
             !dir.join("docker-compose.yaml").exists(),
             "the old docker-compose.yaml is gone"
         );
-        assert!(dir.join("docs/services.md").is_file(), "docs/services.md ships");
+        assert!(
+            dir.join("docs/services.md").is_file(),
+            "docs/services.md ships"
+        );
 
         let env = std::fs::read_to_string(dir.join(".env")).unwrap();
-        assert!(!env.contains("__SECRET_"), "every secret token is filled:\n{env}");
-        assert!(!env.contains("{random32}"), "the APP_KEY token is filled:\n{env}");
+        assert!(
+            !env.contains("__SECRET_"),
+            "every secret token is filled:\n{env}"
+        );
+        assert!(
+            !env.contains("{random32}"),
+            "the APP_KEY token is filled:\n{env}"
+        );
 
         let kv = |key: &str| -> String {
             env.lines()
@@ -2839,16 +2864,33 @@ mod tests {
         };
         // APP_KEY: base64: + exactly 32 random bytes (what Laravel requires).
         let app_key = kv("APP_KEY");
-        let raw = app_key.strip_prefix("base64:").expect("APP_KEY is base64:-prefixed");
+        let raw = app_key
+            .strip_prefix("base64:")
+            .expect("APP_KEY is base64:-prefixed");
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(raw).unwrap().len(),
+            base64::engine::general_purpose::STANDARD
+                .decode(raw)
+                .unwrap()
+                .len(),
             32,
             "APP_KEY decodes to 32 bytes"
         );
         // Passwords reused across a pair match; independent ones differ.
-        assert_eq!(kv("RABBITMQ_PASSWORD"), kv("RABBITMQ_DEFAULT_PASS"), "broker pass reused");
-        assert_eq!(kv("SONAR_JDBC_PASSWORD"), kv("POSTGRES_PASSWORD"), "Sonar reuses its db password");
-        assert_ne!(kv("RABBITMQ_PASSWORD"), kv("POSTGRES_PASSWORD"), "independent secrets differ");
+        assert_eq!(
+            kv("RABBITMQ_PASSWORD"),
+            kv("RABBITMQ_DEFAULT_PASS"),
+            "broker pass reused"
+        );
+        assert_eq!(
+            kv("SONAR_JDBC_PASSWORD"),
+            kv("POSTGRES_PASSWORD"),
+            "Sonar reuses its db password"
+        );
+        assert_ne!(
+            kv("RABBITMQ_PASSWORD"),
+            kv("POSTGRES_PASSWORD"),
+            "independent secrets differ"
+        );
     }
 
     /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
@@ -3364,15 +3406,25 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (_tmp, dir) = scratch();
         let plan = Plan::defaults("fastapi");
-        assert_eq!(plan.tls_port.as_deref(), Some("8443"), "fastapi declares tls=");
-        let cert =
-            render_planned("fastapi", &opts(dir.clone(), "demo", "fastapi", None), false, &plan)
-                .unwrap();
+        assert_eq!(
+            plan.tls_port.as_deref(),
+            Some("8443"),
+            "fastapi declares tls="
+        );
+        let cert = render_planned(
+            "fastapi",
+            &opts(dir.clone(), "demo", "fastapi", None),
+            false,
+            &plan,
+        )
+        .unwrap();
         assert_eq!(cert, Some(CertSource::SelfSigned));
-        let mode = |p: &str| {
-            std::fs::metadata(dir.join(p)).unwrap().permissions().mode() & 0o777
-        };
-        assert_eq!(mode("tls/tls.key"), 0o644, "the key must be readable by `app`");
+        let mode = |p: &str| std::fs::metadata(dir.join(p)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode("tls/tls.key"),
+            0o644,
+            "the key must be readable by `app`"
+        );
         assert_eq!(mode("tls/tls.pem"), 0o600, "the bundle stays private");
     }
 
@@ -3459,8 +3511,14 @@ mod tests {
             None,
         )
         .join("\n");
-        assert!(api.contains("open:    https://localhost:8443/api/v1/health/ready"), "{api}");
-        assert!(api.contains("health:  https://localhost:8443/api/v1/health/live"), "{api}");
+        assert!(
+            api.contains("open:    https://localhost:8443/api/v1/health/ready"),
+            "{api}"
+        );
+        assert!(
+            api.contains("health:  https://localhost:8443/api/v1/health/live"),
+            "{api}"
+        );
         assert!(!api.contains("redirects there"), "{api}");
         assert!(!api.contains("http://localhost:8000"), "{api}");
     }

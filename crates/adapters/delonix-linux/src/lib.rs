@@ -13271,7 +13271,11 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // whatever netns is actually shared, not a per-container one.
         // (own IPC ns throughout — this test is about the net gate.)
         assert!(!sysctl_namespaced("net.ipv4.ip_forward", false, true));
-        assert!(!sysctl_namespaced("net.ipv6.conf.all.forwarding", false, true));
+        assert!(!sysctl_namespaced(
+            "net.ipv6.conf.all.forwarding",
+            false,
+            true
+        ));
         assert!(sysctl_namespaced("net.ipv4.ip_forward", true, true));
     }
 
