@@ -118,8 +118,10 @@ pub enum StackCmd {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Don't apply anything — print the full manifest with every default
-        /// filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are
-        /// expanded and Kinds canonicalized, so you see exactly what WOULD run.
+        /// filled in, then plan it against the machine and refuse what `apply`
+        /// would refuse, with the same exit (like `kubectl apply
+        /// --dry-run=server -o yaml`). A resource another stack owns exits 5
+        /// (DX-5601). Nothing is applied; `manifest render` is the offline view.
         #[arg(long = "dry-run")]
         dry_run: bool,
         /// Authorize DESTROYING and recreating a resource whose change does not
@@ -302,9 +304,11 @@ pub enum StackCmd {
     },
     /// What this stack applied, and when (ADR-0019).
     ///
-    /// One revision per `apply`, failed ones included and marked — after an
-    /// incident the question is what the machine was ASKED to do, not what it
-    /// managed to do. `--show <n>` prints that revision's rendered manifest.
+    /// One revision per `apply` that asked for a change, failed ones included
+    /// and marked — after an incident the question is what the machine was
+    /// ASKED to do, not what it managed to do. An apply with nothing to change
+    /// (what left the manifest, without `--prune`, is kept) writes none.
+    /// `--show <n>` prints that revision's rendered manifest.
     ///
     /// This is a RECORD, never a source of truth: nothing here is read to decide
     /// what exists. Delete `<root>/stacks/` and every other stack command keeps
@@ -359,16 +363,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             reboot,
             prune,
             plan_digest,
-        } => {
-            if dry_run {
-                let path = manifest::resolve_path(file)?;
-                let docs = manifest::load(&path)?;
-                print!("{}", manifest::render_with_defaults(&docs)?);
-                Ok(())
-            } else {
-                apply(file, name, replace, reboot, prune, plan_digest)
-            }
-        }
+        } => apply(file, name, dry_run, replace, reboot, prune, plan_digest),
         StackCmd::Plan {
             file,
             name,
@@ -977,6 +972,34 @@ fn mark_unpruned(mut changes: Vec<Change>, prune: bool) -> Vec<Change> {
         );
     }
     changes
+}
+
+/// What an apply records (ADR-0019): whether it asked the machine for anything,
+/// and the counts of its revision. Both read the plan as THIS apply runs it —
+/// `mark_unpruned` with its own `--prune` —, the same reading `stack plan
+/// --detailed-exitcode` answers with. A `Delete` the apply keeps is counted as
+/// `kept`, never as `delete`: a revision says what was asked for, and saying
+/// it removed what it left would send whoever reads the history after an
+/// incident looking for a removal that never happened. Pure.
+fn revision_of(
+    changes: &[Change],
+    prune: bool,
+) -> (bool, std::collections::BTreeMap<String, usize>) {
+    let as_run = mark_unpruned(changes.to_vec(), prune);
+    let asked = as_run.iter().any(|c| c.changed);
+    let mut counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&as_run)
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let kept = as_run
+        .iter()
+        .filter(|c| c.action == Action::Delete && !c.changed)
+        .count();
+    if kept > 0 {
+        counts.remove("delete");
+        counts.insert("kept".to_string(), kept);
+    }
+    (asked, counts)
 }
 
 /// The exit `--detailed-exitcode` answers for a plan, `None` being 0. A plan
@@ -1742,6 +1765,11 @@ fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Resul
             )));
         }
         c.action = Action::Replace;
+        // `changed` is `action.is_change()` everywhere else, and a recreate the
+        // operator asked for by name IS a change — a `NoOp` promoted here kept
+        // `changed: false`, so `revision_of` (which reads `changed`) dropped the
+        // revision of a destructive recreate.
+        c.changed = c.action.is_change();
         c.reboot_fields.clear();
         // English, like every `reason`: it is part of the `-o json` payload.
         c.reason = Some("recreate requested by --replace".to_string());
@@ -1840,6 +1868,7 @@ fn count_of_kinds(docs: &[manifest::ManifestDoc]) -> std::collections::BTreeMap<
 fn apply(
     file: Option<PathBuf>,
     name: Option<String>,
+    dry_run: bool,
     replace: Vec<String>,
     reboot: Vec<String>,
     do_prune: bool,
@@ -1878,7 +1907,23 @@ fn apply(
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
-    refuse_stale_plan(&docs, &stack_name(&path, name.as_deref()), &plan_digests)?;
+    let stack = stack_name(&path, name.as_deref());
+    refuse_stale_plan(&docs, &stack, &plan_digests)?;
+    // `--dry-run` used to stop at the render and answer 0 without reading the
+    // machine, so a plan the apply refuses (another stack's resource, a
+    // Replace nobody authorised) previewed as fine. It now decides exactly
+    // what the apply decides before its first write, and exits as it would.
+    if dry_run {
+        print_rendered(&docs)?;
+        decide(
+            &docs,
+            &stack,
+            &replace,
+            &reboot,
+            super::gitops::Applier::Operator,
+        )?;
+        return Ok(());
+    }
     apply_docs(
         &docs,
         &path,
@@ -1889,6 +1934,18 @@ fn apply(
         None,
         super::gitops::Applier::Operator,
     )
+}
+
+/// `manifest render`: the manifest with every default filled in, and nothing
+/// else — no plan, nothing read from the machine or written to it.
+pub(crate) fn render(file: Option<PathBuf>) -> Result<()> {
+    let path = manifest::resolve_path(file)?;
+    print_rendered(&manifest::load(&path)?)
+}
+
+fn print_rendered(docs: &[manifest::ManifestDoc]) -> Result<()> {
+    print!("{}", manifest::render_with_defaults(docs)?);
+    Ok(())
 }
 
 /// The shapes an authorisation token can take: `all`, `<Kind>/<name>`, or a
@@ -2020,6 +2077,85 @@ pub(crate) fn refuse_stale_plan(
     Ok(())
 }
 
+/// Everything `stack apply` decides before its first write: the guards, the
+/// graph check, the plan, the `--replace`/`--reboot` typos and the refusal of
+/// what the flags do not authorise. Reads the machine, writes nothing — the
+/// one path the apply and its `--dry-run` share, so the preview cannot answer
+/// differently from the apply.
+fn decide(
+    docs: &[manifest::ManifestDoc],
+    stack: &str,
+    replace: &[String],
+    reboot: &[String],
+    by: super::gitops::Applier,
+) -> Result<Vec<Change>> {
+    // A bootstrap stack that is also the stack the source's passes apply
+    // into would declare only the source, and plan everything the passes
+    // applied for deletion. Refused before anything else is read.
+    super::gitops::refuse_self_target(docs, stack, by)?;
+    // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
+    // rollback, so a broken reference (an `Ingress` pointing to a container that
+    // nobody declares) must stop everything BEFORE the first creation, not halfway
+    // with half the stack already in the kernel.
+    let issues = validate_graph(docs);
+    if !issues.is_empty() {
+        for i in &issues {
+            eprintln!("  ✗ {i}");
+        }
+        return Err(delonix_model::Error::Invalid(super::po::tf(
+            "stack apply aborted: {what} (fix the manifest or use `stack validate`)",
+            &[(
+                "what",
+                &issues_summary(
+                    issues.len(),
+                    shape_issue_count(docs),
+                    spec_issue_count(docs),
+                ),
+            )],
+        )));
+    }
+    // Decide EVERYTHING before changing anything, and refuse up front what this
+    // invocation is not allowed to do (a conflict, or a recreation nobody asked
+    // for). Only then start creating.
+    let changes = build_plan(docs, stack)?;
+    // A `--replace` that names nothing in this manifest is a typo, and a typo in
+    // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
+    // this, `--replace Container/wev` reads as authorised, the recreate is then
+    // refused downstream, and the error the user reads names the resource — never
+    // the misspelling that caused it.
+    if !replace.iter().any(|r| r == "all") {
+        for r in replace {
+            // The same predicate `refuse_unallowed` authorises with. This check
+            // used to be raw equality against the canonical `Kind/name`, so
+            // `--replace container/web` — which `replace_matches` accepts — was
+            // refused here as a typo before it could authorise anything.
+            let hits = changes.iter().any(|c| replace_matches(r, c));
+            if !hits {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--replace '{value}': no resource with that name in this manifest \
+                     (`stack plan` lists them)",
+                    &[("value", r)],
+                )));
+            }
+        }
+    }
+    // Same for `--reboot`: a value naming nothing here is a typo, loudly.
+    if !reboot.iter().any(|r| r == "all") {
+        for r in reboot {
+            if !changes.iter().any(|c| replace_matches(r, c)) {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--reboot '{value}': no resource with that name in this manifest \
+                     (`stack plan` lists them)",
+                    &[("value", r)],
+                )));
+            }
+        }
+    }
+    let changes = promote_named_replaces(changes, replace)?;
+    refuse_unallowed(&changes, replace, reboot)?;
+    Ok(changes)
+}
+
 /// The apply itself, on documents already in hand.
 ///
 /// Split out of `apply` so `rollback` can replay a recorded revision through
@@ -2047,70 +2183,7 @@ pub(crate) fn apply_docs(
     by: super::gitops::Applier,
 ) -> Result<()> {
     let stack = stack_name(path, stack_override);
-    // A bootstrap stack that is also the stack the source's passes apply
-    // into would declare only the source, and plan everything the passes
-    // applied for deletion. Refused before anything else is read.
-    super::gitops::refuse_self_target(docs, &stack, by)?;
-    // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
-    // rollback, so a broken reference (an `Ingress` pointing to a container that
-    // nobody declares) must stop everything BEFORE the first creation, not halfway
-    // with half the stack already in the kernel.
-    let issues = validate_graph(docs);
-    if !issues.is_empty() {
-        for i in &issues {
-            eprintln!("  ✗ {i}");
-        }
-        return Err(delonix_model::Error::Invalid(super::po::tf(
-            "stack apply aborted: {what} (fix the manifest or use `stack validate`)",
-            &[(
-                "what",
-                &issues_summary(
-                    issues.len(),
-                    shape_issue_count(docs),
-                    spec_issue_count(docs),
-                ),
-            )],
-        )));
-    }
-    // Decide EVERYTHING before changing anything, and refuse up front what this
-    // invocation is not allowed to do (a conflict, or a recreation nobody asked
-    // for). Only then start creating.
-    let changes = build_plan(docs, &stack)?;
-    // A `--replace` that names nothing in this manifest is a typo, and a typo in
-    // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
-    // this, `--replace Container/wev` reads as authorised, the recreate is then
-    // refused downstream, and the error the user reads names the resource — never
-    // the misspelling that caused it.
-    if !replace.iter().any(|r| r == "all") {
-        for r in &replace {
-            // The same predicate `refuse_unallowed` authorises with. This check
-            // used to be raw equality against the canonical `Kind/name`, so
-            // `--replace container/web` — which `replace_matches` accepts — was
-            // refused here as a typo before it could authorise anything.
-            let hits = changes.iter().any(|c| replace_matches(r, c));
-            if !hits {
-                return Err(delonix_model::Error::Invalid(super::po::tf(
-                    "--replace '{value}': no resource with that name in this manifest \
-                     (`stack plan` lists them)",
-                    &[("value", r)],
-                )));
-            }
-        }
-    }
-    // Same for `--reboot`: a value naming nothing here is a typo, loudly.
-    if !reboot.iter().any(|r| r == "all") {
-        for r in &reboot {
-            if !changes.iter().any(|c| replace_matches(r, c)) {
-                return Err(delonix_model::Error::Invalid(super::po::tf(
-                    "--reboot '{value}': no resource with that name in this manifest \
-                     (`stack plan` lists them)",
-                    &[("value", r)],
-                )));
-            }
-        }
-    }
-    let changes = promote_named_replaces(changes, &replace)?;
-    refuse_unallowed(&changes, &replace, &reboot)?;
+    let changes = decide(docs, &stack, &replace, &reboot, by)?;
     // A resource that has to be recreated is destroyed FIRST, so the normal
     // creation pass below builds it fresh. Doing it in this order means there is
     // exactly one creation path (the one that has always existed), instead of a
@@ -2158,14 +2231,13 @@ pub(crate) fn apply_docs(
     // GitOps target reconciling on a 60s timer (ADR-0021) would erase its own
     // useful history in twenty minutes.
     //
-    // The predicate is `Action::is_change` and not a second one written here: it
-    // already decides the `--detailed-exitcode` contract, so «a revision was
-    // written» and «the plan reported changes» cannot drift apart.
-    let asked_for_something = changes.iter().any(|c| c.action.is_change());
-    let counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&changes)
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect();
+    // The predicate is the one `--detailed-exitcode` reads — `changed`, after
+    // `mark_unpruned` with THIS apply's `--prune` — and not a second one written
+    // here, so «a revision was written» and «the plan reported changes» cannot
+    // drift apart. They did once: the plan stopped counting a `Delete` an apply
+    // without `--prune` keeps, while this still counted it, and every such
+    // apply wrote a revision saying `delete` for what it left in place.
+    let (asked_for_something, counts) = revision_of(&changes, do_prune);
     let manifest_shown = path.display().to_string();
 
     if let Err(e) = run_layers(&mut layers, docs, base) {
@@ -3192,7 +3264,7 @@ fn history(
         println!(
             "{}",
             super::po::tf(
-                "no revisions recorded for stack '{stack}' — one is written per `stack apply`",
+                "no revisions recorded for stack '{stack}' — one is written per `stack apply` that asks for a change, or fails",
                 &[("stack", &stack)],
             )
         );
@@ -4251,6 +4323,65 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         assert!(ok.is_empty(), "{ok:?}");
     }
 
+    /// `apply --dry-run` answers what the apply would: it used to render and
+    /// return 0 without deciding anything, so a manifest the apply refuses
+    /// previewed as fine. The guard here refuses before the machine is read,
+    /// which keeps the test off the host's registries; the ownership conflict
+    /// (DX-5601) takes the same `decide` and is checked live in `e2e.sh`.
+    #[test]
+    fn a_dry_run_is_refused_where_the_apply_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("source.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: cfgs\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n  stack: cfgs\n",
+        )
+        .unwrap();
+        let e = apply(
+            Some(file),
+            Some("cfgs".into()),
+            true,
+            Vec::new(),
+            Vec::new(),
+            false,
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(e.number(), 1601, "{e}");
+    }
+
+    /// `manifest render` is the view without the machine: the same manifest the
+    /// dry-run above refuses renders with 0. It used to BE `apply --dry-run`,
+    /// and inherited the refusal when the dry-run started to plan. The stack is
+    /// the directory's (`render` has no `--name`), so the source targets it.
+    #[test]
+    fn manifest_render_does_not_take_the_dry_runs_refusals() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cfgs");
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("delonix-manifest.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: cfgs\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n  stack: cfgs\n",
+        )
+        .unwrap();
+        let dry = apply(
+            Some(file.clone()),
+            None,
+            true,
+            Vec::new(),
+            Vec::new(),
+            false,
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(dry.number(), 1601, "{dry}");
+        super::super::manifestcmd::run(super::super::manifestcmd::ManifestCmd::Render {
+            file: Some(file),
+        })
+        .unwrap();
+    }
+
     /// G1 (ADR-0021): a hand-run plan, prune, apply or validate of the stack a
     /// declared source's passes apply into is refused before it reads the
     /// machine — the bootstrap manifest declares only the source, and that
@@ -4582,6 +4713,87 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         let before = change_digest(&a_delete("old"));
         let kept = mark_unpruned(vec![a_delete("old")], false);
         assert_eq!(change_digest(&kept[0]), before);
+    }
+
+    /// An apply WITHOUT `--prune` whose only «change» is a resource that left
+    /// the manifest asks for nothing: no revision, and the counts say `kept`.
+    /// It used to write a revision with `delete` on every run — three re-applies
+    /// took a stack from 2 revisions to 5, all «delete», nothing removed.
+    #[test]
+    fn an_apply_that_keeps_what_left_the_manifest_records_no_revision() {
+        let (asked, counts) = revision_of(&[a_delete("old")], false);
+        assert!(!asked);
+        assert_eq!(counts.get("kept"), Some(&1));
+        assert_eq!(counts.get("delete"), None, "{counts:?}");
+    }
+
+    /// `--prune` removes it, so the revision is written and says `delete`.
+    #[test]
+    fn an_apply_with_prune_records_the_delete() {
+        let (asked, counts) = revision_of(&[a_delete("old")], true);
+        assert!(asked);
+        assert_eq!(counts.get("delete"), Some(&1));
+        assert_eq!(counts.get("kept"), None);
+    }
+
+    /// A real change next to a kept resource still writes a revision, and the
+    /// revision names both for what they were.
+    #[test]
+    fn a_kept_resource_next_to_a_real_change_is_recorded_as_kept() {
+        let mut upd = with_action(a_change("Container", "db"), Action::Update);
+        upd.changed = true;
+        let mut same = with_action(a_change("Volume", "v"), Action::NoOp);
+        same.changed = false;
+        let (asked, counts) = revision_of(&[a_delete("old"), upd, same], false);
+        assert!(asked);
+        assert_eq!(counts.get("kept"), Some(&1));
+        assert_eq!(counts.get("update"), Some(&1));
+        assert_eq!(counts.get("unchanged"), Some(&1));
+        assert_eq!(counts.get("delete"), None);
+    }
+
+    /// `--replace Kind/name` on a resource with nothing to change destroys and
+    /// recreates it, and the revision has to say so. The promoted `NoOp` kept
+    /// `changed: false`, and the first version of `revision_of` recorded
+    /// nothing for it (the cli-tester's finding on this very branch).
+    #[test]
+    fn a_named_replace_of_an_unchanged_resource_records_its_revision() {
+        let mut same = with_action(a_change("Volume", "v"), Action::NoOp);
+        same.changed = false;
+        let out = promote_named_replaces(vec![same], &["Volume/v".to_string()]).unwrap();
+        assert_eq!(out[0].action, Action::Replace);
+        assert!(out[0].changed);
+        for prune in [false, true] {
+            let (asked, counts) = revision_of(&out, prune);
+            assert!(asked, "prune={prune}");
+            assert_eq!(counts.get("replace"), Some(&1));
+        }
+    }
+
+    /// The revision predicate and `--detailed-exitcode` read the plan the same
+    /// way, for every mix — the drift that produced the bug cannot come back.
+    #[test]
+    fn a_revision_is_written_exactly_when_the_detailed_plan_reports_changes() {
+        let mut upd = with_action(a_change("Container", "db"), Action::Update);
+        upd.changed = true;
+        let mut same = with_action(a_change("Volume", "v"), Action::NoOp);
+        same.changed = false;
+        let mixes: Vec<Vec<Change>> = vec![
+            vec![],
+            vec![same.clone()],
+            vec![a_delete("old")],
+            vec![a_delete("old"), same.clone()],
+            vec![a_delete("old"), upd.clone()],
+            vec![upd.clone(), same.clone()],
+            promote_named_replaces(vec![same.clone()], &["Volume/v".to_string()]).unwrap(),
+        ];
+        for prune in [false, true] {
+            for m in &mixes {
+                let (asked, _) = revision_of(m, prune);
+                let reported = detailed_exit(&mark_unpruned(m.clone(), prune)).unwrap() == Some(2);
+                assert_eq!(asked, reported, "prune={prune} {m:?}");
+            }
+        }
     }
 
     /// Without a conflict, a missing `--replace` stays what it was.

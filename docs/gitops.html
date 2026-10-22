@@ -387,7 +387,8 @@ outra pessoa.</p>
 <pre><code class="language-bash">delonix explain Container
 delonix explain Container.ports
 delonix explain Pod.containers.image
-delonix stack apply --dry-run   # o manifesto com TODOS os defaults preenchidos
+delonix manifest render         # o manifesto com TODOS os defaults preenchidos, sem ler a máquina
+delonix stack apply --dry-run   # o mesmo, e sai como o apply sairia (5 num conflito de posse)
 </code></pre>
 <h2 id="validado-ao-vivo-com-um-container-real">Validado ao vivo, com um container real</h2>
 <p>O ciclo inteiro, num <code>DELONIX_ROOT</code> isolado — e a prova que interessa não é o

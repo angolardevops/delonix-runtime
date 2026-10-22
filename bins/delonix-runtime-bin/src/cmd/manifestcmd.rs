@@ -24,11 +24,11 @@ pub enum ManifestCmd {
     },
     /// Print the manifest as the engine will read it, with defaults filled in.
     ///
-    /// The spelling the CLI restructuring asks for is `render`; what it does is
-    /// what `stack apply --dry-run` already did — round-trip every document
-    /// through its typed spec so the `#[serde(default)]` values become visible.
-    /// Secrets are NOT resolved: a rendered manifest is meant to be read by a
-    /// person and pasted into a review.
+    /// The spelling the CLI restructuring asks for is `render`: round-trip every
+    /// document through its typed spec so the `#[serde(default)]` values become
+    /// visible — the manifest `stack apply --dry-run` prints, without the plan
+    /// it then runs against the machine. Secrets are NOT resolved: a rendered
+    /// manifest is meant to be read by a person and pasted into a review.
     Render {
         #[arg(short = 'f', long = "file", value_hint = clap::ValueHint::FilePath)]
         file: Option<PathBuf>,
@@ -46,17 +46,10 @@ pub fn run(action: ManifestCmd) -> Result<()> {
         ManifestCmd::Validate { file, strict } => {
             super::stack::run(super::stack::StackCmd::Validate { file, strict })
         }
-        // `render` IS `apply --dry-run`, and saying so in one line is better
-        // than a second renderer that drifts from the one the apply uses.
-        ManifestCmd::Render { file } => super::stack::run(super::stack::StackCmd::Apply {
-            name: None,
-            file,
-            dry_run: true,
-            replace: Vec::new(),
-            reboot: Vec::new(),
-            prune: false,
-            plan_digest: Vec::new(),
-        }),
+        // The renderer `apply --dry-run` prints with, and only that: the
+        // dry-run goes on to plan against the machine and refuse what the
+        // apply would, and a review copy must not depend on who owns what.
+        ManifestCmd::Render { file } => super::stack::render(file),
         ManifestCmd::Schema { kind } => {
             super::schema::run(super::schema::SchemaCmd::Print { kind })
         }

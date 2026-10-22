@@ -391,15 +391,12 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::POD => Some(crate::cmd::container::POD_SPEC_FIELDS),
         k::VM => Some(crate::cmd::vm::VM_SPEC_FIELDS),
         k::VOLUME => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
-        k::STORAGE => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),
         k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
         k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
         k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
         k::APP => Some(crate::cmd::app::APP_SPEC_FIELDS),
-        // `Ingress` is the k8s-shaped L7 Ingress (→ HTTPRoute); the L4 firewall
-        // keeps `Egress`/`FirewallPolicy`.
         k::INGRESS => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
-        k::EGRESS | k::FIREWALL_POLICY => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+        k::FIREWALL_POLICY => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
         k::NETWORK_ACCESS_RULE => {
             Some(crate::cmd::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS)
         }
@@ -414,7 +411,6 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::IPPOOL => Some(crate::cmd::ippool::IPPOOL_SPEC_FIELDS),
         k::STORAGE_POOL => Some(crate::cmd::storage_pool::STORAGE_POOL_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
-        k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
         k::STACK => Some(stack_spec_fields()),
         k::CLUSTER => Some(crate::cmd::cluster::CLUSTER_SPEC_FIELDS),
@@ -805,9 +801,9 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what
     // this replaces and why one place instead of fifteen.
     //
-    // After the lowering on purpose: by now `Egress` is already `FirewallPolicy`
-    // and the two share one list, so a Kind is checked against the fields it will
-    // actually be parsed with rather than the ones it was written as.
+    // After the lowering on purpose: a lowered Kind (e.g. a `Dependency` folded
+    // into a policy) is checked against the fields it will actually be parsed
+    // with rather than the ones it was written as.
     warn_sunset_kinds(&docs);
     Ok(docs)
 }
@@ -1024,9 +1020,10 @@ mod tests {
     ///
     /// An alias is SILENT, unlike a deprecation. A rename changes nothing about
     /// what the document means, so there is nothing for the writer to migrate;
-    /// a MERGE (`Egress`→`FirewallPolicy`) does warn, because the semantics
-    /// moved. Warning on a pure rename would train people to ignore warnings.
-    /// Os três Kinds removidos recusam NOMEANDO o substituto.
+    /// a SUNSET Kind does warn, because a successor exists. Warning on a pure
+    /// rename would train people to ignore warnings.
+    /// Os três Kinds removidos (`Storage`/`ShareVolume`/`Egress`) recusam
+    /// NOMEANDO o substituto.
     ///
     /// Uma remoção que caísse no «unknown kind» genérico faria um manifesto
     /// correcto-até-ontem parecer um erro de escrita, e quem o apanha não
@@ -1053,6 +1050,28 @@ mod tests {
         )
         .unwrap();
         assert!(lower_legacy_kind(&mut ok).is_ok());
+    }
+
+    /// A removed Kind has NO field allowlist. `lower_legacy_kind` refuses it
+    /// before `check_unknown_fields` ever runs, so an arm in `spec_fields_for`
+    /// for one of these would be unreachable — and `SHAREVOLUME_SPEC_FIELDS`
+    /// proved the cost: it listed `storageRef/quota/alertPct` long after the
+    /// live `share:` block became `from`, a second field-list drifting from the
+    /// resource it claimed to describe. This guard keeps a dead arm from
+    /// growing back: the fields of `Storage`/`ShareVolume`/`Egress` live on
+    /// `Volume`/`NetworkPolicy`, not on the removed spelling.
+    #[test]
+    fn a_removed_kind_has_no_field_allowlist() {
+        for kind in ["Storage", "ShareVolume", "Egress"] {
+            assert!(
+                removed_kind_hint(kind).is_some(),
+                "{kind} should be a removed Kind"
+            );
+            assert!(
+                spec_fields_for(kind).is_none(),
+                "{kind} is refused at load — a `spec_fields_for` arm for it is dead code"
+            );
+        }
     }
 
     #[test]

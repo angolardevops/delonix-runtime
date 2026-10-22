@@ -254,7 +254,8 @@ enum Cmd {
         /// Stack name to own the resources with (`delonix.io/stack`).
         #[arg(long)]
         name: Option<String>,
-        /// Print what would be applied, and apply nothing.
+        /// Print what would be applied, and apply nothing — exiting as the apply
+        /// would refuse (5 for a resource another stack owns, DX-5601).
         #[arg(long)]
         dry_run: bool,
         /// Authorize the recreate of a resource whose cold field changed.
