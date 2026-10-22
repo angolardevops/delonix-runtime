@@ -5841,7 +5841,11 @@ pub fn reveal_cgroup2_if_masked() {
 /// and return `<ancestor>/dlx-containers`. The session's CURRENT cgroup
 /// (e.g. `app-*.scope`) is POPULATED — the no-internal-processes rule refuses
 /// `subtree_control` there; this escape gives us an EMPTY, delegable base.
-fn user_service_base(cur_abs: &str) -> Option<String> {
+///
+/// `pub` so `system prune` can reclaim the rootless `dlx-<id>` leaves that
+/// accumulate under this base when an engine dies before cleanup — the same
+/// base this function hands `setup_cgroup_delegated`, kept as one source of truth.
+pub fn user_service_base(cur_abs: &str) -> Option<String> {
     let mut end = 0usize;
     for seg in cur_abs.split('/') {
         end += seg.len() + 1; // +1 for the '/'
