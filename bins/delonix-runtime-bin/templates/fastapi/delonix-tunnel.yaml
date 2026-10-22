@@ -12,9 +12,13 @@
 #
 # Your own domain (a stable https://app.example.org): the domain's DNS must be
 # on Cloudflare (a free account is enough). Create a tunnel in the dashboard
-# with a public hostname whose service is http://localhost:__PORT__, keep its token in a
-# Delonix secret, and uncomment the `spec:` block below. README.md, "On the
+# with a public hostname whose service is https://localhost:__TLS_PORT__, keep its token in
+# a Delonix secret, and uncomment the `spec:` block below. README.md, "On the
 # internet without a public IP", has every step.
+#
+# `insecureSkipTlsVerify`: the app serves its own local (mkcert/self-signed)
+# certificate, so the agent must not verify it on the hop to localhost. The
+# provider still serves a publicly trusted certificate to the internet.
 apiVersion: gateway.delonix.io/v1alpha1
 kind: Gateway
 metadata:
@@ -31,4 +35,5 @@ spec:
     # spec:
     #   tokenSecretRef: __NAME__-tunnel   # the secret's `token` key holds the tunnel token
     #   hostname: app.example.org         # informational: the route lives in the Cloudflare dashboard
-  localPort: __PORT__
+  localPort: __TLS_PORT__
+  insecureSkipTlsVerify: true

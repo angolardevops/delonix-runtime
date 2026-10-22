@@ -41,6 +41,27 @@ so the first step of a new project is `make lock` and a commit of `uv.lock`.
 Everything else (`make install`, CI) installs with `--locked` and refuses to
 run without it.
 
+## Local HTTPS
+
+`delonix init` generated a development certificate into `./tls` (`tls.crt`,
+`tls.key`), signed by this machine's [mkcert](https://github.com/FiloSottile/mkcert)
+CA when it is installed — trusted by your browsers after `mkcert -install` — or
+self-signed otherwise (HTTPS works; the browser warns). The key is kept
+`0600`, `tls/` is git-ignored, and the certificate never enters the image: it
+is mounted read-only at run time.
+
+```bash
+make dev                          # auto-reload, HTTPS on :__TLS_PORT__ from ./tls
+curl --cacert "$(mkcert -CAROOT)/rootCA.pem" https://localhost:__TLS_PORT__/api/v1/health/ready
+make tls force                    # replace the certificate (e.g. to add a name: sh scripts/tls.sh host app.test)
+```
+
+The app serves TLS itself when `TLS_CERT_FILE` and `TLS_KEY_FILE` are set (see
+`.env.example`); `compose.yaml` and the Delonix manifest set them and publish
+HTTPS on `__TLS_PORT__`. Leave them unset for plain HTTP — which is how the app
+runs in **production**, where TLS is terminated by the ingress in front of it.
+These local certificates cover `localhost` only; never reuse them in production.
+
 ## The stack (`compose.yaml`)
 
 One file brings up the app together with **Redis** (cache) and **RabbitMQ**
@@ -97,7 +118,8 @@ coverage path. The community edition analyses the main branch only — it does
 |---|---|
 | Resolve and lock dependencies | `make lock` |
 | Install exactly what is locked | `make install` |
-| Run in development (auto-reload) | `make dev` |
+| Run in development (auto-reload, HTTPS) | `make dev` |
+| Create / replace the local certificate | `make tls` / `make tls force` |
 | Run as in production | `make run` |
 | Format / check format | `make fmt` / `make fmt-check` |
 | Lint | `make lint` |

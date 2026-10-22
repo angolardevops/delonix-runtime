@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -68,3 +70,28 @@ def test_cross_field_rules() -> None:
 def test_secrets_are_not_printed() -> None:
     s = make_settings(webhook_inbound_secret=SECRET)
     assert SECRET not in repr(s)
+
+
+def test_tls_is_off_by_default() -> None:
+    assert make_settings().tls is None
+
+
+def test_tls_pair_serves_https(tmp_path: Path) -> None:
+    crt, key = tmp_path / "tls.crt", tmp_path / "tls.key"
+    crt.write_text("cert"), key.write_text("key")
+    assert make_settings(tls_cert_file=crt, tls_key_file=key).tls == (crt, key)
+
+
+def test_tls_needs_both_files(tmp_path: Path) -> None:
+    crt = tmp_path / "tls.crt"
+    crt.write_text("cert")
+    with pytest.raises(ValidationError, match="must be set together"):
+        make_settings(tls_cert_file=crt)
+
+
+def test_tls_file_must_exist(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="no readable file"):
+        make_settings(
+            tls_cert_file=tmp_path / "missing.crt",
+            tls_key_file=tmp_path / "missing.key",
+        )

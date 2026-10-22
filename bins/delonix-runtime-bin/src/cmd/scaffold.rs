@@ -674,7 +674,17 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 /// this machine's browsers once `mkcert -install` has been run. Without it the
 /// certificate is self-signed here, which serves HTTPS just the same and makes
 /// a browser warn.
-fn ensure_tls(dir: &Path, hosts: &[String]) -> Result<CertSource> {
+///
+/// `key_mode` is the permission the freshly written **private key** gets. It is
+/// `0o600` by default (an edge proxy — nginx/httpd/haproxy — reads it as root,
+/// so nobody else needs to). A template whose container terminates TLS as a
+/// NON-root user (fastapi runs as `app`, uid 10001) sets `tls_key_mode=0644` in
+/// its `template.meta`: a rootless bind mount surfaces the host-owned key as
+/// `root:root` inside the user namespace, so without the world-read bit the
+/// unprivileged service gets `EACCES` loading it. These are local, localhost
+/// mkcert/self-signed development certificates (see `.gitignore` → `tls/`), so
+/// the loosened bit never applies to a production key.
+fn ensure_tls(dir: &Path, hosts: &[String], key_mode: u32) -> Result<CertSource> {
     // A unit test must not reach the developer's own mkcert: the first call
     // creates a CA under the home directory, outside anything a test owns.
     let mkcert = if cfg!(test) {
@@ -682,11 +692,11 @@ fn ensure_tls(dir: &Path, hosts: &[String]) -> Result<CertSource> {
     } else {
         "mkcert"
     };
-    ensure_tls_with(dir, hosts, mkcert)
+    ensure_tls_with(dir, hosts, mkcert, key_mode)
 }
 
 /// [`ensure_tls`] with the `mkcert` program named by the caller.
-fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str) -> Result<CertSource> {
+fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str, key_mode: u32) -> Result<CertSource> {
     let tls = dir.join("tls");
     std::fs::create_dir_all(&tls)?;
     let (crt, key, pem) = (
@@ -715,6 +725,14 @@ fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str) -> Result<CertSou
             CertSource::SelfSigned
         }
     };
+    // Only a key WE just wrote is re-permissioned; a kept certificate (one the
+    // developer installed) is left exactly as found. `write_private`/`mkcert`
+    // both land the key at 0600, which the default `key_mode` preserves — a
+    // non-root TLS consumer (fastapi) widens it to 0644 (see the doc comment).
+    if source != CertSource::Kept && key_mode != 0o600 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(key_mode))?;
+    }
     let mut both = std::fs::read(&crt)?;
     both.extend(std::fs::read(&key)?);
     write_private(&pem, &both)?;
@@ -901,7 +919,12 @@ fn render_planned(
     // first `stack apply` — with or without `--up`.
     let cert = match plan.tls_port {
         Some(_) => {
-            let source = ensure_tls(&o.dir, &plan.hosts)?;
+            // `tls_key_mode=0644` (octal) for a template whose container reads the
+            // key as a non-root user; absent → 0600, the private-key default.
+            let key_mode = meta_kv(tname, "tls_key_mode")
+                .and_then(|m| u32::from_str_radix(m.trim_start_matches("0o"), 8).ok())
+                .unwrap_or(0o600);
+            let source = ensure_tls(&o.dir, &plan.hosts, key_mode)?;
             eprintln!("  {}", cert_line(source, &plan.hosts));
             Some(source)
         }
@@ -1148,6 +1171,12 @@ fn up_summary(
     let health = template_meta(tname).health;
     let port = plan.port.as_str();
     let open = meta_kv(tname, "open").unwrap_or(health);
+    // A reverse-proxy template (nginx/httpd/haproxy) also serves plain HTTP on
+    // `port` and redirects it to HTTPS; a template that declares `tls_redirect=no`
+    // (an application serving TLS itself on the one port) does not, so the
+    // redirect line — and the plain-HTTP health URL below — would be a false
+    // promise for it.
+    let redirects_http = meta_kv(tname, "tls_redirect") != Some("no");
     let mut out = vec![format!(
         "✨ {}",
         super::po::tf("{name} is UP", &[("name", name)])
@@ -1155,10 +1184,12 @@ fn up_summary(
     match &plan.tls_port {
         Some(tls) => {
             out.push(format!("   open:    https://localhost:{tls}{open}"));
-            out.push(format!(
-                "            {}",
-                super::po::tf("http://localhost:{port} redirects there", &[("port", port)])
-            ));
+            if redirects_http {
+                out.push(format!(
+                    "            {}",
+                    super::po::tf("http://localhost:{port} redirects there", &[("port", port)])
+                ));
+            }
         }
         None => out.push(format!("   open:    http://localhost:{port}{open}")),
     }
@@ -1182,7 +1213,12 @@ fn up_summary(
             )
         ));
     }
-    out.push(format!("   health:  http://localhost:{port}{health}"));
+    match &plan.tls_port {
+        Some(tls) if !redirects_http => {
+            out.push(format!("   health:  https://localhost:{tls}{health}"));
+        }
+        _ => out.push(format!("   health:  http://localhost:{port}{health}")),
+    }
     if has_tunnel(tname) {
         out.push(format!(
             "   {}",
@@ -2643,6 +2679,12 @@ mod tests {
                         // `.env` holds freshly generated random secrets — different
                         // on every render by design, so it is not byte-comparable.
                         continue;
+                    } else if p.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+                        == Some("tls")
+                    {
+                        // `tls/` holds a freshly generated certificate and key —
+                        // self-signed ones differ on every render, like `.env`.
+                        continue;
                     } else {
                         let rel = p.strip_prefix(&dir).unwrap().to_path_buf();
                         files.insert(rel, std::fs::read(&p).unwrap());
@@ -3250,6 +3292,30 @@ mod tests {
         }
     }
 
+    /// fastapi terminates TLS inside its own container as the non-root `app`
+    /// user, so its private key is written world-readable (`tls_key_mode=0644`):
+    /// a rootless bind mount surfaces the host-owned key as `root:root` and
+    /// without the read bit uvicorn hit `PermissionError: [Errno 13]` loading
+    /// it. The certificate bundle (`tls.pem`, which embeds the key and nothing
+    /// mounts) stays private, and the default — the edge templates above — is
+    /// still 0600.
+    #[test]
+    fn the_fastapi_tls_key_is_world_readable_for_the_nonroot_app() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_tmp, dir) = scratch();
+        let plan = Plan::defaults("fastapi");
+        assert_eq!(plan.tls_port.as_deref(), Some("8443"), "fastapi declares tls=");
+        let cert =
+            render_planned("fastapi", &opts(dir.clone(), "demo", "fastapi", None), false, &plan)
+                .unwrap();
+        assert_eq!(cert, Some(CertSource::SelfSigned));
+        let mode = |p: &str| {
+            std::fs::metadata(dir.join(p)).unwrap().permissions().mode() & 0o777
+        };
+        assert_eq!(mode("tls/tls.key"), 0o644, "the key must be readable by `app`");
+        assert_eq!(mode("tls/tls.pem"), 0o600, "the bundle stays private");
+    }
+
     /// `tls=` in a template's meta and the `__TLS_PORT__` token go together:
     /// a template that uses the token without declaring the port would render
     /// an empty port, and one that declares it without using it would get a
@@ -3270,14 +3336,14 @@ mod tests {
     fn a_certificate_is_generated_once_and_then_kept() {
         let (_tmp, dir) = scratch();
         let hosts = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-        let first = ensure_tls_with(&dir, &hosts, "mkcert-not-installed").unwrap();
+        let first = ensure_tls_with(&dir, &hosts, "mkcert-not-installed", 0o600).unwrap();
         assert_eq!(first, CertSource::SelfSigned);
         let crt = std::fs::read(dir.join("tls/tls.crt")).unwrap();
         let key = std::fs::read(dir.join("tls/tls.key")).unwrap();
         assert!(crt.starts_with(b"-----BEGIN CERTIFICATE-----"));
         let pem = std::fs::read(dir.join("tls/tls.pem")).unwrap();
         assert_eq!(pem, [crt.clone(), key].concat());
-        let second = ensure_tls_with(&dir, &hosts, "mkcert-not-installed").unwrap();
+        let second = ensure_tls_with(&dir, &hosts, "mkcert-not-installed", 0o600).unwrap();
         assert_eq!(second, CertSource::Kept);
         assert_eq!(std::fs::read(dir.join("tls/tls.crt")).unwrap(), crt);
     }
@@ -3321,6 +3387,22 @@ mod tests {
         assert!(odoo.contains("user:    admin"), "{odoo}");
         assert!(odoo.contains("pass:    admin"), "{odoo}");
         assert!(odoo.contains("change them"), "{odoo}");
+
+        // An application that serves TLS on its own port (`tls_redirect=no`) has
+        // no plain-HTTP port to redirect, so the summary must not promise one —
+        // the address and the health check are both HTTPS.
+        let api = up_summary(
+            "fastapi",
+            "demo",
+            &Plan::defaults("fastapi"),
+            Some(CertSource::Mkcert),
+            None,
+        )
+        .join("\n");
+        assert!(api.contains("open:    https://localhost:8443/api/v1/health/ready"), "{api}");
+        assert!(api.contains("health:  https://localhost:8443/api/v1/health/live"), "{api}");
+        assert!(!api.contains("redirects there"), "{api}");
+        assert!(!api.contains("http://localhost:8000"), "{api}");
     }
 
     /// The Laravel manifest references `<name>-app`; `--up` is told how to

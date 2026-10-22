@@ -9,6 +9,7 @@ its own standard `OTEL_*` variables; they are not duplicated here.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -63,6 +64,17 @@ class Settings(BaseSettings):
 
     http_host: str = "0.0.0.0"  # noqa: S104 — a container listens on every interface
     port: int = Field(default=__PORT__, ge=1, le=65535)
+
+    # Local HTTPS for development. When both are set the server listens with
+    # TLS (certificate and key generated into ./tls by `delonix init`, signed by
+    # this machine's mkcert CA when it is installed, self-signed otherwise).
+    # `compose.yaml` mounts ./tls and points these here; a bare `python -m` run
+    # can serve HTTPS too (see README). Unset = plain HTTP, which is how the app
+    # runs in production, where TLS is terminated by the ingress in front of it.
+    # NEVER reuse these local certificates in production.
+    tls_cert_file: Path | None = None
+    tls_key_file: Path | None = None
+
     http_max_body_bytes: int = Field(default=1_048_576, ge=1)
     http_keepalive_timeout: Seconds = 5.0
     shutdown_timeout: Seconds = 15.0
@@ -115,6 +127,23 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _tls_pair(self) -> Settings:
+        problems: list[str] = []
+        if (self.tls_cert_file is None) != (self.tls_key_file is None):
+            problems.append(
+                "TLS_CERT_FILE and TLS_KEY_FILE must be set together, or both left unset"
+            )
+        for name, path in (
+            ("TLS_CERT_FILE", self.tls_cert_file),
+            ("TLS_KEY_FILE", self.tls_key_file),
+        ):
+            if path is not None and not path.is_file():
+                problems.append(f"{name}: no readable file at {path}")
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    @model_validator(mode="after")
     def _service_urls(self) -> Settings:
         problems: list[str] = []
         _require_scheme(problems, "REDIS_URL", self.redis_url, ("redis", "rediss"))
@@ -122,6 +151,14 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    @property
+    def tls(self) -> tuple[Path, Path] | None:
+        """The (certificate, key) pair the server listens with, or `None` for
+        plain HTTP. `_tls_pair` has already checked both are set and present."""
+        if self.tls_cert_file is not None and self.tls_key_file is not None:
+            return (self.tls_cert_file, self.tls_key_file)
+        return None
 
     @property
     def api_docs(self) -> bool:
