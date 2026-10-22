@@ -3228,7 +3228,11 @@ mod tests {
     fn the_backend_releases_with_the_records_that_are_left() {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
-        let e = engine(root.path(), seen.clone());
+        // Both networks declared: a create on an undeclared one is refused
+        // before anything is built (#905), which is not what this measures.
+        let nets = DeclaredNets(&["lab-net", "other-net"]);
+        let mut e = engine(root.path(), seen.clone());
+        e.network = Some(&nets);
         let on = |n: &str, net: &str| VmConfig {
             network: net.into(),
             ..cfg(n)
@@ -3256,12 +3260,16 @@ mod tests {
         );
     }
 
-    /// A network port that declares one subnet per name.
-    struct DeclaredNets(BTreeMap<&'static str, &'static str>);
+    /// A network port that declares one subnet per name — and only those
+    /// names, since a start onto an undeclared network is refused (#905).
+    struct DeclaredSubnets(BTreeMap<&'static str, &'static str>);
 
-    impl VmNetwork for DeclaredNets {
+    impl VmNetwork for DeclaredSubnets {
         fn ensure_network(&self, _name: &str) -> delonix_model::Result<()> {
             Ok(())
+        }
+        fn is_declared(&self, name: &str) -> delonix_model::Result<bool> {
+            Ok(self.0.contains_key(name))
         }
         fn attach_tap(&self, _: &str, _: &str, _: &str, _: &str) -> delonix_model::Result<String> {
             Ok("tap0".into())
@@ -3288,7 +3296,7 @@ mod tests {
     fn a_start_carries_the_subnet_declared_now() {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
-        let nets = DeclaredNets(BTreeMap::from([
+        let nets = DeclaredSubnets(BTreeMap::from([
             ("lab-net", "10.231.80.0/24"),
             ("br-net", "10.231.81.0/24"),
         ]));
