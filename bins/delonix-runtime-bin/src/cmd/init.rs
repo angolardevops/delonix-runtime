@@ -222,6 +222,9 @@ pub(crate) fn detect(has: &dyn Fn(&str) -> bool, m: &Manifests) -> Detection {
     if has("go.mod") {
         return Detection::tpl("go", "go.mod");
     }
+    if has("Cargo.toml") {
+        return Detection::tpl("rust", "Cargo.toml");
+    }
     if let Some(text) = &m.package_json {
         // Read from the manifest itself, not from a lockfile or a directory name: the
         // dependency is the only thing that actually says which framework this is.

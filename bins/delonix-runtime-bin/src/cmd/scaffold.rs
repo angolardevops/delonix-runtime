@@ -3620,7 +3620,7 @@ mod tests {
     #[test]
     fn every_application_template_supports_vm_build() {
         let vm_templates = [
-            "go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel",
+            "go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel", "rust",
         ];
 
         for name in &vm_templates {

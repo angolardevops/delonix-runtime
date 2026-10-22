@@ -1,0 +1,57 @@
+# The project manifest. `cargo build` / `cargo test` work from here with no
+# edits. The empty [workspace] table makes this project its OWN workspace, so
+# it never tries to attach to a parent one when nested inside another checkout.
+[workspace]
+
+[package]
+name = "__NAME__"
+version = "0.1.0"
+edition = "2021"
+rust-version = "__TEMPLATE_VERSION__"
+description = "A JSON-API reference service (axum + tokio)."
+publish = false
+
+# The binary keeps the project name (hyphens allowed); the library carries the
+# module name (underscores) so `use __MODULE__::…` works in tests and main.
+[lib]
+name = "__MODULE__"
+path = "src/lib.rs"
+
+[[bin]]
+name = "__NAME__"
+path = "src/main.rs"
+
+[features]
+# `amqp` wires the real RabbitMQ broker glue (lapin). It is OFF by default so a
+# plain `cargo build` / `cargo test` never needs a broker or the broker crate:
+# the messaging queue/worker/consumer logic is transport-agnostic and is always
+# compiled and tested with in-process fakes. Build the image with it to publish
+# and consume for real:  cargo build --release --features amqp
+default = []
+amqp = ["dep:lapin", "dep:futures-util"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util"] }
+axum = "0.7"
+tower = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+# Real RabbitMQ transport, only with `--features amqp`.
+lapin = { version = "2", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[profile.release]
+strip = true
+lto = "thin"
