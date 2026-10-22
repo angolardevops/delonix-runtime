@@ -31,6 +31,7 @@ use schemars::generate::SchemaSettings;
 use schemars::SchemaGenerator;
 
 use super::kinds as k;
+use super::{provision, storage, volume};
 
 /// The Kinds that have a TYPED spec, and therefore a real schema.
 ///
@@ -88,8 +89,31 @@ const TYPED_KINDS: &[&str] = &[
 /// required property», five times over. `address` is the CANONICAL name in the
 /// templates and `ip` is the compatibility spelling, so the schema was demanding
 /// the one nobody is told to write.
-const NESTED_ALIASES: &[(&str, &str, &str)] =
-    &[("HostSpec", "ip", "address"), ("SshSpec", "key", "keyPath")];
+///
+/// `ShareBlock.storageRef` is the spelling `kind: ShareVolume` used for `from`.
+const NESTED_ALIASES: &[(&str, &str, &str)] = &[
+    ("HostSpec", "ip", "address"),
+    ("SshSpec", "key", "keyPath"),
+    ("ShareBlock", "from", "storageRef"),
+];
+
+/// Blocks NESTED inside a typed spec that the load closes with an accept list
+/// of their own, as `(owner def, nested def, accept list)`.
+///
+/// The top-level strictness below closes only the Kind's own spec. The load
+/// goes one level further for a Volume (`volume::warn_unknown_nested`, ADR-0069
+/// D1): `nfs: { readOnlyy: true }` is refused before any effect. Without this
+/// the schema stayed permissive there and an editor green-ticked the very typo
+/// `validate` and `apply` refuse. The lists are the SAME constants the load
+/// counts with, so the two cannot disagree on a key.
+const NESTED_STRICT: &[(&str, &str, &[&str])] = &[
+    ("VolumeSpec", "NetShareSpec", storage::NET_SHARE_FIELDS),
+    ("VolumeSpec", "ShareBlock", volume::SHARE_BLOCK_FIELDS),
+    ("VolumeSpec", "ProvisionSpec", provision::PROVISION_FIELDS),
+    ("VolumeSpec", "TrueNasSpec", provision::TRUENAS_FIELDS),
+    ("VolumeSpec", "ShareSpec", provision::TRUENAS_SHARE_FIELDS),
+    ("VolumeSpec", "OwnerSpec", provision::OWNER_FIELDS),
+];
 
 /// The refusal for a Kind with no typed spec.
 ///
@@ -432,6 +456,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
     // becomes «one of the two», rather than dropping the requirement, which
     // would let a host entry with neither spelling validate clean and then fail
     // at apply.
+    //
+    // «One of», not «at least one»: serde refuses the field written under BOTH
+    // spellings (`duplicate field`), so `anyOf` here green-ticked
+    // `share: {from: x, storageRef: x}`, which `plan` refuses. An optional field
+    // gets the same rule without the requirement: never both.
     for (def_name, canonical, alias) in NESTED_ALIASES {
         let Some(obj) = defs.get_mut(*def_name).and_then(|d| d.as_object_mut()) else {
             continue;
@@ -451,19 +480,29 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             .and_then(|r| r.as_array())
             .cloned()
             .unwrap_or_default();
-        if required.iter().any(|x| x.as_str() == Some(*canonical)) {
+        let (keyword, rule) = if required.iter().any(|x| x.as_str() == Some(*canonical)) {
             let rest: Vec<_> = required
                 .into_iter()
                 .filter(|x| x.as_str() != Some(*canonical))
                 .collect();
             obj.insert("required".into(), serde_json::Value::Array(rest));
-            obj.insert(
-                "anyOf".into(),
+            (
+                "oneOf",
                 serde_json::json!([
                     { "required": [canonical] },
                     { "required": [alias] },
                 ]),
-            );
+            )
+        } else {
+            ("not", serde_json::json!({ "required": [canonical, alias] }))
+        };
+        // One aliased field per type today. A second would overwrite the first
+        // rule here and reopen it, so it has to be written as an `allOf` first.
+        if obj.insert(keyword.into(), rule).is_some() {
+            return Err(Error::Invalid(format!(
+                "internal: `{def_name}` already has a `{keyword}` — a second aliased \
+                 field would overwrite the first one's rule"
+            )));
         }
     }
     // **A typo in a field name is the number-one mistake when writing a
@@ -535,6 +574,33 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                         serde_json::json!({ "anyOf": [existing, { "type": other }] }),
                     );
                 }
+            }
+        }
+        obj.insert(
+            "additionalProperties".into(),
+            serde_json::Value::Bool(false),
+        );
+    }
+    // The nested blocks (see `NESTED_STRICT`). Only where their owner is in the
+    // schema — `schema print --kind Container` has no Volume blocks to close —
+    // and loud when the owner is there and the block is not, for the same
+    // reason as the top-level loop: a renamed struct would otherwise leave the
+    // block open and say nothing.
+    for (owner, def_name, accepted) in NESTED_STRICT {
+        if !defs.contains_key(*owner) {
+            continue;
+        }
+        let Some(obj) = defs.get_mut(*def_name).and_then(|d| d.as_object_mut()) else {
+            return Err(Error::Invalid(format!(
+                "internal: `{owner}` nests `{def_name}` and it is not in $defs — \
+                 the schema would accept unknown fields inside it"
+            )));
+        };
+        if let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+            for name in *accepted {
+                props
+                    .entry(name.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
             }
         }
         obj.insert(
@@ -698,8 +764,8 @@ fn deref(node: serde_json::Value, defs: &serde_json::Value) -> serde_json::Value
         None => node,
     };
     // Only when the node has no `properties` of its own. An `anyOf` NEXT TO
-    // properties is a constraint on one object (`NESTED_ALIASES` writes one to
-    // say «either `ip` or `address`»), not a choice between two shapes —
+    // properties is a constraint on one object (as the `oneOf` `NESTED_ALIASES`
+    // writes to say «either `ip` or `address`»), not a choice between two shapes —
     // following it there would throw the whole object away and answer from a
     // bare `{"required": [...]}`, which is how `explain Cluster.controlPlane`
     // would have started reporting a type with no fields.
@@ -1008,6 +1074,109 @@ mod tests {
         }
     }
 
+    /// The load refuses an unknown key INSIDE a Volume block (ADR-0069 D1:
+    /// `nfs: { readOnlyy: true }` is refused before any effect), and the schema
+    /// has to give the same answer. It closed only `VolumeSpec` itself, so an
+    /// editor checking against the published schema green-ticked `readOnlyy`
+    /// while `validate` and `apply` refused it.
+    ///
+    /// The expected properties are the SAME allowlists the load counts with, so
+    /// the schema cannot accept a key the load refuses nor refuse one it takes —
+    /// `storageRef` included, the `ShareBlock` alias schemars cannot see.
+    #[test]
+    fn every_nested_volume_block_refuses_an_unknown_field() {
+        let blocks: &[(&str, &[&str])] = &[
+            ("NetShareSpec", super::storage::NET_SHARE_FIELDS),
+            ("ShareBlock", super::volume::SHARE_BLOCK_FIELDS),
+            ("ProvisionSpec", super::super::provision::PROVISION_FIELDS),
+            ("TrueNasSpec", super::super::provision::TRUENAS_FIELDS),
+            ("ShareSpec", super::super::provision::TRUENAS_SHARE_FIELDS),
+            ("OwnerSpec", super::super::provision::OWNER_FIELDS),
+        ];
+        for only in [None, Some("Volume")] {
+            let s = manifest_schema(only).unwrap();
+            for (def_name, accepted) in blocks {
+                let def = &s["$defs"][*def_name];
+                assert_eq!(
+                    def["additionalProperties"],
+                    serde_json::Value::Bool(false),
+                    "{def_name} accepts unknown fields ({only:?}) — the schema \
+                     green-ticks a typo the load refuses"
+                );
+                let mut props: Vec<&str> = def["properties"]
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{def_name} has no properties ({only:?})"))
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+                props.sort_unstable();
+                let mut want = accepted.to_vec();
+                want.sort_unstable();
+                assert_eq!(
+                    props, want,
+                    "{def_name}: the schema's properties and the load's allowlist \
+                     disagree ({only:?})"
+                );
+            }
+        }
+        // The alias must not drop the requirement: a share with neither
+        // spelling would validate clean and fail at the load.
+        let s = manifest_schema(Some("Volume")).unwrap();
+        let share = &s["$defs"]["ShareBlock"];
+        assert!(
+            !share["required"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|x| x == "from")),
+            "`from` is still required — `storageRef` alone would be refused"
+        );
+        assert!(
+            !presence_admits(share, &[]),
+            "a share with neither spelling validates: {share:#?}"
+        );
+    }
+
+    /// Whether `node`'s presence keywords — `required`, and the `oneOf`/`anyOf`/
+    /// `not` built from it — admit an object carrying exactly `keys`. Only what
+    /// `NESTED_ALIASES` writes; the values' types are not looked at.
+    fn presence_admits(node: &serde_json::Value, keys: &[&str]) -> bool {
+        let required = node["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|k| k.as_str().is_some_and(|k| keys.contains(&k)));
+        let any = node["anyOf"]
+            .as_array()
+            .is_none_or(|a| a.iter().any(|b| presence_admits(b, keys)));
+        let one = node["oneOf"]
+            .as_array()
+            .is_none_or(|a| a.iter().filter(|b| presence_admits(b, keys)).count() == 1);
+        let not = node.get("not").is_none_or(|n| !presence_admits(n, keys));
+        required && any && one && not
+    }
+
+    /// serde refuses a field written under BOTH its spellings («duplicate field
+    /// `from`»), so the schema has to as well. It said «at least one» (`anyOf`),
+    /// and `share: {from: x, storageRef: x}` validated clean while `plan` refused
+    /// it; `SshSpec` (optional `key`) had no constraint at all.
+    #[test]
+    fn a_nested_alias_is_one_spelling_or_the_other_never_both() {
+        let s = manifest_schema(None).unwrap();
+        for (def_name, canonical, alias) in NESTED_ALIASES {
+            let def = &s["$defs"][*def_name];
+            assert!(presence_admits(def, &[canonical]), "{def_name}: {def:#?}");
+            assert!(presence_admits(def, &[alias]), "{def_name}: {def:#?}");
+            assert!(
+                !presence_admits(def, &[canonical, alias]),
+                "{def_name} accepts `{canonical}` and `{alias}` together — the \
+                 load refuses that as a duplicate field"
+            );
+        }
+        // The engine's side, for the one aliased struct this module can reach.
+        let both: std::result::Result<super::super::volume::ShareBlock, _> =
+            serde_json::from_value(serde_json::json!({ "from": "a", "storageRef": "a" }));
+        assert!(both.is_err(), "serde took both spellings: {both:?}");
+    }
+
     /// **schemars não vê `#[serde(alias = ...)]`**, só `rename`. No topo de um
     /// Kind isso não custa nada (a lista de aceites já carrega as duas grafias),
     /// mas um tipo ANINHADO não tem lista nenhuma — e o `HostSpec` tem o
@@ -1035,7 +1204,7 @@ mod tests {
                 .is_some_and(|r| r.iter().any(|x| x == "ip")),
             "`ip` continua obrigatório — o `address` do exemplo seria recusado"
         );
-        let alts = host["anyOf"]
+        let alts = host["oneOf"]
             .as_array()
             .expect("faltam as duas alternativas");
         assert_eq!(alts.len(), 2, "{host:#?}");
