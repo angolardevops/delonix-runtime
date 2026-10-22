@@ -45,7 +45,8 @@ kind: App
 metadata:
   name: shop-custom
 spec:
-  source: ./services/shop               # any directory holding the application source
+  source: .                             # any directory holding the application source (e.g. ./services/shop); `apply` and
+                                        # `apply --dry-run` refuse one that does not exist
   builder: registry.example.com/buildpacks/builder-jammy-base:latest
   runImage: registry.example.com/buildpacks/run-jammy-base:latest
   image: shop-custom:1.0.0

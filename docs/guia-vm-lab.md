@@ -304,7 +304,7 @@ spec:
 
 ```bash
 delonix stack validate -f vm.yaml            # referências resolvem?
-delonix stack apply -f vm.yaml --dry-run     # o spec com todos os defaults
+delonix stack apply -f vm.yaml --dry-run     # o spec com todos os defaults, e a recusa do apply
 delonix stack apply -f vm.yaml               # aplicar
 delonix stack plan -f vm.yaml                # o que mudaria
 delonix explain Vm                           # todos os campos, gerados do código

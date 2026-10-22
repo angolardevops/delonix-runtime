@@ -241,7 +241,8 @@ No terminal:
 delonix explain Container
 delonix explain Container.ports
 delonix explain Pod.containers.image
-delonix stack apply --dry-run   # o manifesto com TODOS os defaults preenchidos
+delonix manifest render         # o manifesto com TODOS os defaults preenchidos, sem ler a máquina
+delonix stack apply --dry-run   # o mesmo, e sai como o apply sairia (5 num conflito de posse)
 ```
 
 ## Validado ao vivo, com um container real

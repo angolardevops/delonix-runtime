@@ -3659,6 +3659,21 @@ sys.exit(0 if got==[(\"Network\",sys.argv[4]),(\"Volume\",sys.argv[3])] else 1)'
   # Sem a flag, o contrato do `plan` não muda: mostra o conflito e sai 0.
   check "…e sem --detailed-exitcode o plano do conflito continua a sair 0" ok \
     "$BIN" stack plan -f "$CFWORK/a.yaml" --name "$CSB"
+  # O `apply --dry-run` da stk-b responde o que o apply respondeu: até aqui
+  # saía 0 sem olhar para a máquina, e um gate de CI que o usava passava antes
+  # de o apply recusar. Continua a pôr o manifesto no stdout; a recusa vai para
+  # o stderr.
+  check "conflito de posse: o apply --dry-run da outra stack sai 5 com DX-5601, o manifesto no stdout" 5 bash -c "
+    out=\$('$BIN' stack apply -f '$CFWORK/a.yaml' --name '$CSB' --dry-run 2>'$CFWORK/dry.err'); rc=\$?
+    cat '$CFWORK/dry.err'
+    [[ \$rc == 5 ]] && { ! grep -q DX-5601 '$CFWORK/dry.err' || ! grep -q '^kind: Volume' <<<\"\$out\"; } && exit 99
+    exit \$rc"
+  # O `manifest render` é a vista sem a máquina: o mesmo manifesto, com o
+  # conflito por baixo, sai 0. Foi implementado como `apply --dry-run` e herdou
+  # a recusa quando o dry-run passou a planear; o cli-tester apanhou-o.
+  check "conflito de posse: o manifest render do mesmo manifesto sai 0, com o manifesto" ok bash -c "
+    out=\$('$BIN' manifest render -f '$CFWORK/a.yaml') || exit \$?
+    grep -q '^kind: Volume' <<<\"\$out\" || { echo 'sem o manifesto no stdout'; exit 99; }"
   check "…e nada mudou: os dois registos iguais, a stk-b sem revisão, a stk-a sem deriva" ok bash -c "
     s=\$(cd '$CROOT' && sha256sum 'volumes/$CFV/meta.json' 'networks/$CFN') || { echo 'um registo desapareceu'; exit 1; }
     [[ -n '$CF_A' && \"\$s\" == '$CF_A' ]] || { echo 'o registo mudou'; exit 1; }
