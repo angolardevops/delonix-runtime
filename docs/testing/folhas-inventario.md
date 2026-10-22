@@ -34,13 +34,13 @@
 
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| cli | **280** | 268 | 4 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| cli | **280** | 272 | 0 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
 | node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
 | mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
 | mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
 | cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
 | kinds | **130** | 41 | 50 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 26 kinds × 5 verbos |
-| **total** | **550** | **349** | **68** | **57** | **60** | **16** | — |
+| **total** | **550** | **353** | **64** | **57** | **60** | **16** | — |
 
 <!-- folhas:counts:end -->
 
@@ -87,7 +87,9 @@ classes de reestruturação 169 `~`, 85 `=`, 17 `→`, 2 `!`. `--gate` **rc=0**.
 > As quatro que este ramo promoveu — `net l4guard set/clear` e `system boot
 > enable/disable` — voltaram a **B**: os checks que as conduzem estão em
 > `scripts/e2e.sh`, mas o trace de `6dc31582` é anterior a eles, e o trace só se
-> regrava de uma corrida real. Sobem a **A** na próxima gravação. O texto abaixo
+> regrava de uma corrida real. Sobem a **A** na próxima gravação. **Feito no mesmo dia**: o trace foi regravado da bateria corrida sobre o
+> merge (`fa34383b`, `PASS=1577 FAIL=0 SKIP=14`), **272 de 280**, e as quatro
+> estão em **A**. O texto abaixo
 > descreve o estado de 2026-10-20 e fica como estava.
 
 As 10 que nenhuma corrida executa, e o que **cada uma** precisa — medido, não

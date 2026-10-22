@@ -94,6 +94,8 @@ exec/detach/firewall/publish/unpublish`). **Já não há nenhuma `B` na CLI.** A
 > `folhas.tsv` até o trace ser regravado de uma corrida da bateria — os checks
 > continuam no `scripts/e2e.sh`, e a classe do gate é a do trace, nunca a da
 > tabela. `vm pause`/`unpause` estão em **A** por esse mesmo trace.
+> No mesmo dia o trace foi regravado da bateria corrida sobre o merge
+> (`fa34383b`, `PASS=1577 FAIL=0 SKIP=14`, 272 de 280), e as quatro voltaram a **A**.
 
 Atenção ao que `A` significa aqui, porque é fácil ler a promoção como trabalho
 fechado: a corrida de 2026-10-20 (`2663c846`, `PASS=1340 FAIL=0`) provou o
