@@ -7,11 +7,14 @@
 // bundle, and the signal handler would drain a different object from the one
 // the routes use.
 import "server-only";
-import { NotesService, type NotesApi } from "@/lib/notes/notes";
+import { NotesService, type NotePublisher, type NotesApi } from "@/lib/notes/notes";
+import { createCache, type Cache } from "./cache/cache";
+import { CachedNotes } from "./cache/cached-notes";
 import { ConfigError, type Config } from "./config";
 import { Lifecycle } from "./lifecycle";
 import type { Logger } from "./logger";
 import { MemoryNoteStore } from "./memory-note-store";
+import { CompositePublisher, RabbitPublisher, amqpOpener } from "./messaging/publisher";
 import type { Telemetry } from "./telemetry";
 import { TracedNotes } from "./traced-notes";
 import { Dedup } from "./webhooks/dedup";
@@ -31,6 +34,10 @@ export interface Runtime {
   dedup: Dedup;
   /** Set when WEBHOOK_TARGET_URL is configured. */
   dispatcher?: WebhookDispatcher;
+  /** Read-through cache behind the notes read path: Redis when REDIS_URL is set, else in-process. */
+  cache: Cache;
+  /** Set when RABBITMQ_URL is configured; drained and closed in the shutdown. */
+  messaging?: RabbitPublisher;
   nowMs: () => number;
 }
 
@@ -65,17 +72,39 @@ export function buildRuntime(config: Config, deps: RuntimeDeps): Runtime {
           nowMs: deps.nowMs,
         })
       : undefined;
-  const service = new NotesService(new MemoryNoteStore(), dispatcher);
+  // One note crossing the wire can reach several sinks: fan a CompositePublisher
+  // out to the webhook dispatcher AND the RabbitMQ publisher, so wiring both is
+  // not a choice between them. Each is already non-blocking and bounded.
+  let messaging: RabbitPublisher | undefined;
+  const publishers: NotePublisher[] = [];
+  if (dispatcher) publishers.push(dispatcher);
+  if (config.rabbitUrl) {
+    messaging = new RabbitPublisher({ url: config.rabbitUrl, opener: amqpOpener });
+    messaging.start();
+    publishers.push(messaging);
+  }
+  const publisher: NotePublisher | undefined =
+    publishers.length > 0 ? new CompositePublisher(publishers) : undefined;
+
+  // Cache-aside over the read path: TracedNotes(CachedNotes(service)) so a
+  // notes.get span still covers the cache lookup. A note is immutable, so a
+  // cached one is never stale; a backend outage is swallowed and falls through
+  // to the store (lib/server/cache). The default backend is in-process.
+  const cache = createCache({ redisUrl: config.redisUrl });
+  const service = new NotesService(new MemoryNoteStore(), publisher);
+  const cached = new CachedNotes(service, cache, Math.round(config.cacheTtlMs / 1000));
   return {
     config,
     log: deps.log,
-    notes: new TracedNotes(service),
+    notes: new TracedNotes(cached),
     lifecycle: new Lifecycle(),
     telemetry: deps.telemetry,
     afterResponse: deps.afterResponse,
     inboundKey,
     dedup: new Dedup(),
     dispatcher,
+    cache,
+    messaging,
     nowMs: deps.nowMs ?? (() => Date.now()),
   };
 }

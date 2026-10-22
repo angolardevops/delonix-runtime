@@ -24,6 +24,12 @@ export interface Config {
   /** Receives a signed `note.created` per new note. Undefined: nothing is sent. */
   webhookTargetUrl?: string;
   webhookTargetSecret?: string;
+  /** Redis backend for the read-through cache. Undefined: the in-process MemoryCache. */
+  redisUrl?: string;
+  /** How long a cached note lives, in milliseconds. */
+  cacheTtlMs: number;
+  /** RabbitMQ broker for the `note.created` publisher. Undefined: not wired. */
+  rabbitUrl?: string;
   /** Set by the start command; without it Next.js handles SIGTERM itself (no drain). */
   manualSignalHandling: boolean;
 }
@@ -102,6 +108,16 @@ export function loadConfig(env: Env = process.env): Config {
     }
   }
 
+  const redisUrl = get("REDIS_URL") || undefined;
+  if (redisUrl && !/^rediss?:\/\//.test(redisUrl)) {
+    problems.push(`REDIS_URL: "${redisUrl}" is not a redis:// or rediss:// URL`);
+  }
+  const cacheTtlMs = duration("CACHE_TTL", "300s");
+  const rabbitUrl = get("RABBITMQ_URL") || undefined;
+  if (rabbitUrl && !/^amqps?:\/\//.test(rabbitUrl)) {
+    problems.push(`RABBITMQ_URL: "${rabbitUrl}" is not an amqp:// or amqps:// URL`);
+  }
+
   const manualSignalHandling = get("NEXT_MANUAL_SIG_HANDLE") === "true";
   if (appEnv === "production" && !manualSignalHandling) {
     problems.push(
@@ -122,6 +138,9 @@ export function loadConfig(env: Env = process.env): Config {
     webhookInboundSecret,
     webhookTargetUrl,
     webhookTargetSecret,
+    redisUrl,
+    cacheTtlMs,
+    rabbitUrl,
     manualSignalHandling,
   };
   if (problems.length > 0) {

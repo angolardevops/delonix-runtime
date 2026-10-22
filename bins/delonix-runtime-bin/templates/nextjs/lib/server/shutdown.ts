@@ -40,6 +40,13 @@ export async function shutdown(runtime: Runtime, exit: (code: number) => void): 
   if (runtime.dispatcher && !(await runtime.dispatcher.close(remaining()))) {
     complete = false;
   }
+  // Drain the RabbitMQ publisher (bounded by what is left of the deadline),
+  // then release the Redis connection. close() takes seconds and never rejects.
+  if (runtime.messaging && !(await runtime.messaging.close(remaining() / 1000))) {
+    log.error("messaging publisher not drained before the deadline");
+    complete = false;
+  }
+  await runtime.cache.close();
   // Capped: a collector that is down must not hold the exit for the whole deadline.
   await runtime.telemetry.shutdown(Math.min(Math.max(remaining(), 500), TELEMETRY_FLUSH_MAX_MS));
   log.info(complete ? "stopped" : "stopped before the shutdown completed");

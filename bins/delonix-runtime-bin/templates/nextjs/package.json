@@ -28,6 +28,8 @@
     "@opentelemetry/sdk-trace-base": "^2.11.0",
     "@opentelemetry/sdk-trace-node": "^2.11.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
+    "amqplib": "^0.10.5",
+    "ioredis": "^5.4.2",
     "next": "^__TEMPLATE_VERSION__",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^__TEMPLATE_VERSION__",
+    "@types/amqplib": "^0.10.5",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
