@@ -480,6 +480,9 @@ fn check_unknown_fields(doc: &ManifestDoc) {
             ));
         }
     }
+    if doc.kind == k::VOLUME {
+        crate::cmd::volume::warn_unknown_nested(doc);
+    }
     let nested = match doc.kind.as_str() {
         k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
         k::VM => crate::cmd::vm::unknown_group_keys(&doc.spec),
@@ -1602,6 +1605,87 @@ spec: {}
             err.contains("Pod 'p' spec.containers[0].readinessProbe"),
             "{err}"
         );
+    }
+
+    /// A typo INSIDE a Volume's blocks is refused by the load, like one at the
+    /// top of the spec — not warned about by the apply after the load let it
+    /// through. Measured on origin/main 2026-10-22: `spec.nfs.readOnlyy: true`
+    /// passed `validate` (OK) and `plan`, and `apply` only warned and went on to
+    /// mount the export READ-WRITE; `spec.share.fromm` was not seen at all.
+    #[test]
+    fn a_typo_inside_a_volume_block_is_refused_by_the_load() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        for (spec, field) in [
+            (
+                "nfs: { server: 192.0.2.1, share: /export/x, readOnlyy: true }",
+                "Volume 'v' spec.nfs.readOnlyy",
+            ),
+            (
+                "cifs: { server: 192.0.2.1, share: x, mountOptionz: vers=3 }",
+                "Volume 'v' spec.cifs.mountOptionz",
+            ),
+            ("share: { from: x, fromm: y }", "Volume 'v' spec.share.fromm"),
+            (
+                "provision: { truenas: { url: 'https://nas', dataset: tank/x, datasett: tank/y } }",
+                "Volume 'v' spec.provision.truenas.datasett",
+            ),
+            (
+                "provision: { truenass: { url: 'https://nas' } }",
+                "Volume 'v' spec.provision.truenass",
+            ),
+            (
+                "provision: { truenas: { url: 'https://nas', dataset: tank/x, share: { networks: [10.0.0.0/24], readOnlyy: true } } }",
+                "Volume 'v' spec.provision.truenas.share.readOnlyy",
+            ),
+            (
+                "provision: { truenas: { url: 'https://nas', dataset: tank/x, owner: { uid: 1, gid: 1, mod: '0770' } } }",
+                "Volume 'v' spec.provision.truenas.owner.mod",
+            ),
+        ] {
+            std::fs::write(
+                &p,
+                format!(
+                    "apiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: {{ name: v }}\nspec: {{ {spec} }}\n"
+                ),
+            )
+            .unwrap();
+            let err = load(&p).unwrap_err().to_string();
+            assert!(err.contains("nothing was applied"), "{spec}: {err}");
+            assert!(err.contains(field), "{spec}: {err}");
+            // The lenient load (`validate`) counts the same field, so its
+            // verdict is not «OK».
+            let before = super::thread_unknown_fields().len();
+            load_lenient(&p).unwrap();
+            assert_eq!(
+                super::thread_unknown_fields()[before..],
+                [field.to_string()],
+                "{spec}"
+            );
+        }
+        // The same block spelt right loads, aliases included.
+        for spec in [
+            "nfs: { server: 192.0.2.1, share: /export/x, readOnly: true, mountOptions: vers=4 }",
+            "share: { storageRef: x }",
+            "provision: { truenas: { url: 'https://nas', dataset: tank/x, share: { networks: [10.0.0.0/24], maprootUser: root, readOnly: true }, owner: { uid: 1, gid: 1, mode: '0770' } } }",
+        ] {
+            std::fs::write(
+                &p,
+                format!(
+                    "apiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: {{ name: v }}\nspec: {{ {spec} }}\n"
+                ),
+            )
+            .unwrap();
+            assert!(load(&p).is_ok(), "{spec}: {:?}", load(&p).err());
+        }
+        // And inside a Stack's `volumes:` group.
+        std::fs::write(
+            &p,
+            "apiVersion: core.delonix.io/v1alpha1\nkind: Stack\nmetadata: { name: s }\nspec:\n  volumes:\n    - name: v\n      spec: { nfs: { server: 192.0.2.1, share: /x, readOnlyy: true } }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err().to_string();
+        assert!(err.contains("spec.nfs.readOnlyy"), "{err}");
     }
 
     #[test]

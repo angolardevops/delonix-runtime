@@ -245,6 +245,27 @@ pub(crate) const VOLUME_SPEC_FIELDS: &[&str] = &[
     "size",
 ];
 
+/// Accepted keys of `spec.share` (drift-guard): `from` and the alias
+/// `storageRef` that `kind: ShareVolume` spelt it with.
+pub(crate) const SHARE_BLOCK_FIELDS: &[&str] = &["from", "storageRef"];
+
+/// Counts the unknown keys INSIDE a Volume's blocks — the network-share blocks,
+/// `share:` and `provision:` — for the manifest load.
+///
+/// The top-level guard only sees the spec's own keys. These used to be checked
+/// by the apply, after the load had already accepted the manifest: measured on
+/// 2026-10-22, `nfs: { readOnlyy: true }` passed `validate` («OK») and `plan`,
+/// and the apply warned and went on to mount the export read-WRITE;
+/// `share: { fromm: … }` was not seen by anything. Called from the load, the
+/// count refuses the manifest before any effect (ADR-0069 D1), on every path.
+pub(crate) fn warn_unknown_nested(doc: &manifest::ManifestDoc) {
+    for block in ["nfs", "cifs", "webdav"] {
+        manifest::warn_unknown_fields_in(doc, block, super::storage::NET_SHARE_FIELDS);
+    }
+    manifest::warn_unknown_fields_in(doc, "share", SHARE_BLOCK_FIELDS);
+    super::provision::warn_unknown(doc);
+}
+
 /// Fields the reconciler compares for a `kind: Volume`. `quota` is the only one
 /// that converges hot (`VolumeStore::set_quota`); changing the driver or the
 /// device of a volume that already holds data is a replace, and a replace of a
@@ -913,18 +934,15 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // pointing at a different machine, or at a path the appliance does not
         // actually use, the way a second hand-written `nfs:` block could.
         let provisioned = match &spec.provision {
-            Some(p) => {
-                super::provision::warn_unknown(doc);
-                match &p.truenas {
-                    Some(t) => Some(super::provision::run_truenas(t)?),
-                    None => {
-                        return Err(delonix_model::Error::Invalid(
-                            super::po::t("spec.provision needs a target block (today: `truenas:`)")
-                                .into(),
-                        ))
-                    }
+            Some(p) => match &p.truenas {
+                Some(t) => Some(super::provision::run_truenas(t)?),
+                None => {
+                    return Err(delonix_model::Error::Invalid(
+                        super::po::t("spec.provision needs a target block (today: `truenas:`)")
+                            .into(),
+                    ))
                 }
-            }
+            },
             None => None,
         };
         // Report the NAS side as soon as it exists, BEFORE the local mount is
@@ -1007,10 +1025,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         };
         let (driver, device, options) = match effective_share {
             Some((kind, block)) => {
-                // A typo inside the block would otherwise be swallowed: the
-                // top-level warning only looks at the spec's own keys, and a
-                // `serverr:` in here would silently become "no server".
-                manifest::warn_unknown_fields_in(doc, kind, super::storage::NET_SHARE_FIELDS);
+                // A typo inside the block was refused by the load already
+                // (`warn_unknown_nested`), before anything here ran.
                 super::storage::ensure_share_credentials(name, kind, block)?;
                 let m = super::storage::share_mount(name, kind, block)?;
                 (m.driver, Some(m.device), m.options)
@@ -2251,6 +2267,24 @@ pub(crate) fn cmd_rm_with(
 #[cfg(test)]
 mod tests {
     use super::{fmt_size_cell, fmt_usage, parse_duusage, VolumeSpec};
+
+    /// `SHARE_BLOCK_FIELDS` is `ShareBlock`'s fields plus the `storageRef`
+    /// alias, which the schema does not list. Add a field to the struct and
+    /// this fails until the const names it.
+    #[test]
+    fn share_block_fields_cover_exactly_the_struct() {
+        let from_struct = crate::cmd::manifest::schema_field_names::<super::ShareBlock>();
+        let mut from_const: Vec<String> = super::SHARE_BLOCK_FIELDS
+            .iter()
+            .filter(|f| **f != "storageRef")
+            .map(|s| s.to_string())
+            .collect();
+        from_const.sort();
+        assert_eq!(
+            from_struct, from_const,
+            "SHARE_BLOCK_FIELDS diverged from ShareBlock"
+        );
+    }
 
     /// The mapped walk sees far more than the direct one — root in the userns
     /// even reads a `chmod 000` directory owned by a mapped uid — but it does not

@@ -3049,6 +3049,39 @@ check "manifesto: um grupo mal escrito NÃO se chama «ficheiro vazio»" ok bash
   printf '%s' \"\$out\" | grep -qi 'expanded to nothing' || exit 1"
 rm -f "$OUT/typo-stack.yaml"
 
+# Uma gralha DENTRO de um bloco do Volume (ADR-0069 D1). Medido na origin/main
+# a 2026-10-22: `spec.nfs.readOnlyy: true` passava o `validate` com «OK», o
+# `plan` com rc=2 sem uma palavra, e o `apply` só avisava e seguia para o
+# efeito — a montar o export em ESCRITA. `spec.share.fromm` nem aviso tinha. A
+# gralha no topo (`spec.quotaa`) já era recusada pelo load; esta passava porque
+# a verificação dos blocos só corria no apply, depois do load.
+NFW="$OUT/nested-typo-$PFX"; mkdir -p "$NFW"
+for blk in \
+  "nfs|nfs: { server: 192.0.2.1, share: /export/x, readOnlyy: true }|spec.nfs.readOnlyy" \
+  "share|share: { from: nfpai-$PFX, fromm: y }|spec.share.fromm" \
+  "truenas|provision: { truenas: { url: 'https://192.0.2.1', dataset: tank/x, datasett: tank/y } }|spec.provision.truenas.datasett"
+do
+  IFS='|' read -r tag spec field <<<"$blk"
+  printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: { name: nf%s-%s }\nspec: { %s }\n' \
+    "$tag" "$PFX" "$spec" >"$NFW/$tag.yaml"
+  check "manifesto: gralha em $field — o validate nomeia-a e não diz OK; --strict sai 1" ok bash -c "
+    out=\$('$BIN' manifest validate -f '$NFW/$tag.yaml' 2>&1); printf '%s\n' \"\$out\"
+    grep -q \"'${field##*.}'\" <<<\"\$out\" || { echo 'o validate não nomeou o campo'; exit 1; }
+    grep -q 'OK —' <<<\"\$out\" && { echo 'o validate disse OK'; exit 1; }
+    '$BIN' manifest validate --strict -f '$NFW/$tag.yaml' >/dev/null 2>&1; [[ \$? == 1 ]]"
+  check "manifesto: gralha em $field — plan e apply recusam com 1, nada aplicado, nada criado" ok bash -c "
+    for verb in 'stack plan --detailed-exitcode' 'stack apply'; do
+      out=\$(timeout 60 '$BIN' \$verb -f '$NFW/$tag.yaml' 2>&1); rc=\$?; printf '%s: rc=%s\n%s\n' \"\$verb\" \$rc \"\$out\"
+      [[ \$rc == 1 ]] || { echo \"\$verb: rc=\$rc, esperado 1\"; exit 1; }
+      grep -q 'nothing was applied' <<<\"\$out\" && grep -q 'Volume .nf$tag-$PFX. $field' <<<\"\$out\" \
+        || { echo \"\$verb: a recusa não nomeia $field\"; exit 1; }
+    done
+    '$BIN' volume ls 2>/dev/null | grep -qw 'nf$tag-$PFX' && { echo 'o apply criou o volume'; exit 1; }
+    exit 0"
+  "$BIN" volume rm -f "nf$tag-$PFX" >/dev/null 2>&1
+done
+rm -rf "$NFW"
+
 # Os grupos de um Stack saem da tabela de Kinds (ADR-0045). Quatro Kinds que o
 # `stack apply` aplica (NetworkRoute, NetworkAccessRule, Service, App) não cabiam
 # dentro de um Stack, e o grupo do Gateway ainda se chamava `tunnels:`. `validate`
