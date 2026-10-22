@@ -9,7 +9,8 @@
         "laravel/framework": "^__TEMPLATE_VERSION__",
         "open-telemetry/api": "^1.10",
         "open-telemetry/exporter-otlp": "^1.4",
-        "open-telemetry/sdk": "^1.15"
+        "open-telemetry/sdk": "^1.15",
+        "vladimir-yuldashev/laravel-queue-rabbitmq": "^15.0"
     },
     "require-dev": {
         "larastan/larastan": "^3.12",

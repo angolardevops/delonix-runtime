@@ -621,6 +621,11 @@ fn write_env_file(dir: &Path, template: &str) -> Result<bool> {
 /// the SAME `<NAME>` gets the SAME value (so a password reused in a connection
 /// URL and in the service's own variable match), a DIFFERENT name an
 /// independent one. URL-safe base64, so a secret is safe inside a `scheme://`.
+///
+/// Every `{random32}` token is replaced with an INDEPENDENT fresh value: 32
+/// random bytes in standard base64 (the shape `APP_KEY=base64:…` wants — a key
+/// that must decode to exactly 32 bytes, which the URL-safe no-pad `__SECRET__`
+/// form does not).
 fn fill_env_secrets(template: &str) -> Result<String> {
     let mut names: Vec<String> = Vec::new();
     let mut rest = template;
@@ -637,7 +642,21 @@ fn fill_env_secrets(template: &str) -> Result<String> {
     for name in names {
         out = out.replace(&format!("__SECRET_{name}__"), &random_secret(24)?);
     }
+    // `{random32}`: independent per occurrence, so two keys never collide.
+    while out.contains("{random32}") {
+        out = out.replacen("{random32}", &random_key_32()?, 1);
+    }
     Ok(out)
+}
+
+/// 32 random bytes as standard (padded) base64 — a valid Laravel `APP_KEY`
+/// body once prefixed with `base64:`. From `/dev/urandom`, no fallback.
+fn random_key_32() -> Result<String> {
+    use base64::Engine;
+    use std::io::Read;
+    let mut bytes = [0u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 /// `n` random bytes as URL-safe base64 (no padding). From `/dev/urandom`, no
@@ -2727,6 +2746,47 @@ mod tests {
             std::fs::read_to_string(dir.join(".env")).unwrap(),
             "--force does not rotate the secrets in an existing .env"
         );
+    }
+
+    /// The Laravel project ships the same single compose stack as FastAPI:
+    /// `compose.yaml` (never the old `docker-compose.yaml`) and a generated
+    /// `.env` whose APP_KEY is a valid `base64:`-prefixed 32-byte key, with the
+    /// RabbitMQ and Sonar passwords reused verbatim where a pair must match.
+    #[test]
+    fn laravel_generates_the_single_compose_stack_and_a_valid_app_key() {
+        use base64::Engine;
+        let (_tmp, dir) = scratch();
+        render_template("laravel", &opts(dir.clone(), "myapp", "laravel", None), false).unwrap();
+
+        assert!(dir.join("compose.yaml").is_file(), "compose.yaml is written");
+        assert!(
+            !dir.join("docker-compose.yaml").exists(),
+            "the old docker-compose.yaml is gone"
+        );
+        assert!(dir.join("docs/services.md").is_file(), "docs/services.md ships");
+
+        let env = std::fs::read_to_string(dir.join(".env")).unwrap();
+        assert!(!env.contains("__SECRET_"), "every secret token is filled:\n{env}");
+        assert!(!env.contains("{random32}"), "the APP_KEY token is filled:\n{env}");
+
+        let kv = |key: &str| -> String {
+            env.lines()
+                .find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))
+                .unwrap_or_else(|| panic!("{key} in .env:\n{env}"))
+                .to_string()
+        };
+        // APP_KEY: base64: + exactly 32 random bytes (what Laravel requires).
+        let app_key = kv("APP_KEY");
+        let raw = app_key.strip_prefix("base64:").expect("APP_KEY is base64:-prefixed");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD.decode(raw).unwrap().len(),
+            32,
+            "APP_KEY decodes to 32 bytes"
+        );
+        // Passwords reused across a pair match; independent ones differ.
+        assert_eq!(kv("RABBITMQ_PASSWORD"), kv("RABBITMQ_DEFAULT_PASS"), "broker pass reused");
+        assert_eq!(kv("SONAR_JDBC_PASSWORD"), kv("POSTGRES_PASSWORD"), "Sonar reuses its db password");
+        assert_ne!(kv("RABBITMQ_PASSWORD"), kv("POSTGRES_PASSWORD"), "independent secrets differ");
     }
 
     /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
