@@ -148,6 +148,51 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
+    // ---- Docker/Podman root verbs ----
+    // The everyday container/image verbs, reachable at the ROOT so a Docker or
+    // Podman user runs their habitual flows changing only the executable name
+    // (`docker run …` → `delonix run …`). These are NOT reimplementations: each
+    // carries the SAME clap `Args` struct as its `container <verb>` / `image
+    // <verb>` counterpart and dispatches into the SAME handler — a second code
+    // path would be the divergence this reuse exists to prevent. The doc strings
+    // are copied VERBATIM from those variants so the i18n catalog entry is shared
+    // (see `help_i18n_tests`), never a second string to translate.
+    //
+    // Scope of this pass: the most frequent flows (run, create, ps, logs,
+    // exec, stop, start, restart, rm, pull). kill/wait/attach/inspect/
+    // stats/push/images/rmi/tag/login/logout stay under their groups for now.
+    /// Run a container from an image (pulls it if missing).
+    Run(cmd::container::RunArgs),
+    /// Create a container from an image WITHOUT starting it — the engine's `docker create`.
+    ///
+    /// The record is registered in `Created` state and the rootfs prepared, but no process runs; `container start <id>` launches it later from the same record. Takes every flag `run` does, and pulls the image if missing.
+    Create(cmd::container::RunArgs),
+    /// List containers.
+    #[command(visible_alias = "ls")]
+    Ps(cmd::container::PsArgs),
+    /// (Re)start stopped/crashed containers. Always detached.
+    ///
+    /// Reuses the persistent rootfs (writes made inside the container
+    /// survive, like in docker) and the same network/ports/volumes as the
+    /// original `run`.
+    Start(cmd::container::StartArgs),
+    /// Stop one or more containers (SIGTERM, then SIGKILL).
+    Stop(cmd::container::StopArgs),
+    /// Stop then start one or more containers.
+    ///
+    /// Reuses the persistent rootfs and the original run configuration, like
+    /// `start`.
+    Restart(cmd::container::RestartArgs),
+    /// Remove one or more containers.
+    Rm(cmd::container::RmArgs),
+    /// Execute a command inside a running container.
+    ///
+    /// With no command, tries `bash` and falls back to `sh` (which exists in any image) — `container exec -it <id>` is the interactive shell, same as `container exec -it <id> bash` would give if `bash` is there.
+    Exec(cmd::container::ExecArgs),
+    /// Show the logs (detached containers).
+    Logs(cmd::container::LogsArgs),
+    /// Pull an image from a registry.
+    Pull(cmd::image::PullArgs),
     /// Real multi-container pods (N containers sharing a netns): create/logs/exec/cp/attach/port-forward.
     ///
     /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix describe
@@ -1036,6 +1081,18 @@ fn run() -> Result<()> {
     delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
+        // Docker/Podman root verbs — forward into the SAME group handler with
+        // the SAME parsed args struct (no second dispatch path).
+        Cmd::Run(a) => cmd::container::run(cmd::container::ContainerCmd::Run(a)),
+        Cmd::Create(a) => cmd::container::run(cmd::container::ContainerCmd::Create(a)),
+        Cmd::Ps(a) => cmd::container::run(cmd::container::ContainerCmd::Ps(a)),
+        Cmd::Start(a) => cmd::container::run(cmd::container::ContainerCmd::Start(a)),
+        Cmd::Stop(a) => cmd::container::run(cmd::container::ContainerCmd::Stop(a)),
+        Cmd::Restart(a) => cmd::container::run(cmd::container::ContainerCmd::Restart(a)),
+        Cmd::Rm(a) => cmd::container::run(cmd::container::ContainerCmd::Rm(a)),
+        Cmd::Exec(a) => cmd::container::run(cmd::container::ContainerCmd::Exec(a)),
+        Cmd::Logs(a) => cmd::container::run(cmd::container::ContainerCmd::Logs(a)),
+        Cmd::Pull(a) => cmd::image::run(cmd::image::ImageCmd::Pull(a)),
         Cmd::Pod { action } => cmd::pod::run(action),
         Cmd::Image { action } => cmd::image::run(action),
         Cmd::Build(args) => cmd::build::run(args),
@@ -1695,7 +1752,27 @@ mod cli_stability_classification_tests {
     /// major. `build` is included here even though it is its own root
     /// command — the doc's fenced block names it in the same breath as
     /// `image`, as the promise for `delonix build`.
-    const STABLE_GROUPS: &[&str] = &["container", "image", "build"];
+    ///
+    /// The Docker/Podman root verbs (`run`/`ps`/`stop`/…) are STABLE too, and
+    /// for free: each is a true alias that forwards into the SAME handler as its
+    /// `container <verb>`/`image <verb>` counterpart, so it inherits that
+    /// surface's promise by construction — there is no second contract to break.
+    const STABLE_GROUPS: &[&str] = &[
+        "container",
+        "image",
+        "build", // groups + build
+        // Docker/Podman root verbs (aliases of container/image — see above).
+        "run",
+        "create",
+        "ps",
+        "start",
+        "stop",
+        "restart",
+        "rm",
+        "exec",
+        "logs",
+        "pull",
+    ];
 
     /// Every other real top-level group, mirroring "NÃO estável" 1:1. A group
     /// added to `Cmd` has to land in ONE of these two lists (and in
@@ -2164,7 +2241,7 @@ mod dead_command_reference_tests {
 #[cfg(test)]
 mod exec_separator_tests {
     use super::{Cli, Cmd};
-    use crate::cmd::container::ContainerCmd;
+    use crate::cmd::container::{ContainerCmd, ExecArgs};
     use clap::Parser;
 
     fn exec_of(argv: &[&str]) -> (Option<String>, Vec<String>, Vec<String>) {
@@ -2172,9 +2249,9 @@ mod exec_separator_tests {
         match cli.cmd {
             Cmd::Container {
                 action:
-                    ContainerCmd::Exec {
+                    ContainerCmd::Exec(ExecArgs {
                         user, env, command, ..
-                    },
+                    }),
             } => (user, env, command),
             _ => panic!("not container exec"),
         }

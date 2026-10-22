@@ -4436,6 +4436,18 @@ msgstr "Inicia um projecto com um Delonixfile + manifesto — ficheiros JÁ PREE
 msgid "Run a container from an image (pulls it if missing)."
 msgstr "Corre um container a partir de uma imagem (puxa-a se faltar)."
 
+msgid "Create a container from an image WITHOUT starting it — the engine's `docker create`."
+msgstr "Cria um container a partir de uma imagem SEM o arrancar — o `docker create` do motor."
+
+msgid "Create a container from an image WITHOUT starting it — the engine's `docker create`.\n\nThe record is registered in `Created` state and the rootfs prepared, but no process runs; `container start <id>` launches it later from the same record. Takes every flag `run` does, and pulls the image if missing."
+msgstr "Cria um container a partir de uma imagem SEM o arrancar — o `docker create` do motor.\n\nO registo fica no estado `Created` e o rootfs preparado, mas nenhum processo corre; `container start <id>` arranca-o depois a partir do mesmo registo. Aceita todas as flags do `run` e puxa a imagem se faltar."
+
+msgid "prepare a container now, to start later with the same configuration"
+msgstr "prepara um container agora, para arrancar depois com a mesma configuração"
+
+msgid "with ports and a named volume, ready for `start` to bring up"
+msgstr "com portas e um volume nomeado, pronto para o `start` levantar"
+
 msgid "(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached."
 msgstr "(Re)arranca containers parados/caídos, reaproveitando o rootfs persistente (o que foi escrito lá dentro sobrevive, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre desanexado."
 
@@ -5450,8 +5462,8 @@ msgstr "Tipo: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownClou
 msgid "Vault secret with the `password` key (cifs/webdav) — does not leak in shell history"
 msgstr "Segredo do cofre com a chave `password` (cifs/webdav) — não vaza no histórico da shell"
 
-msgid "Wait for every node to report `Ready` (CNI up) before fetching the kubeconfig, then MERGE it into `~/.kube/config` as its own cluster/user/context (named after `--name`) instead of leaving other clusters' contexts untouched only by accident. Without this, the kubeconfig is still written to `<root>/clusters/<name>-kubeconfig.yaml` right after `kubeadm join`, before the CNI has necessarily finished"
-msgstr "Espera que todos os nós reportem `Ready` (CNI de pé) antes de ir buscar o kubeconfig, e FUNDE-O depois no `~/.kube/config` como cluster/user/contexto próprios (com o nome do `--name`), em vez de deixar os contextos dos outros clusters intactos só por acaso. Sem isto, o kubeconfig continua a ser escrito em `<root>/clusters/<nome>-kubeconfig.yaml` logo a seguir ao `kubeadm join`, antes de o CNI ter necessariamente terminado"
+msgid "Wait for every node to report `Ready` (CNI up) before the command returns. It does NOT decide anything about the kubeconfig, despite the name: that is cached to `<root>/clusters/<name>-kubeconfig.yaml` and merged into `~/.kube/config` as its own cluster/user/context (named after `--name`) on EVERY run, as soon as `kubeadm init` has written it — so the commands a later failure tells you to run can actually run. A pod-network profile waits with or without this flag"
+msgstr "Espera que todos os nós reportem `Ready` (CNI de pé) antes de o comando terminar. NÃO decide nada sobre o kubeconfig, apesar do nome: esse é guardado em `<root>/clusters/<nome>-kubeconfig.yaml` e fundido no `~/.kube/config` como cluster/user/contexto próprios (com o nome do `--name`) em TODAS as corridas, assim que o `kubeadm init` o escreveu — para que os comandos que uma falha posterior mande correr possam mesmo correr. Um perfil de rede de pods espera com ou sem esta flag"
 
 msgid "Which container (its short name inside the pod). Default: the first"
 msgstr "Qual container (o nome curto dele dentro do pod). Por omissão: o primeiro"
@@ -13556,6 +13568,12 @@ msgstr "[{label}] a CLI delonix do nó é diferente desta (sha256 {sha}) — a s
 
 msgid "`delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version."
 msgstr "Binário `delonix-cri` a instalar nos nós. Omitido = o que está ao lado do `delonix`, senão o asset da release desta versão."
+
+msgid "Point `kubectl` at this cluster once it is up, so a bare `kubectl get nodes` reaches it. Without this flag a `~/.kube/config` that already selects a usable context keeps it — the cluster's context is merged either way, and the command to switch to it is printed"
+msgstr "Aponta o `kubectl` para este cluster quando ele estiver de pé, para que um `kubectl get nodes` simples o alcance. Sem esta flag, um `~/.kube/config` que já selecciona um contexto utilizável mantém-no — o contexto do cluster é fundido de qualquer maneira, e o comando para mudar para ele é impresso"
+
+msgid "to point kubectl at this cluster, run:"
+msgstr "para apontar o kubectl para este cluster, corre:"
 
 msgid "destroyed {name} — {n} local artifact(s), {size} freed here; disks and snapshots released on {backend}"
 msgstr "destruída {name} — {n} artefacto(s) locais, {size} libertados aqui; discos e snapshots libertados em {backend}"

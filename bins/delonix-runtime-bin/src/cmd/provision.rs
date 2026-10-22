@@ -32,6 +32,13 @@ pub(crate) const TRUENAS_FIELDS: &[&str] = &[
     "share",
 ];
 
+/// Accepted keys of `spec.provision.truenas.share` (drift-guard).
+pub(crate) const TRUENAS_SHARE_FIELDS: &[&str] =
+    &["networks", "maprootUser", "maprootGroup", "readOnly"];
+
+/// Accepted keys of `spec.provision.truenas.owner` (drift-guard).
+pub(crate) const OWNER_FIELDS: &[&str] = &["uid", "gid", "mode"];
+
 #[derive(Debug, Default, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct ProvisionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -411,13 +418,16 @@ pub(crate) fn run_truenas(spec: &TrueNasSpec) -> Result<Provisioned> {
     })
 }
 
-/// Warns about unknown keys inside `spec.provision` and its vendor block. The
-/// top-level guard only sees the spec's own keys, so a `datasett:` in here
-/// would otherwise be swallowed into "no dataset" — the same reason the share
-/// blocks get their own pass.
+/// Counts the unknown keys inside `spec.provision`, its vendor block and the
+/// vendor's own blocks. The top-level guard only sees the spec's own keys, so a
+/// `datasett:` in here would otherwise be swallowed into "no dataset" — the
+/// same reason the share blocks get their own pass. Called by the manifest
+/// load, so the count refuses the manifest before any effect.
 pub(crate) fn warn_unknown(doc: &manifest::ManifestDoc) {
     manifest::warn_unknown_fields_in(doc, "provision", PROVISION_FIELDS);
     manifest::warn_unknown_fields_in(doc, "provision.truenas", TRUENAS_FIELDS);
+    manifest::warn_unknown_fields_in(doc, "provision.truenas.share", TRUENAS_SHARE_FIELDS);
+    manifest::warn_unknown_fields_in(doc, "provision.truenas.owner", OWNER_FIELDS);
 }
 
 #[cfg(test)]
@@ -429,10 +439,9 @@ mod tests {
     /// it cannot drift: add a field to the struct and the matching test fails
     /// until the const lists it — the guard `SHAREVOLUME_SPEC_FIELDS` never had.
     #[test]
-    fn provision_fields_cobre_exactamente_o_struct() {
+    fn provision_fields_cover_exactly_the_struct() {
         let from_struct = crate::cmd::manifest::schema_field_names::<ProvisionSpec>();
-        let mut from_const: Vec<String> =
-            PROVISION_FIELDS.iter().map(|s| s.to_string()).collect();
+        let mut from_const: Vec<String> = PROVISION_FIELDS.iter().map(|s| s.to_string()).collect();
         from_const.sort();
         assert_eq!(
             from_struct, from_const,
@@ -441,15 +450,34 @@ mod tests {
     }
 
     #[test]
-    fn truenas_fields_cobre_exactamente_o_struct() {
+    fn truenas_fields_cover_exactly_the_struct() {
         let from_struct = crate::cmd::manifest::schema_field_names::<TrueNasSpec>();
-        let mut from_const: Vec<String> =
-            TRUENAS_FIELDS.iter().map(|s| s.to_string()).collect();
+        let mut from_const: Vec<String> = TRUENAS_FIELDS.iter().map(|s| s.to_string()).collect();
         from_const.sort();
         assert_eq!(
             from_struct, from_const,
             "TRUENAS_FIELDS divergiu de TrueNasSpec — actualiza a const"
         );
+    }
+
+    #[test]
+    fn truenas_share_and_owner_fields_cover_exactly_their_structs() {
+        for (from_struct, list, name) in [
+            (
+                crate::cmd::manifest::schema_field_names::<ShareSpec>(),
+                TRUENAS_SHARE_FIELDS,
+                "TRUENAS_SHARE_FIELDS",
+            ),
+            (
+                crate::cmd::manifest::schema_field_names::<OwnerSpec>(),
+                OWNER_FIELDS,
+                "OWNER_FIELDS",
+            ),
+        ] {
+            let mut from_const: Vec<String> = list.iter().map(|s| s.to_string()).collect();
+            from_const.sort();
+            assert_eq!(from_struct, from_const, "{name} diverged from its struct");
+        }
     }
 
     #[test]

@@ -375,10 +375,9 @@ mod tests {
     /// so it cannot drift again: add a field to the struct and this fails until
     /// the const lists it, so a `serverr:` typo stays caught.
     #[test]
-    fn net_share_fields_cobre_exactamente_o_struct() {
+    fn net_share_fields_cover_exactly_the_struct() {
         let from_struct = crate::cmd::manifest::schema_field_names::<NetShareSpec>();
-        let mut from_const: Vec<String> =
-            NET_SHARE_FIELDS.iter().map(|s| s.to_string()).collect();
+        let mut from_const: Vec<String> = NET_SHARE_FIELDS.iter().map(|s| s.to_string()).collect();
         from_const.sort();
         assert_eq!(
             from_struct, from_const,

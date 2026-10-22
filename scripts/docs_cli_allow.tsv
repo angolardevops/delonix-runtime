@@ -22,7 +22,6 @@
 
 # --- PROSA ---------------------------------------------------------------
 docs/c4.html	delonix netns	rótulo mermaid do re-exec interno `delonix netns holder`, não um comando público
-docs/c4.html	delonix run	rótulo `participant CLI as delonix run` num diagrama de sequência
 docs/kinds.html	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»
 docs/kinds.html	delonix values also	comentário YAML sobre valores aceites, não uma invocação
 examples/pod.yaml	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»

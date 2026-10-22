@@ -24,6 +24,7 @@ Docker e Podman lhes dão:
 container run   ps   stop   start   restart   kill   rm   exec   logs
                 wait   inspect   port   rename   pause   unpause
 image     pull  ls    remove    build (delonix build)
+raiz      run  create  ps  start  stop  restart  rm  exec  logs  pull   (aliases dos de cima)
 ```
 
 Concretamente, garante-se:
@@ -39,6 +40,12 @@ Concretamente, garante-se:
 * **Os códigos de saída** — ver a secção «Códigos de saída» abaixo.
 * **A saída JSON de `inspect`** — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.
+* **Os verbos de topo (`raiz`) são aliases dos de grupo** — `delonix run` É
+  `delonix container run`: mesma struct de flags, mesmo handler, mesmos códigos
+  de saída, por construção (não há segundo contrato a partir). Herdam a promessa
+  acima; o que AINDA não se promete é paridade total de flags e comportamento
+  com uma versão de referência de Docker/Podman — essa medição é trabalho em
+  curso, fora deste conjunto.
 
 > **Quebra de contrato na v1.0.0.** Até à v0.69.0 os atalhos de topo (`ps`,
 > `run`, `exec`, `logs`, `rm`, `images`) estavam aqui, como reescrita de argv
@@ -49,6 +56,22 @@ Concretamente, garante-se:
 > `delonix container logs`, `delonix container rm`, `delonix image list`
 > (ver a nota da v2.0.0 abaixo — essa grafia mudou outra vez).
 > **Os códigos de saída não mudam nesta versão** — ver a secção abaixo.
+
+> **Reintrodução na v5.x.** Os atalhos de topo VOLTARAM — `delonix run`,
+> `create`, `ps`, `start`, `stop`, `restart`, `rm`, `exec`, `logs`, `pull` — por uma razão que a
+> nota da v1.0.0 não pesou: a familiaridade de quem vem de Docker/Podman vale
+> mais do que a pureza de uma CLI sem sinónimos, e o objectivo declarado é
+> trocar o executável e manter o fluxo. NÃO é a reescrita de argv de outrora (a
+> grafia antiga, frágil, que esta mesma nota tinha razão em cortar): cada verbo
+> de topo é agora um subcomando `clap` de pleno direito que carrega a MESMA
+> struct de argumentos e despacha para o MESMO handler do grupo — não há segundo
+> caminho de código a divergir, e o `--help` é o mesmo módulo a módulo. É por
+> isso que entram na promessa de estabilidade acima, e não numa à parte: o que
+> `delonix container run` promete, `delonix run` promete pela mesma linha. O
+> conjunto reintroduzido é o dos fluxos mais frequentes; os restantes
+> (`kill`, `wait`, `attach`, `inspect`, `stats`, `push`, `images`,
+> `rmi`, `tag`, `login`, `logout`) seguem o mesmo padrão à medida que forem
+> acrescentados.
 
 > **Quebra de contrato na próxima major (ADR-0062).** `container run` de uma
 > imagem que declara `USER` passa a correr como esse utilizador, como no Docker

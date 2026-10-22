@@ -49,23 +49,61 @@ pub enum BootCmd {
 /// reach a unit somebody else installed.
 const UNIT_PREFIX: &str = "delonix-boot-";
 
-/// Is this a unit `system boot enable` generated?
+/// Is this a unit `system boot enable` generated, judged by its NAME alone?
 ///
-/// The legacy `delonix-<name>.service` form is still recognised, so a `disable`
-/// cleans up what an older binary installed — but `delonix-cri.service` is
-/// excluded by name, because that one was never ours.
+/// Only the current shape. The legacy `delonix-<name>.service` form is handled
+/// by [`claims_unit`], which reads the file: by name it is indistinguishable
+/// from any other `delonix-*.service` in a shared unit directory.
 fn is_boot_unit(name: &str) -> bool {
     if !name.ends_with(".service") {
         return false;
     }
-    // Neither is `delonix-node-api.service`, which `serve node-api
-    // --install-units` writes into the SAME user unit directory: the legacy
-    // prefix would match it, and a `system boot disable` would delete the
-    // service its socket unit starts.
+    name.starts_with(UNIT_PREFIX)
+}
+
+/// The engine's own marker, written into every unit this command generates
+/// (`container_unit`, `vm_unit`). Nothing a user writes by hand carries it.
+const OWN_MARKER: &str = "DELONIX_INTERNAL=1";
+
+/// Does this command own the unit at `path`, and may it therefore DELETE it?
+///
+/// Name alone is not enough, and that is the whole point. `enable` names its
+/// units `delonix-boot-` ([`UNIT_PREFIX`]), but a `disable` also has to clean
+/// up what a version before the prefix installed — so the rule used to accept
+/// any `delonix-*.service`, with `delonix-cri.service` and
+/// `delonix-node-api.service` carved out BY NAME. The second was added after
+/// `serve node-api --install-units` began writing into this very directory and
+/// a `disable` deleted the service its socket unit starts.
+///
+/// A blocklist cannot keep up, because this directory is shared with
+/// everything else the user runs. Measured on a maintainer's host 2026-10-18:
+/// `~/.config/systemd/user/` held `delonix-issues-sync.service` — tooling with
+/// nothing to do with bringing containers back after a reboot — and the legacy
+/// clause claimed it. `system boot disable` would have REMOVED it
+/// (`std::fs::remove_file`, in the `Disable` arm), and this is the one leaf of
+/// the nineteen unexecuted ones with zero checks.
+///
+/// So the legacy shape is now identified by CONTENT: a `delonix-*.service` that
+/// carries [`OWN_MARKER`] was written by this engine and is ours to remove; one
+/// that does not is somebody else's and is left alone. An unreadable file is
+/// NOT claimed — erring toward a leftover an operator can delete, never toward
+/// a deletion they cannot undo.
+fn claims_unit(name: &str, path: &std::path::Path) -> bool {
+    if is_boot_unit(name) {
+        return true;
+    }
+    if !name.ends_with(".service") || !name.starts_with("delonix-") {
+        return false;
+    }
+    // Kept even though the marker test below would also exclude them: these two
+    // are load-bearing (the kubelet's CRI endpoint, and the node API's socket
+    // unit), and a regression here is worse than a redundant check.
     if name == "delonix-cri.service" || name == "delonix-node-api.service" {
         return false;
     }
-    name.starts_with(UNIT_PREFIX) || name.starts_with("delonix-")
+    std::fs::read_to_string(path)
+        .map(|t| t.contains(OWN_MARKER))
+        .unwrap_or(false)
 }
 
 pub fn run(action: BootCmd) -> Result<()> {
@@ -114,7 +152,7 @@ pub fn run(action: BootCmd) -> Result<()> {
             if let Ok(rd) = std::fs::read_dir(&unit_dir) {
                 for e in rd.flatten() {
                     let name = e.file_name().to_string_lossy().into_owned();
-                    if is_boot_unit(&name) {
+                    if claims_unit(&name, &e.path()) {
                         sysctl(&["disable", &name]);
                         let _ = std::fs::remove_file(e.path());
                         n += 1;
@@ -140,7 +178,7 @@ pub fn run(action: BootCmd) -> Result<()> {
             if let Ok(rd) = std::fs::read_dir(&unit_dir) {
                 for e in rd.flatten() {
                     let name = e.file_name().to_string_lossy().into_owned();
-                    if is_boot_unit(&name) {
+                    if claims_unit(&name, &e.path()) {
                         let on = sysctl(&["is-enabled", "--quiet", &name]);
                         println!("  {name}  [{}]", if on { "enabled" } else { "disabled" });
                         any = true;
@@ -338,7 +376,7 @@ fn enable(
     if let Ok(rd) = std::fs::read_dir(unit_dir) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            if is_boot_unit(&name) && !installed.contains(&name) {
+            if claims_unit(&name, &e.path()) && !installed.contains(&name) {
                 sysctl(&["disable", &name]);
                 let _ = std::fs::remove_file(e.path());
                 pruned.push(name);
@@ -406,9 +444,11 @@ mod tests {
         assert!(!is_boot_unit("delonix-node-api.service"));
         // O que É nosso continua a ser reconhecido...
         assert!(is_boot_unit("delonix-boot-web.service"));
-        // ...incluindo a forma legada, para um `disable` limpar o que uma versão
-        // anterior instalou.
-        assert!(is_boot_unit("delonix-web.service"));
+        // The legacy shape is no longer recognised BY NAME: it moved to
+        // `claims_unit`, which reads the file, because by name it cannot be
+        // told apart from any other `delonix-*.service` in the shared unit
+        // directory (see `disable_only_claims_the_units_enable_itself_wrote`).
+        assert!(!is_boot_unit("delonix-web.service"));
         // E nada que não seja um unit.
         assert!(!is_boot_unit("delonix-boot-web.timer"));
         assert!(!is_boot_unit("outra-coisa.service"));
@@ -476,6 +516,80 @@ mod tests {
             format!("{UNIT_PREFIX}db.service")
         );
         assert!(is_boot_unit(&format!("{UNIT_PREFIX}vm-db.service")));
+    }
+
+    /// `system boot disable` REMOVES every file it calls a boot unit, so saying
+    /// yes to a unit this command did not write is a `remove_file` on somebody
+    /// else's service.
+    ///
+    /// It did, and by a blocklist: the rule was `starts_with(UNIT_PREFIX) ||
+    /// starts_with("delonix-")`, with `delonix-cri.service` and
+    /// `delonix-node-api.service` enumerated as exceptions. Measured on this
+    /// host 2026-10-18, `~/.config/systemd/user/` held
+    /// `delonix-issues-sync.service` — a unit of the maintainer's own tooling,
+    /// nothing to do with bringing containers back after a reboot — and
+    /// `is_boot_unit` said yes to it. A `system boot disable` would have
+    /// deleted it, and this is the one leaf of the nineteen with ZERO checks.
+    ///
+    /// A blocklist cannot keep up: the comment above it records two names
+    /// already added after the fact. What this command owns is what it names,
+    /// and it names `delonix-boot-` (see `enable`). Anything else is left on
+    /// disk — a leftover is recoverable, a deleted unit is not.
+    #[test]
+    fn disable_only_claims_the_units_enable_itself_wrote() {
+        let dir = std::env::temp_dir().join(format!("dlx-boot-claims-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, body).unwrap();
+            p
+        };
+
+        // Ours, by the current prefix — claimed whatever the content.
+        let own = write(&format!("{UNIT_PREFIX}db.service"), "[Service]\n");
+        assert!(claims_unit(&format!("{UNIT_PREFIX}db.service"), &own));
+
+        // Ours, in the LEGACY shape: claimed because the file carries the
+        // engine's marker, which is what `container_unit`/`vm_unit` write.
+        let legacy = write(
+            "delonix-web.service",
+            "[Service]\nEnvironment=DELONIX_INTERNAL=1\nExecStart=/x container start web\n",
+        );
+        assert!(
+            claims_unit("delonix-web.service", &legacy),
+            "a pre-prefix unit this engine wrote still has to be cleanable"
+        );
+
+        // Somebody else's, same `delonix-` name shape, no marker. Claiming any
+        // of these means `std::fs::remove_file` on a service we did not write.
+        for foreign in [
+            "delonix-issues-sync.service", // measured on a maintainer's host
+            "delonix-gc.service",
+            "delonix-regulate.service", // `system regulate --install-timer`
+        ] {
+            let p = write(foreign, "[Service]\nExecStart=/usr/bin/true\n");
+            assert!(
+                !claims_unit(foreign, &p),
+                "{foreign} was not written by this command, and `disable` DELETES what it claims"
+            );
+        }
+
+        // The two load-bearing ones stay excluded even if a marker shows up.
+        for pinned in ["delonix-cri.service", "delonix-node-api.service"] {
+            let p = write(pinned, "[Service]\nEnvironment=DELONIX_INTERNAL=1\n");
+            assert!(!claims_unit(pinned, &p), "{pinned} is load-bearing");
+        }
+
+        // A file we cannot read is not claimed: a leftover beats a deletion.
+        assert!(!claims_unit(
+            "delonix-gone.service",
+            &dir.join("delonix-gone.service")
+        ));
+
+        // Timers were never claimed, and stay unclaimed.
+        assert!(!claims_unit("delonix-issues-sync.timer", &dir.join("x")));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// **A pod's members SHARE the netns**, and whoever starts first is the one

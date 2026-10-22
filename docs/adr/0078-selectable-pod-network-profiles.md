@@ -247,6 +247,15 @@ exercida: `✗ … 7m00s` e DX-6704 com as contagens («agent Ready on 0/0 node(
 and 0/2 node(s) report Ready»), sem apagar nada e nomeando os comandos de
 diagnóstico. Um `kubectl apply` com êxito não foi tratado como sucesso.
 
+> **Correcção, 2026-10-20.** Os comandos que o DX-6704 nomeia **não corriam**
+> no momento em que eram impressos: resolvem o kubeconfig em cache, e o
+> `apply_ssh` só o ia buscar no último passo — depois do perfil e depois da
+> espera. Reproduzido num cluster de 3+2 com `--cni flannel`: DX-6704 aos
+> 420s, e logo a seguir `DX-1000 … no kubeconfig for cluster`. O D5 continua
+> inteiro — o que falhava era a metade accionável da mensagem, não o critério.
+> O kubeconfig passa a ser guardado a seguir ao `kubeadm init`; ver
+> `docs/network-compatibility.md`, correcção ao L10.
+
 **O que isto prova, e que nenhuma leitura provava:** o portão `EXPERIMENTAL`
 estava certo. Um perfil com artefacto fixado, verificado, renderizado com os
 valores certos e aplicado com êxito **ainda não funciona**. Declarar o Cilium
