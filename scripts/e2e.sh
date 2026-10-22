@@ -448,7 +448,7 @@ xflaky() {
 
 section() { log ""; log "=== $1 ==="; }
 
-# The teardown helpers (`e2e_rm`, `e2e_net_rm`) live in their own file so the
+# The teardown helpers (`e2e_rm`, `e2e_net_rm`, `e2e_image_rm`) live in their own file so the
 # scenario that proves them under a real DX-8101 sources the very same code.
 source "$(dirname "$0")/e2e_teardown.sh"
 # shellcheck source=scripts/e2e_ports.sh
@@ -505,6 +505,44 @@ E2E_PORTS_GIVEN=" "; e2e_port x; e2e_port y; e2e_port z
 [[ "$x" != "$y" && "$z" != "$x" && "$z" != "$y" ]] || { echo "repetida: $x $y $z"; exit 1; }
 EOF
 check "e2e_port: a mesma corrida nunca recebe a mesma porta duas vezes" ok bash "$OUT/ports-distinct.sh" "$EPORTS"
+
+########################################
+section "guard: the image teardown judges its effect"
+########################################
+# `e2e_image_rm` is what turns a leftover test image into a FAIL. Until
+# 2026-10-22 three of its call sites were `image rm … >/dev/null 2>&1`, a verb
+# the CLI does not have, and no run noticed. A stub engine proves the helper
+# itself: the stub's `image ls` lists whatever `$STUB_LS` says, and its
+# `image remove` answers `$STUB_RC`.
+ETEARDOWN="$(cd "$(dirname "$0")" && pwd)/e2e_teardown.sh"
+cat >"$OUT/image-rm-stub" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2${3:+ $3}" in
+  "image remove "*) exit "${STUB_RC:-0}" ;;
+  "image ls -o")
+    [[ -n "${STUB_ERR:-}" ]] && echo "$STUB_ERR" >&2
+    [[ -n "${STUB_BAD:-}" ]] && { echo "not json"; exit 0; }
+    printf '[{"id":"abc123","repo_tags":["%s"]}]\n' "${STUB_LS:-}" ;;
+  *) echo "error: unrecognized subcommand '$2'" >&2; exit 2 ;;
+esac
+EOF
+chmod +x "$OUT/image-rm-stub"
+cat >"$OUT/image-rm.sh" <<'EOF'
+BIN="$2"; source "$1"; e2e_image_rm "$3"
+EOF
+_irm=(bash "$OUT/image-rm.sh" "$ETEARDOWN" "$OUT/image-rm-stub" "t-$PFX:1")
+check "e2e_image_rm: a removed name that image ls no longer lists passes" ok env STUB_LS=alpine:3.19 "${_irm[@]}"
+check "e2e_image_rm: an image that is already gone (4) passes" ok env STUB_RC=4 "${_irm[@]}"
+check "e2e_image_rm: a removal the CLI refuses (rc 2) fails" 1 env STUB_RC=2 "${_irm[@]}"
+check "e2e_image_rm: a name image ls still lists, even behind a registry, fails" 1 env STUB_LS="localhost/t-$PFX:1" "${_irm[@]}"
+# The table cuts a long REPOSITORY:TAG with «…»; the helper reads JSON so it
+# still sees one.
+_irml=(bash "$OUT/image-rm.sh" "$ETEARDOWN" "$OUT/image-rm-stub" "t-$PFX-$(printf 'y%.0s' {1..60}):1")
+check "e2e_image_rm: a long name image ls still lists fails" 1 env STUB_LS="localhost/${_irml[4]}" "${_irml[@]}"
+# A warning on stderr is not part of the listing, and a listing that does not
+# parse is a failure, never «the name is gone».
+check "e2e_image_rm: a warning on stderr does not hide a name still listed" 1 env STUB_ERR=warning STUB_LS="t-$PFX:1" "${_irm[@]}"
+check "e2e_image_rm: a listing that does not parse fails" 1 env STUB_BAD=1 "${_irm[@]}"
 
 ########################################
 section "guarda: o irmão SERVIDO é da release do \$BIN"
@@ -1640,7 +1678,7 @@ if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
     '$BIN' image load -i '$OUT/loadtags.tar' >/dev/null 2>&1 || exit 1
     '$BIN' image ls | grep -qF '$IMG ' || { echo 'o nome original desapareceu no load'; '$BIN' image ls; exit 1; }
     '$BIN' image ls | grep -qF '$TAGX' || { echo 'o nome do arquivo não ficou'; exit 1; }"
-  "$BIN" image remove "$TAGX" >/dev/null 2>&1
+  check "teardown: the load test's tag leaves the store" ok e2e_image_rm "$TAGX"
   rm -f "$OUT/loadtags.tar"
 fi
 
@@ -1661,11 +1699,11 @@ build_env_path() {
   # the PATH and failed a check whose PATH was right.
   got=$("$BIN" container run --rm --net none "$tag" sh -c 'command -v ls >/dev/null && echo "$PATH"' 2>"$OUT/build-env.run.err")
   [[ -n "$got" ]] || got="(no PATH printed; stderr: $(tail -2 "$OUT/build-env.run.err"))"
-  "$BIN" image rm "$tag" >/dev/null 2>&1
   echo "PATH=$got"
   case "$got" in /opt/tool/bin:/*) return 0 ;; *) return 1 ;; esac
 }
 check "build: ENV PATH=…:\$PATH empacota o PATH expandido, e as ferramentas da base continuam a resolver" ok build_env_path
+check "teardown: the ENV PATH build leaves the store" ok e2e_image_rm "${PFX}-env:1"
 
 # --- `delonix build` passa a ser EXECUTADO sob um check ----------------------
 # A bateria já constrói — quatro vezes nesta secção — e o portão contava a
@@ -1687,7 +1725,7 @@ check "build: um -t dá um nome que o image ls mostra, e o CMD declarado é o qu
   '$BIN' image ls 2>&1 | grep -qF '$_bmt' || { echo 'a tag não aparece no image ls'; exit 1; }
   got=\$('$BIN' container run --rm --net none '$_bmt' 2>&1 | tail -1)
   [ \"\$got\" = construido-por-e2e ] || { echo \"o CMD declarado não correu: '\$got'\"; exit 1; }"
-"$BIN" image rm "$_bmt" >/dev/null 2>&1
+check "teardown: the -t build leaves the store" ok e2e_image_rm "$_bmt"
 rm -rf "$_bmin"
 
 section "container: ciclo de vida + hot reconfig"
@@ -1766,7 +1804,7 @@ if check_then "USER da imagem: o build da imagem de teste" ok "$BIN" build -t "$
     "$BIN" build -t "$_bi:3" "$_bd" >/dev/null 2>&1 || true
     check "build: um COPY substitui um ficheiro que a base dá a um não-root, e o novo é de root" ok bash -c \
       "[ \"\$('$BIN' container run --rm --net none '$_bi:3' sh -c 'cat /home/app/who; stat -c %U /home/app/who' 2>/dev/null | tr '\\n' ' ')\" = 'copied root ' ]"
-    "$BIN" image remove "$_bi:1" "$_bi:2" "$_bi:3" >/dev/null 2>&1 || true
+    check "teardown: the USER builds leave the store" ok e2e_image_rm "$_bi:1" "$_bi:2" "$_bi:3"
   fi
   rm -rf "$_bd"
 
@@ -1810,12 +1848,12 @@ if check_then "USER da imagem: o build da imagem de teste" ok "$BIN" build -t "$
         "[ \"\$('$BIN' container run --rm --net none '$_uci' id -u 2>/dev/null)\" = 1000 ]"
     fi
     e2e_rm "$_uc"
-    "$BIN" image remove "$_uci" >/dev/null 2>&1 || true
+    check "teardown: the committed image leaves the store" ok e2e_image_rm "$_uci"
   fi
   "$BIN" container run --rm --net none -u 0 -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
   "$BIN" volume rm "$_uv" >/dev/null 2>&1 || true
   rm -rf "$_ub"
-  "$BIN" image remove "$_ui" >/dev/null 2>&1 || true
+  check "teardown: the USER test image leaves the store" ok e2e_image_rm "$_ui"
 fi
 rm -rf "$_ud"
 
@@ -7068,7 +7106,7 @@ if [ "${LOWTHR:-0}" -gt 1 ] 2>/dev/null; then
       "[ '$LOWRC' = 0 ] && grep -q 'test is successful' '$LOWLOG' && ! grep -q 'Permission denied' '$LOWLOG'"
     check "build: e o check ainda corre mesmo (não foi removido)" ok bash -c \
       "grep -q 'syntax is ok' '$LOWLOG'"
-    "$BIN" image rm "low-$PFX:dev" >/dev/null 2>&1 || true
+    check "teardown: the privileged-port build leaves the store" ok e2e_image_rm "low-$PFX:dev"
   fi
   # 3) `--up` recusa ANTES do build: achada só no `stack apply`, custa o build
   #    inteiro primeiro — a mesma razão que já justifica a recusa de porta ocupada.
