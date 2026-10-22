@@ -1558,8 +1558,8 @@ msgstr "--network-alias é gravado mas o DNS interno ainda não resolve aliases 
 msgid "Remove the local state even if the libvirt cleanup fails."
 msgstr "Remove o estado local mesmo que a limpeza no libvirt falhe."
 
-msgid "the VM record was kept; `delonix delete vms {name} --force` discards it anyway"
-msgstr "o registo da VM foi preservado; `delonix delete vms {name} --force` descarta-o na mesma"
+msgid "the VM record was kept; `delonix delete vm {name} --force` discards it anyway"
+msgstr "o registo da VM foi preservado; `delonix delete vm {name} --force` descarta-o na mesma"
 
 msgid "Remove inbound rule(s) matching `[proto/]port` (all protos if none given)."
 msgstr "Remove regra(s) de entrada que casem `[proto/]porta` (todos os protos se omitido)."
@@ -2511,8 +2511,8 @@ msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (esperava '{legacy}
 msgid "{kind} '{name}': invalid spec"
 msgstr "{kind} '{name}': spec inválido"
 
-msgid "WARNING: {kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)"
-msgstr "AVISO: {kind} '{name}': campo desconhecido '{key}' no spec — ignorado (verifica a ortografia)"
+msgid "WARNING: {kind} '{name}': unknown field '{key}' in spec (check the spelling)"
+msgstr "AVISO: {kind} '{name}': campo desconhecido '{key}' no spec (verifica a ortografia)"
 
 msgid "mounting '{ty}' requires CAP_SYS_ADMIN — run as root or in a privileged session; in rootless the mount is best-effort and fails"
 msgstr "montar '{ty}' precisa de CAP_SYS_ADMIN — corre como root ou numa sessão privilegiada; em rootless o mount é best-effort e falha"
@@ -4020,8 +4020,8 @@ msgstr "Mostra o que um `apply` MUDARIA, sem mudar nada."
 msgid "Stack name (owner of the resources). Default: a `kind: Stack`'s name, else the manifest's directory."
 msgstr "Nome da stack (dono dos recursos). Omissão: o nome de um `kind: Stack`, senão o directório do manifesto."
 
-msgid "Exit 2 when there are changes (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
-msgstr "Sai com 2 quando há alterações (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
+msgid "Exit 2 when there are changes, 5 when the plan holds a conflict `stack apply` would refuse (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
+msgstr "Sai com 2 quando há alterações, 5 quando o plano tem um conflito que o `stack apply` recusaria (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
 
 msgid "to create"
 msgstr "a criar"
@@ -4063,6 +4063,12 @@ msgstr "{key}: {reason} — passa `--replace {key}` (ou `--replace all`) para o 
 
 msgid "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)"
 msgstr "stack apply recusado: {n} recurso(s) precisam de uma decisão explícita (nada foi alterado)"
+
+msgid "stack apply refused: {n} resource(s) belong to another stack or only to the provider (nothing was changed)"
+msgstr "stack apply recusado: {n} recurso(s) pertencem a outra stack ou só ao provider (nada foi alterado)"
+
+msgid "stack plan: {n} resource(s) belong to another stack or only to the provider — `stack apply` would refuse this plan"
+msgstr "stack plan: {n} recurso(s) pertencem a outra stack ou só ao provider — o `stack apply` recusaria este plano"
 
 msgid "{kind}/{name}: recreating"
 msgstr "{kind}/{name}: a recriar"
@@ -4200,11 +4206,11 @@ msgstr "Storage '{name}': o spec tem de ser uma mapping"
 msgid "a volume declares more than one network share ({kinds}) — a volume is one mount"
 msgstr "um volume declara mais do que uma partilha de rede ({kinds}) — um volume é uma montagem"
 
-msgid "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)"
-msgstr "{kind} '{name}': campo desconhecido '{key}' no spec — ignorado (verifica a ortografia)"
+msgid "{kind} '{name}': unknown field '{key}' in spec (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' no spec (verifica a ortografia)"
 
-msgid "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)"
-msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado (verifica a escrita)"
+msgid "{kind} '{name}': unknown field '{key}' in spec.{block} (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} (verifica a escrita)"
 
 # forma-Pod do kind: Container, depreciada mas NAO reescrita (fase A4)
 
@@ -10144,8 +10150,8 @@ msgstr "Imprime o que seria aplicado, e não aplica nada"
 msgid "Authorize the recreate of a resource whose cold field changed"
 msgstr "Autoriza a recriação de um recurso cujo campo frio mudou"
 
-msgid "0 = no changes, 2 = there are changes, 1 = error (`terraform plan`)"
-msgstr "0 = sem alterações, 2 = há alterações, 1 = erro (`terraform plan`)"
+msgid "0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`)"
+msgstr "0 = sem alterações, 2 = há alterações, 5 = um conflito que o apply recusaria, 1 = erro (`terraform plan`)"
 
 msgid "Print WHICH fields the plan compares, per Kind, and exit"
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai"
@@ -10172,8 +10178,8 @@ msgstr "remove também o que esta stack possui e o ficheiro já não declara"
 msgid "what an apply would change"
 msgstr "o que um apply mudaria"
 
-msgid "a drift gate for CI: 0 none, 2 changes, 1 error"
-msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 1 erro"
+msgid "a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would refuse, 1 error"
+msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 5 um conflito que o apply recusaria, 1 erro"
 
 msgid "which fields are compared, per Kind"
 msgstr "que campos são comparados, por Kind"
@@ -13973,6 +13979,15 @@ msgstr "O nó respondeu HTTP 404, ou disse que o ficheiro de configuração da V
 msgid "Check the VM id in the record against `qm list` on the node; a VM removed on the node side leaves a record with nothing behind it."
 msgstr "Confere o id da VM no registo com o `qm list` do nó; uma VM removida do lado do nó deixa um registo sem nada por trás."
 
+msgid "no such network for the VM"
+msgstr "essa rede não existe para a VM"
+
+msgid "The VM names a network that is not declared on this node. The create stopped before building anything."
+msgstr "A VM nomeia uma rede que não está declarada neste nó. A criação parou antes de construir fosse o que fosse."
+
+msgid "Create it first with `delonix network create <name>` (or a `kind: Network`), or leave `--network` out for the default network."
+msgstr "Cria-a primeiro com `delonix network create <nome>` (ou um `kind: Network`), ou omite o `--network` para usar a rede por omissão."
+
 msgid "the Proxmox node reports a conflict"
 msgstr "o nó Proxmox reporta um conflito"
 
@@ -15043,6 +15058,16 @@ msgstr "O `systemcontainer move` foi recusado antes de qualquer coisa se mover: 
 
 msgid "Pass `--restart` to stop it, move it and start it on the target, or `--with-local-disks` to let the node copy its volumes, or pick a node the precheck allows."
 msgstr "Passa `--restart` para o parar, mover e arrancar no destino, ou `--with-local-disks` para deixar o nó copiar os volumes, ou escolhe um nó que a verificação prévia permita."
+
+# DX-5601 — stack apply recusado por um conflito de posse
+msgid "a resource the manifest declares is held by someone else — nothing was changed"
+msgstr "um recurso que o manifesto declara pertence a outrem — nada foi alterado"
+
+msgid "The plan holds a `Conflict`: a resource of this name already carries another stack's `delonix.io/stack` stamp, or (a VM) the provider holds one this node's registry does not know. Two stacks converging one resource would flap it between two shapes on every apply, so `stack apply` refuses the whole apply before anything is touched, and `stack plan --detailed-exitcode` exits with this code instead of 0 or 2. No flag authorises it."
+msgstr "O plano tem um `Conflict`: um recurso com este nome já tem o carimbo `delonix.io/stack` de outra stack, ou (uma VM) o provider tem uma que o registo deste nó não conhece. Duas stacks a convergir o mesmo recurso fá-lo-iam oscilar entre duas formas a cada apply, por isso o `stack apply` recusa o apply inteiro antes de se tocar em qualquer coisa, e o `stack plan --detailed-exitcode` sai com este código em vez de 0 ou 2. Nenhuma flag o autoriza."
+
+msgid "Apply it from the stack that owns it, remove it there first, or rename it in this manifest; `stack plan` names the owner."
+msgstr "Aplica-o a partir da stack que é dona dele, remove-o lá primeiro, ou muda-lhe o nome neste manifesto; o `stack plan` diz quem é o dono."
 
 msgid "a copy of the container as it was at a snapshot"
 msgstr "uma cópia do container tal como estava num snapshot"
@@ -16812,3 +16837,21 @@ msgstr "Um VMM do Cloud Hypervisor arranca dentro da sua própria folha de cgrou
 
 msgid "Run the engine where it can create cgroups: as root, or rootless under a delegated scope (`systemd-run --user --scope -p Delegate=yes -- delonix vm create ...`). To start the VM without ceilings on purpose, set DELONIX_ALLOW_UNENFORCED_LIMITS=1."
 msgstr "Corre o motor onde ele possa criar cgroups: como root, ou rootless num scope delegado (`systemd-run --user --scope -p Delegate=yes -- delonix vm create ...`). Para arrancar a VM sem tectos de propósito, define DELONIX_ALLOW_UNENFORCED_LIMITS=1."
+
+msgid "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.containers[{i}] (verifica a escrita)"
+
+msgid "{path}: nothing was applied — {n} field(s) not understood: {fields}; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to apply without them"
+msgstr "{path}: nada foi aplicado — {n} campo(s) não reconhecido(s): {fields}; corrige a escrita, ou define DELONIX_MANIFEST_LENIENT=1 para aplicar sem eles"
+
+msgid "{path}: {n} field(s) not understood, ignored (DELONIX_MANIFEST_LENIENT=1): {fields}"
+msgstr "{path}: {n} campo(s) não reconhecido(s), ignorado(s) (DELONIX_MANIFEST_LENIENT=1): {fields}"
+
+msgid "<none> (user-mode NIC: egress only)"
+msgstr "<nenhuma> (NIC em modo utilizador: só saída)"
+
+msgid "{name} (host bridge)"
+msgstr "{name} (bridge do host)"
+
+msgid "{name} (libvirt network)"
+msgstr "{name} (rede do libvirt)"

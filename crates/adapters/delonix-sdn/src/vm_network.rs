@@ -48,6 +48,17 @@ impl VmNetwork for HostVmNetwork {
         Ok(())
     }
 
+    /// A `NetworkStore` record, or a holder `NetDef` an earlier version brought
+    /// up for a VM without one — the network [`Self::ensure_network`] adopts
+    /// rather than creates, so refusing it would break a VM that used to boot.
+    fn is_declared(&self, name: &str) -> Result<bool> {
+        match crate::NetworkStore::open(&self.state_root)?.get(name) {
+            Ok(_) => Ok(true),
+            Err(e) if e.is_not_found() => Ok(crate::infra::network_get(name).is_some()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     fn attach_tap(&self, vm: &str, network: &str, mac: &str, namespace: &str) -> Result<String> {
         crate::infra::vm_attach(vm, network, mac, namespace).map_err(Into::into)
     }

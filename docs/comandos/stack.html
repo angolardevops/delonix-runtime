@@ -462,7 +462,7 @@ Options:
           [possible values: table, json]
 
       --detailed-exitcode
-          Exit 2 when there are changes (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate
+          Exit 2 when there are changes, 5 when the plan holds a conflict `stack apply` would refuse (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate
 
       --fields
           Print WHICH fields the plan compares, per Kind, and exit. Answers &quot;why is my change not showing up?&quot; without reading the source

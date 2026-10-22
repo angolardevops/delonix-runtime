@@ -503,7 +503,11 @@ async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Res
 /// a leading `-` — otherwise the CLI's `clap` would interpret the id as a flag (e.g. an
 /// id `--rm`). The CLI args do not suffer shell injection (`Command::args`, not a
 /// string), but they can be read as options — hence the barrier against `-`.
-fn valid_arg(s: &str) -> bool {
+///
+/// Public so the OTHER surface that spawns the same CLI with a caller-supplied
+/// name — `delonix-mcp` (`logs.query`, `container.restart`) — validates with the
+/// exact same rule instead of a second copy that can drift (G-017).
+pub fn valid_arg(s: &str) -> bool {
     valid_name(s) && !s.starts_with('-')
 }
 

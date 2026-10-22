@@ -1,4 +1,4 @@
-<!-- translated-from: system-design-interview.md sha256:4dc968058b2bad04dcabc1a8e8808533f5108d7fcee9df62ff8cb70bda00af79 -->
+<!-- translated-from: system-design-interview.md sha256:2aa684bf763ff432abe940b618378dffaf9c6c1111db9c9501bc08e6a9ba9759 -->
 # Entretien de conception de système — le Delonix Engine
 
 **Avant de lire :** [Architecture](architecture.md) et [Les crates](crates.md) — cette page défend *pourquoi* la structure qu'elles décrivent a cette forme.
@@ -477,7 +477,8 @@ sequenceDiagram
   `--prune` et `destroy` ne voient que ce qui porte le label.
 - **Les actions** sont `Create`, `Adopt`, `Update` (à chaud, même PID), `Replace` (refusée sauf si
   `--replace <Kind>/<name>` est fourni, vérifié avant toute création), `NoOp`, `Delete`, `Conflict`,
-  `NotConverged`. `plan --detailed-exitcode` répond 0/2/1 pour un gate de dérive en CI.
+  `NotConverged`. `plan --detailed-exitcode` répond 0/2/1 pour un gate de dérive en CI, et 5 quand le plan
+  contient un `Conflict` que l'apply refuserait.
 - **Une seule table de faits par Kind** (domaine, forme, s'il converge, s'il a un teardown, s'il est
   namespacé, comment sa présence est observée) gouverne le planificateur, l'ordre d'application et
   l'ordre de teardown, au lieu de listes tenues synchronisées à la main.
