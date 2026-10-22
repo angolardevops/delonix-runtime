@@ -244,6 +244,19 @@ struct TunnelRecord {
     /// records predate the field and mean `false`.
     #[serde(default)]
     insecure_skip_tls_verify: bool,
+    /// Whether the public URL actually reaches a live origin, as last probed
+    /// right after (re)starting the agent (see `probe_origin`): `"ready"` (the
+    /// backend answered — a local TCP connect succeeded and, for an HTTP
+    /// provider, a request through the public URL came back as something OTHER
+    /// than the provider's own "origin unreachable" page), `"origin
+    /// unavailable"` (the local port refused the connection), or absent
+    /// (`Unknown` — not probed, or the edge never gave a usable answer within
+    /// the window; reported as nothing rather than a false ready/down).
+    /// Status only, like `restarts` — a tunnel is still "Running" while its
+    /// supervisor lives; this just says whether there is anything behind it.
+    /// `#[serde(default)]`: older records predate the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_state: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -935,19 +948,31 @@ fn spawn_supervised(
             },
         });
     }
-    // The supervisor saved the record (its pid, the agent's pid, the URL) BEFORE
-    // the handshake byte, so a reload here sees it.
-    let url = store
-        .load(name)
-        .ok()
-        .and_then(|r| r.public_url)
+    // The supervisor saved the record (its pid, the agent's pid, the URL, the
+    // origin probe) BEFORE the handshake byte, so a reload here sees it.
+    let saved = store.load(name).ok();
+    let url = saved
+        .as_ref()
+        .and_then(|r| r.public_url.clone())
         .unwrap_or_else(|| {
             super::po::t(
                 "(URL not confirmed yet — see `delonix describe gateways <name>` / the log)",
             )
             .into()
         });
-    println!("tunnel/{name}: {} — {url}", super::po::t("running"));
+    // Reflect the origin probe on the line the operator sees RIGHT NOW, so a
+    // tunnel standing over a dead backend is not reported as a bare
+    // "running — <url>". `None` (origin ready could not be decided, e.g. a
+    // still-warming edge) stays silent rather than guessing.
+    let origin = saved.as_ref().and_then(|r| r.origin_state.as_deref());
+    match origin {
+        Some(state) => println!(
+            "tunnel/{name}: {} ({} {state}) — {url}",
+            super::po::t("running"),
+            super::po::t("origin")
+        ),
+        None => println!("tunnel/{name}: {} — {url}", super::po::t("running")),
+    }
     Ok(())
 }
 
@@ -992,9 +1017,14 @@ fn supervise_loop(
             started_unix: Some(created),
             agent_web_port: None,
             insecure_skip_tls_verify: spec.insecure_skip_tls_verify,
+            origin_state: None,
         };
         let started = spawn_agent(&mut rec, spec, token, store);
         if started.is_ok() {
+            // The agent is up and (best-effort) has its URL — now ask whether
+            // anything actually answers behind it, so a tunnel over a dead
+            // backend records "origin unavailable" instead of a bare Running.
+            rec.origin_state = probe_origin(&rec).into_state();
             let _ = store.save(name, &rec);
         }
         if first {
@@ -1587,6 +1617,153 @@ fn poll_ngrok_api(rec: &mut TunnelRecord) {
     }
 }
 
+/// Origin readiness, as decided by [`probe_origin`]. Not serialized — it is
+/// flattened to the `origin_state` string the record stores via [`into_state`].
+#[derive(Debug, PartialEq, Eq)]
+enum OriginReadiness {
+    /// The backend answered: a local TCP connect succeeded and — for an HTTP
+    /// provider — a request through the public URL came back as something that
+    /// is NOT the provider's own "origin unreachable" page.
+    Ready,
+    /// The local backend port refused the connection — nothing is listening.
+    Unavailable,
+    /// Could not decide: no URL to probe, or the public edge never gave a
+    /// usable answer within the window (a warming quick-tunnel edge can 5xx for
+    /// a few seconds even over a LIVE origin — reported as "don't know", never
+    /// as a false "down", because the local connect already said the backend is
+    /// up).
+    Unknown,
+}
+
+impl OriginReadiness {
+    /// The stored `origin_state` token. `Unknown` stores nothing (so old
+    /// records and not-probed tunnels stay clean), matching the field's
+    /// `skip_serializing_if`.
+    fn into_state(self) -> Option<String> {
+        match self {
+            OriginReadiness::Ready => Some("ready".into()),
+            OriginReadiness::Unavailable => Some("unavailable".into()),
+            OriginReadiness::Unknown => None,
+        }
+    }
+}
+
+/// How long a local origin connect may take before we call the backend dead,
+/// and how long the public-URL HTTP proof keeps retrying a warming edge.
+const ORIGIN_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const PUBLIC_PROBE_WINDOW: Duration = Duration::from_secs(10);
+
+/// Decides whether anything actually answers behind a just-(re)started tunnel.
+///
+/// Two stages, cheap first:
+///  1. A local TCP connect to `127.0.0.1:<local_port>`. A refusal is the
+///     unambiguous "origin unavailable" — nothing is listening — and it is the
+///     ONLY source of `Unavailable`, so a slow public edge is never mistaken
+///     for a dead backend. This is also the whole readiness story for a raw-TCP
+///     provider (`pinggy`), where an HTTP proof does not apply.
+///  2. For an HTTP provider (`ngrok`/`cloudflare`) with a captured URL, a
+///     request THROUGH the public URL, retried across [`PUBLIC_PROBE_WINDOW`]
+///     to tolerate edge warm-up: the moment a reply comes back that is not the
+///     provider's own error page (see [`public_response_is_origin`]), the
+///     origin is confirmed reachable end-to-end — `Ready`. If only provider
+///     error pages / transport errors appear for the whole window, the local
+///     connect already proved the backend up, so this is `Unknown`, not down.
+fn probe_origin(rec: &TunnelRecord) -> OriginReadiness {
+    if !local_origin_listening(rec.local_port) {
+        return OriginReadiness::Unavailable;
+    }
+    match rec.provider.as_str() {
+        // Raw TCP forward — a successful connect IS the readiness signal; there
+        // is no HTTP layer to confirm a nonce through.
+        "pinggy" => OriginReadiness::Ready,
+        "ngrok" | "cloudflare" => match rec.public_url.as_deref() {
+            Some(url) => probe_public_http(url, &rec.provider),
+            None => OriginReadiness::Unknown,
+        },
+        _ => OriginReadiness::Unknown,
+    }
+}
+
+/// A plain TCP connect to the backend, TLS-agnostic on purpose: the handshake
+/// only proves something accepts connections on the port, which is exactly the
+/// "is the backend up" question — and it answers it the same whether the
+/// backend speaks HTTP or HTTPS (an `insecureSkipTlsVerify` origin included).
+fn local_origin_listening(port: u16) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, ORIGIN_CONNECT_TIMEOUT).is_ok()
+}
+
+/// Polls the public URL until a reply that came from the backend appears, or
+/// the window elapses. Sends `ngrok-skip-browser-warning` and a non-browser
+/// user-agent so ngrok forwards straight to the origin instead of serving its
+/// free-tier interstitial — a 200 page that is NOT the origin, the precise
+/// "any 200 is success" trap this must avoid (confirmed live: with the header
+/// the backend's own bytes come through; `ERR_NGROK_8012` is what a dead
+/// origin yields, at 502).
+fn probe_public_http(url: &str, provider: &str) -> OriginReadiness {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return OriginReadiness::Unknown,
+    };
+    let deadline = Instant::now() + PUBLIC_PROBE_WINDOW;
+    loop {
+        if let Ok(resp) = client
+            .get(url)
+            .header("ngrok-skip-browser-warning", "true")
+            .header(reqwest::header::USER_AGENT, "delonix-tunnel-probe")
+            .send()
+        {
+            let status = resp.status().as_u16();
+            // Cap the body read: provider error pages are small, and a huge
+            // origin response does not need reading in full to classify.
+            let body = resp.text().unwrap_or_default();
+            if public_response_is_origin(provider, status, &body) {
+                return OriginReadiness::Ready;
+            }
+        }
+        if Instant::now() >= deadline {
+            return OriginReadiness::Unknown;
+        }
+        std::thread::sleep(Duration::from_millis(700));
+    }
+}
+
+/// Whether an HTTP response fetched through the public URL came from the
+/// BACKEND rather than from the provider's own "origin unreachable" surface.
+/// PURE, so the real captured provider pages pin it without a network.
+///
+/// The signal is NEGATIVE — "not the provider's error page" — because a healthy
+/// backend may legitimately answer any status (a 404, a 500 of its own), so a
+/// status check alone cannot decide this. What is unambiguous is the provider's
+/// branded gateway error:
+///  - ngrok serves `ERR_NGROK_8012` (and siblings) as an HTML page at 502 when
+///    the upstream refuses — measured live. The code token is the signal; the
+///    502 alone is not (a backend can answer 502 itself).
+///  - a cloudflare quick-tunnel edge serves its OWN branded 5xx (`error code:
+///    1033`, the `52x` "web server"/"SSL handshake failed" family — measured: a
+///    `525` page) when it cannot reach the origin through the tunnel.
+fn public_response_is_origin(provider: &str, status: u16, body: &str) -> bool {
+    match provider {
+        "ngrok" => !body.contains("ERR_NGROK_"),
+        "cloudflare" => {
+            // The branding IS the discriminator: cloudflare's own gateway
+            // errors carry either an `error code: NNNN` token (1033 "Argo
+            // Tunnel error" ships at 530, outside the 52x band) or its name on
+            // a 5xx interstitial (measured: a `525` "SSL handshake failed"
+            // page). A plain 5xx WITHOUT that branding is the backend's own,
+            // i.e. reachable.
+            let b = body.to_ascii_lowercase();
+            let edge_error = b.contains("error code:")
+                || (status >= 500 && (b.contains("cloudflare") || b.contains("cloudflared")));
+            !edge_error
+        }
+        _ => true,
+    }
+}
+
 /// Dispatches on whether a token was resolved: no token is the anonymous
 /// quick tunnel (unchanged); a token is a NAMED tunnel already created
 /// through the Cloudflare dashboard or `cloudflared tunnel create` — running
@@ -1804,6 +1981,10 @@ pub(crate) fn cmd_describe(name: &str) -> Result<()> {
     // an agent dying and its respawn — which the second line makes explicit so
     // a momentarily-dead agent is not mistaken for a stopped tunnel.
     d.field("Status", if alive { "Running" } else { "Stopped" });
+    // The origin behind the tunnel, as last probed at (re)start — distinct
+    // from Status, which only tracks the supervisor/agent. A live tunnel over a
+    // dead backend reads Running + "origin unavailable".
+    d.field_opt("Origin", rec.origin_state.as_deref());
     if rec.supervisor_pid.is_some() {
         d.field(
             "Agent",
@@ -2052,6 +2233,7 @@ mod tests {
             started_unix: None,
             agent_web_port: None,
             insecure_skip_tls_verify: false,
+            origin_state: None,
         }
     }
 
@@ -2225,6 +2407,7 @@ mod tests {
             started_unix: None,
             agent_web_port: None,
             insecure_skip_tls_verify: false,
+            origin_state: None,
         };
         assert!(!is_alive(&rec));
     }
@@ -2247,6 +2430,7 @@ mod tests {
             started_unix: None,
             agent_web_port: None,
             insecure_skip_tls_verify: false,
+            origin_state: None,
         };
         assert!(!is_alive(&rec));
     }
@@ -2276,6 +2460,7 @@ mod tests {
             started_unix: None,
             agent_web_port: Some(4040),
             insecure_skip_tls_verify: false,
+            origin_state: None,
         };
         store.save("other", &stale).unwrap();
         assert!(
@@ -2317,6 +2502,7 @@ mod tests {
             started_unix: None,
             agent_web_port: Some(4040),
             insecure_skip_tls_verify: false,
+            origin_state: None,
         };
         // Re-applying 'web' over its own live record: not a rival.
         assert!(
@@ -2365,6 +2551,7 @@ mod tests {
             started_unix: None,
             agent_web_port: None,
             insecure_skip_tls_verify: false,
+            origin_state: None,
         };
         store.save("p", &pinggy_rec).unwrap();
         assert!(other_alive_ngrok(&store, "mine").unwrap().is_none());
@@ -2464,5 +2651,87 @@ mod tests {
         rec.supervisor_pid = Some(i32::MAX - 1);
         rec.supervisor_starttime = None;
         assert!(!is_alive(&rec));
+    }
+
+    /// The whole point of the probe: a reply must be CONFIRMED to come from the
+    /// backend, not merely be "some HTTP response". The real `ERR_NGROK_8012`
+    /// page a dead origin yields (captured live, served at 502) must read as
+    /// NOT-origin, while the backend's own bytes — whatever status it chooses,
+    /// including a 404 or a 500 of its own — read as origin.
+    #[test]
+    fn ngrok_err_page_is_not_the_origin_but_a_real_reply_is() {
+        // The live-captured shape: 502 + the error-code token in the body.
+        let err = "<html>...ERR_NGROK_8012...The connection to ... was refused</html>";
+        assert!(!public_response_is_origin("ngrok", 502, err));
+        // A backend that answers for itself — any status — is reachable.
+        assert!(public_response_is_origin(
+            "ngrok",
+            200,
+            "a-random-nonce-xyz"
+        ));
+        assert!(public_response_is_origin("ngrok", 404, "my app's own 404"));
+        assert!(public_response_is_origin("ngrok", 500, "my app's own 500"));
+    }
+
+    /// "Any 200 is success" is the bug: a provider's OWN 200 page is not the
+    /// origin. An ngrok error token at 200 (or any status) still means down.
+    #[test]
+    fn ngrok_classification_ignores_the_status_code_and_reads_the_body() {
+        assert!(!public_response_is_origin(
+            "ngrok",
+            200,
+            "ERR_NGROK_3200 page"
+        ));
+        assert!(!public_response_is_origin("ngrok", 418, "ERR_NGROK_8012"));
+    }
+
+    /// cloudflare's quick-tunnel edge serves its OWN branded 5xx (measured: a
+    /// `525` "SSL handshake failed" page, cloudflare-branded) when it cannot
+    /// reach the origin — not the origin. A 5xx WITHOUT the cloudflare branding
+    /// is the backend's own and counts as reachable; and a normal 200 from the
+    /// backend is the origin.
+    #[test]
+    fn cloudflare_edge_error_page_is_not_the_origin() {
+        let e525 = "<title>mysite | 525: SSL handshake failed</title> ... cloudflare";
+        assert!(!public_response_is_origin("cloudflare", 525, e525));
+        let e1033 = "<html>... error code: 1033 ... cloudflare ...</html>";
+        assert!(!public_response_is_origin("cloudflare", 530, e1033));
+        // A 5xx that is the BACKEND's own (no cloudflare branding) is reachable.
+        assert!(public_response_is_origin(
+            "cloudflare",
+            502,
+            "my app blew up"
+        ));
+        // The happy path.
+        assert!(public_response_is_origin("cloudflare", 200, "the-nonce"));
+    }
+
+    /// A refused local connect is the one unambiguous "down"; a bound port is
+    /// not (yet) a verdict for an HTTP provider — only for the raw-TCP one.
+    #[test]
+    fn local_connect_refused_is_the_only_unavailable() {
+        // Nothing listens on this port in the test process.
+        let mut rec = guard_rec("cloudflare", 59_123);
+        rec.public_url = Some("https://x.trycloudflare.com".into());
+        assert_eq!(probe_origin(&rec), OriginReadiness::Unavailable);
+        // Same dead port, raw-TCP provider: still Unavailable (the connect
+        // decides, before any provider-specific step).
+        let pinggy = guard_rec("pinggy", 59_123);
+        assert_eq!(probe_origin(&pinggy), OriginReadiness::Unavailable);
+    }
+
+    /// The stored token is what `describe`/`expose` render; `Unknown` stores
+    /// nothing so old and not-probed records stay clean.
+    #[test]
+    fn origin_state_tokens_are_stable() {
+        assert_eq!(
+            OriginReadiness::Ready.into_state().as_deref(),
+            Some("ready")
+        );
+        assert_eq!(
+            OriginReadiness::Unavailable.into_state().as_deref(),
+            Some("unavailable")
+        );
+        assert_eq!(OriginReadiness::Unknown.into_state(), None);
     }
 }

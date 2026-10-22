@@ -659,6 +659,9 @@ msgstr "containers:"
 msgid "running"
 msgstr "a correr"
 
+msgid "origin"
+msgstr "origem"
+
 msgid "events:"
 msgstr "eventos:"
 
