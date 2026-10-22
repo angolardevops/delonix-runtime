@@ -519,7 +519,10 @@ cat >"$OUT/image-rm-stub" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2${3:+ $3}" in
   "image remove "*) exit "${STUB_RC:-0}" ;;
-  "image ls -o") printf '[{"id":"abc123","repo_tags":["%s"]}]\n' "${STUB_LS:-}" ;;
+  "image ls -o")
+    [[ -n "${STUB_ERR:-}" ]] && echo "$STUB_ERR" >&2
+    [[ -n "${STUB_BAD:-}" ]] && { echo "not json"; exit 0; }
+    printf '[{"id":"abc123","repo_tags":["%s"]}]\n' "${STUB_LS:-}" ;;
   *) echo "error: unrecognized subcommand '$2'" >&2; exit 2 ;;
 esac
 EOF
@@ -536,6 +539,10 @@ check "e2e_image_rm: a name image ls still lists, even behind a registry, fails"
 # still sees one.
 _irml=(bash "$OUT/image-rm.sh" "$ETEARDOWN" "$OUT/image-rm-stub" "t-$PFX-$(printf 'y%.0s' {1..60}):1")
 check "e2e_image_rm: a long name image ls still lists fails" 1 env STUB_LS="localhost/${_irml[4]}" "${_irml[@]}"
+# A warning on stderr is not part of the listing, and a listing that does not
+# parse is a failure, never «the name is gone».
+check "e2e_image_rm: a warning on stderr does not hide a name still listed" 1 env STUB_ERR=warning STUB_LS="t-$PFX:1" "${_irm[@]}"
+check "e2e_image_rm: a listing that does not parse fails" 1 env STUB_BAD=1 "${_irm[@]}"
 
 ########################################
 section "guarda: o irmão SERVIDO é da release do \$BIN"

@@ -45,15 +45,23 @@ e2e_image_rm() {
     fi
     # JSON, never the table: the table cuts REPOSITORY:TAG near 44 characters
     # with «…», so a long name still in the store read as gone (measured).
-    ls=$("$BIN" image ls -o json 2>&1) || { echo "image ls → rc=$?: ${ls##*$'\n'}"; bad=1; continue; }
+    # stderr stays out of the JSON, and a listing that does not parse is its
+    # own answer (2), never «absent».
+    ls=$("$BIN" image ls -o json 2>/dev/null) || { echo "image ls -o json → rc=$?"; bad=1; continue; }
     # A name shows as given or behind a registry prefix (`…/name:tag`).
-    if python3 -I -c '
+    python3 -I -c '
 import json, sys
 n = sys.argv[1]
-tags = [t for img in json.load(sys.stdin) for t in img.get("repo_tags") or []]
-sys.exit(0 if any(t == n or t.endswith("/" + n) for t in tags) else 1)' "$i" <<<"$ls"; then
-      echo "image remove $i → rc=$rc, but image ls still lists it"; bad=1
-    fi
+try:
+    tags = [t for img in json.load(sys.stdin) for t in img.get("repo_tags") or []]
+except (ValueError, TypeError, AttributeError) as e:
+    print("image ls -o json did not parse: %s" % e); sys.exit(2)
+sys.exit(0 if any(t == n or t.endswith("/" + n) for t in tags) else 1)' "$i" <<<"$ls"
+    case $? in
+      0) echo "image remove $i → rc=$rc, but image ls still lists it"; bad=1 ;;
+      1) ;;
+      *) bad=1 ;;
+    esac
   done
   return "$bad"
 }
