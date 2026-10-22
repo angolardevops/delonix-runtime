@@ -424,6 +424,34 @@ pub(crate) fn warn_unknown(doc: &manifest::ManifestDoc) {
 mod tests {
     use super::*;
 
+    /// `PROVISION_FIELDS` / `TRUENAS_FIELDS` are hand-kept allowlists of the
+    /// `provision` / `provision.truenas` blocks. These tie each to its struct so
+    /// it cannot drift: add a field to the struct and the matching test fails
+    /// until the const lists it — the guard `SHAREVOLUME_SPEC_FIELDS` never had.
+    #[test]
+    fn provision_fields_cobre_exactamente_o_struct() {
+        let from_struct = crate::cmd::manifest::schema_field_names::<ProvisionSpec>();
+        let mut from_const: Vec<String> =
+            PROVISION_FIELDS.iter().map(|s| s.to_string()).collect();
+        from_const.sort();
+        assert_eq!(
+            from_struct, from_const,
+            "PROVISION_FIELDS divergiu de ProvisionSpec — actualiza a const"
+        );
+    }
+
+    #[test]
+    fn truenas_fields_cobre_exactamente_o_struct() {
+        let from_struct = crate::cmd::manifest::schema_field_names::<TrueNasSpec>();
+        let mut from_const: Vec<String> =
+            TRUENAS_FIELDS.iter().map(|s| s.to_string()).collect();
+        from_const.sort();
+        assert_eq!(
+            from_struct, from_const,
+            "TRUENAS_FIELDS divergiu de TrueNasSpec — actualiza a const"
+        );
+    }
+
     #[test]
     fn o_host_vem_do_url_e_nao_de_um_campo_a_parte() {
         assert_eq!(host_of_url("https://nas.local").unwrap(), "nas.local");
