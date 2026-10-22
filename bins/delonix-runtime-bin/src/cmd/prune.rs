@@ -426,6 +426,58 @@ fn orphan_cgroup_leaves(
     out
 }
 
+/// **PURE** — every orphan leaf across ALL container cgroup bases, flattened.
+/// The `(base, prefix)` pairs are exactly what [`container_cgroup_bases`] yields,
+/// but taken as an argument so the selection can be exercised against a temp
+/// directory in a test — no real cgroupfs, no live store, no process-once guard.
+/// Both the real [`gc_orphan_cgroup_leaves_once`] sweep and the startup GC share
+/// this one predicate, so they can never disagree about what is an orphan.
+fn orphan_cgroup_leaves_in(
+    bases: &[(std::path::PathBuf, &'static str)],
+    live_ids: &HashSet<String>,
+) -> Vec<std::path::PathBuf> {
+    bases
+        .iter()
+        .flat_map(|(base, prefix)| orphan_cgroup_leaves(base, prefix, live_ids))
+        .collect()
+}
+
+/// Runs the startup cgroup GC at most once in this process.
+static CGROUP_GC: std::sync::Once = std::sync::Once::new();
+
+/// Opportunistic, daemonless GC of the orphan cgroup leaves a previous engine
+/// left behind by dying — a crash, an OOM-kill, a `kill -9` — BEFORE
+/// `remove_container_cgroup` ran. Before this, the only thing that reclaimed them
+/// was a manual `system prune`; an engine that is daemonless has no resident
+/// process to do it on its own, so a node that crashed under load kept leaking
+/// empty `dlx-<id>` leaves until a human remembered to prune.
+///
+/// So the same sweep `system prune` does for cgroups is hung on the FIRST use of
+/// the container store in a process ([`super::util::open_stores`], which every
+/// command that touches state goes through — `system info`, the first
+/// `container run`, …) and guarded by [`CGROUP_GC`] to run exactly once. It is
+/// NOT a daemon: nothing resides, the work happens on a path a command already
+/// runs, and it is over before `open_stores` returns.
+///
+/// Selection is [`orphan_cgroup_leaves_in`] over [`container_cgroup_bases`] with
+/// the live ids from the store — byte-for-byte the predicate `system prune`'s
+/// cgroup phase uses, so the GC can never reap a leaf the plan would spare. It is
+/// best-effort and silent: `remove_dir` removes only an EMPTY cgroup (a leaf a
+/// race just refilled stays, exactly as in the prune sweep), and every error —
+/// an unreadable store, a `remove_dir` that lost the race — is swallowed, because
+/// a GC that failed must never fail the command that happened to trigger it.
+pub(crate) fn gc_orphan_cgroup_leaves_once(store: &Store) {
+    CGROUP_GC.call_once(|| {
+        let Ok(containers) = store.list() else {
+            return;
+        };
+        let live_ids: HashSet<String> = containers.into_iter().map(|c| c.id).collect();
+        for leaf in orphan_cgroup_leaves_in(&container_cgroup_bases(), &live_ids) {
+            let _ = std::fs::remove_dir(&leaf);
+        }
+    });
+}
+
 pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<ContainerSweep> {
     // Orphan slirps (dead target) — the SAFE reaper, never the fail-open
     // `reap_orphan_hostfwds` (see the history of the reaper that deleted live
@@ -1907,6 +1959,39 @@ mod tests {
         // no-op, not an error.
         let missing = std::path::Path::new("/nonexistent/delonix/cgroup/base");
         assert!(super::orphan_cgroup_leaves(missing, "delonix-", &set(&[])).is_empty());
+    }
+
+    #[test]
+    fn startup_gc_selects_only_dead_orphan_leaves_across_every_base() {
+        // The startup GC (`gc_orphan_cgroup_leaves_once`) reaps exactly what
+        // `orphan_cgroup_leaves_in` returns, over every container cgroup base. A
+        // real cgroupfs, a live store and the process-once guard are not needed to
+        // prove the SELECTION — only that, given two bases (the root slice and a
+        // rootless delegated base), it takes the empty, process-less, child-less
+        // leaves whose id is neither live nor reserved, and nothing else.
+        let tmp = tempfile::tempdir().unwrap();
+        let slice = tmp.path().join("delonix.slice");
+        let rootless = tmp.path().join("dlx-containers");
+        std::fs::create_dir(&slice).unwrap();
+        std::fs::create_dir(&rootless).unwrap();
+
+        fake_cgroup(&slice, "delonix-dead", ""); // root-mode dead orphan — taken
+        fake_cgroup(&slice, "delonix-live", ""); // id is live — spared
+        fake_cgroup(&rootless, "dlx-dead", ""); // rootless dead orphan — taken
+        fake_cgroup(&rootless, "dlx-running", "7\n"); // has a process — spared
+        fake_cgroup(&rootless, "dlx-containers", ""); // reserved base — spared
+        fake_cgroup(&rootless, "dlx-mgr", ""); // reserved manager cgroup — spared
+
+        let bases = vec![(slice, "delonix-"), (rootless, "dlx-")];
+        let mut got: Vec<String> = super::orphan_cgroup_leaves_in(&bases, &set(&["live"]))
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["delonix-dead".to_string(), "dlx-dead".to_string()]
+        );
     }
 
     #[test]

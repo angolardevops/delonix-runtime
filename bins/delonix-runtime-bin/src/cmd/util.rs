@@ -21,6 +21,12 @@ pub(crate) fn open_stores() -> Result<(ImageStore, Store)> {
     let root = state_root();
     let images = ImageStore::open(&root)?;
     let store = Store::open(root.join("containers"))?;
+    // The daemonless engine's opportunistic startup GC. This is the first use of
+    // the container store in any command that touches state, so it is where the
+    // sweep of orphan cgroup leaves a crashed engine left behind is hung — run
+    // once per process, best-effort, so a crash/OOM no longer needs a manual
+    // `system prune` to reclaim them. See `prune::gc_orphan_cgroup_leaves_once`.
+    super::prune::gc_orphan_cgroup_leaves_once(&store);
     Ok((images, store))
 }
 
