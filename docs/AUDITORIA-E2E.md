@@ -527,3 +527,88 @@ A verificação adversarial NÃO cobriu, por quota, estes subsistemas — merece
 Além disso, a fase de finders correu 1 passagem por subsistema; um 2.º passo com a lente de
 **concorrência sob carga** (CRI + mgmt + proxy em simultâneo) e um **fuzzing dos parsers**
 (DNS, .po, manifesto YAML, tar de layer) apanharia o que a leitura estática não vê.
+
+---
+
+## Passagem focada em `delonix container` (2026-10-22, v5.1.1)
+
+Âmbito: caminho `delonix container` (lifecycle, estado, recuperação, isolamento,
+imagens, GC). Baseline: `cargo check` do workspace verde; `delonix-state` 38/38;
+`clippy` dos crates tocados sem avisos. As lacunas L1–L6 da
+`docs/paridade-docker-podman.md` já estavam fechadas (incl. a degradação
+silenciosa de rede L1, agora `host (degraded: …)` com teste). Método: 4 agentes
+adversariais (lifecycle, pull de imagem, isolamento, GC) + leitura directa.
+
+### FECHADO · `container cp` seguia symlinks/`..` para fora do rootfs (ALTO, classe CVE-2019-14271)
+
+**Descrição.** `cmd_cp` (`bins/delonix-runtime-bin/src/cmd/container.rs`) juntava
+o lado `container:/path` ao rootfs com `root.join(cpath.trim_start_matches('/'))`
+— sem normalizar `..` — e copiava com `copy_recursive`, que usava `src.is_dir()`
++ `std::fs::copy`, ambos a **seguir symlinks**. Num container EM EXECUÇÃO o root é
+`/proc/<pid>/root`, que o kernel confina; mas num container PARADO o root é um
+directório de host comum (`merged`/`rootfs`, ou um `__ovlhold` que **não** faz
+`pivot_root` — `cmd/mapped.rs:678`), sem confinamento algum. Uma imagem que
+embarque `fuga -> /etc/shadow`, ou um `..` no caminho, levava o `cp` a ler/gravar
+ficheiros do HOST como o motor (root no modo rootful; o uid no rootless). É a
+mesma classe que o repo já fechara para binds e `COPY` via `safe_bind_target`, e
+de que o `cp` ficara de fora — tal como o `write_etc_files` outrora (ver L3 da
+paridade).
+
+**Cenário de falha.** Leitura: `delonix container cp web:/fuga /tmp/roubo` com
+`fuga -> /etc/shadow` no rootfs exfiltra o `/etc/shadow` do host. `..`:
+`cp web:/../../../../etc/passwd /tmp/x`. Escrita: `cp ./payload web:/hook` com
+`hook -> /host/vitima` sobrescreve o ficheiro do host.
+
+**Correcção.** (1) `cmd_cp` resolve o lado container com
+`delonix_linux::safe_bind_target` (agora `pub` — reutilizado, não reescrito pela
+3.ª vez), que clampa `..` ao rootfs e resolve um symlink DENTRO do rootfs (alvo
+absoluto reinicia no rootfs, nunca no `/` do host). (2) `copy_recursive` passou a
+usar `symlink_metadata` (lstat) e NUNCA dereferencia um symlink: recria-o tal e
+qual (como o `docker cp`), e desliga um symlink já presente no destino antes de
+escrever — fechando a fuga em TODOS os níveis da árvore, não só no topo.
+
+**Testes de regressão** (`container.rs`, módulo de testes):
+`cp_nao_segue_symlink_do_container_para_fora` (leitura),
+`cp_nao_escreve_atraves_de_symlink_no_destino` (escrita),
+`cp_confina_dot_dot_e_symlink_do_caminho_do_container` (confinamento do topo).
+Provado: os dois primeiros FALHAM com o `copy_recursive` antigo e passam com o
+novo; `clippy` limpo. **Validado por teste; NÃO validado ao vivo** contra um
+container parado real (sem ambiente nesta sessão) — o caminho `/proc/<pid>/root`
+do container vivo continua a depender do confinamento do kernel.
+
+### Fila de prioridade (reproduzidos e tracejados; NÃO corrigidos — uma sessão cada)
+
+1. **ALTO · sysctls de IPC escritos na namespace do host com `--host-ipc`** —
+   `sysctl_namespaced` (`delonix-linux/src/lib.rs:3213`) devolve `true`
+   incondicional para `kernel.sem/shm*/msg*` e `fs.mqueue.*`; `apply_sysctls`
+   só recebe `has_own_netns`, nunca `has_own_ipcns`. `run --host-ipc --sysctl
+   kernel.shmall=…` altera o knob GLOBAL do host (DoS). É o irmão IPC do `net.*`
+   já documentado acima — o mesmo endurecimento que o `net.*` recebeu nunca foi
+   aplicado ao IPC.
+2. **MÉDIO (perda de dados) · `prune` liberta lease IPAM / desmonta rootfs de um
+   container cujo `remove` foi MANTIDO** — `cmd/prune.rs:366-372` engole o `Err`
+   de `delonix_linux::remove` (quando um `start` concorrente ganha a corrida e o
+   registo é preservado) e corre à mesma `release_leases` + `unmount_rootfs` +
+   `remove_container_dir` → dois containers vivos num IP. O `cmd_rm` real propaga
+   o erro; o `prune` diverge. Fix: condicionar os três passos a `remove(...) == Ok`.
+3. **MÉDIO-ALTO (disponibilidade) · contador de restart do supervisor nunca
+   reinicia** — `supervise.rs:125/251` acumula para toda a vida do supervisor:
+   `on-failure:N` vira orçamento vitalício (nunca mais reinicia após N falhas
+   espaçadas por meses) e o backoff `always` nunca volta à base. Diverge do docker
+   (que reinicia após uptime estável), ao contrário do comentário em `supervise.rs:255`.
+4. **MÉDIO · `wait` devolve "exit code não capturado" para container supervisionado**
+   — corrida em `wait_for_exit` (`container.rs:5056`): um reconcile concorrente marca
+   `Crashed/process_gone` antes de o supervisor fazer `wait_and_record`, e o `wait`
+   dá o erro "corre em FOREGROUND" a um container que tem supervisor exactamente
+   para o código ser conhecido.
+5. **MÉDIO · degradação silenciosa de SELinux** — `apply_selinux`
+   (`delonix-linux/src/lib.rs:3024`) engole o erro de escrita do contexto MAC
+   (`let _ =`), sem o fail-closed (126) que o AppArmor tem. Alcançável só via CRI
+   `SELinuxOptions`; num nó SELinux-enforcing deixa o container no domínio
+   default sem erro.
+6. **MÉDIO · `apply_layer_flat` segue symlinks plantados ao pré-criar/chmod dirs
+   pai** — `delonix-oci/src/overlay.rs:229-252`: efeitos (`mkdir`/`chmod`) FORA da
+   raiz de extracção (a escrita do conteúdo em si é barrada pelo tar-rs). Afeta o
+   caminho flat (`image export`, work-containers rootless), não o `run`.
+
+Próxima prioridade recomendada: **#1 (ALTO, mesma classe de contenção silenciosa)**.

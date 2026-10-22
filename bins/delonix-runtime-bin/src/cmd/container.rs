@@ -5718,8 +5718,32 @@ fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
     )))
 }
 
+/// Recursive copy for `container cp`.
+///
+/// SECURITY: never DEREFERENCES a symlink. It recreates one verbatim (as `docker
+/// cp` does), and it unlinks any symlink already sitting at the destination
+/// before writing. Following even one would reopen the escape that
+/// `confine`/`safe_bind_target` closes for the top-level path: a container-rootfs
+/// symlink `x -> /etc/shadow` would otherwise redirect a READ out to a host file
+/// (the old `std::fs::copy(symlink, dst)` copied the TARGET's bytes), or — when
+/// `x` sits on the destination side — redirect a WRITE through it onto a host
+/// path. `symlink_metadata` (lstat), never `is_dir`/`copy` (which follow), is
+/// what makes that hold at every level of the tree, not just the top.
 fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    if src.is_dir() {
+    let ft = std::fs::symlink_metadata(src)?.file_type();
+    // Unlink a symlink planted at `dst` so the node we create lands on a real
+    // in-root path instead of being redirected through the link to the host.
+    if std::fs::symlink_metadata(dst).is_ok_and(|m| m.file_type().is_symlink()) {
+        std::fs::remove_file(dst)?;
+    }
+    if ft.is_symlink() {
+        // Copy the LINK, never its target.
+        let target = std::fs::read_link(src)?;
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::os::unix::fs::symlink(target, dst)?;
+    } else if ft.is_dir() {
         std::fs::create_dir_all(dst)?;
         for entry in std::fs::read_dir(src)? {
             let entry = entry?;
@@ -5748,18 +5772,33 @@ pub(crate) fn split_cp_arg(s: &str) -> Option<(String, String)> {
 
 /// `container cp` — copies host↔container. Exactly one side is `container:/path`.
 pub(crate) fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()> {
-    let join_root = |root: &std::path::Path, p: &str| root.join(p.trim_start_matches('/'));
+    // SECURITY: resolve the `container:/path` side CONFINED to the container's
+    // rootfs, so neither a `..` nor an image-planted symlink can reach a host
+    // path. A RUNNING container's root is `/proc/<pid>/root`, which the kernel
+    // confines; a STOPPED one's is a plain host directory (`merged`/`rootfs`, or
+    // an `__ovlhold` that does NOT pivot_root), where `root.join(cpath)` + a
+    // symlink-following `std::fs::copy` read/wrote host files as the engine — the
+    // CVE-2019-14271 class this repo already closes for binds and `COPY` via
+    // `safe_bind_target`, and had left `cp` out of (exactly like `write_etc_files`).
+    let join_root = |root: &std::path::Path, p: &str| -> Result<PathBuf> {
+        runtime::safe_bind_target(&root.to_string_lossy(), p).ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "cp: path '{p}' does not resolve inside the container filesystem",
+                &[("p", p)],
+            ))
+        })
+    };
     match (split_cp_arg(src), split_cp_arg(dst)) {
         (Some((name, cpath)), None) => {
             let c = find(store, &name)?;
             let root = container_fs_root(images, &c)?;
-            copy_recursive(&join_root(root.path(), &cpath), std::path::Path::new(dst))
+            copy_recursive(&join_root(root.path(), &cpath)?, std::path::Path::new(dst))
                 .map_err(|e| Error::Invalid(format!("cp: {e}")))?;
         }
         (None, Some((name, cpath))) => {
             let c = find(store, &name)?;
             let root = container_fs_root(images, &c)?;
-            copy_recursive(std::path::Path::new(src), &join_root(root.path(), &cpath))
+            copy_recursive(std::path::Path::new(src), &join_root(root.path(), &cpath)?)
                 .map_err(|e| Error::Invalid(format!("cp: {e}")))?;
         }
         _ => {
@@ -8417,6 +8456,94 @@ ports: [\"0.0.0.0:8080:80\"]",
         assert_eq!(split_cp_arg("/mnt/disco:1/f"), None);
         // An empty name is not a container.
         assert_eq!(split_cp_arg(":/etc"), None);
+    }
+
+    /// REGRESSION (HIGH, CVE-2019-14271 class): `container cp` must never
+    /// DEREFERENCE a symlink that lives inside the container's filesystem. On a
+    /// STOPPED container the rootfs is a plain host directory (no kernel-confined
+    /// `/proc/<pid>/root`), and the old `copy_recursive` used `src.is_dir()` +
+    /// `std::fs::copy`, both of which FOLLOW symlinks — so a `cp` from a
+    /// container that shipped `secret -> /etc/shadow` copied the HOST file's
+    /// bytes out. The fix copies the LINK itself; the target is never read.
+    #[test]
+    fn cp_nao_segue_symlink_do_container_para_fora() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        // A host secret OUTSIDE any container rootfs.
+        let secret = tmp.path().join("host-secret");
+        std::fs::write(&secret, b"TOPSECRET").unwrap();
+        // The container side being copied FROM: a dir holding a planted link.
+        let csrc = tmp.path().join("rootfs-export");
+        std::fs::create_dir_all(&csrc).unwrap();
+        symlink(&secret, csrc.join("leak")).unwrap();
+        std::fs::write(csrc.join("plain.txt"), b"ok").unwrap();
+        // Where the user asked the copy to land.
+        let out = tmp.path().join("out");
+
+        super::copy_recursive(&csrc, &out).unwrap();
+
+        // The link is recreated AS a link — its target's bytes were never read.
+        let md = std::fs::symlink_metadata(out.join("leak")).unwrap();
+        assert!(
+            md.file_type().is_symlink(),
+            "cp dereferenced a container symlink and exfiltrated the host file"
+        );
+        // Regular files still copy normally.
+        assert_eq!(std::fs::read(out.join("plain.txt")).unwrap(), b"ok");
+    }
+
+    /// REGRESSION (HIGH): the WRITE direction. Copying INTO a container must not
+    /// write THROUGH a symlink sitting at the destination — the old code's
+    /// `std::fs::copy(src, dst)` followed `dst`, so a container that shipped
+    /// `hook -> /host/victim` let `cp file container:/hook` overwrite the host
+    /// file. The fix unlinks the planted symlink first and writes a real node.
+    #[test]
+    fn cp_nao_escreve_atraves_de_symlink_no_destino() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let victim = tmp.path().join("host-victim");
+        std::fs::write(&victim, b"original").unwrap();
+        // The destination node, a symlink pointing at the host victim.
+        let dst_link = tmp.path().join("rootfs").join("hook");
+        std::fs::create_dir_all(dst_link.parent().unwrap()).unwrap();
+        symlink(&victim, &dst_link).unwrap();
+        // What the user is copying in.
+        let src = tmp.path().join("payload");
+        std::fs::write(&src, b"payload").unwrap();
+
+        super::copy_recursive(&src, &dst_link).unwrap();
+
+        // The host victim is untouched; the write landed on a real in-rootfs node.
+        assert_eq!(
+            std::fs::read(&victim).unwrap(),
+            b"original",
+            "cp wrote THROUGH a destination symlink onto a host file"
+        );
+        let md = std::fs::symlink_metadata(&dst_link).unwrap();
+        assert!(!md.file_type().is_symlink(), "the planted link survived");
+        assert_eq!(std::fs::read(&dst_link).unwrap(), b"payload");
+    }
+
+    /// REGRESSION (HIGH): the top-level `container:/path` is confined to the
+    /// rootfs — `..` cannot climb above it, and a rootfs symlink is resolved
+    /// WITHIN the rootfs (an absolute target restarts at the rootfs, never at the
+    /// host `/`). This is the `safe_bind_target` reuse the `cp` fix relies on.
+    #[test]
+    fn cp_confina_dot_dot_e_symlink_do_caminho_do_container() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("rootfs");
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        // An image-planted absolute symlink inside the rootfs.
+        symlink("/etc", root.join("escape")).unwrap();
+        let root_s = root.to_string_lossy();
+
+        // `..` is clamped at the rootfs — never the host's /etc/passwd.
+        let p = delonix_linux::safe_bind_target(&root_s, "../../../../etc/passwd").unwrap();
+        assert!(p.starts_with(&root), "`..` escaped the rootfs: {p:?}");
+        // The absolute symlink resolves to the rootfs's OWN /etc, not the host's.
+        let q = delonix_linux::safe_bind_target(&root_s, "escape/passwd").unwrap();
+        assert_eq!(q, root.join("etc").join("passwd"), "symlink escaped: {q:?}");
     }
 
     #[test]

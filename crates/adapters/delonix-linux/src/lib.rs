@@ -1248,7 +1248,14 @@ fn mount_target_safe(target: &str) -> bool {
 /// (measured on a kubeadm node, k8s 1.36).
 ///
 /// `None` only for a link chain too long to be anything but a loop.
-fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
+///
+/// `pub` because `container cp` needs the EXACT same scoped resolution for the
+/// `container:/path` side: a stopped container's rootfs is a plain host
+/// directory (no kernel-confined `/proc/<pid>/root`), so `cp` has to confine the
+/// path by hand just like a bind or a `COPY` does — reusing this instead of
+/// writing the primitive out a third time (the whole lesson of the `cp`/`COPY`
+/// symlink-escape class).
+pub fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
     use std::collections::VecDeque;
     use std::ffi::OsString;
     use std::path::Component;
@@ -2097,6 +2104,7 @@ fn setup_rootfs(
     host_pid: bool,
     privileged: bool,
     has_own_netns: bool,
+    has_own_ipcns: bool,
 ) -> nix::Result<()> {
     sethostname(hostname)?;
     // Root propagation. `MS_PRIVATE` severs every link with the host's mount
@@ -2245,7 +2253,7 @@ fn setup_rootfs(
         )?;
     }
     // --sysctl: BEFORE /proc/sys becomes read-only (B13).
-    apply_sysctls(sysctls, has_own_netns);
+    apply_sysctls(sysctls, has_own_netns, has_own_ipcns);
     // `mask_proc_paths` used to run HERE; it moved to `container_init`, beside
     // `apply_masked_paths`/`apply_readonly_paths` — the place this file already
     // documents for mask work — so a failure can NAME the path it could not
@@ -3180,7 +3188,15 @@ fn write_secret_values(dir: &str, pairs: &[(String, String)]) -> std::result::Re
 /// refuses `--sysctl net.*` combined with host networking for exactly this
 /// reason. `has_own_netns` is the same condition `spawn` uses to decide
 /// whether to add `CLONE_NEWNET` in the first place.
-fn apply_sysctls(specs: &[String], has_own_netns: bool) {
+///
+/// SAME BUG, IPC SIBLING: the IPC sysctls (`kernel.sem`/`kernel.shm*`/
+/// `kernel.msg*`/`fs.mqueue.*`) are namespaced ONLY when the container owns
+/// its IPC namespace (`CLONE_NEWIPC`). Under `--host-ipc` (CRI `ipc: NODE`),
+/// or as a pod member that joins the infra's IPC ns, `/proc/sys/kernel/sem`
+/// (etc.) point at the SHARED namespace — the host's — so writing them is a
+/// host-wide DoS surface. `has_own_ipcns` is the same condition `spawn` uses
+/// to decide whether to add `CLONE_NEWIPC`.
+fn apply_sysctls(specs: &[String], has_own_netns: bool, has_own_ipcns: bool) {
     for kv in specs {
         if let Some((k, v)) = kv.split_once('=') {
             let k = k.trim();
@@ -3189,7 +3205,7 @@ fn apply_sysctls(specs: &[String], has_own_netns: bool) {
             // GLOBAL to the host and a container cannot touch them. Without this, and since
             // this runs before `/proc/sys` becomes RO and before dropping caps,
             // a container could write HOST kernel knobs.
-            if !sysctl_namespaced(k, has_own_netns) {
+            if !sysctl_namespaced(k, has_own_netns, has_own_ipcns) {
                 eprintln!("delonix: --sysctl {k}: not namespaced; refused (affects the host)");
                 continue;
             }
@@ -3209,16 +3225,17 @@ fn apply_sysctls(specs: &[String], has_own_netns: bool) {
 
 /// `true` if the sysctl is namespaced (safe for a container to change). Same
 /// set that Docker permits by default — `net.*` additionally requires the
-/// container to actually own its network namespace (see `apply_sysctls`).
-fn sysctl_namespaced(k: &str, has_own_netns: bool) -> bool {
+/// container to actually own its network namespace, and the IPC sysctls its
+/// own IPC namespace (see `apply_sysctls`).
+fn sysctl_namespaced(k: &str, has_own_netns: bool, has_own_ipcns: bool) -> bool {
     if k.contains("..") || k.starts_with('/') {
         return false;
     }
-    k == "kernel.sem"
+    let is_ipc = k == "kernel.sem"
         || k.starts_with("kernel.shm")
         || k.starts_with("kernel.msg")
-        || k.starts_with("fs.mqueue.")
-        || (k.starts_with("net.") && has_own_netns)
+        || k.starts_with("fs.mqueue.");
+    (is_ipc && has_own_ipcns) || (k.starts_with("net.") && has_own_netns)
 }
 
 /// The type of the 1st argument of `setrlimit`: enum (`__rlimit_resource_t`) in glibc,
@@ -3632,6 +3649,11 @@ struct NamespaceSpec {
     /// `--net host`, nor the holder's under the rootless ingress). Decides
     /// whether `net.*` sysctls are safe to apply.
     has_own_netns: bool,
+    /// The child ends up with an EXCLUSIVE IPC namespace (`CLONE_NEWIPC`), not
+    /// the host's under `--host-ipc` nor the infra's as a pod member. Decides
+    /// whether the IPC sysctls (`kernel.sem`/`shm*`/`msg*`, `fs.mqueue.*`) are
+    /// safe to apply.
+    has_own_ipcns: bool,
     host_pid: bool,
     /// The child inherits the holder's user namespace instead of cloning one,
     /// so there is no uid_map handshake to wait for.
@@ -3701,6 +3723,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
             NamespaceSpec {
                 pod_infra_pid,
                 has_own_netns,
+                has_own_ipcns,
                 host_pid,
                 inherit_userns,
                 node_cgroup,
@@ -3794,6 +3817,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         host_pid,
         privileged,
         has_own_netns,
+        has_own_ipcns,
     ) {
         eprintln!("delonix: failed to prepare the rootfs: {e}");
         return 126;
@@ -7432,6 +7456,7 @@ struct InitInputs {
     readonly_paths: Vec<String>,
     pod_infra_pid: Option<i32>,
     has_own_netns: bool,
+    has_own_ipcns: bool,
     host_pid: bool,
     inherit_userns: bool,
     node_cgroup: bool,
@@ -7497,6 +7522,12 @@ impl InitInputs {
             // rootless ingress). `apply_sysctls` needs this to know whether
             // `net.*` sysctls are safe.
             has_own_netns: spec.new_netns && !spec.inherit_userns,
+            // Same condition `clone_flags` uses to add `CLONE_NEWIPC`: the
+            // container owns its IPC namespace only when it neither shares the
+            // host's (`--host-ipc`) nor joins a pod infra's (which it `setns`es
+            // into). `apply_sysctls` needs this to know whether the IPC sysctls
+            // are safe (else they hit the shared namespace — the host's).
+            has_own_ipcns: !spec.host_ipc && spec.pod_infra_pid.is_none(),
             host_pid: spec.host_pid,
             inherit_userns: spec.inherit_userns,
             node_cgroup: is_kind_node(privileged, &container.labels),
@@ -7544,6 +7575,7 @@ impl InitInputs {
             namespaces: NamespaceSpec {
                 pod_infra_pid: self.pod_infra_pid,
                 has_own_netns: self.has_own_netns,
+                has_own_ipcns: self.has_own_ipcns,
                 host_pid: self.host_pid,
                 inherit_userns: self.inherit_userns,
                 node_cgroup: self.node_cgroup,
@@ -13208,23 +13240,26 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
 
     #[test]
     fn sysctl_allowlist_so_aceita_namespaced() {
-        // namespaced (safe) → permitted, WITH an own netns.
+        // namespaced (safe) → permitted, WITH an own netns and IPC ns.
         for k in [
             "net.ipv4.ip_forward",
             "kernel.shmmax",
             "kernel.sem",
             "fs.mqueue.msg_max",
         ] {
-            assert!(sysctl_namespaced(k, true), "{k} devia ser permitido");
+            assert!(sysctl_namespaced(k, true, true), "{k} devia ser permitido");
         }
-        // global to the host / traversal → refused, regardless of netns.
+        // global to the host / traversal → refused, regardless of namespaces.
         for k in [
             "kernel.hostname",
             "vm.swappiness",
             "kernel.core_pattern",
             "net/../kernel.x",
         ] {
-            assert!(!sysctl_namespaced(k, true), "{k} NÃO devia ser permitido");
+            assert!(
+                !sysctl_namespaced(k, true, true),
+                "{k} NÃO devia ser permitido"
+            );
         }
     }
 
@@ -13234,12 +13269,40 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // which shares the ingress holder's netns) used to let `net.*`
         // sysctls through unconditionally — writing a GLOBAL knob of
         // whatever netns is actually shared, not a per-container one.
-        // `kernel.sem`/`fs.mqueue.*` stay allowed either way (never network).
-        assert!(!sysctl_namespaced("net.ipv4.ip_forward", false));
-        assert!(!sysctl_namespaced("net.ipv6.conf.all.forwarding", false));
-        assert!(sysctl_namespaced("net.ipv4.ip_forward", true));
-        assert!(sysctl_namespaced("kernel.sem", false));
-        assert!(sysctl_namespaced("fs.mqueue.msg_max", false));
+        // (own IPC ns throughout — this test is about the net gate.)
+        assert!(!sysctl_namespaced("net.ipv4.ip_forward", false, true));
+        assert!(!sysctl_namespaced("net.ipv6.conf.all.forwarding", false, true));
+        assert!(sysctl_namespaced("net.ipv4.ip_forward", true, true));
+    }
+
+    #[test]
+    fn sysctl_ipc_recusado_sem_ipcns_propria() {
+        // BUG regression guard (ALTO #1), sibling of the `net.*` case:
+        // `--host-ipc` (CRI `ipc: NODE`), or a pod member joining the infra's
+        // IPC ns, shares the host's IPC namespace — so the IPC sysctls
+        // (`kernel.sem`/`shm*`/`msg*`, `fs.mqueue.*`) used to write a
+        // HOST-WIDE knob, a DoS surface. Refused unless the container owns
+        // its own IPC namespace.
+        for k in [
+            "kernel.shmall",
+            "kernel.shmmax",
+            "kernel.sem",
+            "kernel.msgmax",
+            "fs.mqueue.msg_max",
+        ] {
+            assert!(
+                !sysctl_namespaced(k, true, false),
+                "{k} NÃO devia ser permitido sem IPC ns própria"
+            );
+            assert!(
+                sysctl_namespaced(k, true, true),
+                "{k} devia ser permitido com IPC ns própria"
+            );
+        }
+        // The net gate and the IPC gate are independent: an own netns does not
+        // license IPC sysctls, nor an own IPC ns the `net.*` ones.
+        assert!(!sysctl_namespaced("net.ipv4.ip_forward", false, true));
+        assert!(!sysctl_namespaced("kernel.shmall", false, false));
     }
 
     /// `euid 0` is not proof of real root, and this is the parse that decides.
@@ -14117,6 +14180,8 @@ mod spawn_step_tests {
         // `no_new_privs` is ON unless the record says otherwise.
         assert!(i.no_new_privs);
         assert!(i.has_own_netns && !i.node_cgroup);
+        // No `--host-ipc`, no pod → owns its IPC namespace.
+        assert!(i.has_own_ipcns);
         assert!(i.detach && i.secret_files.is_empty());
         assert_eq!((i.run_uid, i.run_gid), (Some(1000), Some(1000)));
         assert_eq!((i.rootfs.as_str(), i.cid.as_str()), ("/r", "abc"));
@@ -14149,6 +14214,21 @@ mod spawn_step_tests {
         };
         let i = InitInputs::gather(&c, "/r", &inherited, "h".into(), vec![], vec![]);
         assert!(!i.has_own_netns && i.inherit_userns);
+
+        // --host-ipc shares the host's IPC namespace: not its own.
+        let host_ipc = RunSpec {
+            host_ipc: true,
+            ..Default::default()
+        };
+        let i = InitInputs::gather(&c, "/r", &host_ipc, "h".into(), vec![], vec![]);
+        assert!(!i.has_own_ipcns);
+        // A pod member joins the infra's IPC namespace: not its own either.
+        let pod = RunSpec {
+            pod_infra_pid: Some(7),
+            ..Default::default()
+        };
+        let i = InitInputs::gather(&c, "/r", &pod, "h".into(), vec![], vec![]);
+        assert!(!i.has_own_ipcns);
     }
 
     #[test]
