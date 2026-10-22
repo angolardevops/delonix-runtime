@@ -30,6 +30,13 @@ type Config struct {
 	Env         Environment
 	LogLevel    string
 
+	// RedisURL enables the Redis cache. Empty: the in-process cache is used.
+	RedisURL string
+	// CacheTTL is how long a cached note lives.
+	CacheTTL time.Duration
+	// RabbitURL enables RabbitMQ publish/consume. Empty: messaging is off.
+	RabbitURL string
+
 	Addr              string
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
@@ -84,6 +91,10 @@ func Load(getenv func(string) string, version string) (Config, error) {
 		IdleTimeout:       dur("HTTP_IDLE_TIMEOUT", 60*time.Second),
 		ShutdownTimeout:   dur("SHUTDOWN_TIMEOUT", 15*time.Second),
 		DrainDelay:        dur("DRAIN_DELAY", 0),
+
+		RedisURL:  get("REDIS_URL", ""),
+		CacheTTL:  dur("CACHE_TTL", 300*time.Second),
+		RabbitURL: get("RABBITMQ_URL", ""),
 
 		InboundWebhookSecret:  get("WEBHOOK_INBOUND_SECRET", ""),
 		OutboundWebhookURL:    get("WEBHOOK_TARGET_URL", ""),
