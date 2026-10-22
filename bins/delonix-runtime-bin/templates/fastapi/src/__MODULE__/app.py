@@ -14,10 +14,17 @@ from fastapi import FastAPI
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
+from .cache.cached_notes import CachedNotes
+from .cache.memory import InMemoryCache
+from .cache.ports import Cache
+from .cache.redis import RedisCache
 from .config import Settings
 from .lifecycle import Readiness
+from .messaging.consumer import RabbitConsumer
+from .messaging.publisher import CompositePublisher, Opener, RabbitPublisher, aio_pika_opener
 from .notes import api as notes_api
 from .notes.memory import InMemoryNoteStore
+from .notes.ports import NotePublisher
 from .notes.service import NoteService
 from .observability.telemetry import Telemetry
 from .observability.traced import TracedNotes
@@ -35,12 +42,23 @@ API_VERSION = "1.0.0"
 TITLE = "__NAME__"
 
 
+def _combine(publishers: list[NotePublisher]) -> NotePublisher | None:
+    """The one publisher, the composite of several, or None for zero."""
+    if not publishers:
+        return None
+    if len(publishers) == 1:
+        return publishers[0]
+    return CompositePublisher(publishers)
+
+
 def create_app(
     settings: Settings,
     telemetry: Telemetry,
     *,
     clock: Callable[[], float] = time.time,
     webhook_client: httpx.AsyncClient | None = None,
+    cache: Cache | None = None,
+    rabbit_opener: Opener = aio_pika_opener,
 ) -> FastAPI:
     readiness = Readiness()
     client: httpx.AsyncClient | None = None
@@ -57,24 +75,61 @@ def create_app(
             tracer=telemetry.tracer(f"{__package__}.webhooks"),
             meter=telemetry.meter(f"{__package__}.webhooks"),
         )
-    notes = TracedNotes(
-        NoteService(InMemoryNoteStore(), dispatcher), telemetry.tracer(f"{__package__}.notes")
+
+    # Every new note goes to each configured publisher: the webhook dispatcher
+    # (signed HTTP) and RabbitMQ (AMQP). Both are non-blocking and bounded.
+    publishers: list[NotePublisher] = []
+    if dispatcher is not None:
+        publishers.append(dispatcher)
+    rabbit_publisher: RabbitPublisher | None = None
+    consumer: RabbitConsumer | None = None
+    if settings.rabbitmq_url:
+        meter = telemetry.meter(f"{__package__}.messaging")
+        rabbit_publisher = RabbitPublisher(
+            url=settings.rabbitmq_url, meter=meter, opener=rabbit_opener
+        )
+        publishers.append(rabbit_publisher)
+        consumer = RabbitConsumer(url=settings.rabbitmq_url, meter=meter)
+    publisher: NotePublisher | None = _combine(publishers)
+
+    # Redis when configured, an in-process cache otherwise (so tests and local
+    # runs need no Redis). Cache-aside wraps the use cases from the outside.
+    cache_backend: Cache = cache or (
+        RedisCache.from_url(settings.redis_url) if settings.redis_url else InMemoryCache()
+    )
+    notes = CachedNotes(
+        TracedNotes(
+            NoteService(InMemoryNoteStore(), publisher), telemetry.tracer(f"{__package__}.notes")
+        ),
+        cache_backend,
+        ttl_seconds=settings.cache_ttl,
     )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if dispatcher is not None:
             dispatcher.start()
+        if rabbit_publisher is not None:
+            rabbit_publisher.start()
+        if consumer is not None:
+            consumer.start()
         readiness.set_ready()
         log.info("ready")
         yield
         # Uvicorn runs this after in-flight requests finished (or were cut).
-        # Whatever time the shutdown deadline leaves goes to the webhook queue.
+        # Whatever time the shutdown deadline leaves goes to the delivery queues.
         readiness.begin_drain(settings.shutdown_timeout)
+        if consumer is not None:
+            await consumer.close()
+        if rabbit_publisher is not None and not await rabbit_publisher.close(
+            readiness.remaining(settings.shutdown_timeout)
+        ):
+            readiness.mark_interrupted()
         if dispatcher is not None and not await dispatcher.close(
             readiness.remaining(settings.shutdown_timeout)
         ):
             readiness.mark_interrupted()
+        await cache_backend.aclose()
         if client is not None:
             await client.aclose()
 

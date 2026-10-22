@@ -34,6 +34,17 @@ def _parse_duration(value: object) -> object:
 Seconds = Annotated[float, BeforeValidator(_parse_duration), Field(ge=0)]
 
 
+def _require_scheme(
+    problems: list[str], name: str, url: str | None, schemes: tuple[str, ...]
+) -> None:
+    """Add a problem if `url` is set but not one of `schemes` with a host."""
+    if not url:
+        return
+    parts = urlsplit(url)
+    if parts.scheme not in schemes or not parts.netloc:
+        problems.append(f"{name}: expected {' or '.join(schemes)}://host")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -63,6 +74,17 @@ class Settings(BaseSettings):
     webhook_target_url: str | None = None
     webhook_target_secret: SecretStr | None = None
 
+    # Redis cache (read-through for note lookups). Unset = an in-process cache,
+    # so local runs and tests need no Redis; `compose.yaml` points this at the
+    # redis service. The URL carries the password — it is never logged.
+    redis_url: str | None = None
+    cache_ttl: Seconds = 300.0
+
+    # RabbitMQ async messaging (publish and consume `note.created`). Unset =
+    # off; `compose.yaml` points this at the rabbitmq service. Password in the
+    # URL, never logged.
+    rabbitmq_url: str | None = None
+
     @model_validator(mode="after")
     def _cross_field_rules(self) -> Settings:
         problems: list[str] = []
@@ -88,6 +110,15 @@ class Settings(BaseSettings):
                     parse_secret(self.webhook_target_secret.get_secret_value())
                 except ValueError as exc:
                     problems.append(f"WEBHOOK_TARGET_SECRET: {exc}")
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    @model_validator(mode="after")
+    def _service_urls(self) -> Settings:
+        problems: list[str] = []
+        _require_scheme(problems, "REDIS_URL", self.redis_url, ("redis", "rediss"))
+        _require_scheme(problems, "RABBITMQ_URL", self.rabbitmq_url, ("amqp", "amqps"))
         if problems:
             raise ValueError("; ".join(problems))
         return self

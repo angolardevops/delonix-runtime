@@ -3,7 +3,12 @@
 RUN := uv run --locked
 URL ?= http://localhost:__PORT__
 
-.PHONY: lock install fmt fmt-check lint typecheck test cover audit build openapi run dev smoke check
+# The container engine for the compose targets: `docker compose` by default,
+# or Delonix' own path with `make up ENGINE="delonix compose"`.
+ENGINE ?= docker compose
+
+.PHONY: lock install fmt fmt-check lint typecheck test cover audit build openapi run dev smoke check \
+        up down logs ps scan
 
 lock:        ## resolve the dependencies and write uv.lock (commit it)
 	uv lock
@@ -41,3 +46,19 @@ dev:         ## auto-reload on change
 smoke:       ## against a running instance: make smoke URL=http://localhost:__PORT__
 	sh ./scripts/smoke.sh $(URL)
 check: install fmt-check lint typecheck test build  ## what CI runs
+
+# ---- the stack (compose.yaml): app + Redis + RabbitMQ; +SonarQube with the
+# `quality` profile). Works with Docker/Podman Compose and `delonix compose`. --
+up:          ## build and start the app, Redis and RabbitMQ (detached)
+	$(ENGINE) up -d --build
+down:        ## stop the stack (keeps the named volumes / data)
+	$(ENGINE) down
+logs:        ## follow the app's logs
+	$(ENGINE) logs -f __NAME__
+ps:          ## what is running
+	$(ENGINE) ps
+scan:        ## run SonarQube + its DB, then analyse (needs SONAR_TOKEN; see README)
+	$(ENGINE) --profile quality up -d
+	$(MAKE) cover
+	@test -n "$(SONAR_TOKEN)" || { echo "set SONAR_TOKEN (see README: SonarQube)"; exit 1; }
+	uvx pysonar-scanner@0.3.4 -Dsonar.host.url=$${SONAR_HOST_URL:-http://localhost:9000} -Dsonar.token=$(SONAR_TOKEN)

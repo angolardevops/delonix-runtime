@@ -41,6 +41,56 @@ so the first step of a new project is `make lock` and a commit of `uv.lock`.
 Everything else (`make install`, CI) installs with `--locked` and refuses to
 run without it.
 
+## The stack (`compose.yaml`)
+
+One file brings up the app together with **Redis** (cache) and **RabbitMQ**
+(messaging). It is the single startup manifest and runs on both engines:
+
+```bash
+make up                                  # docker compose up -d --build
+make up ENGINE="delonix compose"         # the same file, Delonix' own path
+make logs                                # follow the app
+make down                                # stop (named volumes keep the data)
+```
+
+`delonix init` wrote a git-ignored `.env` (mode 0600) with fresh random
+passwords for RabbitMQ and the SonarQube database; `compose.yaml` reads it via
+`env_file` — no secret is in the committed files. The app points at the
+services by their Compose hostnames (`redis`, `rabbitmq`).
+
+Redis and RabbitMQ are **optional and degrade gracefully**: unset `REDIS_URL`
+and the cache is in-process; unset `RABBITMQ_URL` and messaging is off. So a
+bare `make run` needs neither — comment both out in `.env` for a pure local run.
+The cache is read-through on `GET /api/v1/notes/{id}`; every new note is
+published as `note.created` to a topic exchange and consumed from a work queue
+with manual acks, a bounded retry and a dead-letter queue (`src/__MODULE__/cache`
+and `src/__MODULE__/messaging`).
+
+## Code quality: SonarQube
+
+SonarQube and its PostgreSQL run under the `quality` profile, kept out of the
+default `up` because they are heavy:
+
+```bash
+sudo sysctl -w vm.max_map_count=262144   # host prerequisite (Elasticsearch);
+                                         # persist it in /etc/sysctl.d/99-sonar.conf
+make up ENGINE="delonix compose" || docker compose --profile quality up -d sonarqube sonar-db
+```
+
+SonarQube ships with a known default login (`admin`/`admin`) that it forces you
+to change on first sign-in — do that before anything else. Then create a
+**project analysis token** (My Account → Security) and export it; it is never
+written to a file by this template:
+
+```bash
+export SONAR_TOKEN=<the token you created>
+make scan                                # runs coverage, then the scanner
+```
+
+`sonar-project.properties` carries the project key, sources, tests and the
+coverage path. The community edition analyses the main branch only — it does
+**not** do pull-request or branch analysis; that needs a paid edition.
+
 ## Commands
 
 | Task | Command |
