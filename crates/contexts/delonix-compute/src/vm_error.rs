@@ -130,6 +130,12 @@ pub enum Error {
     #[error("{0}")]
     SnapshotNotFound(String),
 
+    /// A create named a network (`--network`, `spec.network`) that is not
+    /// declared on this node. Refused before the overlay is built, so nothing
+    /// is left behind to clean.
+    #[error("{0}")]
+    NetworkNotDeclared(String),
+
     // ---- conflict -------------------------------------------------------
     /// A VM record already exists under this name, from the other (direct-QEMU)
     /// VM subsystem that shares the same `vms/` folder.
@@ -155,6 +161,12 @@ pub enum Error {
     /// ADR-0053 decision 4. A refusal, never a partial move.
     #[error("{0}")]
     MoveRefused(String),
+    /// The hypervisor already has a network under the name a VM asked for,
+    /// on a subnet other than the one declared for it, and it cannot be
+    /// redefined: the engine did not define it, or a VM is still on it.
+    /// Before, the VM was attached to it anyway, rc 0, on the old subnet.
+    #[error("{0}")]
+    NetworkSubnetConflict(String),
 
     // ---- unavailable ------------------------------------------------------
     /// A named backend this build knows about but has not configured (e.g.
@@ -270,11 +282,13 @@ impl Error {
             Error::InvalidMoveTarget(_) => 1538,
             Error::VmNotFound(_) => 4501,
             Error::SnapshotNotFound(_) => 4502,
+            Error::NetworkNotDeclared(_) => 4505,
             Error::RecordConflict(_) => 5501,
             Error::SnapshotTaken(_) => 5502,
             Error::ResizeNeedsStopped(_) => 5505,
             Error::CloudInitNeedsStopped(_) => 5506,
             Error::MoveRefused(_) => 5507,
+            Error::NetworkSubnetConflict(_) => 5508,
             Error::BackendNotConfigured(_) => 6501,
             Error::NoBackendAvailable(_) => 6502,
             Error::NoFirmware(_) => 6503,
@@ -318,12 +332,13 @@ impl From<Error> for Dx {
         }
         let number = e.number();
         let class = match e {
-            Error::SnapshotNotFound(text) => Dx::NotFound(text),
+            Error::SnapshotNotFound(text) | Error::NetworkNotDeclared(text) => Dx::NotFound(text),
             Error::RecordConflict(text)
             | Error::SnapshotTaken(text)
             | Error::ResizeNeedsStopped(text)
             | Error::CloudInitNeedsStopped(text)
-            | Error::MoveRefused(text) => Dx::Conflict(text),
+            | Error::MoveRefused(text)
+            | Error::NetworkSubnetConflict(text) => Dx::Conflict(text),
             Error::BackendNotConfigured(text)
             | Error::NoBackendAvailable(text)
             | Error::NoFirmware(text)
@@ -388,12 +403,16 @@ mod tests {
             ),
             Error::VmNotFound("dev".into()),
             Error::SnapshotNotFound("snapshot of VM 'x': s1".into()),
+            Error::NetworkNotDeclared("network 'n' is not declared on this node".into()),
             Error::RecordConflict(
                 "a VM 'x' created by `vm run` (direct-QEMU) already exists".into(),
             ),
             Error::SnapshotTaken("VM 'x' already has a snapshot named 's1'".into()),
             Error::InvalidMoveTarget("node 'pve9' is not a member of the VM's cluster".into()),
             Error::MoveRefused("VM 'x' has local disks the target would have to copy".into()),
+            Error::NetworkSubnetConflict(
+                "libvirt network 'lab' is on 10.0.0.0/24, not 10.0.1.0/24".into(),
+            ),
             Error::BackendNotConfigured(
                 "VM backend 'proxmox' is not available in this build: y".into(),
             ),

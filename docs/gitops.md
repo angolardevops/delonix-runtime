@@ -16,7 +16,7 @@ fluxo completo.
 ## Os cinco comandos
 
 ```bash
-delonix stack plan       # o que mudaria — não muda nada
+delonix stack plan       # o que mudaria — não muda nada (`--prune`: o que o apply --prune faria)
 delonix stack apply      # converge
 delonix stack apply --prune   # converge e remove o que saiu do manifesto
 delonix stack wait       # bloqueia até estar mesmo de pé
@@ -36,7 +36,7 @@ mexe).
 | `+~` | existe, não pertence a stack nenhuma — vai ser **adoptado** |
 | `~` | converge **a quente**, sem recriar e sem mudar o PID |
 | `-/+` | tem de ser **destruído e recriado** — o `apply` recusa sem `--replace` |
-| `-` | pertence a esta stack e saiu do manifesto — só sai com `--prune` |
+| `-` | pertence a esta stack e saiu do manifesto — só sai com `--prune`. Num `plan` sem `--prune` aparece como **mantido** e não conta para o `--detailed-exitcode` |
 | `=` | já bate certo |
 | `✗` | pertence a **outra** stack — nunca é tocado |
 | `!` | este Kind não converge nesta versão |
@@ -149,7 +149,17 @@ serve-o directamente — mesmo contrato do `terraform plan -detailed-exitcode`:
 |---|---|
 | `0` | nada a fazer |
 | `2` | há alterações (= deriva, se o ficheiro não mudou) |
+| `5` | o plano tem um **conflito de posse** (`DX-5601`) — o `stack apply` recusá-lo-ia inteiro |
 | `1` | o comando falhou |
+
+**O gate planeia com as flags do `apply` que o acompanha.** O `plan` responde
+pelo que esse `apply` faria, e um `apply` sem `--prune` não remove nada. Por isso,
+sem `--prune`, um recurso que saiu do manifesto aparece como **mantido** e não
+conta: o gate fica verde, porque o `apply` também o deixa ficar. Um pipeline que
+aplica com `--prune`, como o de cima, planeia com `stack plan --prune
+--detailed-exitcode`, e aí a remoção conta como alteração (`2`). Até aqui o `plan`
+não tinha `--prune`, contava sempre a remoção, e um gate sem poda ficava a `2`
+para sempre.
 
 Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de `1` — `4` se o
 manifesto nomear um recurso que não existe, por exemplo (a tabela completa está
@@ -159,12 +169,19 @@ em [cli-stability.md](cli-stability.md)). Os dois sinais positivos não mudam:
 por erro» continua correcto; um escrito com `elif [ $? -eq 1 ]` para o erro
 passa a precisar de `else`.
 
+O `5` existe desde que um conflito deixou de passar por limpo: um recurso que
+outra stack já carimbou não é uma alteração (o `changed` dele é `false`), e até
+aqui o plano respondia `0` — o gate ficava verde e o `apply` a seguir recusava
+com `5`. O conflito ganha às alterações: com um conflito no plano a resposta é
+`5` mesmo que haja também recursos a mudar, porque o `apply` não aplicaria
+nenhum deles.
+
 ```yaml
   drift:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: delonix stack plan --detailed-exitcode
+      - run: delonix stack plan --prune --detailed-exitcode
 ```
 
 ```yaml

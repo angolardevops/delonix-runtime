@@ -76,6 +76,25 @@ Concretamente, garante-se:
 > comportamento; o que muda é para quem testa `[ $? -eq 1 ]` **à espera de uma
 > falha específica**. Ver a nota de migração no fim desta secção.
 
+> **Alteração de contrato depois da v5.1.1.** Com `--detailed-exitcode`, um
+> `stack plan` cujo plano tem um `Conflict` — um recurso com o carimbo
+> `delonix.io/stack` de outra stack — respondia `0`, porque um conflito não é uma
+> alteração. Passa a responder `5` (`DX-5601`), o mesmo que o `stack apply`
+> recusaria, e ganha ao `2`. Um gate escrito como «`0` passa, `2` é deriva, o
+> resto é erro» fica certo sem mudança; quem só testava `[ $? -eq 0 ]` passa a ver
+> vermelho exactamente onde o `apply` ia falhar. Sem a flag, o `plan` continua a
+> responder `0`.
+
+> **Alteração de contrato depois da v5.1.1 (2).** O `stack plan` (e o `plan`)
+> ganhou `--prune`, e passou a planear com as flags do `apply`. Sem `--prune`, um
+> recurso que esta stack possui e o manifesto já não declara continua listado
+> (`-`), mas como **mantido**: `changed: false` no `-o json` e fora do
+> `--detailed-exitcode`. Antes contava como alteração, e um gate de deriva sem
+> poda respondia `2` para sempre, porque o `apply` que o acompanha nunca o remove.
+> Com `--prune` responde como antes: a remoção é uma alteração (`2`). Quem fazia o
+> gate dar `2` com recursos que saíram do manifesto passa a precisar de
+> `--prune`. O `action` continua `delete`, e o `planDigest` não muda.
+
 | código | significado |
 |---|---|
 | `0` | sucesso |
@@ -83,7 +102,7 @@ Concretamente, garante-se:
 | `2` | uso inválido (o do `clap`) — e, em `stack plan --detailed-exitcode`, «há alterações» |
 | `3` | o recurso existe mas **não está a correr** |
 | `4` | **não existe** esse recurso |
-| `5` | **conflito** — o nome já está tomado |
+| `5` | **conflito** — o nome já está tomado; e, em `stack plan --detailed-exitcode`, um plano com um recurso que outra stack carimbou (`DX-5601`) |
 | `69` | **capacidade que este host não tem** — uma ferramenta por instalar, um backend indisponível |
 | `74` | **o sistema de ficheiros disse que não** — disco cheio, caminho impossível |
 | `77` | **permissão negada** — o remédio é uma permissão, e depois repetir |

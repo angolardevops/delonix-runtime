@@ -118,6 +118,10 @@ pub trait RunHost {
 pub trait VmNetwork: Send + Sync {
     /// Ensures a private network's bridge and DHCP exist before an attach.
     fn ensure_network(&self, name: &str) -> Result<()>;
+    /// Whether `name` is a network declared on this node (`network create`,
+    /// `kind: Network`) — the question a create asks BEFORE it builds anything,
+    /// so a VM is never half-made on a network nobody declared.
+    fn is_declared(&self, name: &str) -> Result<bool>;
     /// Creates `vm`'s tap on `network`, registered in `namespace`; returns the
     /// tap's name.
     fn attach_tap(&self, vm: &str, network: &str, mac: &str, namespace: &str) -> Result<String>;
@@ -128,6 +132,16 @@ pub trait VmNetwork: Send + Sync {
     /// The argv prefix that runs a command inside the infra's namespaces, or
     /// `None` when the infra is not up.
     fn join_argv(&self) -> Option<Vec<String>>;
+    /// The subnet declared for the network `name` (`10.231.80.0/24`), or
+    /// `None` when none is declared. Default: `None`.
+    ///
+    /// A `vm start` rebuilds its config from the record, which does not keep
+    /// the subnet; without it a hypervisor-side network that has gone (removed
+    /// with its last VM by another state root, or out of band) could not be
+    /// defined again, and one left on an old subnet could not be judged.
+    fn subnet_of(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 /// The VM backends a node has, as the VM use cases ask for them

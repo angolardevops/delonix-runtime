@@ -225,7 +225,9 @@ pub struct Change {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<crate::condition::Condition>,
     pub diffs: Vec<FieldDiff>,
-    /// Convenience for consumers: `action.is_change()`.
+    /// Convenience for consumers: `action.is_change()` as the reconciler sets
+    /// it. `stack plan` without `--prune` clears it on a `Delete`, which the
+    /// apply it pairs with keeps — the plan answers for the same flags.
     pub changed: bool,
     /// The digest of this document's plan, for the Kinds whose plan is
     /// decided from a remote provider's state (ADR-0059 D4). `stack apply

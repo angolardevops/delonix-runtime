@@ -161,7 +161,7 @@ esconder, com o obstáculo nomeado. A lista autoritativa não é este parágrafo
 <a href="cli-stability.md"><code>cli-stability.md</code></a>.</p>
 </blockquote>
 <h2 id="os-cinco-comandos">Os cinco comandos</h2>
-<pre><code class="language-bash">delonix stack plan       # o que mudaria — não muda nada
+<pre><code class="language-bash">delonix stack plan       # o que mudaria — não muda nada (`--prune`: o que o apply --prune faria)
 delonix stack apply      # converge
 delonix stack apply --prune   # converge e remove o que saiu do manifesto
 delonix stack wait       # bloqueia até estar mesmo de pé
@@ -198,7 +198,7 @@ mexe).</p>
 </tr>
 <tr>
 <td><code>-</code></td>
-<td>pertence a esta stack e saiu do manifesto — só sai com <code>--prune</code></td>
+<td>pertence a esta stack e saiu do manifesto — só sai com <code>--prune</code>. Num <code>plan</code> sem <code>--prune</code> aparece como <strong>mantido</strong> e não conta para o <code>--detailed-exitcode</code></td>
 </tr>
 <tr>
 <td><code>=</code></td>
@@ -314,11 +314,23 @@ serve-o directamente — mesmo contrato do <code>terraform plan -detailed-exitco
 <td>há alterações (= deriva, se o ficheiro não mudou)</td>
 </tr>
 <tr>
+<td><code>5</code></td>
+<td>o plano tem um <strong>conflito de posse</strong> (<code>DX-5601</code>) — o <code>stack apply</code> recusá-lo-ia inteiro</td>
+</tr>
+<tr>
 <td><code>1</code></td>
 <td>o comando falhou</td>
 </tr>
 </tbody>
 </table>
+<p><strong>O gate planeia com as flags do <code>apply</code> que o acompanha.</strong> O <code>plan</code> responde
+pelo que esse <code>apply</code> faria, e um <code>apply</code> sem <code>--prune</code> não remove nada. Por isso,
+sem <code>--prune</code>, um recurso que saiu do manifesto aparece como <strong>mantido</strong> e não
+conta: o gate fica verde, porque o <code>apply</code> também o deixa ficar. Um pipeline que
+aplica com <code>--prune</code>, como o de cima, planeia com <code>stack plan --prune
+--detailed-exitcode</code>, e aí a remoção conta como alteração (<code>2</code>). Até aqui o <code>plan</code>
+não tinha <code>--prune</code>, contava sempre a remoção, e um gate sem poda ficava a <code>2</code>
+para sempre.</p>
 <p>Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de <code>1</code> — <code>4</code> se o
 manifesto nomear um recurso que não existe, por exemplo (a tabela completa está
 em <a href="cli-stability.md">cli-stability.md</a>). Os dois sinais positivos não mudam:
@@ -326,11 +338,17 @@ em <a href="cli-stability.md">cli-stability.md</a>). Os dois sinais positivos n�
 <code>2</code>. Um gate escrito como «<code>0</code> passa, <code>2</code> falha por deriva, <strong>o resto</strong> falha
 por erro» continua correcto; um escrito com <code>elif [ $? -eq 1 ]</code> para o erro
 passa a precisar de <code>else</code>.</p>
+<p>O <code>5</code> existe desde que um conflito deixou de passar por limpo: um recurso que
+outra stack já carimbou não é uma alteração (o <code>changed</code> dele é <code>false</code>), e até
+aqui o plano respondia <code>0</code> — o gate ficava verde e o <code>apply</code> a seguir recusava
+com <code>5</code>. O conflito ganha às alterações: com um conflito no plano a resposta é
+<code>5</code> mesmo que haja também recursos a mudar, porque o <code>apply</code> não aplicaria
+nenhum deles.</p>
 <pre><code class="language-yaml">  drift:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: delonix stack plan --detailed-exitcode
+      - run: delonix stack plan --prune --detailed-exitcode
 </code></pre>
 <pre><code class="language-yaml">on:
   schedule: [{ cron: '0 7 * * *' }]

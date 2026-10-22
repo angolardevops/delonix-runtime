@@ -203,10 +203,17 @@ pub enum StackCmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
-        /// Exit 2 when there are changes (0 = none, 1 = error) — the
+        /// Exit 2 when there are changes, 5 when the plan holds a conflict
+        /// `stack apply` would refuse (0 = none, 1 = error) — the
         /// `terraform plan -detailed-exitcode` contract, for a CI drift gate.
         #[arg(long = "detailed-exitcode")]
         detailed_exitcode: bool,
+        /// Plan what `stack apply --prune` would do: what this stack owns and
+        /// the manifest no longer declares counts as a change, to remove.
+        /// Without it, it is listed as KEPT — `apply` removes nothing without
+        /// `--prune` — and does not count for `--detailed-exitcode`.
+        #[arg(long = "prune")]
+        prune: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit. Answers
         /// "why is my change not showing up?" without reading the source.
         #[arg(long = "fields")]
@@ -367,8 +374,9 @@ pub fn run(action: StackCmd) -> Result<()> {
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
-        } => plan_cmd(file, name, output, detailed_exitcode, fields),
+        } => plan_cmd(file, name, output, detailed_exitcode, prune, fields),
         StackCmd::Destroy {
             file,
             name,
@@ -919,6 +927,7 @@ fn plan_cmd(
     name: Option<String>,
     output: super::output::OutputFormat,
     detailed_exitcode: bool,
+    prune: bool,
     fields: bool,
 ) -> Result<()> {
     if fields {
@@ -930,8 +939,7 @@ fn plan_cmd(
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
     super::gitops::refuse_self_target(&docs, &stack, super::gitops::Applier::Operator)?;
-    let changes = plan_with_digests(&docs, &stack)?;
-    let any = changes.iter().any(|c| c.changed);
+    let changes = mark_unpruned(plan_with_digests(&docs, &stack)?, prune);
     match output {
         super::output::OutputFormat::Json => super::output::print_json(&changes)?,
         super::output::OutputFormat::Table => render_plan(&path, &stack, &changes),
@@ -940,10 +948,62 @@ fn plan_cmd(
     // wiring this into CI already has in their fingers: 0 = nothing to do,
     // 2 = there are changes, 1 = the command failed. Opt-in, so the plain
     // `plan` keeps returning 0 and no existing script changes meaning.
-    if detailed_exitcode && any {
-        std::process::exit(2);
+    if detailed_exitcode {
+        if let Some(code) = detailed_exit(&changes)? {
+            std::process::exit(code);
+        }
     }
     Ok(())
+}
+
+/// A plan answers what `stack apply` WITH THE SAME FLAGS would do, and an
+/// apply without `--prune` removes nothing. So without `prune` a `Delete` stays
+/// in the plan — what this stack left behind must stay visible — but marked
+/// kept: `changed: false`, which is what `--detailed-exitcode` and the JSON's
+/// `changed` read. A drift gate used to answer 2 for ever after a resource left
+/// the manifest, since the apply it pairs with never removes it. The action and
+/// the `planDigest` are left as they are (the digest never reads `changed` nor
+/// `reason`), so `apply --plan-digest` accepts either plan. Pure.
+fn mark_unpruned(mut changes: Vec<Change>, prune: bool) -> Vec<Change> {
+    if prune {
+        return changes;
+    }
+    for c in changes.iter_mut().filter(|c| c.action == Action::Delete) {
+        c.changed = false;
+        // English, like every `reason`: it is part of the `-o json` payload.
+        c.reason = Some(
+            "no longer declared in the manifest — kept: `stack apply` removes it only with --prune"
+                .to_string(),
+        );
+    }
+    changes
+}
+
+/// The exit `--detailed-exitcode` answers for a plan, `None` being 0. A plan
+/// with a `Conflict` is the error the apply would refuse it with (DX-5601,
+/// exit 5), and it outranks «there are changes»: a conflict is not a change
+/// (`changed` is false on it), so it used to read 0 — a drift gate saw a clean
+/// plan that `stack apply` then refused. Pure.
+fn detailed_exit(changes: &[Change]) -> Result<Option<i32>> {
+    let conflicts = changes
+        .iter()
+        .filter(|c| c.action == Action::Conflict)
+        .count();
+    if conflicts > 0 {
+        return Err(conflict_error(super::po::tf(
+            "stack plan: {n} resource(s) belong to another stack or only to the provider — \
+             `stack apply` would refuse this plan",
+            &[("n", &conflicts.to_string())],
+        )));
+    }
+    Ok(changes.iter().any(|c| c.changed).then_some(2))
+}
+
+/// `DX-5601`: a resource the manifest declares is held by someone else. The
+/// one constructor the apply's refusal and the plan's exit share, so the two
+/// cannot drift to different numbers.
+fn conflict_error(message: String) -> delonix_model::Error {
+    delonix_model::Error::coded(5601, delonix_model::Error::Conflict(message))
 }
 
 /// The localized justification for a change, composed from the STRUCTURED
@@ -976,6 +1036,10 @@ fn explain(c: &Change) -> Option<String> {
         Action::Adopt => {
             Some(super::po::t("exists and belongs to no stack — will be taken over").to_string())
         }
+        Action::Delete if !c.changed => Some(
+            super::po::t("no longer declared in the manifest — kept, `--prune` removes it")
+                .to_string(),
+        ),
         Action::Delete => Some(super::po::t("no longer declared in the manifest").to_string()),
         // A Secret converges per document, so reaching here means THIS one reads
         // its values from the environment or a file, which a plan does not.
@@ -1043,6 +1107,11 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
     }
     println!();
     let s = reconcile::summary(changes);
+    // A `Delete` the plan was not asked to prune is one the apply keeps
+    // (`mark_unpruned`): «to remove» would promise what will not happen.
+    let kept = changes
+        .iter()
+        .any(|c| c.action == Action::Delete && !c.changed);
     // The counter labels are translated for the human table; the JSON keeps the
     // stable `snake_case` keys (ADR-0005 — field names never change with the
     // locale, or every consumer in another language breaks).
@@ -1056,6 +1125,7 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
                 "replace" => super::po::t("to replace"),
                 "reboot" => super::po::t("to reboot"),
                 "unchanged" => super::po::t("unchanged"),
+                "delete" if kept => super::po::t("kept, no longer declared (`--prune` removes)"),
                 "delete" => super::po::t("to remove"),
                 "conflict" => super::po::t("in conflict"),
                 _ => super::po::t("not converging"),
@@ -1691,10 +1761,29 @@ fn refuse_unallowed(changes: &[Change], replace: &[String], reboot: &[String]) -
     for b in &blocked {
         eprintln!("  ✗ {b}");
     }
-    Err(delonix_model::Error::Invalid(super::po::tf(
+    Err(refusal(changes, blocked.len()))
+}
+
+/// The error a refused apply answers with. A `Conflict` is not a decision the
+/// operator forgot to pass — no flag authorises it —, so it exits with the
+/// conflict class like every other «someone else holds it» refusal of the CLI,
+/// and outranks a `--replace`/`--reboot` the same plan also lacks. Pure.
+fn refusal(changes: &[Change], blocked: usize) -> delonix_model::Error {
+    let conflicts = changes
+        .iter()
+        .filter(|c| c.action == Action::Conflict)
+        .count();
+    if conflicts > 0 {
+        return conflict_error(super::po::tf(
+            "stack apply refused: {n} resource(s) belong to another stack or only to the \
+             provider (nothing was changed)",
+            &[("n", &conflicts.to_string())],
+        ));
+    }
+    delonix_model::Error::Invalid(super::po::tf(
         "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)",
-        &[("n", &blocked.len().to_string())],
-    )))
+        &[("n", &blocked.to_string())],
+    ))
 }
 
 /// One line per change the flags do not authorise. Pure.
@@ -3022,7 +3111,7 @@ fn rollback(
     // The same renderer `stack plan` uses. A rollback that printed its own
     // shape would be a second way to describe the same decision, and the two
     // would drift — the failure this file already carries three lessons about.
-    render_plan(&path, &stack, &changes);
+    render_plan(&path, &stack, &mark_unpruned(changes.clone(), do_prune));
 
     // What the replay cannot undo. Counted from the plan, so the numbers are
     // this rollback's and not a general disclaimer.
@@ -4199,6 +4288,7 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
                 super::super::output::OutputFormat::Table,
                 false,
                 false,
+                false,
             )),
             1601
         );
@@ -4364,6 +4454,142 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         )
         .unwrap();
         assert!(refuse_unallowed(&out, &r, &[]).is_err());
+    }
+
+    /// A resource another stack owns is a conflict, whatever its Kind, and the
+    /// refusal exits with the conflict class (5) under its own number — not the
+    /// generic «invalid argument» (rc 1, DX-1000) it used to answer with, which
+    /// told a script to fix an argument when no argument was wrong.
+    #[test]
+    fn a_conflict_refuses_with_the_conflict_class_for_every_kind() {
+        for kind in ["Container", "Network", "Volume", "VirtualMachine"] {
+            let mut c = with_action(a_change(kind, "x"), Action::Conflict);
+            c.owner = Some("stk".into());
+            let e = refuse_unallowed(&[c], &["all".into()], &["all".into()]).unwrap_err();
+            assert_eq!(e.number(), 5601, "{kind}: {e}");
+            assert_eq!(delonix_model::exitcode::for_error(&e), 5, "{kind}: {e}");
+        }
+    }
+
+    /// A conflict next to a recreate nobody authorised still answers as a
+    /// conflict: passing `--replace` would not unblock it, so «invalid
+    /// argument» would send the operator after the wrong flag.
+    #[test]
+    fn a_conflict_outranks_a_missing_replace() {
+        let changes = vec![
+            with_action(a_change("Container", "web"), Action::Conflict),
+            a_change("Container", "db"),
+        ];
+        let e = refuse_unallowed(&changes, &[], &[]).unwrap_err();
+        assert_eq!(e.number(), 5601);
+    }
+
+    /// `plan --detailed-exitcode` on a plan whose only entry is a conflict: the
+    /// conflict carries `changed: false`, so this used to answer 0 — a drift
+    /// gate read «clean» a plan `stack apply` refuses with exit 5.
+    #[test]
+    fn a_detailed_plan_with_a_conflict_exits_with_the_conflict_class() {
+        for kind in ["Container", "Network", "Volume", "VirtualMachine"] {
+            let mut c = with_action(a_change(kind, "x"), Action::Conflict);
+            c.changed = false;
+            c.owner = Some("stk".into());
+            let e = detailed_exit(&[c]).unwrap_err();
+            assert_eq!(e.number(), 5601, "{kind}: {e}");
+            assert_eq!(delonix_model::exitcode::for_error(&e), 5, "{kind}: {e}");
+        }
+    }
+
+    /// A conflict next to real changes is still 5, not 2: the apply would
+    /// refuse the whole plan, so «there are changes to apply» would be false.
+    #[test]
+    fn a_detailed_plan_conflict_outranks_changes() {
+        let mut changed = with_action(a_change("Container", "db"), Action::Update);
+        changed.changed = true;
+        let changes = vec![
+            with_action(a_change("Container", "web"), Action::Conflict),
+            changed,
+        ];
+        assert_eq!(detailed_exit(&changes).unwrap_err().number(), 5601);
+    }
+
+    /// Without a conflict the `terraform` contract is untouched: 2 with a
+    /// change, 0 (None) without one.
+    #[test]
+    fn a_detailed_plan_without_a_conflict_keeps_two_and_zero() {
+        let mut changed = with_action(a_change("Container", "db"), Action::Update);
+        changed.changed = true;
+        assert_eq!(detailed_exit(&[changed]).unwrap(), Some(2));
+        let mut noop = with_action(a_change("Container", "db"), Action::NoOp);
+        noop.changed = false;
+        assert_eq!(detailed_exit(&[noop]).unwrap(), None);
+        assert_eq!(detailed_exit(&[]).unwrap(), None);
+    }
+
+    fn a_delete(name: &str) -> Change {
+        let mut c = with_action(a_change("Volume", name), Action::Delete);
+        c.changed = Action::Delete.is_change();
+        c.reason = Some("no longer declared in the manifest".into());
+        c
+    }
+
+    /// A resource that left the manifest, planned WITHOUT `--prune`: the apply
+    /// keeps it, so it does not count — a drift gate used to answer 2 for ever.
+    #[test]
+    fn without_prune_a_delete_is_kept_and_the_detailed_plan_is_clean() {
+        let out = mark_unpruned(vec![a_delete("old")], false);
+        assert_eq!(out[0].action, Action::Delete, "still listed");
+        assert!(!out[0].changed);
+        assert!(out[0].reason.as_deref().unwrap().contains("--prune"));
+        assert_eq!(detailed_exit(&out).unwrap(), None);
+    }
+
+    /// `--prune` plans what `apply --prune` does: the removal is a change.
+    #[test]
+    fn with_prune_a_delete_is_a_change() {
+        let out = mark_unpruned(vec![a_delete("old")], true);
+        assert!(out[0].changed);
+        assert_eq!(
+            out[0].reason.as_deref(),
+            Some("no longer declared in the manifest")
+        );
+        assert_eq!(detailed_exit(&out).unwrap(), Some(2));
+    }
+
+    /// Only the `Delete` is kept: a real change next to it still answers 2,
+    /// and a conflict still answers 5.
+    #[test]
+    fn without_prune_other_changes_still_count() {
+        let mut upd = with_action(a_change("Container", "db"), Action::Update);
+        upd.changed = true;
+        let out = mark_unpruned(vec![a_delete("old"), upd], false);
+        assert!(out[1].changed);
+        assert_eq!(detailed_exit(&out).unwrap(), Some(2));
+        let out = mark_unpruned(
+            vec![
+                a_delete("old"),
+                with_action(a_change("Volume", "x"), Action::Conflict),
+            ],
+            false,
+        );
+        assert_eq!(detailed_exit(&out).unwrap_err().number(), 5601);
+    }
+
+    /// The digest `apply --plan-digest` checks is the same whether or not the
+    /// plan was asked to prune — or a plan without `--prune` would make the
+    /// apply refuse it as stale.
+    #[test]
+    fn marking_a_delete_kept_does_not_change_its_plan_digest() {
+        let before = change_digest(&a_delete("old"));
+        let kept = mark_unpruned(vec![a_delete("old")], false);
+        assert_eq!(change_digest(&kept[0]), before);
+    }
+
+    /// Without a conflict, a missing `--replace` stays what it was.
+    #[test]
+    fn a_missing_replace_alone_keeps_the_invalid_argument_class() {
+        let e = refuse_unallowed(&[a_change("Container", "db")], &[], &[]).unwrap_err();
+        assert_eq!(e.number(), 1000);
+        assert_eq!(delonix_model::exitcode::for_error(&e), 1);
     }
 
     /// A flag that reads as obeyed and changes nothing is the defect itself —

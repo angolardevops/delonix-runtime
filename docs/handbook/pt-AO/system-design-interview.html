@@ -690,7 +690,7 @@ fazer do planeamento uma função pura.</p>
 <li><strong>As acções</strong> são <code>Create</code>, <code>Adopt</code>, <code>Update</code> (a quente, mesmo PID), <code>Replace</code> (recusado a menos
   que seja dado <code>--replace &lt;Kind&gt;/&lt;name&gt;</code>, verificado antes de qualquer coisa ser criada), <code>NoOp</code>,
   <code>Delete</code>, <code>Conflict</code>, <code>NotConverged</code>. O <code>plan --detailed-exitcode</code> responde 0/2/1 para um gate de
-  deriva em CI.</li>
+  deriva em CI, e 5 quando o plano tem um <code>Conflict</code> que o apply recusaria.</li>
 <li><strong>Uma única tabela de factos dos Kinds</strong> (domínio, forma, se converge, se tem teardown, se é
   namespaced, como é observada a presença) governa o planeador, a ordem de apply e a ordem de
   teardown, em vez de listas mantidas em sincronia à mão.</li>

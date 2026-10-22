@@ -282,9 +282,12 @@ enum Cmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: cmd::output::OutputFormat,
-        /// 0 = no changes, 2 = there are changes, 1 = error (`terraform plan`).
+        /// 0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`).
         #[arg(long)]
         detailed_exitcode: bool,
+        /// Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept.
+        #[arg(long)]
+        prune: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit.
         #[arg(long)]
         fields: bool,
@@ -1066,12 +1069,14 @@ fn run() -> Result<()> {
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         } => cmd::stack::run(cmd::stack::StackCmd::Plan {
             file,
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
         }),
         Cmd::Wait { file, timeout } => {

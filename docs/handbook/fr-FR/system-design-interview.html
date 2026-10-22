@@ -697,7 +697,8 @@ propriété d'un label, et faire de la planification une fonction pure.</p>
   <code>--prune</code> et <code>destroy</code> ne voient que ce qui porte le label.</li>
 <li><strong>Les actions</strong> sont <code>Create</code>, <code>Adopt</code>, <code>Update</code> (à chaud, même PID), <code>Replace</code> (refusée sauf si
   <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> est fourni, vérifié avant toute création), <code>NoOp</code>, <code>Delete</code>, <code>Conflict</code>,
-  <code>NotConverged</code>. <code>plan --detailed-exitcode</code> répond 0/2/1 pour un gate de dérive en CI.</li>
+  <code>NotConverged</code>. <code>plan --detailed-exitcode</code> répond 0/2/1 pour un gate de dérive en CI, et 5 quand le plan
+  contient un <code>Conflict</code> que l'apply refuserait.</li>
 <li><strong>Une seule table de faits par Kind</strong> (domaine, forme, s'il converge, s'il a un teardown, s'il est
   namespacé, comment sa présence est observée) gouverne le planificateur, l'ordre d'application et
   l'ordre de teardown, au lieu de listes tenues synchronisées à la main.</li>

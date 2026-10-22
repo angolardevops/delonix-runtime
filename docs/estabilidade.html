@@ -216,6 +216,23 @@ era <code>1</code> — «não existe» e «rebentou» eram o mesmo número. Cont
 <code>0</code> é sucesso e não-zero é falha, portanto um <code>if delonix …; then</code> não muda de
 comportamento; o que muda é para quem testa <code>[ $? -eq 1 ]</code> <strong>à espera de uma
 falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
+<p><strong>Alteração de contrato depois da v5.1.1.</strong> Com <code>--detailed-exitcode</code>, um
+<code>stack plan</code> cujo plano tem um <code>Conflict</code> — um recurso com o carimbo
+<code>delonix.io/stack</code> de outra stack — respondia <code>0</code>, porque um conflito não é uma
+alteração. Passa a responder <code>5</code> (<code>DX-5601</code>), o mesmo que o <code>stack apply</code>
+recusaria, e ganha ao <code>2</code>. Um gate escrito como «<code>0</code> passa, <code>2</code> é deriva, o
+resto é erro» fica certo sem mudança; quem só testava <code>[ $? -eq 0 ]</code> passa a ver
+vermelho exactamente onde o <code>apply</code> ia falhar. Sem a flag, o <code>plan</code> continua a
+responder <code>0</code>.</p>
+<p><strong>Alteração de contrato depois da v5.1.1 (2).</strong> O <code>stack plan</code> (e o <code>plan</code>)
+ganhou <code>--prune</code>, e passou a planear com as flags do <code>apply</code>. Sem <code>--prune</code>, um
+recurso que esta stack possui e o manifesto já não declara continua listado
+(<code>-</code>), mas como <strong>mantido</strong>: <code>changed: false</code> no <code>-o json</code> e fora do
+<code>--detailed-exitcode</code>. Antes contava como alteração, e um gate de deriva sem
+poda respondia <code>2</code> para sempre, porque o <code>apply</code> que o acompanha nunca o remove.
+Com <code>--prune</code> responde como antes: a remoção é uma alteração (<code>2</code>). Quem fazia o
+gate dar <code>2</code> com recursos que saíram do manifesto passa a precisar de
+<code>--prune</code>. O <code>action</code> continua <code>delete</code>, e o <code>planDigest</code> não muda.</p>
 </blockquote>
 <table>
 <thead>
@@ -247,7 +264,7 @@ falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
 </tr>
 <tr>
 <td><code>5</code></td>
-<td><strong>conflito</strong> — o nome já está tomado</td>
+<td><strong>conflito</strong> — o nome já está tomado; e, em <code>stack plan --detailed-exitcode</code>, um plano com um recurso que outra stack carimbou (<code>DX-5601</code>)</td>
 </tr>
 <tr>
 <td><code>69</code></td>
