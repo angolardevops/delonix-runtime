@@ -1,14 +1,16 @@
 import { type DynamicModule, Global, Module } from "@nestjs/common";
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from "@nestjs/core";
 
+import { CacheModule } from "./cache/cache.module";
 import { AppConfig } from "./config/app-config";
 import { HealthModule } from "./health/health.module";
 import { AllExceptionsFilter } from "./http/all-exceptions.filter";
 import { RequestValidationPipe } from "./http/validation";
 import { AppLogger } from "./logging/app-logger";
+import { MessagingModule } from "./messaging/messaging.module";
 import { NotesModule } from "./notes/notes.module";
 import { HttpRouteInterceptor } from "./telemetry/http-route.interceptor";
-import { InboundWebhookModule, OutboundWebhookModule } from "./webhooks/webhooks.module";
+import { InboundWebhookModule } from "./webhooks/webhooks.module";
 
 /** The validated configuration and the logger, available to every module. */
 @Global()
@@ -38,7 +40,8 @@ export class AppModule {
       module: AppModule,
       imports: [
         CoreModule.register(config, logger),
-        OutboundWebhookModule,
+        CacheModule,
+        MessagingModule,
         HealthModule,
         NotesModule,
         InboundWebhookModule.register(config),
