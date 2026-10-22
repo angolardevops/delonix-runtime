@@ -3477,6 +3477,16 @@ check "três applies sem alterações não gastam revisões" ok \
 # passaria num motor que simplesmente parou de gravar revisões de todo.
 check "e o plano confirma que não havia nada a mudar" ok \
   "$BIN" stack plan -f "$HWORK/hist.yaml" --detailed-exitcode
+# O contrário: um `--replace` sem nada a mudar destrói e recria o volume, e isso
+# é pedir alguma coisa à máquina — grava uma revisão, com `replace` no resumo.
+# A primeira versão da correcção do `kept` perdia-a (o `NoOp` promovido ficava
+# com `changed: false`), e só a sonda do cli-tester o viu.
+check "um --replace sem alterações grava a revisão da recriação" ok bash -c "
+  n() { '$BIN' stack history -f '$HWORK/hist.yaml' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+  before=\$(n); '$BIN' stack apply -f '$HWORK/hist.yaml' --replace 'Volume/hv-$PFX' >/dev/null 2>&1 || exit 1
+  '$BIN' stack history -f '$HWORK/hist.yaml' -o json | python3 -c 'import json,sys
+h=json.load(sys.stdin); s=h[-1].get(\"summary\") or {}
+print(len(h), s); sys.exit(0 if len(h)==int(sys.argv[1])+1 and s.get(\"replace\")==1 else 1)' \"\$before\""
 # `stack apply --name` — o nome que se destrói tem de poder ser CRIADO.
 #
 # Medido a 2026-08-25: `plan`, `destroy`, `prune`, `history` e `rollback`

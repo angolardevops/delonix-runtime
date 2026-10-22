@@ -302,9 +302,11 @@ pub enum StackCmd {
     },
     /// What this stack applied, and when (ADR-0019).
     ///
-    /// One revision per `apply`, failed ones included and marked — after an
-    /// incident the question is what the machine was ASKED to do, not what it
-    /// managed to do. `--show <n>` prints that revision's rendered manifest.
+    /// One revision per `apply` that asked for a change, failed ones included
+    /// and marked — after an incident the question is what the machine was
+    /// ASKED to do, not what it managed to do. An apply with nothing to change
+    /// (what left the manifest, without `--prune`, is kept) writes none.
+    /// `--show <n>` prints that revision's rendered manifest.
     ///
     /// This is a RECORD, never a source of truth: nothing here is read to decide
     /// what exists. Delete `<root>/stacks/` and every other stack command keeps
@@ -1770,6 +1772,11 @@ fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Resul
             )));
         }
         c.action = Action::Replace;
+        // `changed` is `action.is_change()` everywhere else, and a recreate the
+        // operator asked for by name IS a change — a `NoOp` promoted here kept
+        // `changed: false`, so `revision_of` (which reads `changed`) dropped the
+        // revision of a destructive recreate.
+        c.changed = c.action.is_change();
         c.reboot_fields.clear();
         // English, like every `reason`: it is part of the `-o json` payload.
         c.reason = Some("recreate requested by --replace".to_string());
@@ -3219,7 +3226,7 @@ fn history(
         println!(
             "{}",
             super::po::tf(
-                "no revisions recorded for stack '{stack}' — one is written per `stack apply`",
+                "no revisions recorded for stack '{stack}' — one is written per `stack apply` that asks for a change, or fails",
                 &[("stack", &stack)],
             )
         );
@@ -4648,6 +4655,24 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         assert_eq!(counts.get("delete"), None);
     }
 
+    /// `--replace Kind/name` on a resource with nothing to change destroys and
+    /// recreates it, and the revision has to say so. The promoted `NoOp` kept
+    /// `changed: false`, and the first version of `revision_of` recorded
+    /// nothing for it (the cli-tester's finding on this very branch).
+    #[test]
+    fn a_named_replace_of_an_unchanged_resource_records_its_revision() {
+        let mut same = with_action(a_change("Volume", "v"), Action::NoOp);
+        same.changed = false;
+        let out = promote_named_replaces(vec![same], &["Volume/v".to_string()]).unwrap();
+        assert_eq!(out[0].action, Action::Replace);
+        assert!(out[0].changed);
+        for prune in [false, true] {
+            let (asked, counts) = revision_of(&out, prune);
+            assert!(asked, "prune={prune}");
+            assert_eq!(counts.get("replace"), Some(&1));
+        }
+    }
+
     /// The revision predicate and `--detailed-exitcode` read the plan the same
     /// way, for every mix — the drift that produced the bug cannot come back.
     #[test]
@@ -4663,6 +4688,7 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
             vec![a_delete("old"), same.clone()],
             vec![a_delete("old"), upd.clone()],
             vec![upd.clone(), same.clone()],
+            promote_named_replaces(vec![same.clone()], &["Volume/v".to_string()]).unwrap(),
         ];
         for prune in [false, true] {
             for m in &mixes {
