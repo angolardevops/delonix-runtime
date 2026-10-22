@@ -995,6 +995,30 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     write_kubeconfig(&c, &cfg.name, api_port)?;
 
+    // Record the DESIRED pod network, exactly as the vm/ssh install path does
+    // (see `net_profiles_install::write_record` at the end of the pod-network
+    // install). Without this, `cluster network status` reads no record for a
+    // kind cluster and reports `desired unknown` for the common case — created
+    // by THIS engine, moments ago — and the DX-6703/DX-6704 drift checks can
+    // never fire, because both require a non-empty desired. kindnet ships in
+    // the node image rather than being fetched, so there is no artefact digest,
+    // dataplane or managed MTU to record; the fields left at their defaults are
+    // skipped by the status display. `cni: none` records nothing on purpose:
+    // the operator means to apply their own, so an absent agent is not drift.
+    if cfg.cni == "default" {
+        let _ = super::net_profiles_install::write_record(
+            &cfg.name,
+            &super::net_profiles_install::ProfileRecord {
+                cni: "default".to_string(),
+                version: "kindnet".to_string(),
+                kube_proxy: "iptables".to_string(),
+                pod_subnet: cfg.pod_subnet.clone(),
+                service_subnet: cfg.service_subnet.clone(),
+                ..Default::default()
+            },
+        );
+    }
+
     // Install the context into the user's kubeconfig — without this the cluster only
     // exists for whoever passes `--kubeconfig <file>` by hand, and it does not appear in
     // `kubectl config get-contexts`. It is what `kind` does at the end.

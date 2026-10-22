@@ -913,11 +913,21 @@ fn cmd_network_status(name: Option<String>) -> Result<()> {
     match &record {
         Some(r) => {
             println!("desired   {} {}", r.cni, r.version);
-            println!("  dataplane   {}", r.dataplane);
+            // kindnet (cni: default) ships in the node image, so it has no
+            // dataplane, managed MTU or fetched-artefact digest — those fields
+            // stay at their defaults and printing them would be noise (and an
+            // empty `sha256:`). Only show what was actually recorded.
+            if !r.dataplane.is_empty() {
+                println!("  dataplane   {}", r.dataplane);
+            }
             println!("  kube-proxy  {}", r.kube_proxy);
-            println!("  {:<12}{}", "mtu", r.mtu);
+            if r.mtu != 0 {
+                println!("  {:<12}{}", "mtu", r.mtu);
+            }
             println!("  pod CIDR    {}", r.pod_subnet);
-            println!("  artefact    sha256:{}", r.artefact_sha256);
+            if !r.artefact_sha256.is_empty() {
+                println!("  artefact    sha256:{}", r.artefact_sha256);
+            }
             if r.multus {
                 println!("  {:<12}installed", "multus");
             }
