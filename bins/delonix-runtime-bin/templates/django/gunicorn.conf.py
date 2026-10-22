@@ -99,14 +99,20 @@ def post_worker_init(worker):
 
 
 def worker_exit(server, worker):
-    """In the worker, after it stopped serving: drain the webhook queue and
-    flush telemetry within what is left of SHUTDOWN_TIMEOUT."""
+    """In the worker, after it stopped serving: drain the outbound webhook and
+    RabbitMQ publish queues, then flush telemetry, within what is left of
+    SHUTDOWN_TIMEOUT."""
     from core import telemetry
-    from webhooks import receivers
+    from messaging import receivers as messaging_receivers
+    from webhooks import receivers as webhook_receivers
 
     started = _shutdown_started[0] if _shutdown_started else time.monotonic()
-    # Keep a margin so the master's SIGKILL does not cut the flush.
-    remaining = max(_app.shutdown_timeout - (time.monotonic() - started) - 0.5, 0.1)
-    receivers.close(remaining * 0.7)
-    left = max(_app.shutdown_timeout - (time.monotonic() - started) - 0.5, 0.1)
-    telemetry.shutdown(left)
+
+    def budget() -> float:
+        # Keep a margin so the master's SIGKILL does not cut the flush.
+        return max(_app.shutdown_timeout - (time.monotonic() - started) - 0.5, 0.1)
+
+    # Split the budget across the two queues, then give telemetry the rest.
+    webhook_receivers.close(budget() * 0.45)
+    messaging_receivers.close(budget() * 0.7)
+    telemetry.shutdown(budget())

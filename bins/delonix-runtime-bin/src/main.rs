@@ -158,9 +158,15 @@ enum Cmd {
     // are copied VERBATIM from those variants so the i18n catalog entry is shared
     // (see `help_i18n_tests`), never a second string to translate.
     //
-    // Scope of this pass: the most frequent flows (run, create, ps, logs,
-    // exec, stop, start, restart, rm, pull). kill/wait/attach/inspect/
-    // stats/push/images/rmi/tag/login/logout stay under their groups for now.
+    // Scope: #930 landed the most frequent flows (run, create, ps, logs,
+    // exec, stop, start, restart, rm, pull). This pass completes the
+    // Docker/Podman table — the container verbs kill/attach/stats and the
+    // image verbs images/rmi/tag/save/load/push — plus the one collision the
+    // table forces: `wait`, which this engine already spells at the root for a
+    // MANIFEST. `wait` is handled below as a single polymorphic verb, not here,
+    // because it is not a plain alias. `login`/`logout` stay group-only (not in
+    // the table); `inspect`/`diff` stay type-scoped by documented policy (see
+    // `docs/cli-stability.md`): no generic root resolver guesses the Kind.
     /// Run a container from an image (pulls it if missing).
     Run(cmd::container::RunArgs),
     /// Create a container from an image WITHOUT starting it — the engine's `docker create`.
@@ -191,8 +197,49 @@ enum Cmd {
     Exec(cmd::container::ExecArgs),
     /// Show the logs (detached containers).
     Logs(cmd::container::LogsArgs),
+    /// Send a signal to one or more containers (default SIGKILL).
+    ///
+    /// Unlike `stop`, does not wait or force a `Stopped` status: the real
+    /// outcome (e.g. `Crashed` for a `KILL`) is picked up on the next
+    /// observation.
+    Kill(cmd::container::KillArgs),
+    /// Re-attach to a running container's output stream (output only).
+    ///
+    /// Same log file `logs -f` reads. Unlike `docker attach`, this is
+    /// OUTPUT-ONLY: a detached container's stdin has nowhere to go (this
+    /// engine keeps no live conduit to it once started, unlike a persistent
+    /// per-container shim) — `-i`/`--stdin` is refused with a clear error
+    /// instead of silently doing nothing.
+    Attach(cmd::container::AttachArgs),
+    /// Resource usage (CPU/memory/PIDs) of the running containers.
+    ///
+    /// One sample and exits (no stream). With no IDs, shows all running ones.
+    Stats(cmd::container::StatsArgs),
     /// Pull an image from a registry.
     Pull(cmd::image::PullArgs),
+    /// List local images.
+    Images(cmd::image::LsArgs),
+    /// Remove a local image.
+    Rmi(cmd::image::RemoveArgs),
+    /// Give another name/tag to a local image (copies nothing — it's just a new
+    /// name for the same content).
+    Tag(cmd::image::TagArgs),
+    /// Save an image to a portable archive (`docker save`'s counterpart).
+    ///
+    /// The way to move an image to another machine with no registry. The
+    /// archive is an OCI layout WITH the legacy `manifest.json`, so `delonix
+    /// image load`, `docker load`, `podman load` and `ctr images import` all
+    /// read it.
+    Save(cmd::image::SaveArgs),
+    /// Load an image from an archive (the counterpart of `save`).
+    ///
+    /// Reads archives produced by `delonix image save`, `docker save` or
+    /// `podman save`.
+    Load(cmd::image::LoadArgs),
+    /// Publish a local image to an OCI registry.
+    ///
+    /// Without `target`, publishes under the image's own reference.
+    Push(cmd::image::PushArgs),
     /// Real multi-container pods (N containers sharing a netns): create/logs/exec/cp/attach/port-forward.
     ///
     /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix describe
@@ -338,13 +385,26 @@ enum Cmd {
         #[arg(long)]
         fields: bool,
     },
-    /// Block until the manifest's resources are ready.
+    /// Wait for containers to exit (`docker wait <id>…`), or for a manifest's resources to be ready.
+    ///
+    /// ONE verb, two forms, selected by GRAMMAR — never by guessing. One or
+    /// more positional CONTAINER operands select the container form (blocks
+    /// until each exits, prints its exit code, like `container wait`). Zero
+    /// operands select the manifest form (blocks until the manifest's resources
+    /// are ready). The two grammars are disjoint; mixing them — a container
+    /// operand together with `-f`/`--timeout`, which belong only to the manifest
+    /// form — is refused, not silently resolved.
     Wait {
+        /// Containers to wait on (the `docker wait` form). With none, the
+        /// manifest form runs instead.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(cmd::complete::containers))]
+        ids: Vec<String>,
+        /// Manifest file (manifest form only).
         #[arg(short = 'f', long = "file", value_hint = clap::ValueHint::FilePath)]
         file: Option<std::path::PathBuf>,
-        /// Seconds to wait before giving up (exit 124).
-        #[arg(long, default_value_t = 300)]
-        timeout: u64,
+        /// Seconds to wait before giving up (exit 124). Manifest form only.
+        #[arg(long)]
+        timeout: Option<u64>,
     },
     /// Work on a manifest without touching the host.
     Manifest {
@@ -1092,7 +1152,16 @@ fn run() -> Result<()> {
         Cmd::Rm(a) => cmd::container::run(cmd::container::ContainerCmd::Rm(a)),
         Cmd::Exec(a) => cmd::container::run(cmd::container::ContainerCmd::Exec(a)),
         Cmd::Logs(a) => cmd::container::run(cmd::container::ContainerCmd::Logs(a)),
+        Cmd::Kill(a) => cmd::container::run(cmd::container::ContainerCmd::Kill(a)),
+        Cmd::Attach(a) => cmd::container::run(cmd::container::ContainerCmd::Attach(a)),
+        Cmd::Stats(a) => cmd::container::run(cmd::container::ContainerCmd::Stats(a)),
         Cmd::Pull(a) => cmd::image::run(cmd::image::ImageCmd::Pull(a)),
+        Cmd::Images(a) => cmd::image::run(cmd::image::ImageCmd::Ls(a)),
+        Cmd::Rmi(a) => cmd::image::run(cmd::image::ImageCmd::Remove(a)),
+        Cmd::Tag(a) => cmd::image::run(cmd::image::ImageCmd::Tag(a)),
+        Cmd::Save(a) => cmd::image::run(cmd::image::ImageCmd::Save(a)),
+        Cmd::Load(a) => cmd::image::run(cmd::image::ImageCmd::Load(a)),
+        Cmd::Push(a) => cmd::image::run(cmd::image::ImageCmd::Push(a)),
         Cmd::Pod { action } => cmd::pod::run(action),
         Cmd::Image { action } => cmd::image::run(action),
         Cmd::Build(args) => cmd::build::run(args),
@@ -1137,8 +1206,27 @@ fn run() -> Result<()> {
             prune,
             fields,
         }),
-        Cmd::Wait { file, timeout } => {
-            cmd::stack::run(cmd::stack::StackCmd::Wait { file, timeout })
+        // `wait` is the one root verb the Docker/Podman table forces to share a
+        // name with a verb this engine already had (the MANIFEST wait). Resolved
+        // by GRAMMAR, never by guessing: positional container operands ⇒ the
+        // `docker wait` form (same handler as `container wait`); no operands ⇒
+        // the manifest form. Mixing them is refused, so no flag is ever read in
+        // a sense the caller did not intend. See `docs/cli-stability.md`.
+        Cmd::Wait { ids, file, timeout } => {
+            if ids.is_empty() {
+                cmd::stack::run(cmd::stack::StackCmd::Wait {
+                    file,
+                    timeout: timeout.unwrap_or(300),
+                })
+            } else if file.is_some() || timeout.is_some() {
+                Err(delonix_model::Error::Invalid(cmd::po::t(
+                    "`delonix wait <container>…` is the container form (docker wait); `-f`/`--timeout` belong to the manifest form `delonix wait -f <file>`. Use one or the other, not both.",
+                ).to_string()))
+            } else {
+                cmd::container::run(cmd::container::ContainerCmd::Wait(
+                    cmd::container::WaitArgs { ids },
+                ))
+            }
         }
         Cmd::Manifest { action } => cmd::manifestcmd::run(action),
         Cmd::Get {
@@ -1757,6 +1845,12 @@ mod cli_stability_classification_tests {
     /// for free: each is a true alias that forwards into the SAME handler as its
     /// `container <verb>`/`image <verb>` counterpart, so it inherits that
     /// surface's promise by construction — there is no second contract to break.
+    ///
+    /// `wait` is deliberately NOT here: it is the one table entry that collides
+    /// with a verb this engine already had (the manifest wait), so it is a
+    /// polymorphic root verb, not a plain alias — classified under
+    /// NOT_STABLE_GROUPS with the rest of the manifest surface. Its container
+    /// path is still promised, through the `container` group.
     const STABLE_GROUPS: &[&str] = &[
         "container",
         "image",
@@ -1771,7 +1865,16 @@ mod cli_stability_classification_tests {
         "rm",
         "exec",
         "logs",
+        "kill",
+        "attach",
+        "stats",
         "pull",
+        "images",
+        "rmi",
+        "tag",
+        "save",
+        "load",
+        "push",
     ];
 
     /// Every other real top-level group, mirroring "NÃO estável" 1:1. A group

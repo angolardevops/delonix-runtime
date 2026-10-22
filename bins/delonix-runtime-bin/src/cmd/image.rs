@@ -194,17 +194,68 @@ pub struct PullArgs {
     verify: Option<PathBuf>,
 }
 
+// The flags of the image verbs this engine ALSO exposes at the root as
+// Docker/Podman aliases (`delonix images`/`push`/`rmi`/`tag`/`save`/`load`).
+// Same discipline as #930's container structs and `PullArgs` above: ONE flag
+// definition shared by the root alias and the `image <verb>` form, so the two
+// cannot drift into accepting different flags.
+#[derive(clap::Args)]
+pub struct LsArgs {
+    /// Output format: `table` (default) or `json` (ADR-0005).
+    // `pub(crate)` because `verbs.rs` (the generic `get images`) builds this
+    // struct by hand to reach the SAME handler as `image ls` / `images`.
+    #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+    pub(crate) output: super::output::OutputFormat,
+}
+
+#[derive(clap::Args)]
+pub struct TagArgs {
+    #[arg(add = ArgValueCandidates::new(super::complete::images))]
+    source: String,
+    target: String,
+}
+
+#[derive(clap::Args)]
+pub struct RemoveArgs {
+    // `pub(crate)` because `verbs.rs` (the generic `delete image`) builds this
+    // struct by hand to reach the SAME handler as `image rm` / `rmi`.
+    #[arg(add = ArgValueCandidates::new(super::complete::images))]
+    pub(crate) image: String,
+    /// Remove it even if a container still uses it.
+    #[arg(short = 'f', long)]
+    pub(crate) force: bool,
+}
+
+#[derive(clap::Args)]
+pub struct SaveArgs {
+    #[arg(add = ArgValueCandidates::new(super::complete::images))]
+    image: String,
+    /// Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`).
+    #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output", value_name = "FILE")]
+    output: PathBuf,
+}
+
+#[derive(clap::Args)]
+pub struct LoadArgs {
+    /// Archive to read (`.tar`; a `.tar.gz` must be gunzipped first).
+    #[arg(value_hint = clap::ValueHint::FilePath, short = 'i', long = "input", value_name = "FILE")]
+    input: PathBuf,
+}
+
+#[derive(clap::Args)]
+pub struct PushArgs {
+    #[arg(add = ArgValueCandidates::new(super::complete::images))]
+    name: String,
+    target: Option<String>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ImageCmd {
     /// Pull an image from a registry.
     Pull(PullArgs),
     /// List local images.
-    Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005).
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: super::output::OutputFormat,
-    },
+    Ls(LsArgs),
     /// Human-readable detail of one or more images, `kubectl describe`-style.
     ///
     /// Tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir.
@@ -214,11 +265,7 @@ pub enum ImageCmd {
     },
     /// Give another name/tag to a local image (copies nothing — it's just a new
     /// name for the same content).
-    Tag {
-        #[arg(add = ArgValueCandidates::new(super::complete::images))]
-        source: String,
-        target: String,
-    },
+    Tag(TagArgs),
     /// Layers of an image (digest + size), from base to top.
     History {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
@@ -284,13 +331,11 @@ pub enum ImageCmd {
         image: String,
     },
     /// Remove a local image.
-    Remove {
-        #[arg(add = ArgValueCandidates::new(super::complete::images))]
-        image: String,
-        /// Remove it even if a container still uses it.
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
+    // `rm` so `delonix image rm` matches `docker image rm` exactly (the root
+    // alias is `delonix rmi`); `remove` stays the canonical the stability doc
+    // promises.
+    #[command(visible_alias = "rm")]
+    Remove(RemoveArgs),
     /// Remove unused images and the CAS blobs nobody references any more.
     ///
     /// By default only the DANGLING ones (no tag); `--all` also drops tagged
@@ -317,22 +362,12 @@ pub enum ImageCmd {
     /// archive is an OCI layout WITH the legacy `manifest.json`, so `delonix
     /// image load`, `docker load`, `podman load` and `ctr images import` all
     /// read it.
-    Save {
-        #[arg(add = ArgValueCandidates::new(super::complete::images))]
-        image: String,
-        /// Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`).
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output", value_name = "FILE")]
-        output: PathBuf,
-    },
+    Save(SaveArgs),
     /// Load an image from an archive (the counterpart of `save`).
     ///
     /// Reads archives produced by `delonix image save`, `docker save` or
     /// `podman save`.
-    Load {
-        /// Archive to read (`.tar`; a `.tar.gz` must be gunzipped first).
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'i', long = "input", value_name = "FILE")]
-        input: PathBuf,
-    },
+    Load(LoadArgs),
     /// Apply the `kind: Image` documents of a manifest.
     ///
     /// `pull` is idempotent by reference; `build` rebuilds and replaces the
@@ -363,11 +398,7 @@ pub enum ImageCmd {
     /// Publish a local image to an OCI registry.
     ///
     /// Without `target`, publishes under the image's own reference.
-    Push {
-        #[arg(add = ArgValueCandidates::new(super::complete::images))]
-        name: String,
-        target: Option<String>,
-    },
+    Push(PushArgs),
 }
 
 pub fn run(action: ImageCmd) -> Result<()> {
@@ -412,9 +443,9 @@ pub fn run(action: ImageCmd) -> Result<()> {
     let (images, store) = open_stores()?;
     match action {
         ImageCmd::Pull(PullArgs { image, verify }) => cmd_pull(&images, &image, verify.as_deref()),
-        ImageCmd::Ls { output } => cmd_ls(&images, output),
+        ImageCmd::Ls(LsArgs { output }) => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
-        ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
+        ImageCmd::Tag(TagArgs { source, target }) => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
         ImageCmd::Verify { image, key } => cmd_verify(&images, &image, &key),
         ImageCmd::Sign { image, key, force } => cmd_sign(&images, &image, key.as_deref(), force),
@@ -440,17 +471,17 @@ pub fn run(action: ImageCmd) -> Result<()> {
             }
         }
         ImageCmd::Sbom { image } => super::scan::cmd_sbom(&image),
-        ImageCmd::Remove { image, force } => cmd_rm(&images, &store, &image, force),
+        ImageCmd::Remove(RemoveArgs { image, force }) => cmd_rm(&images, &store, &image, force),
         ImageCmd::Prune { force, all } => cmd_prune(&images, &store, force, all),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
-        ImageCmd::Save { image, output } => cmd_save(&images, &image, &output),
-        ImageCmd::Load { input } => cmd_load(&images, &input),
+        ImageCmd::Save(SaveArgs { image, output }) => cmd_save(&images, &image, &output),
+        ImageCmd::Load(LoadArgs { input }) => cmd_load(&images, &input),
         ImageCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
             apply(&docs)
         }
-        ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
+        ImageCmd::Push(PushArgs { name, target }) => cmd_push(&images, &name, target.as_deref()),
         ImageCmd::Login { .. } | ImageCmd::Logout { .. } => {
             unreachable!("tratados acima")
         }

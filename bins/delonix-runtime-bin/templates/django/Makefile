@@ -2,7 +2,7 @@
 # CI sets UV_LOCKED=1, so every `uv run` there refuses a missing or stale uv.lock.
 PORT ?= __PORT__
 
-.PHONY: install lock fmt fmt-check lint test migrations-check deploy-check vuln migrate dev run smoke check
+.PHONY: install lock fmt fmt-check lint test migrations-check deploy-check vuln migrate dev run consume smoke check
 
 install:           ## create .venv and install (writes uv.lock on the first run — commit it)
 	uv sync
@@ -32,6 +32,8 @@ dev:               ## development server with autoreload (no graceful shutdown)
 	uv run python manage.py runserver $(PORT)
 run:               ## the production server: gunicorn, configured by gunicorn.conf.py
 	PORT=$(PORT) uv run gunicorn config.wsgi:application
+consume:           ## run the RabbitMQ event consumer (no-op when RABBITMQ_URL is unset)
+	uv run python manage.py consume_events
 smoke:             ## against a running instance: make smoke URL=http://localhost:__PORT__
 	sh ./scripts/smoke.sh $(or $(URL),http://localhost:$(PORT))
 check: fmt-check lint migrations-check deploy-check test  ## what CI runs
