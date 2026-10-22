@@ -636,6 +636,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("what an apply would change", "delonix plan -f delonix-manifest.yaml"),
             ("a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would refuse, 1 error", "delonix plan -f delonix-manifest.yaml --detailed-exitcode"),
+            ("the same gate for a pipeline that applies with --prune: removals count", "delonix plan -f delonix-manifest.yaml --prune --detailed-exitcode"),
             ("which fields are compared, per Kind", "delonix plan --fields"),
         ],
         see_also: &["apply", "wait", "manifest validate"],
@@ -2231,6 +2232,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("what an apply would change — the machine is not touched", "delonix stack plan -f prod.yaml"),
             ("a drift gate in CI: exit 2 means the machine no longer matches the file", "delonix stack plan -f prod.yaml --detailed-exitcode"),
+            ("the same gate when the pipeline applies with --prune: what left the file counts as a removal", "delonix stack plan -f prod.yaml --prune --detailed-exitcode"),
             ("machine-readable, for a bot to comment on a pull request", "delonix stack plan -f prod.yaml -o json"),
             ("which fields the plan compares, per Kind, and which it does not — answers why a change is not showing up", "delonix stack plan --fields"),
         ],

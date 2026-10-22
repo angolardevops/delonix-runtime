@@ -3720,8 +3720,47 @@ check "o campo mudado voltou ao valor da revisão 1" ok \
 # O que NÃO voltou, e é dito em vez de escondido: um rollback não apaga sozinho.
 check "o recurso criado depois SOBREVIVE a um rollback sem --prune" ok \
   "$BIN" volume inspect "hv2-$PFX"
+# O `plan` responde pelo `apply` com as MESMAS flags. Um `apply` sem `--prune`
+# não remove o hv2, por isso um `plan` sem `--prune` lista-o como MANTIDO e não
+# o conta: até aqui dava 2 («1 to remove») para sempre, e um portão de deriva
+# sem poda nunca ficava verde. O `so1.yaml` é a revisão 1 ao lado do
+# `hist.yaml`: o nome da stack vem do directório, é a mesma stack.
+cat >"$HWORK/so1.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: hv-$PFX
+spec: {}
+YAML
+check "stack plan sem --prune: o que saiu do manifesto fica MANTIDO e o --detailed-exitcode é 0" 0 bash -c "
+  out=\$('$BIN' stack plan -f '$HWORK/so1.yaml' --detailed-exitcode 2>&1); rc=\$?
+  printf '%s\n' \"\$out\"
+  [[ \$rc == 0 ]] && ! grep -q 'Volume/hv2-$PFX .*kept' <<<\"\$out\" && exit 99
+  exit \$rc"
+# No JSON: o `action` continua `delete`, o `changed` é `false`, a `reason` nomeia
+# o `--prune`, e o `planDigest` é o MESMO do plano com `--prune` — senão um
+# `apply --plan-digest` recusaria um dos dois como desactualizado.
+check "…no -o json: delete, changed false, e o mesmo planDigest que com --prune" ok bash -c "
+  a=\$('$BIN' stack plan -f '$HWORK/so1.yaml' -o json) || exit 1
+  b=\$('$BIN' stack plan -f '$HWORK/so1.yaml' -o json --prune) || exit 1
+  python3 -c 'import json,sys
+f=lambda t: [c for c in json.loads(t) if c[\"name\"]==sys.argv[3]][0]
+a,b=f(sys.argv[1]),f(sys.argv[2])
+ok=(a[\"action\"]==b[\"action\"]==\"delete\" and a[\"changed\"] is False and b[\"changed\"] is True
+    and \"--prune\" in a[\"reason\"] and a[\"planDigest\"]==b[\"planDigest\"])
+sys.exit(0 if ok else 1)' \"\$a\" \"\$b\" 'hv2-$PFX'"
+# Com `--prune` o plano é o do `apply --prune`: a remoção conta. O 2 é também o
+# rc de um erro de uso do clap: só conta se a saída for um plano que nomeia o hv2.
+check "stack plan --prune: a remoção conta, o --detailed-exitcode é 2" 2 bash -c "
+  out=\$('$BIN' stack plan -f '$HWORK/so1.yaml' --prune --detailed-exitcode 2>&1); rc=\$?
+  printf '%s\n' \"\$out\"
+  [[ \$rc == 2 ]] && { grep -q 'Usage:' <<<\"\$out\" || ! grep -q '1 to remove' <<<\"\$out\"; } && exit 99
+  exit \$rc"
+# Só o stderr, e a frase que só o aviso tem: desde que o plano escreve «kept,
+# `--prune` removes it» no stdout, procurar `--prune` em `2>&1` passava mesmo
+# sem o aviso.
 check "…e o rollback avisa que é preciso --prune para o levar" ok \
-  bash -c "'$BIN' stack rollback --to 1 -f '$HWORK/hist.yaml' --dry-run 2>&1 | grep -q -- '--prune'"
+  bash -c "'$BIN' stack rollback --to 1 -f '$HWORK/hist.yaml' --dry-run 2>&1 >/dev/null | grep -q 'does not delete on its own'"
 check "rollback --prune leva-o" ok \
   "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --prune
 check "…e agora já não está" 4 "$BIN" volume inspect "hv2-$PFX"

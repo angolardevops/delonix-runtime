@@ -4023,6 +4023,9 @@ msgstr "Nome da stack (dono dos recursos). Omissão: o nome de um `kind: Stack`,
 msgid "Exit 2 when there are changes, 5 when the plan holds a conflict `stack apply` would refuse (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
 msgstr "Sai com 2 quando há alterações, 5 quando o plano tem um conflito que o `stack apply` recusaria (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
 
+msgid "Plan what `stack apply --prune` would do: what this stack owns and the manifest no longer declares counts as a change, to remove. Without it, it is listed as KEPT — `apply` removes nothing without `--prune` — and does not count for `--detailed-exitcode`."
+msgstr "Planeia o que o `stack apply --prune` faria: o que esta stack possui e o manifesto já não declara conta como alteração, a remover. Sem ela, aparece como MANTIDO — o `apply` não remove nada sem `--prune` — e não conta para o `--detailed-exitcode`."
+
 msgid "to create"
 msgstr "a criar"
 
@@ -4114,6 +4117,12 @@ msgstr "já existe e não pertence a nenhuma stack — vai ser adoptado"
 
 msgid "no longer declared in the manifest"
 msgstr "já não está declarado no manifesto"
+
+msgid "no longer declared in the manifest — kept, `--prune` removes it"
+msgstr "já não está declarado no manifesto — mantido, o `--prune` remove-o"
+
+msgid "kept, no longer declared (`--prune` removes)"
+msgstr "mantido(s), já não declarado(s) (o `--prune` remove)"
 
 msgid "this Kind is ensure-present in this version"
 msgstr "este Kind é «garante presente» nesta versão"
@@ -6706,6 +6715,9 @@ msgstr "o que um apply mudaria — a máquina não é tocada"
 
 msgid "a drift gate in CI: exit 2 means the machine no longer matches the file"
 msgstr "um gate de deriva em CI: saída 2 quer dizer que a máquina já não bate certo com o ficheiro"
+
+msgid "the same gate when the pipeline applies with --prune: what left the file counts as a removal"
+msgstr "o mesmo portão quando o pipeline aplica com --prune: o que saiu do ficheiro conta como remoção"
 
 msgid "machine-readable, for a bot to comment on a pull request"
 msgstr "legível por máquina, para um bot comentar num pull request"
@@ -10153,6 +10165,9 @@ msgstr "Autoriza a recriação de um recurso cujo campo frio mudou"
 msgid "0 = no changes, 2 = there are changes, 5 = a conflict the apply would refuse, 1 = error (`terraform plan`)"
 msgstr "0 = sem alterações, 2 = há alterações, 5 = um conflito que o apply recusaria, 1 = erro (`terraform plan`)"
 
+msgid "Plan what `apply --prune` would do; without it, what the manifest no longer declares is listed as kept"
+msgstr "Planeia o que o `apply --prune` faria; sem ela, o que o manifesto já não declara aparece como mantido"
+
 msgid "Print WHICH fields the plan compares, per Kind, and exit"
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai"
 
@@ -10180,6 +10195,9 @@ msgstr "o que um apply mudaria"
 
 msgid "a drift gate for CI: 0 none, 2 changes, 5 a conflict the apply would refuse, 1 error"
 msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 5 um conflito que o apply recusaria, 1 erro"
+
+msgid "the same gate for a pipeline that applies with --prune: removals count"
+msgstr "o mesmo portão para um pipeline que aplica com --prune: as remoções contam"
 
 msgid "which fields are compared, per Kind"
 msgstr "que campos são comparados, por Kind"

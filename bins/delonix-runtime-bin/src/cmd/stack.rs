@@ -208,6 +208,12 @@ pub enum StackCmd {
         /// `terraform plan -detailed-exitcode` contract, for a CI drift gate.
         #[arg(long = "detailed-exitcode")]
         detailed_exitcode: bool,
+        /// Plan what `stack apply --prune` would do: what this stack owns and
+        /// the manifest no longer declares counts as a change, to remove.
+        /// Without it, it is listed as KEPT — `apply` removes nothing without
+        /// `--prune` — and does not count for `--detailed-exitcode`.
+        #[arg(long = "prune")]
+        prune: bool,
         /// Print WHICH fields the plan compares, per Kind, and exit. Answers
         /// "why is my change not showing up?" without reading the source.
         #[arg(long = "fields")]
@@ -368,8 +374,9 @@ pub fn run(action: StackCmd) -> Result<()> {
             name,
             output,
             detailed_exitcode,
+            prune,
             fields,
-        } => plan_cmd(file, name, output, detailed_exitcode, fields),
+        } => plan_cmd(file, name, output, detailed_exitcode, prune, fields),
         StackCmd::Destroy {
             file,
             name,
@@ -920,6 +927,7 @@ fn plan_cmd(
     name: Option<String>,
     output: super::output::OutputFormat,
     detailed_exitcode: bool,
+    prune: bool,
     fields: bool,
 ) -> Result<()> {
     if fields {
@@ -931,7 +939,7 @@ fn plan_cmd(
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
     super::gitops::refuse_self_target(&docs, &stack, super::gitops::Applier::Operator)?;
-    let changes = plan_with_digests(&docs, &stack)?;
+    let changes = mark_unpruned(plan_with_digests(&docs, &stack)?, prune);
     match output {
         super::output::OutputFormat::Json => super::output::print_json(&changes)?,
         super::output::OutputFormat::Table => render_plan(&path, &stack, &changes),
@@ -946,6 +954,29 @@ fn plan_cmd(
         }
     }
     Ok(())
+}
+
+/// A plan answers what `stack apply` WITH THE SAME FLAGS would do, and an
+/// apply without `--prune` removes nothing. So without `prune` a `Delete` stays
+/// in the plan — what this stack left behind must stay visible — but marked
+/// kept: `changed: false`, which is what `--detailed-exitcode` and the JSON's
+/// `changed` read. A drift gate used to answer 2 for ever after a resource left
+/// the manifest, since the apply it pairs with never removes it. The action and
+/// the `planDigest` are left as they are (the digest never reads `changed` nor
+/// `reason`), so `apply --plan-digest` accepts either plan. Pure.
+fn mark_unpruned(mut changes: Vec<Change>, prune: bool) -> Vec<Change> {
+    if prune {
+        return changes;
+    }
+    for c in changes.iter_mut().filter(|c| c.action == Action::Delete) {
+        c.changed = false;
+        // English, like every `reason`: it is part of the `-o json` payload.
+        c.reason = Some(
+            "no longer declared in the manifest — kept: `stack apply` removes it only with --prune"
+                .to_string(),
+        );
+    }
+    changes
 }
 
 /// The exit `--detailed-exitcode` answers for a plan, `None` being 0. A plan
@@ -1005,6 +1036,10 @@ fn explain(c: &Change) -> Option<String> {
         Action::Adopt => {
             Some(super::po::t("exists and belongs to no stack — will be taken over").to_string())
         }
+        Action::Delete if !c.changed => Some(
+            super::po::t("no longer declared in the manifest — kept, `--prune` removes it")
+                .to_string(),
+        ),
         Action::Delete => Some(super::po::t("no longer declared in the manifest").to_string()),
         // A Secret converges per document, so reaching here means THIS one reads
         // its values from the environment or a file, which a plan does not.
@@ -1072,6 +1107,11 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
     }
     println!();
     let s = reconcile::summary(changes);
+    // A `Delete` the plan was not asked to prune is one the apply keeps
+    // (`mark_unpruned`): «to remove» would promise what will not happen.
+    let kept = changes
+        .iter()
+        .any(|c| c.action == Action::Delete && !c.changed);
     // The counter labels are translated for the human table; the JSON keeps the
     // stable `snake_case` keys (ADR-0005 — field names never change with the
     // locale, or every consumer in another language breaks).
@@ -1085,6 +1125,7 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
                 "replace" => super::po::t("to replace"),
                 "reboot" => super::po::t("to reboot"),
                 "unchanged" => super::po::t("unchanged"),
+                "delete" if kept => super::po::t("kept, no longer declared (`--prune` removes)"),
                 "delete" => super::po::t("to remove"),
                 "conflict" => super::po::t("in conflict"),
                 _ => super::po::t("not converging"),
@@ -3070,7 +3111,7 @@ fn rollback(
     // The same renderer `stack plan` uses. A rollback that printed its own
     // shape would be a second way to describe the same decision, and the two
     // would drift — the failure this file already carries three lessons about.
-    render_plan(&path, &stack, &changes);
+    render_plan(&path, &stack, &mark_unpruned(changes.clone(), do_prune));
 
     // What the replay cannot undo. Counted from the plan, so the numbers are
     // this rollback's and not a general disclaimer.
@@ -4247,6 +4288,7 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
                 super::super::output::OutputFormat::Table,
                 false,
                 false,
+                false,
             )),
             1601
         );
@@ -4481,6 +4523,65 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         noop.changed = false;
         assert_eq!(detailed_exit(&[noop]).unwrap(), None);
         assert_eq!(detailed_exit(&[]).unwrap(), None);
+    }
+
+    fn a_delete(name: &str) -> Change {
+        let mut c = with_action(a_change("Volume", name), Action::Delete);
+        c.changed = Action::Delete.is_change();
+        c.reason = Some("no longer declared in the manifest".into());
+        c
+    }
+
+    /// A resource that left the manifest, planned WITHOUT `--prune`: the apply
+    /// keeps it, so it does not count — a drift gate used to answer 2 for ever.
+    #[test]
+    fn without_prune_a_delete_is_kept_and_the_detailed_plan_is_clean() {
+        let out = mark_unpruned(vec![a_delete("old")], false);
+        assert_eq!(out[0].action, Action::Delete, "still listed");
+        assert!(!out[0].changed);
+        assert!(out[0].reason.as_deref().unwrap().contains("--prune"));
+        assert_eq!(detailed_exit(&out).unwrap(), None);
+    }
+
+    /// `--prune` plans what `apply --prune` does: the removal is a change.
+    #[test]
+    fn with_prune_a_delete_is_a_change() {
+        let out = mark_unpruned(vec![a_delete("old")], true);
+        assert!(out[0].changed);
+        assert_eq!(
+            out[0].reason.as_deref(),
+            Some("no longer declared in the manifest")
+        );
+        assert_eq!(detailed_exit(&out).unwrap(), Some(2));
+    }
+
+    /// Only the `Delete` is kept: a real change next to it still answers 2,
+    /// and a conflict still answers 5.
+    #[test]
+    fn without_prune_other_changes_still_count() {
+        let mut upd = with_action(a_change("Container", "db"), Action::Update);
+        upd.changed = true;
+        let out = mark_unpruned(vec![a_delete("old"), upd], false);
+        assert!(out[1].changed);
+        assert_eq!(detailed_exit(&out).unwrap(), Some(2));
+        let out = mark_unpruned(
+            vec![
+                a_delete("old"),
+                with_action(a_change("Volume", "x"), Action::Conflict),
+            ],
+            false,
+        );
+        assert_eq!(detailed_exit(&out).unwrap_err().number(), 5601);
+    }
+
+    /// The digest `apply --plan-digest` checks is the same whether or not the
+    /// plan was asked to prune — or a plan without `--prune` would make the
+    /// apply refuse it as stale.
+    #[test]
+    fn marking_a_delete_kept_does_not_change_its_plan_digest() {
+        let before = change_digest(&a_delete("old"));
+        let kept = mark_unpruned(vec![a_delete("old")], false);
+        assert_eq!(change_digest(&kept[0]), before);
     }
 
     /// Without a conflict, a missing `--replace` stays what it was.
