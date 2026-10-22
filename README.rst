@@ -459,6 +459,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - OCI images: pull, ls, remove, export, scan, sign, verify. ``vm image <cmd>`` for golden VM images (build/import/push/convert).
    * - ``build``
      - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
+   * - ``run`` · ``create`` · ``ps`` · ``start`` · ``stop`` · ``restart`` · ``rm`` · ``exec`` · ``logs`` · ``pull``
+     - Docker/Podman root aliases: each is the SAME flag struct and handler as the ``container <verb>`` / ``image pull`` it shortcuts, so you change only the executable name.
    * - ``volume``
      - Named volumes, bind mounts, network shares and per-tenant slices: create (including ``--driver nfs|cifs|smb|webdav --opt key=value`` and ``--parent``), ls, describe, inspect, snapshot, prune, rm.
    * - ``secret``
