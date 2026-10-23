@@ -148,7 +148,7 @@ IMAGE      := $(IMAGE_REPO):$(TAG)
 GHCR_IMAGE ?= ghcr.io/angolardevops/delonix-runtime
 
 .PHONY: help info repro-check bootstrap doctor build build-debug binaries check fmt fmt-check lint test deny \
-	gates ci install install-system uninstall uninstall-system apparmor clean \
+	gates ci gitflow install install-system uninstall uninstall-system apparmor clean \
 	image ghcr-push kind-load image-tag bench coverage require-protoc require-built
 
 help: ## Show this help
@@ -229,6 +229,9 @@ gates: ## The script gates CI runs on the source tree (language, architecture, v
 	python3 scripts/folhas_gate.py
 
 ci: fmt-check gates lint test ## What to run before pushing: format, gates, clippy, tests
+
+gitflow: ## Engineering-process harness (docs/dev/engineering-process.md); ARGS="<subcommand> ..."
+	python3 scripts/gitflow.py $(ARGS)
 
 # -------------------------------------------------------------------- install
 require-built:
