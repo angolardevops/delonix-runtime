@@ -404,12 +404,15 @@ def cmd_integrate(args):
     print(f"branch {branch} (base {base}) -> integrate into {INTEGRATION}")
     _fetch(root, not act)
 
+    # No --label: a label that does not exist in the repo makes `gh pr create`
+    # abort WITHOUT creating the PR. Labels are cosmetic; never let one block
+    # integration. (Apply labels after the fact with `gh pr edit --add-label`.)
+    pr_cmd = ["gh", "pr", "create", "--base", INTEGRATION, "--head", branch, "--fill"]
     plan = [
         ["git", "pull", "--rebase", REMOTE, INTEGRATION],
         ["python3", "scripts/gitflow.py", "gates"],
         ["git", "push", "-u", REMOTE, branch],
-        ["gh", "pr", "create", "--base", INTEGRATION, "--head", branch,
-         "--fill", "--label", "gitflow"],
+        pr_cmd,
     ]
     if not act:
         print("PLAN (pass --execute to run):")
@@ -422,8 +425,7 @@ def cmd_integrate(args):
     if cmd_gates(argparse.Namespace(full=False, keep_going=False)) != 0:
         raise GitFlowError("gates failed after rebase; not pushing.")
     git(["push", "-u", REMOTE, branch], cwd=cwd, capture=False)
-    pr = run(["gh", "pr", "create", "--base", INTEGRATION, "--head", branch,
-              "--fill", "--label", "gitflow"], cwd=cwd, check=False, capture=False)
+    pr = run(pr_cmd, cwd=cwd, check=False, capture=False)
     if pr.returncode != 0:
         print("note: branch pushed; open the PR to develop by hand (gh unavailable or PR exists).")
     return 0
