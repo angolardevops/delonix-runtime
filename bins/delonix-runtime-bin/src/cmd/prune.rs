@@ -356,13 +356,16 @@ const RESERVED_CGROUP_DIRS: &[&str] = &["dlx-containers", "dlx-mgr"];
 /// base that does not exist on this host (e.g. `delonix.slice` under rootless) is
 /// simply skipped by the `read_dir` in [`orphan_cgroup_leaves`].
 fn container_cgroup_bases() -> Vec<(std::path::PathBuf, &'static str)> {
-    let mut bases: Vec<(std::path::PathBuf, &'static str)> =
-        vec![(std::path::PathBuf::from(delonix_compute::DELONIX_SLICE), "delonix-")];
-    let add = |p: std::path::PathBuf, prefix, bases: &mut Vec<(std::path::PathBuf, &'static str)>| {
-        if !bases.iter().any(|(b, _)| *b == p) {
-            bases.push((p, prefix));
-        }
-    };
+    let mut bases: Vec<(std::path::PathBuf, &'static str)> = vec![(
+        std::path::PathBuf::from(delonix_compute::DELONIX_SLICE),
+        "delonix-",
+    )];
+    let add =
+        |p: std::path::PathBuf, prefix, bases: &mut Vec<(std::path::PathBuf, &'static str)>| {
+            if !bases.iter().any(|(b, _)| *b == p) {
+                bases.push((p, prefix));
+            }
+        };
     if let Some(cur) = delonix_linux::current_cgroup_v2() {
         if let Some(base) = delonix_linux::user_service_base(&cur) {
             add(std::path::PathBuf::from(base), "dlx-", &mut bases);
@@ -1944,7 +1947,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         assert!(super::cgroup_leaf_removable(&fake_cgroup(base, "dead", "")));
-        assert!(!super::cgroup_leaf_removable(&fake_cgroup(base, "running", "99\n")));
+        assert!(!super::cgroup_leaf_removable(&fake_cgroup(
+            base, "running", "99\n"
+        )));
         let busy = fake_cgroup(base, "busy", "");
         std::fs::create_dir(busy.join("child")).unwrap();
         assert!(!super::cgroup_leaf_removable(&busy));
