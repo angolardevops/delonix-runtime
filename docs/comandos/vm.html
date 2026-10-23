@@ -326,13 +326,21 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Checkpoint de sistema (memória + disco) de uma VM A CORRER</div><div class='cap lang-en'>System checkpoint (memory + disk) of a RUNNING VM</div><pre><code>delonix vm snapshot create dev antes-do-upgrade</code></pre></div><div class="ex"><div class='cap lang-pt'>Com a VM parada é só do disco — e a VM continua parada</div><div class='cap lang-en'>Of a stopped one it is disk-only — and it stays stopped</div><pre><code>delonix vm snapshot create dev copia-fria</code></pre></div><div class="ex"><div class='cap lang-pt'>Listar os checkpoints de uma VM (também com ela parada)</div><div class='cap lang-en'>List a VM&#x27;s checkpoints (with the VM stopped too)</div><pre><code>delonix vm snapshot ls dev</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm snapshot restore dev antes-do-upgrade</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um checkpoint (o estado dele sai do disco)</div><div class='cap lang-en'>Delete a checkpoint (its state leaves the disk)</div><pre><code>delonix vm snapshot rm dev antes-do-upgrade</code></pre></div>
 <h2 id='restart'><code>vm restart</code></h2>
 <p class='intro'>Stop (if running) then start — always a real reboot, unlike <code>start</code>. Same recovered-fields limits as <code>start</code></p>
-<div class='help'><pre><code>Usage: delonix vm restart &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix vm restart [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --wait
+          After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running
+
+      --boot-timeout &lt;BOOT_TIMEOUT&gt;
+          Seconds to wait with --wait (default 120)
+          
+          [default: 120]
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -349,13 +357,21 @@ SEE ALSO:
 <h2 id='start'><code>vm start</code></h2>
 <p class='intro'>Start an existing, stopped VM — idempotent (already running = no-op).</p>
 <p class='intro'>Reboots with everything recorded at its last <code>create</code>/<code>start</code> — base disk/vcpus/memory/network/backend AND the boot shape (custom kernel/seed/volumes/static IP/VNC/TPM/CPU topology/extra disks and NICs/advanced libvirt knobs) — reusing the same overlay, so disk state is preserved. A VM created before the engine persisted that shape has none recorded; re-run its original <code>vm create</code> (idempotent) once to stamp it.</p>
-<div class='help'><pre><code>Usage: delonix vm start &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix vm start [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --wait
+          After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running
+
+      --boot-timeout &lt;BOOT_TIMEOUT&gt;
+          Seconds to wait with --wait (default 120)
+          
+          [default: 120]
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
