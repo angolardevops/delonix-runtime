@@ -353,7 +353,7 @@ the holder, on `virbr0` in the host's network namespace.
 | log shim | `fork` inside `spawn`, running `log_shim` | the container |
 | per-container `slirp4netns` | `delonix_sdn::slirp_attach`, called as the `on_started` hook | the container's netns; orphans reaped by `reap_orphan_slirp` |
 | pin | `infra::start_pin` spawns `delonix netns pin`; `infra::pin_main` creates the user, net and mount namespaces in-process (`crates/adapters/delonix-sdn/src/pin_userns.rs`) and sleeps | the infra; its pid is `ingress/holder.pid` and it never changes |
-| control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | restartable; serves the control socket, DNS (`dns_server_main`), Router Advertisements (`ra_sender_main`) and per-bridge DHCP (`dhcp_serve`) |
+| control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | restartable; serves the control socket, DNS (`dns_server_main`), per-bridge DHCP (`dhcp_serve`) and — only under `DELONIX_ENABLE_IPV6=1` — Router Advertisements (`ra_sender_main`). The thread roster is `control_plane_threads`; being restartable is what lets the RA gate be a plain condition and not a reconciler |
 | single `slirp4netns` | `infra::start_slirp` (`tap0` into the pin's netns, `--api-socket`) | the infra |
 | L7 ingress proxy | `cmd/ingress_proxy.rs::spawn_proxy` through `infra::infra_join_argv` | while an `HTTPRoute`/`Ingress` or an `--expose` route exists; reloads routes on `SIGHUP` |
 | `cloud-hypervisor` | `delonix_vm::launch_vmm`, run through the infra join argv | the VM |

@@ -603,8 +603,8 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <tr>
 <td><code>DELONIX_ENABLE_IPV6</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:ipv6_sdn_enabled</code></a></td>
-<td>Gives containers IPv6 addresses on the SDN again.</td>
-<td><code>1</code> → enabled; anything else → IPv6 disabled in the container and forwarding refused.</td>
+<td>Gives containers IPv6 addresses on the SDN again, and is what starts the Router Advertisements emitter (<code>control_plane_threads</code>).</td>
+<td><code>1</code> → enabled; anything else → IPv6 disabled in the container, forwarding refused, and no RA emitted on any bridge.</td>
 <td><strong>No firewall rule, namespace isolation or <code>Dependency</code> applies to IPv6</strong> — every policy is IPv4-only. Security warning. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>

@@ -761,7 +761,7 @@ the holder, on <code>virbr0</code> in the host's network namespace.</p>
 <tr>
 <td>control</td>
 <td><code>infra::start_control</code> (<code>nsenter -t &lt;pin&gt; -U -m -n -- delonix netns control</code>) → <code>infra::control_main</code></td>
-<td>restartable; serves the control socket, DNS (<code>dns_server_main</code>), Router Advertisements (<code>ra_sender_main</code>) and per-bridge DHCP (<code>dhcp_serve</code>)</td>
+<td>restartable; serves the control socket, DNS (<code>dns_server_main</code>), per-bridge DHCP (<code>dhcp_serve</code>) and — only under <code>DELONIX_ENABLE_IPV6=1</code> — Router Advertisements (<code>ra_sender_main</code>). The thread roster is <code>control_plane_threads</code>; being restartable is what lets the RA gate be a plain condition and not a reconciler</td>
 </tr>
 <tr>
 <td>single <code>slirp4netns</code></td>
