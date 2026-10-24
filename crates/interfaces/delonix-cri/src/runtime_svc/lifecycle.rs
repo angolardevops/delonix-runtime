@@ -1858,7 +1858,19 @@ fn start_run_opts(
         Some(g) => format!("{u}:{g}"),
         None => u,
     });
-    o.command = rec.command.iter().chain(rec.args.iter()).cloned().collect();
+    // CRI/k8s: `command` IS the entrypoint override and `args` ARE its arguments
+    // (the same two fields this engine's RunOpts carries), so each maps straight
+    // across — exactly as the pod path does (see `pod.rs`). An empty `command`
+    // means "no override": the image's own ENTRYPOINT stays and `args` replace its
+    // CMD, so `entrypoint` is left `None` and only the command is set. This used to
+    // fold both into `o.command` and never set `o.entrypoint`, which made the pod's
+    // command get APPENDED to the image's ENTRYPOINT instead of replacing it.
+    if rec.command.is_empty() {
+        o.command = rec.args.clone();
+    } else {
+        o.entrypoint = Some(rec.command.clone());
+        o.command = rec.args.clone();
+    }
     o
 }
 
@@ -3606,6 +3618,60 @@ mod tests {
             Vec::new(),
         );
         assert!(bare.kube_cgroup_parent.is_none());
+    }
+
+    /// CRI/k8s `command` REPLACES the image's ENTRYPOINT; `args` are its arguments.
+    /// This used to fold both into `o.command` and leave `o.entrypoint` unset, so
+    /// `build_record` fell through to the image's own ENTRYPOINT and APPENDED the
+    /// pod's command to it — a flannel pod whose spec said `command:["echo"]
+    /// args:["X"]` ran `/opt/bin/flanneld echo X` instead of `echo X`, and the node
+    /// never went Ready. The container's command must be exactly `echo X`, with the
+    /// image's entrypoint nowhere in it.
+    #[test]
+    fn cri_command_overrides_the_image_entrypoint() {
+        let rec = ContainerRec {
+            command: vec!["echo".into()],
+            args: vec!["X".into()],
+            ..Default::default()
+        };
+        let o = start_run_opts(&rec, None, crate::CapCeiling::unlimited(), "x", Vec::new());
+        // The override is carried as the entrypoint; the args are the command.
+        assert_eq!(o.entrypoint.as_deref(), Some(["echo".to_string()].as_slice()));
+        assert_eq!(o.command, ["X"]);
+
+        // Fed to the record builder against an image whose ENTRYPOINT is flannel's:
+        // the final argv is `echo X`, and `/opt/bin/flanneld` appears nowhere.
+        let resolved = delonix_compute::run::ResolvedRun {
+            // What the bug would have run: the image's ENTRYPOINT with the pod's
+            // command appended. `build_record` must NOT reach for this.
+            image_command: vec!["/opt/bin/flanneld".into(), "echo".into(), "X".into()],
+            default_memory: "max".into(),
+            default_cpus: String::new(),
+            ..Default::default()
+        };
+        let built = delonix_compute::run::build_record(&o, resolved).unwrap();
+        assert_eq!(built.command, ["echo", "X"]);
+        assert!(
+            !built.command.iter().any(|a| a.contains("flanneld")),
+            "the image's entrypoint leaked into the argv: {:?}",
+            built.command
+        );
+    }
+
+    /// The other side of the contract: an empty `command` is NOT an override, so the
+    /// image's ENTRYPOINT stays and `args` replace only its CMD. `o.entrypoint` must
+    /// be left `None` (the image's own entrypoint applies) and `args` become the
+    /// command that `build_record` folds onto it.
+    #[test]
+    fn cri_empty_command_keeps_the_image_entrypoint() {
+        let rec = ContainerRec {
+            command: Vec::new(),
+            args: vec!["--ip-masq".into()],
+            ..Default::default()
+        };
+        let o = start_run_opts(&rec, None, crate::CapCeiling::unlimited(), "x", Vec::new());
+        assert!(o.entrypoint.is_none(), "an empty command is not an override");
+        assert_eq!(o.command, ["--ip-masq"]);
     }
 
     /// An escaping parent is refused at the sandbox, not dropped.
