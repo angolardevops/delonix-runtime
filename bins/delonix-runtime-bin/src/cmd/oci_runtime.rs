@@ -10,9 +10,149 @@
 //! already carries `rootfs/` + `config.json`, so no image store is involved.
 
 use delonix_compute::Container;
+use delonix_model::records::Status;
 use delonix_model::{Error, Result};
+use delonix_state::Store;
 use oci_spec::runtime::Spec;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use delonix_linux::{self as runtime};
+
+/// `delonix oci-runtime` — the runc command-line contract over the engine's init.
+#[derive(clap::Args)]
+pub struct OciRuntimeArgs {
+    /// State directory (the per-runtime root, like `runc --root`). Default:
+    /// `$XDG_RUNTIME_DIR/delonix-runtime` (rootless) or `/run/delonix-runtime`.
+    #[arg(long, global = true)]
+    pub root: Option<PathBuf>,
+    #[command(subcommand)]
+    pub cmd: OciRuntimeCmd,
+}
+
+#[derive(clap::Subcommand)]
+pub enum OciRuntimeCmd {
+    /// Create a container from an OCI bundle WITHOUT starting it.
+    Create {
+        id: String,
+        /// Path to the OCI bundle (its `rootfs/` and `config.json`).
+        #[arg(short = 'b', long)]
+        bundle: PathBuf,
+    },
+    /// Start a container previously `create`d.
+    Start { id: String },
+    /// Print the OCI state JSON of a container.
+    State { id: String },
+    /// Send a signal to a container (default `SIGTERM`).
+    Kill {
+        id: String,
+        #[arg(default_value = "SIGTERM")]
+        signal: String,
+    },
+    /// Delete a container's state (teardown; `--force` kills it first).
+    Delete {
+        id: String,
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+/// The per-runtime state dir (`--root`), honouring the default when unset.
+fn state_root(explicit: Option<PathBuf>) -> PathBuf {
+    explicit.unwrap_or_else(|| {
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .map(|x| PathBuf::from(x).join("delonix-runtime"))
+            .unwrap_or_else(|| PathBuf::from("/run/delonix-runtime"))
+    })
+}
+
+/// Map the engine's container status to the OCI runtime-spec `state.status`
+/// (one of `creating`/`created`/`running`/`stopped`).
+fn oci_status(s: &Status) -> &'static str {
+    match s {
+        Status::Created => "created",
+        Status::Running | Status::Paused => "running",
+        Status::Stopped | Status::Failed(_) | Status::Crashed => "stopped",
+    }
+}
+
+/// The bundle path a `Container` was created from — stored in its `image` field
+/// as `oci-bundle:<path>` by [`spec_to_container`].
+fn bundle_of(c: &Container) -> Option<&str> {
+    c.image.strip_prefix("oci-bundle:")
+}
+
+pub fn run(args: OciRuntimeArgs) -> Result<()> {
+    let root = state_root(args.root);
+    let store = Store::open(root.join("containers"))?;
+    match args.cmd {
+        OciRuntimeCmd::Create { id, bundle } => create(&store, &id, &bundle),
+        OciRuntimeCmd::Start { id } => start(&store, &id),
+        OciRuntimeCmd::State { id } => state(&store, &id),
+        OciRuntimeCmd::Kill { id, signal } => super::container::cmd_kill(&store, &id, &signal),
+        OciRuntimeCmd::Delete { id, force } => delete(&store, &id, force),
+    }
+}
+
+fn create(store: &Store, id: &str, bundle: &Path) -> Result<()> {
+    let bundle = bundle
+        .canonicalize()
+        .map_err(|e| Error::Invalid(format!("oci-runtime: bundle '{}': {e}", bundle.display())))?;
+    let spec = Spec::load(bundle.join("config.json"))
+        .map_err(|e| Error::Invalid(format!("oci-runtime: config.json: {e}")))?;
+    let (mut c, _rootfs) = spec_to_container(id, &bundle, &spec)?;
+    c.status = Status::Created;
+    store.save(&c)?;
+    println!("{id}");
+    Ok(())
+}
+
+fn start(store: &Store, id: &str) -> Result<()> {
+    let mut c = super::util::find(store, id)?;
+    runtime::reconcile_status(&mut c);
+    if matches!(c.status, Status::Running | Status::Paused) {
+        return Err(Error::Invalid(format!("oci-runtime: {id} is already running")));
+    }
+    // Recover the bundle + re-derive the rootfs the init pivots into. A runc
+    // bundle has no delonix network, so this is the host-net launch path.
+    let bundle = bundle_of(&c)
+        .ok_or_else(|| Error::Invalid(format!("oci-runtime: {id} has no bundle recorded")))?
+        .to_string();
+    let spec = Spec::load(Path::new(&bundle).join("config.json"))
+        .map_err(|e| Error::Invalid(format!("oci-runtime: config.json: {e}")))?;
+    let (_c2, rootfs) = spec_to_container(id, Path::new(&bundle), &spec)?;
+    let spec = runtime::RunSpec {
+        detach: true,
+        userns: c.userns,
+        ..Default::default()
+    };
+    runtime::create_with(store, &mut c, &rootfs, &spec)?;
+    Ok(())
+}
+
+fn state(store: &Store, id: &str) -> Result<()> {
+    let mut c = super::util::find(store, id)?;
+    runtime::reconcile_status(&mut c);
+    let st = OciState {
+        oci_version: "1.3.0".to_string(),
+        id: c.id.clone(),
+        status: oci_status(&c.status).to_string(),
+        pid: c.pid.unwrap_or(0),
+        bundle: bundle_of(&c).unwrap_or("").to_string(),
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&st)
+            .map_err(|e| Error::Invalid(format!("oci-runtime: state json: {e}")))?
+    );
+    Ok(())
+}
+
+fn delete(store: &Store, id: &str, force: bool) -> Result<()> {
+    let c = super::util::find(store, id)?;
+    runtime::remove(store, &c, force)?;
+    println!("{}", c.id);
+    Ok(())
+}
 
 /// The OCI runtime **state** (`runtime-spec/schema/state-schema.json`): what
 /// `oci-runtime state <id>` prints and what a bundle-keyed record under `--root`
