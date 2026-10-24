@@ -752,6 +752,26 @@ fn allowed_syscalls() -> Vec<i64> {
     v
 }
 
+/// This engine's own syscall allowlist, rendered as NAMES instead of numbers.
+///
+/// The engine enforces its policy numerically (`allowed_syscalls` → seccompiler
+/// BPF, never a names table). But an exported OCI bundle (`image export`) is run
+/// by `runc`/`crun`, which take the policy as an OCI seccomp JSON keyed by NAME.
+/// This resolves each allowed number back to its name (via the same table
+/// `syscall_number` uses) so the exported bundle can carry the SAME allowlist the
+/// engine itself enforces — no drift, no vendored upstream profile. A number with
+/// no name in the table is skipped (and would be a table gap, not a policy gap).
+/// Sorted and de-duplicated for a stable, reviewable profile.
+pub fn allowed_syscall_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = allowed_syscalls()
+        .into_iter()
+        .filter_map(seccomp_profile::syscall_name)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// Enables `NO_NEW_PRIVS`: an `execve` never gains privileges (nullifies setuid/
 /// setgid/file capabilities). Key defense against escalation — always active.
 fn set_no_new_privs() {
@@ -2038,12 +2058,33 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
     }
     let upperdir = base.join("upper");
     let workdir = base.join("work");
-    let mounted = match fsopen_overlay(&lower_paths, &upperdir, &workdir, merged, volatile) {
+    // Translate the OCI whiteouts baked into the lower layers (`.wh.<name>`,
+    // `.wh..wh..opq`) into what the KERNEL overlay honours: char-dev 0:0
+    // whiteouts and opaque directories, in per-container sidecar lowerdirs
+    // interleaved into the stack. The shared per-digest layer dirs are left
+    // untouched. `userxattr` is only needed when an opaque dir is present (its
+    // marker is a `user.overlay.opaque` xattr the kernel reads only under that
+    // option); plain char-dev whiteouts need no option. See
+    // `build_whiteout_sidecars`.
+    let (expanded_lowers, userxattr) = build_whiteout_sidecars(base, &lower_paths);
+    let mounted = match fsopen_overlay(
+        &expanded_lowers,
+        &upperdir,
+        &workdir,
+        merged,
+        volatile,
+        userxattr,
+    ) {
         // A kernel without `volatile` (before 5.10) refuses the flag with EINVAL:
         // the container still starts, without the optimisation (ADR-0056 D3).
-        Err(e) if volatile && e == rustix::io::Errno::INVAL => {
-            fsopen_overlay(&lower_paths, &upperdir, &workdir, merged, false)
-        }
+        Err(e) if volatile && e == rustix::io::Errno::INVAL => fsopen_overlay(
+            &expanded_lowers,
+            &upperdir,
+            &workdir,
+            merged,
+            false,
+            userxattr,
+        ),
         other => other,
     };
     mounted.map_err(|e| nix::errno::Errno::from_i32(e.raw_os_error()))
@@ -2056,11 +2097,12 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
 /// speak `nix::errno::Errno`; converting once at the boundary above keeps it
 /// that way instead of spreading two error types through the caller side).
 fn fsopen_overlay(
-    lowers: &[&str],
+    lowers: &[String],
     upperdir: &std::path::Path,
     workdir: &std::path::Path,
     target: &std::path::Path,
     volatile: bool,
+    userxattr: bool,
 ) -> rustix::io::Result<()> {
     use rustix::mount::{
         fsconfig_create, fsconfig_set_flag, fsconfig_set_string, fsmount, fsopen, move_mount,
@@ -2071,12 +2113,21 @@ fn fsopen_overlay(
     // always used — overlayfs reads `lowerdir+` appends in the order given,
     // identically to the old colon-joined list.
     for lower in lowers {
-        fsconfig_set_string(&fs, "lowerdir+", *lower)?;
+        fsconfig_set_string(&fs, "lowerdir+", lower.as_str())?;
     }
     fsconfig_set_string(&fs, "upperdir", upperdir.to_string_lossy().as_ref())?;
     fsconfig_set_string(&fs, "workdir", workdir.to_string_lossy().as_ref())?;
     if volatile {
         fsconfig_set_flag(&fs, "volatile")?;
+    }
+    // Tells overlayfs to read whiteout/opaque markers from the `user.overlay.*`
+    // xattr namespace instead of `trusted.overlay.*`. An unprivileged user (even
+    // root inside a user namespace) cannot set `trusted.*`, so the opaque dirs
+    // this engine synthesises for OCI `.wh..wh..opq` markers are tagged
+    // `user.overlay.opaque` and are only honoured under this flag (podman's
+    // rootless default). Set only when a synthesised opaque dir is in the stack.
+    if userxattr {
+        fsconfig_set_flag(&fs, "userxattr")?;
     }
     fsconfig_create(&fs)?;
     let mount_fd = fsmount(&fs, FsMountFlags::FSMOUNT_CLOEXEC, MountAttrFlags::empty())?;
@@ -2087,6 +2138,255 @@ fn fsopen_overlay(
         target.to_string_lossy().as_ref(),
         MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
     )
+}
+
+/// A whiteout marker found inside an extracted image layer: `rel` is its path
+/// relative to the layer root, `opaque` tells apart the two OCI kinds — a
+/// per-file deletion (`<dir>/.wh.<name>`) from an opaque directory
+/// (`<dir>/.wh..wh..opq`, which hides everything the lower layers put in `<dir>`).
+struct Whiteout {
+    rel: std::path::PathBuf,
+    opaque: bool,
+}
+
+/// Synthesises the kernel-honoured whiteouts for the OCI whiteouts baked into
+/// `lowers` and returns the lower stack to actually mount, plus whether any
+/// opaque directory was produced (so the caller knows to pass `userxattr`).
+///
+/// # Why this exists
+///
+/// An image records a deletion as a FILE in the layer that makes it:
+/// `.wh.<name>` removes `<name>` from the layers below, `.wh..wh..opq` makes a
+/// directory opaque. A userspace unpack writes those files verbatim into the
+/// per-digest layer cache. The KERNEL overlay driver does not read the `.wh.`
+/// naming convention at all — it honours a whiteout only as a character device
+/// `0:0`, and an opaque directory only as an `overlay.opaque` xattr — so the
+/// markers leak into the merged rootfs as unreadable `000`-root files and the
+/// deletions they encode never happen (measured: `rabbitmq:4.0-management-alpine`
+/// exits 1 with `failed_to_parse_configuration_file`, its config loader tripping
+/// over `/etc/rabbitmq/conf.d/.wh.20-...conf`).
+///
+/// # How
+///
+/// The shared per-digest layer directories are immutable and cannot be touched.
+/// For each layer `Li` that carries whiteouts, up to two throwaway sidecar
+/// directories are built under `<base>/wh/` and spliced into the stack around
+/// `Li` (highest-first order: `[Ai, Li, Bi]`):
+///
+/// - `Ai`, directly ABOVE `Li`, carries char-dev `0:0` whiteouts. For a file
+///   whiteout it gets one at the TARGET (to delete the lower copy) and one at the
+///   marker path itself (so the `.wh.` file does not show in the merge). Above
+///   `Li` so a higher layer that re-adds the same path still wins, and so the
+///   marker that lives in `Li` is covered.
+/// - `Bi`, directly BELOW `Li`, carries an opaque directory per `.wh..wh..opq`.
+///   Below `Li` on purpose: an opaque dir hides everything in the layers UNDER
+///   it, so placing it under `Li` hides the lower layers' contents while `Li`'s
+///   own entries in that directory survive — exactly the OCI opaque semantics.
+///   The opaque marker itself is hidden by a char-dev in `Ai`.
+///
+/// Sidecars are per-container and rebuilt on every mount (a handful of `mknod`s);
+/// `mknod` of a char-dev `0:0` and setting a `user.*` xattr are both allowed for
+/// the user-namespace root this runs as. Best-effort per marker: a whiteout that
+/// cannot be synthesised is skipped rather than failing the whole mount.
+fn build_whiteout_sidecars(base: &std::path::Path, lowers: &[&str]) -> (Vec<String>, bool) {
+    let wh_root = base.join("wh");
+    // A previous start of this same container may have left sidecars behind
+    // (`unmount_rootfs` keeps `upper/` and does not know about `wh/`). Rebuild
+    // from scratch so a stale sidecar can never shadow the current layers.
+    let _ = std::fs::remove_dir_all(&wh_root);
+    let mut expanded: Vec<String> = Vec::with_capacity(lowers.len());
+    let mut any_opaque = false;
+    for (i, lower) in lowers.iter().enumerate() {
+        let plan = plan_layer(&layer_whiteouts(std::path::Path::new(lower)));
+        let above = wh_root.join(format!("a{i}"));
+        let below = wh_root.join(format!("b{i}"));
+        let mut has_above = false;
+        let mut has_below = false;
+        for rel in &plan.above_whiteouts {
+            has_above |= mknod_whiteout(&above.join(rel)).is_ok();
+        }
+        for rel in &plan.below_opaque {
+            if set_opaque_dir(&below.join(rel)).is_ok() {
+                has_below = true;
+                any_opaque = true;
+            }
+        }
+        // Highest-first: the synthesised deletions sit directly above their
+        // layer, the opaque dirs directly below it.
+        if has_above {
+            expanded.push(above.to_string_lossy().into_owned());
+        }
+        expanded.push((*lower).to_string());
+        if has_below {
+            expanded.push(below.to_string_lossy().into_owned());
+        }
+    }
+    (expanded, any_opaque)
+}
+
+/// What one layer's whiteouts translate to, as sidecar-relative paths. PURE — the
+/// decomposition is here so it can be tested without the privilege `mknod`/`setxattr`
+/// need. See [`build_whiteout_sidecars`] for how the two sets are placed in the stack.
+struct LayerPlan {
+    /// Char-dev `0:0` whiteouts for the ABOVE sidecar: per file whiteout, the
+    /// target to delete AND the marker to hide; per opaque dir, the opq marker.
+    above_whiteouts: Vec<std::path::PathBuf>,
+    /// Directories for the BELOW sidecar to tag opaque.
+    below_opaque: Vec<std::path::PathBuf>,
+}
+
+fn plan_layer(whs: &[Whiteout]) -> LayerPlan {
+    let mut above = Vec::new();
+    let mut below = Vec::new();
+    for w in whs {
+        if !is_confined_rel(&w.rel) {
+            continue;
+        }
+        if w.opaque {
+            if let Some(dir) = w.rel.parent() {
+                below.push(dir.to_path_buf());
+            }
+            // Hide the `.wh..wh..opq` marker file itself.
+            above.push(w.rel.clone());
+        } else {
+            // `<dir>/.wh.<name>` → delete `<dir>/<name>` from the lower layers...
+            if let (Some(dir), Some(name)) = (
+                w.rel.parent(),
+                w.rel
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_prefix(".wh.")),
+            ) {
+                above.push(dir.join(name));
+            }
+            // ...and hide the marker file itself.
+            above.push(w.rel.clone());
+        }
+    }
+    LayerPlan {
+        above_whiteouts: above,
+        below_opaque: below,
+    }
+}
+
+/// The whiteouts in one extracted layer, cached next to it so a large image is
+/// only ever walked once. The cache key is the layer's content-addressed digest,
+/// so it never goes stale; a missing or unreadable cache just means another walk.
+fn layer_whiteouts(layer: &std::path::Path) -> Vec<Whiteout> {
+    let cache = layer.with_file_name(format!(
+        "{}.whiteouts",
+        layer.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    if let Ok(text) = std::fs::read_to_string(&cache) {
+        return parse_whiteout_cache(&text);
+    }
+    let whs = walk_whiteouts(layer);
+    write_whiteout_cache(&cache, &whs);
+    whs
+}
+
+/// Walks `layer` and collects every `.wh.`-prefixed entry. Does not descend into
+/// a whiteout entry (a layer never has children under one) or follow symlinks.
+fn walk_whiteouts(layer: &std::path::Path) -> Vec<Whiteout> {
+    let mut out = Vec::new();
+    let mut stack = vec![layer.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            let is_whiteout = name.starts_with(".wh.");
+            if is_whiteout {
+                if let Ok(rel) = e.path().strip_prefix(layer) {
+                    out.push(Whiteout {
+                        rel: rel.to_path_buf(),
+                        opaque: name == ".wh..wh..opq",
+                    });
+                }
+            } else if ft.is_dir() {
+                stack.push(e.path());
+            }
+        }
+    }
+    out
+}
+
+/// `<kind> <rel>` per line, `o` opaque or `f` file. `rel` runs to end-of-line, so
+/// a marker whose name contains a space is preserved.
+fn parse_whiteout_cache(text: &str) -> Vec<Whiteout> {
+    text.lines()
+        .filter_map(|line| {
+            let (kind, rel) = line.split_once(' ')?;
+            let opaque = match kind {
+                "o" => true,
+                "f" => false,
+                _ => return None,
+            };
+            Some(Whiteout {
+                rel: std::path::PathBuf::from(rel),
+                opaque,
+            })
+        })
+        .collect()
+}
+
+/// Writes the cache atomically (temp + rename) so a concurrent start never reads
+/// a half-written file. Best-effort: a failure just costs the next start a walk.
+fn write_whiteout_cache(cache: &std::path::Path, whs: &[Whiteout]) {
+    let mut body = String::new();
+    for w in whs {
+        body.push_str(if w.opaque { "o " } else { "f " });
+        body.push_str(&w.rel.to_string_lossy());
+        body.push('\n');
+    }
+    let tmp = cache.with_extension(format!("whiteouts.{}.tmp", std::process::id()));
+    if std::fs::write(&tmp, body.as_bytes()).is_ok() && std::fs::rename(&tmp, cache).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// A relative path is safe to splice under a sidecar only if every component is a
+/// plain name — no `..`, no root — so a crafted marker path cannot escape it.
+fn is_confined_rel(rel: &std::path::Path) -> bool {
+    !rel.as_os_str().is_empty()
+        && rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Creates a char-dev `0:0` at `path` (an overlay whiteout), making its parents.
+fn mknod_whiteout(path: &std::path::Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let c = CString::new(path.as_os_str().as_encoded_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: `c` is a valid NUL-terminated path owned by this frame; a char
+    // device with rdev 0 is overlayfs's whiteout, and `mode` 0 matches the
+    // `000` the image's own marker carried.
+    let r = unsafe { libc::mknod(c.as_ptr(), libc::S_IFCHR, 0) };
+    if r != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Creates `dir` and tags it `user.overlay.opaque=y` (honoured under `userxattr`).
+fn set_opaque_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let c = CString::new(dir.as_os_str().as_encoded_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let name = CString::new("user.overlay.opaque").expect("static xattr name has no NUL");
+    // SAFETY: `c` and `name` are valid NUL-terminated C strings owned by this
+    // frame; the value/len pair points at a one-byte buffer that outlives the call.
+    let r = unsafe { libc::setxattr(c.as_ptr(), name.as_ptr(), b"y".as_ptr().cast(), 1, 0) };
+    if r != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Mounts the container rootfs and does `pivot_root` (runs INSIDE the `clone`).
@@ -5561,7 +5861,11 @@ pub fn reveal_cgroup2_if_masked() {
 /// and return `<ancestor>/dlx-containers`. The session's CURRENT cgroup
 /// (e.g. `app-*.scope`) is POPULATED — the no-internal-processes rule refuses
 /// `subtree_control` there; this escape gives us an EMPTY, delegable base.
-fn user_service_base(cur_abs: &str) -> Option<String> {
+///
+/// `pub` so `system prune` can reclaim the rootless `dlx-<id>` leaves that
+/// accumulate under this base when an engine dies before cleanup — the same
+/// base this function hands `setup_cgroup_delegated`, kept as one source of truth.
+pub fn user_service_base(cur_abs: &str) -> Option<String> {
     let mut end = 0usize;
     for seg in cur_abs.split('/') {
         end += seg.len() + 1; // +1 for the '/'
@@ -14506,5 +14810,189 @@ mod cgroup_group_tests {
             Err(Error::InvalidCgroupParent(m)) => assert!(m.contains("../escape"), "{m}"),
             other => panic!("expected InvalidCgroupParent, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod whiteout_synthesis_tests {
+    //! The OCI→kernel whiteout translation (`build_whiteout_sidecars` and the
+    //! pure `plan_layer`/`walk_whiteouts`/cache helpers it rests on). The
+    //! privileged half — `mknod`-ing the char devices and mounting the overlay
+    //! that honours them — is exercised live (see `mount_overlay_if_marked`'s
+    //! doc comment and the `rabbitmq:4.0-management-alpine` reproduction); here
+    //! the decomposition is pinned without needing a user namespace.
+    use super::{
+        build_whiteout_sidecars, is_confined_rel, layer_whiteouts, parse_whiteout_cache,
+        plan_layer, walk_whiteouts, write_whiteout_cache, Whiteout,
+    };
+    use std::path::{Path, PathBuf};
+
+    fn file_wh(rel: &str) -> Whiteout {
+        Whiteout {
+            rel: PathBuf::from(rel),
+            opaque: false,
+        }
+    }
+    fn opq(rel: &str) -> Whiteout {
+        Whiteout {
+            rel: PathBuf::from(rel),
+            opaque: true,
+        }
+    }
+
+    #[test]
+    fn a_file_whiteout_deletes_its_target_and_hides_its_own_marker() {
+        // The rabbitmq case: `.wh.20-...conf` must both remove the lower
+        // `20-...conf` and keep the `.wh.` marker out of the merged view.
+        let p = plan_layer(&[file_wh("etc/rabbitmq/conf.d/.wh.20-x.conf")]);
+        assert_eq!(
+            p.above_whiteouts,
+            vec![
+                PathBuf::from("etc/rabbitmq/conf.d/20-x.conf"),
+                PathBuf::from("etc/rabbitmq/conf.d/.wh.20-x.conf"),
+            ]
+        );
+        assert!(p.below_opaque.is_empty());
+    }
+
+    #[test]
+    fn an_opaque_dir_tags_the_directory_below_and_hides_its_marker_above() {
+        let p = plan_layer(&[opq("var/lib/app/.wh..wh..opq")]);
+        assert_eq!(p.below_opaque, vec![PathBuf::from("var/lib/app")]);
+        assert_eq!(
+            p.above_whiteouts,
+            vec![PathBuf::from("var/lib/app/.wh..wh..opq")]
+        );
+    }
+
+    #[test]
+    fn a_whiteout_at_the_root_opaques_the_layer_root() {
+        // `.wh..wh..opq` with no parent dir → the layer root itself is opaque.
+        let p = plan_layer(&[opq(".wh..wh..opq")]);
+        assert_eq!(p.below_opaque, vec![PathBuf::from("")]);
+    }
+
+    #[test]
+    fn a_marker_that_escapes_its_layer_is_dropped() {
+        // A crafted path must never let a synthesised device land outside the
+        // sidecar; `is_confined_rel` is the gate `plan_layer` applies.
+        assert!(!is_confined_rel(Path::new("../etc/.wh.passwd")));
+        assert!(!is_confined_rel(Path::new("/etc/.wh.passwd")));
+        assert!(!is_confined_rel(Path::new("")));
+        assert!(is_confined_rel(Path::new("etc/.wh.passwd")));
+        let p = plan_layer(&[file_wh("../../.wh.escape"), file_wh("etc/.wh.keep")]);
+        assert_eq!(
+            p.above_whiteouts,
+            vec![PathBuf::from("etc/keep"), PathBuf::from("etc/.wh.keep"),]
+        );
+    }
+
+    #[test]
+    fn walk_finds_markers_in_nested_dirs_and_does_not_descend_into_them() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("a/b/.wh.gone"), b"").unwrap();
+        std::fs::write(root.join("a/keep"), b"x").unwrap();
+        // An opaque marker, and a directory whose NAME starts with `.wh.` (must
+        // be recorded, never recursed into).
+        std::fs::write(root.join("a/.wh..wh..opq"), b"").unwrap();
+        std::fs::create_dir_all(root.join(".wh.weird/child")).unwrap();
+
+        let mut got: Vec<(String, bool)> = walk_whiteouts(root)
+            .into_iter()
+            .map(|w| (w.rel.to_string_lossy().into_owned(), w.opaque))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                (".wh.weird".to_string(), false),
+                ("a/.wh..wh..opq".to_string(), true),
+                ("a/b/.wh.gone".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_whiteout_cache_round_trips_including_spaced_names() {
+        let whs = vec![
+            file_wh("etc/conf.d/.wh.20 management agent.conf"),
+            opq("var/lib/app/.wh..wh..opq"),
+        ];
+        let d = tempfile::tempdir().unwrap();
+        let cache = d.path().join("x.whiteouts");
+        write_whiteout_cache(&cache, &whs);
+        let text = std::fs::read_to_string(&cache).unwrap();
+        let back = parse_whiteout_cache(&text);
+        assert_eq!(back.len(), 2);
+        assert_eq!(
+            back[0].rel,
+            PathBuf::from("etc/conf.d/.wh.20 management agent.conf")
+        );
+        assert!(!back[0].opaque);
+        assert_eq!(back[1].rel, PathBuf::from("var/lib/app/.wh..wh..opq"));
+        assert!(back[1].opaque);
+    }
+
+    #[test]
+    fn parse_skips_malformed_lines() {
+        let back = parse_whiteout_cache("f etc/.wh.a\ngarbage-no-space\nx etc/.wh.b\no var/lib\n");
+        let got: Vec<_> = back
+            .iter()
+            .map(|w| (w.rel.to_string_lossy().into_owned(), w.opaque))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("etc/.wh.a".to_string(), false),
+                ("var/lib".to_string(), true)
+            ]
+        );
+    }
+
+    #[test]
+    fn layer_whiteouts_prefers_the_cache_over_a_walk() {
+        // A written cache is authoritative (keyed by immutable digest): even if
+        // it disagrees with what is on disk, the cache wins and no walk happens.
+        let d = tempfile::tempdir().unwrap();
+        let layer = d.path().join("deadbeef");
+        std::fs::create_dir_all(layer.join("etc")).unwrap();
+        std::fs::write(layer.join("etc/.wh.ondisk"), b"").unwrap();
+        let cache = d.path().join("deadbeef.whiteouts");
+        std::fs::write(&cache, "f etc/.wh.cached\n").unwrap();
+        let got = layer_whiteouts(&layer);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].rel, PathBuf::from("etc/.wh.cached"));
+    }
+
+    #[test]
+    fn layer_whiteouts_walks_and_writes_the_cache_when_absent() {
+        let d = tempfile::tempdir().unwrap();
+        let layer = d.path().join("cafe");
+        std::fs::create_dir_all(layer.join("etc")).unwrap();
+        std::fs::write(layer.join("etc/.wh.gone"), b"").unwrap();
+        let got = layer_whiteouts(&layer);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].rel, PathBuf::from("etc/.wh.gone"));
+        // The walk persisted a cache next to the layer for the next mount.
+        let cache = d.path().join("cafe.whiteouts");
+        assert!(cache.exists(), "walk should have written the cache");
+        assert_eq!(std::fs::read_to_string(&cache).unwrap(), "f etc/.wh.gone\n");
+    }
+
+    #[test]
+    fn a_layer_with_no_whiteouts_leaves_the_stack_and_options_untouched() {
+        // Common case: no synthesis, no extra lowerdirs, no `userxattr`.
+        let d = tempfile::tempdir().unwrap();
+        let base = d.path();
+        let layer = base.join("plainlayer");
+        std::fs::create_dir_all(layer.join("etc")).unwrap();
+        std::fs::write(layer.join("etc/passwd"), b"root:x:0:0:::\n").unwrap();
+        let lowers = [layer.to_string_lossy().into_owned()];
+        let lower_refs: Vec<&str> = lowers.iter().map(String::as_str).collect();
+        let (expanded, userxattr) = build_whiteout_sidecars(base, &lower_refs);
+        assert_eq!(expanded, vec![layer.to_string_lossy().into_owned()]);
+        assert!(!userxattr);
     }
 }

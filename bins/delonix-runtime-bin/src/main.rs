@@ -1696,6 +1696,31 @@ mod advisory_flag_tests {
             );
         }
     }
+
+    /// DEF-001 regression: the free-text ADVISORY strings in `system.rs`
+    /// (`system doctor` / `system resources`) must never advertise a Docker
+    /// spelling as if it were our flag. The compiler cannot see inside a string
+    /// literal (the class of bug `main.rs::advisory_flag_tests` exists for), and
+    /// `system doctor` used to print `cgroup2 delegation (--memory/--cpus/--pids-limit)`
+    /// — a `--pids-limit` flag that deliberately does not exist.
+    #[test]
+    fn delegation_labels_name_only_real_flags() {
+        use crate::cmd::system::{
+            DELEGATION_CHECK_LABEL, DELEGATION_LIMITS_APPLY, DELEGATION_LIMITS_INERT,
+        };
+        for label in [
+            DELEGATION_CHECK_LABEL,
+            DELEGATION_LIMITS_APPLY,
+            DELEGATION_LIMITS_INERT,
+        ] {
+            for f in ["--pids-limit", "--memory-swap", "--cpuset-mems", "--io-max"] {
+                assert!(
+                    !label.contains(f),
+                    "advisory label {label:?} names {f}, a flag `container run` does not have"
+                );
+            }
+        }
+    }
 }
 
 /// Every user-facing help string has to have a Portuguese translation, and the

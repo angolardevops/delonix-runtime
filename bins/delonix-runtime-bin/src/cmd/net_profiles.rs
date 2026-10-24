@@ -716,43 +716,18 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
     // --- 5. addressing ----------------------------------------------------
     let pod_subnet = parse_cidr_field("spec.podSubnet", &req.pod_subnet)?;
     let service_subnet = parse_cidr_field("spec.serviceSubnet", &req.service_subnet)?;
-    if pod_subnet.overlaps(service_subnet) {
-        return Err(Error::coded(
-            1704,
-            Error::Invalid(super::po::tf(
-                "spec.podSubnet {pods} and spec.serviceSubnet {svcs} overlap. kubeadm accepts \
-                 both and the cluster then routes one of them nowhere: a Service address that \
-                 falls inside the pod CIDR is answered by whatever pod holds it. Nothing was \
-                 created",
-                &[("pods", &req.pod_subnet), ("svcs", &req.service_subnet)],
-            )),
-        ));
-    }
-    // A pod CIDR has to hold more than the nodes that will carve it up. The
-    // kube-controller-manager hands each node a /24 by default, so a /24 pod
-    // CIDR on two nodes gives the second node nothing and its pods never get
-    // an address — a failure that shows up as "pods Pending", far from here.
-    let per_node = 256u64;
-    if profile.is_addon() && pod_subnet.size() < per_node * u64::from(req.nodes.max(1)) {
-        return Err(Error::coded(
-            1704,
-            Error::Invalid(super::po::tf(
-                "spec.podSubnet {pods} holds {have} addresses, and a {n}-node cluster needs at \
-                 least {need}: the controller-manager carves a /24 per node, so the later nodes \
-                 would get no pod range at all and their pods would stay Pending. Widen the pod \
-                 CIDR",
-                &[
-                    ("pods", &req.pod_subnet),
-                    ("have", &pod_subnet.size().to_string()),
-                    ("n", &req.nodes.max(1).to_string()),
-                    (
-                        "need",
-                        &(per_node * u64::from(req.nodes.max(1))).to_string(),
-                    ),
-                ],
-            )),
-        ));
-    }
+    // Shared with the native kind path (`kindmode::create`) so the two cannot
+    // drift. The size check runs only for the add-on CNIs here: they are the
+    // ones whose pods get a controller-manager-carved /24 per node on this
+    // path (`default`/`none` in kubeadm mode leave that to the operator).
+    validate_cluster_cidrs(
+        pod_subnet,
+        &req.pod_subnet,
+        service_subnet,
+        &req.service_subnet,
+        req.nodes,
+        profile.is_addon(),
+    )?;
 
     // --- 6. MTU -----------------------------------------------------------
     let node_mtu = req.node_mtu.unwrap_or(DEFAULT_NODE_MTU);
@@ -877,7 +852,7 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
 /// gate (it is the shell-injection defence, and it must not become weaker
 /// because the parse got stronger) and reporting host bits rather than
 /// masking them away in silence.
-fn parse_cidr_field(field: &str, value: &str) -> Result<Cidr4> {
+pub(crate) fn parse_cidr_field(field: &str, value: &str) -> Result<Cidr4> {
     let charset_ok = !value.is_empty()
         && value
             .chars()
@@ -919,6 +894,66 @@ fn parse_cidr_field(field: &str, value: &str) -> Result<Cidr4> {
         ));
     }
     Ok(cidr)
+}
+
+/// Shared DX-1704 addressing validation: the pod and service CIDRs must not
+/// overlap, and (when `enforce_size`) the pod CIDR must hold a /24 per node.
+///
+/// Both the declarative path ([`validate_and_plan`]) and the native kind path
+/// ([`super::kindmode::create`]) call this, so a cluster is refused the same
+/// way whether it arrives as a `KubernetesCluster` manifest, a `cluster create`
+/// flag set, or a `kind.x-k8s.io` config — the three cannot drift.
+///
+/// `pod_str`/`service_str` are the originals, used verbatim in the messages so
+/// the operator sees what they wrote. `nodes` is the total node count
+/// (control-planes + workers). `enforce_size` is `profile.is_addon()` on the
+/// declarative path — there only the add-on CNIs get a controller-manager /24
+/// per node — and always `true` on the kind path, where kindnet and a
+/// bring-your-own CNI both take their per-node pod range from the
+/// controller-manager.
+pub(crate) fn validate_cluster_cidrs(
+    pod_subnet: Cidr4,
+    pod_str: &str,
+    service_subnet: Cidr4,
+    service_str: &str,
+    nodes: u32,
+    enforce_size: bool,
+) -> Result<()> {
+    if pod_subnet.overlaps(service_subnet) {
+        return Err(Error::coded(
+            1704,
+            Error::Invalid(super::po::tf(
+                "spec.podSubnet {pods} and spec.serviceSubnet {svcs} overlap. kubeadm accepts \
+                 both and the cluster then routes one of them nowhere: a Service address that \
+                 falls inside the pod CIDR is answered by whatever pod holds it. Nothing was \
+                 created",
+                &[("pods", pod_str), ("svcs", service_str)],
+            )),
+        ));
+    }
+    // A pod CIDR has to hold more than the nodes that will carve it up. The
+    // kube-controller-manager hands each node a /24 by default, so a /24 pod
+    // CIDR on two nodes gives the second node nothing and its pods never get
+    // an address — a failure that shows up as "pods Pending", far from here.
+    let per_node = 256u64;
+    if enforce_size && pod_subnet.size() < per_node * u64::from(nodes.max(1)) {
+        return Err(Error::coded(
+            1704,
+            Error::Invalid(super::po::tf(
+                "spec.podSubnet {pods} holds {have} addresses, and a {n}-node cluster needs at \
+                 least {need}: the controller-manager carves a /24 per node, so the later nodes \
+                 would get no pod range at all and their pods would stay Pending. Widen the pod \
+                 CIDR",
+                &[
+                    ("pods", pod_str),
+                    ("have", &pod_subnet.size().to_string()),
+                    ("n", &nodes.max(1).to_string()),
+                    ("need", &(per_node * u64::from(nodes.max(1))).to_string()),
+                ],
+            )),
+        ));
+    }
+    Ok(())
 }
 
 /// Refuses a pod/service CIDR that overlaps a network the environment already
@@ -1328,6 +1363,33 @@ mod tests {
         // One node fits in a /24.
         r.nodes = 1;
         assert!(validate(&r).is_ok());
+    }
+
+    /// The shared helper that the kind path (`kindmode::create`) calls with
+    /// `enforce_size: true`: overlap is refused regardless of the flag, and the
+    /// size check keys off it — so the kind path refuses a `/30` pod CIDR for 2
+    /// nodes while the declarative `default`/`none` CNI path (which passes
+    /// `false`) does not reach that arm.
+    #[test]
+    fn validate_cluster_cidrs_honours_enforce_size() {
+        let pod = Cidr4::parse("10.244.0.0/30").unwrap(); // 4 addresses
+        let svc = Cidr4::parse("10.96.0.0/12").unwrap();
+        // Size enforced (kind path): 2 nodes need 512, a /30 holds 4 → refused.
+        let e =
+            validate_cluster_cidrs(pod, "10.244.0.0/30", svc, "10.96.0.0/12", 2, true).unwrap_err();
+        assert_eq!(e.number(), 1704, "{e}");
+        assert!(e.to_string().contains("/24 per node"), "{e}");
+        // Size NOT enforced: the same small CIDR passes (the caller owns IPAM).
+        assert!(
+            validate_cluster_cidrs(pod, "10.244.0.0/30", svc, "10.96.0.0/12", 2, false).is_ok()
+        );
+        // Overlap is refused either way.
+        let p = Cidr4::parse("10.0.0.0/8").unwrap();
+        for enforce in [true, false] {
+            let e =
+                validate_cluster_cidrs(p, "10.0.0.0/8", p, "10.0.0.0/8", 1, enforce).unwrap_err();
+            assert_eq!(e.number(), 1704, "enforce={enforce}: {e}");
+        }
     }
 
     #[test]

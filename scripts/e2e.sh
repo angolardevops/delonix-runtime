@@ -5182,6 +5182,59 @@ else
 fi
 
 ########################################
+section "vm: ciclo de vida no cloud-hypervisor (pause/resume/restart/resize.cold/destroy)"
+########################################
+# MESMA convenção das secções CH acima: prova o MECANISMO do motor contra um
+# disco VAZIO (o VMM sobe e fica em `S` no firmware à espera de um device de
+# arranque — `vm ls` di-lo Running), sem um SO convidado. O que é a nível de
+# GUEST — o convidado volta depois de `pause`/`restart`, vê os vCPUs novos após
+# `resize`, e nada fica órfão — foi validado AO VIVO ponta-a-ponta com a golden
+# `k8s-golden` (login real por `delonix vm ssh`, 28/28 asserções) e registado em
+# `reports/vm-native-ch-audit-2026-10-24/` + o arnês reproduzível
+# `scripts/vm-native-ch-lifecycle.sh`; não se repete aqui porque exigiria puxar
+# uma imagem por corrida da bateria sem provar nada que este mecanismo já não
+# prove. É esta a evidência que gradua estas capacidades de `partial`.
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "vm: ciclo de vida no cloud-hypervisor" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif ch_usable; then
+  LVM="chlife-$PFX"; LDISK="$OUT/$LVM.qcow2"; LSOCK="$SROOT/vms/$LVM.sock"
+  qemu-img create -f qcow2 "$LDISK" 64M >/dev/null 2>&1
+  if check_then "vm create cloud-hypervisor (ciclo de vida)" ok \
+       "$BIN" vm create "$LVM" --disk "$LDISK" --backend cloud-hypervisor --memory 256M; then
+    # pause/resume: PUT /api/v1/vm.{pause,resume} no socket do VMM; o VMM
+    # continua de pé dos dois lados (vm.resume)
+    check "CH: vm pause" ok "$BIN" vm pause "$LVM"
+    check "CH: o VMM continua vivo depois do pause" ok bash -c "pgrep -f -- '--api-socket $LSOCK( |\$)' >/dev/null"
+    check "CH: vm resume" ok "$BIN" vm unpause "$LVM"
+    check "CH: o VMM continua vivo depois do resume" ok bash -c "pgrep -f -- '--api-socket $LSOCK( |\$)' >/dev/null"
+    # restart: stop-then-start — reboot real; o VMM sai e volta a subir
+    check "CH: vm restart" ok "$BIN" vm restart "$LVM"
+    check "CH: o VMM está de pé depois do restart" ok bash -c "pgrep -f -- '--api-socket $LSOCK( |\$)' >/dev/null"
+    # resize.cold: `vm resize` reescreve os vcpus no record e `vm start`
+    # reconstrói a linha de comando do VMM a partir dele — a testemunha
+    # independente é o argv do processo CH (boot=2)
+    check "CH: vm stop (resize.cold)" ok "$BIN" vm stop "$LVM"
+    check "CH: vm resize --vcpus 2 com a VM parada" ok "$BIN" vm resize "$LVM" --vcpus 2
+    check "CH: vm start depois do resize" ok "$BIN" vm start "$LVM"
+    check "CH: o VMM arranca com boot=2 vCPUs" ok bash -c \
+      "pgrep -af -- '--api-socket $LSOCK' | grep -q -- '--cpus boot=2'"
+    # destroy: termina o VMM (guarda pid+starttime) e remove tudo o que é da VM
+    check "CH: vm destroy" ok "$BIN" delete vm "$LVM" -f
+    check "CH: destroy não deixa o VMM órfão" ok bash -c "! pgrep -f -- '--api-socket $LSOCK( |\$)' >/dev/null"
+    check "CH: destroy não deixa o record" ok bash -c \
+      "! '$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$LVM' for v in json.load(sys.stdin)) else 1)\""
+    check "CH: destroy não deixa ficheiros no vms/" ok bash -c \
+      "! ls '$SROOT'/vms/'$LVM'.* >/dev/null 2>&1"
+  else
+    "$BIN" delete vm "$LVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$LDISK"
+else
+  skip "vm: ciclo de vida no cloud-hypervisor" "$(ch_missing)"
+fi
+
+########################################
 section "vm: --disk-size cresce o disco de arranque, só a crescer (vm.disk.resize)"
 ########################################
 # Achado e corrigido a auditar a prontidão VMaaS (docs/discovery/67): esta

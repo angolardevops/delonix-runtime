@@ -310,6 +310,9 @@ Options:
           [default: default]
           [possible values: default, none]
 
+      --config &lt;CONFIG&gt;
+          A real `kind` config file (`kind.x-k8s.io/v1alpha4`), the one `kind create cluster --config` reads. delonix honours the fields it can (`nodes[].role`, `name`, `networking.{podSubnet,serviceSubnet, apiServerPort,disableDefaultCNI}`) and REFUSES the rest by name (DX-1707) instead of ignoring them. The config is the source of truth: a value it sets wins over the matching flag&#x27;s default
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

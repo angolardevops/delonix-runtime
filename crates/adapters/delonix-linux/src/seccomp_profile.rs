@@ -441,6 +441,19 @@ pub fn syscall_number(name: &str) -> Option<i64> {
         .map(|(_, nr)| *nr)
 }
 
+/// The reverse of [`syscall_number`]: a syscall NUMBER back to its name. Used to
+/// render this engine's own numeric allowlist as an OCI seccomp profile (names)
+/// for an exported bundle (`image export`), so the `runc`/`crun` that runs it
+/// applies the SAME policy this engine's own init enforces. `None` = a number
+/// with no name in either table.
+pub fn syscall_name(nr: i64) -> Option<&'static str> {
+    SYSCALLS
+        .iter()
+        .chain(SYSCALLS_ARCH.iter())
+        .find(|(_, n)| *n == nr)
+        .map(|(name, _)| *name)
+}
+
 /// A parsed OCI seccomp profile, reduced to what this engine can enforce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
