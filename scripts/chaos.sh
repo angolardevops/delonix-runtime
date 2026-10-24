@@ -576,8 +576,20 @@ scen_oom() {
     case "$st" in Exited|Crashed|Dead) break;; esac
     sleep 2
   done
+  # Morrer não chega: o estado final tem de DISTINGUIR o OOM de um exit normal
+  # ou de um SIGKILL externo — senão o motor podia reportar "morreu" sem saber
+  # porquê. O contrato público expõe a razão: `container inspect` grava
+  # `crash_reason: oom_killed` e o `ps` carimba o estado com `(OOMKilled)`.
+  local reason
+  reason=$(dlx container inspect ck3 2>/dev/null | grep -o '"crash_reason"[^,]*' | head -1)
   case "$st" in
-    Exited|Crashed|Dead) ok "oom (morreu no limite: $st)" ;;
+    Exited|Crashed|Dead)
+      if printf '%s' "$reason" | grep -q "oom_killed"; then
+        ok "oom (morreu por OOM no limite: $st; crash_reason=oom_killed, distinto de um término não-OOM)"
+      else
+        bad "oom" "morreu ($st) mas o estado final não imputa o OOM (crash_reason=${reason:-<ausente>}) — não distingue OOM de outro término"
+      fi
+      ;;
     "") skip "oom" "não consegui ler o estado do container" ;;
     *) bad "oom" "ainda $st após 45s a alocar sem limite com -m 64M" ;;
   esac

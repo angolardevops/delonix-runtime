@@ -126,8 +126,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::ContainerSeccompCustomProfile => S::Supported {
                 evidence: "check:seccomp: a regra ERRNO continua a negar",
             },
-            C::ContainerOomDetection => cg(S::Partial {
-                detail: "`Dead (OOMKilled)` from `memory.events.local`, read by the supervisor; `scen_oom` kills but does not assert the reason yet",
+            C::ContainerOomDetection => cg(S::Supported {
+                evidence: "chaos:scen_oom",
             }),
             C::PodSharedNetwork => S::Supported {
                 evidence: "chaos:scen_pod_namespace_isolation",
