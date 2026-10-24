@@ -63,6 +63,21 @@ for c in data or []:
 }
 container_exists() { [ -n "$(container_field "$1" name)" ]; }
 
+# Existe uma imagem local com este repo:tag? (lê `image ls -o json`, não grep de
+# tabela — a saída estruturada é a verdade estável, ADR-0005.)
+image_exists() { # REPO:TAG
+  "${DELONIX}" image ls -o json 2>/dev/null | python3 -c '
+import sys, json
+tag = sys.argv[1]
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(1)
+for img in data or []:
+    if tag in (img.get("repo_tags") or []):
+        sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
 delonix_ok() {
   if ! "${DELONIX}" version >/dev/null 2>&1 && ! "${DELONIX}" --version >/dev/null 2>&1; then
     die "o binário '${DELONIX}' não responde. Instala o Delonix ou define DELONIX=<caminho>."

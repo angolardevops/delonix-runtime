@@ -4988,7 +4988,16 @@ delonix container ps
 delonix container rm -f a1; delonix image remove minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
 <code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
-sozinho — sem systemd, ao contrário do Podman rootless.</p>"""),
+sozinho — sem systemd, ao contrário do Podman rootless.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê <code>(healthy)</code> da coluna
+STATUS de <code>container ps -o json</code> (não só <code>Up</code>), com retry, e
+prova que <code>delonix build</code> acha o <code>Delonixfile</code> antes de
+qualquer <code>Dockerfile</code> sem <code>-f</code> — e <strong>falha em voz
+alta</strong> distinguindo «build falhou» de «healthcheck nunca passou», em vez de
+passar em silêncio, em <code>docs/labs/lab-4/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
+Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
 
     ("lab-5", "Uma microVM a sério", "intermédio", """
 <p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
@@ -5275,7 +5284,16 @@ delonix container ps
 delonix container rm -f a1; delonix image remove my-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verification:</strong> <code>ps</code> shows
 <code>(healthy)</code> in the STATUS column. The engine is probing the
-container on its own — no systemd, unlike rootless Podman.</p>"""),
+container on its own — no systemd, unlike rootless Podman.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads <code>(healthy)</code> from
+the STATUS column of <code>container ps -o json</code> (not just <code>Up</code>),
+with retry, and proves <code>delonix build</code> finds the <code>Delonixfile</code>
+before any <code>Dockerfile</code> with no <code>-f</code> — and it <strong>fails
+loudly</strong>, telling "build failed" apart from "healthcheck never passed"
+instead of passing silently, under <code>docs/labs/lab-4/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
+Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
 
     "lab-5": ("A real microVM", "intermediate", """
 <p>Goal: a full VM with the same CLI as containers.</p>
