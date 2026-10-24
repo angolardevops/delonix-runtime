@@ -213,6 +213,12 @@ pub struct RunOpts {
     /// `cmd::pod` for the pod's app containers; flows through the `--pod` re-exec.
     #[serde(default)]
     pub pod_infra_pid: Option<i32>,
+    /// (internal) k8s `shareProcessNamespace`: this pod member joins the infra
+    /// container's PID namespace (via `pod_infra_pid`) instead of creating its
+    /// own, so the pod's containers see each other's processes. Set by
+    /// `cmd::pod` from the `Pod` spec; flows through the `--pod` re-exec.
+    #[serde(default)]
+    pub pod_shared_pid: bool,
     #[serde(default)]
     pub net_bps: Option<String>,
     #[serde(default)]

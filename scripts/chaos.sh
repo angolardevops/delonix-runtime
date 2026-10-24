@@ -1106,6 +1106,51 @@ scen_pod_shared_ipc_uts() {
   rm -rf "$d"
 }
 
+# `shareProcessNamespace: true` — os membros do pod partilham a MESMA pid ns, e a
+# prova é dupla, como no §9 da ipc/uts: (1) IDENTIDADE — dois membros lêem o
+# MESMO inode em `/proc/self/ns/pid`, e um container FORA do pod lê um DIFERENTE
+# (senão "partilhada" era indistinguível de "toda a gente na pid ns global");
+# (2) VISIBILIDADE — de dentro de um membro vê-se o processo do OUTRO (a razão
+# de ser de `shareProcessNamespace`). O membro-cabeça (c0) é o PID 1 da ns
+# partilhada; os restantes são clonados LÁ PARA DENTRO (setns no pai antes do
+# clone), nunca criam a sua própria.
+scen_pod_shared_pid() {
+  head_ "pod-shared-pid — membros de um pod partilham a MESMA pid ns e vêem-se (por identidade + visibilidade)"
+  dlx net netns up >/dev/null 2>&1
+  local d="$SANDBOX/pidshare"; mkdir -p "$d"
+  # Marcadores únicos no argv de cada membro, para a prova de visibilidade.
+  printf 'apiVersion: delonix.io/v1\nkind: Pod\nmetadata:\n  name: shp\n  namespace: default\nspec:\n  shareProcessNamespace: true\n  containers:\n    - name: c0\n      image: %s\n      command: ["sleep","987654"]\n    - name: c1\n      image: %s\n      command: ["sleep","123456"]\n' \
+    "$IMAGE" "$IMAGE" > "$d/shp.yaml"
+  dlx pod create -f "$d/shp.yaml" >/dev/null 2>&1
+  # Controlo negativo: um container FORA do pod tem de ficar noutra pid ns.
+  dlx container run -d --name shplone --net none "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local pid0 pid1 pidlone
+  pid0=$(dlx container exec shp-c0 readlink /proc/self/ns/pid 2>/dev/null)
+  pid1=$(dlx container exec shp-c1 readlink /proc/self/ns/pid 2>/dev/null)
+  pidlone=$(dlx container exec shplone readlink /proc/self/ns/pid 2>/dev/null)
+  # Visibilidade: de dentro de c1, procurar o marcador de c0 no /proc da ns partilhada.
+  local sees_c0
+  sees_c0=$(dlx container exec shp-c1 sh -c \
+    'for c in /proc/[0-9]*/cmdline; do cat "$c" 2>/dev/null | tr "\0" " "; echo; done' 2>/dev/null \
+    | grep -c 987654)
+  log "pid c0=$pid0 c1=$pid1 · fora=$pidlone · c1 vê o 'sleep 987654' de c0: ${sees_c0:-0}x"
+  if [ -z "$pid0" ] || [ -z "$pid1" ]; then
+    skip "pod-shared-pid" "não consegui ler /proc/self/ns/pid dos membros"
+  elif [ "$pid0" != "$pid1" ]; then
+    bad "pod-shared-pid" "membros com pid ns diferentes ($pid0 vs $pid1) — não partilham PID"
+  elif [ -n "$pidlone" ] && [ "$pidlone" = "$pid0" ]; then
+    bad "pod-shared-pid" "um container FORA do pod está na mesma pid ns ($pidlone) — a partilha não isola"
+  elif [ "${sees_c0:-0}" -lt 1 ]; then
+    bad "pod-shared-pid" "c1 NÃO vê o processo de c0 na pid ns partilhada — identidade sem visibilidade"
+  else
+    ok "pod-shared-pid (mesma pid ns entre membros: $pid0; distinta de fora: ${pidlone:-<sem controlo>}; c1 vê o processo de c0)"
+  fi
+  dlx delete pod shp --force >/dev/null 2>&1
+  dlx container rm -f shplone shp-c0 shp-c1 >/dev/null 2>&1
+  rm -rf "$d"
+}
+
 # The firewall FAILS CLOSED — the four ways it used to fail open (NaaS audit,
 # docs/discovery/62, P0-1/2/4/5), each measured in PACKETS and in the counter of
 # the rule that has to catch them, never in a command's exit code. Every one of
@@ -2413,7 +2458,7 @@ voltou ABERTO depois do respawn do holder"
   rm -rf "$dir"
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

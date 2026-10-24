@@ -135,7 +135,9 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::PodSharedIpcUts => S::Supported {
                 evidence: "chaos:scen_pod_shared_ipc_uts",
             },
-            C::PodSharedPid => S::NotImplemented,
+            C::PodSharedPid => S::Supported {
+                evidence: "chaos:scen_pod_shared_pid",
+            },
             C::ContainerImages => S::Supported {
                 evidence: "e2e:image",
             },

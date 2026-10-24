@@ -1408,6 +1408,10 @@ pub struct RunArgs {
     /// namespaces (shared pod IPC + hostname). Set by `delonix pod`.
     #[arg(long = "pod-infra-pid", hide = true)]
     pod_infra_pid: Option<i32>,
+    /// (internal) join the pod infra's PID namespace (k8s `shareProcessNamespace`),
+    /// so the pod's containers see each other's processes. Set by `delonix pod`.
+    #[arg(long = "pod-shared-pid", hide = true)]
+    pod_shared_pid: bool,
     /// Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net <network>`.
     #[arg(long = "net-bps")]
     net_bps: Option<String>,
@@ -1898,6 +1902,7 @@ fn run_opts_from_args(args: RunArgs, no_start: bool) -> Result<RunOpts> {
         knows_none,
         pod,
         pod_infra_pid,
+        pod_shared_pid,
         net_bps,
         net_burst,
         log_driver,
@@ -1994,6 +1999,7 @@ fn run_opts_from_args(args: RunArgs, no_start: bool) -> Result<RunOpts> {
         knows_none,
         pod,
         pod_infra_pid,
+        pod_shared_pid,
         net_bps,
         net_burst,
         log_driver,
@@ -2989,6 +2995,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         wait_timeout,
         pod,
         pod_infra_pid,
+        pod_shared_pid,
         ..
     } = opts;
     // Isolation namespace (default `default`). It goes into an nft set name (via
@@ -3398,6 +3405,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         pod: pod.is_some(),
         attached_ip: attached_ip.clone(),
         pod_infra_pid,
+        pod_shared_pid,
         apparmor: apparmor_profile,
         log_path: c.log_path.clone(),
         replaces_record: false,
@@ -4934,6 +4942,7 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         pod: c.pod.is_some(),
         attached_ip: c.ip.clone(),
         pod_infra_pid: None,
+        pod_shared_pid: false,
         apparmor: c.apparmor.clone(),
         log_path: Some(c.log_path.clone().unwrap_or(default_log)),
         // `start` brings back a container whose record exists: an `rm -f` while
