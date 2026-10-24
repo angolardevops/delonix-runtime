@@ -1634,6 +1634,12 @@ pub fn create_container(
     } else {
         write_env_file(base, &id, &cfg.envs)?
     };
+    // A hostPath whose node directory does not exist yet is CREATED here, before
+    // the spec reaches the engine's `canonicalize`-backed bind — otherwise a pod
+    // like kube-flannel (hostPath `/run/flannel`, type "") dies with "no such
+    // bind path" that the kubelet never resolves on its own. See
+    // `ensure_cri_mount_sources`.
+    ensure_cri_mount_sources(&cfg.mounts)?;
     let rec = ContainerRec {
         id: id.clone(),
         sandbox_id: req.pod_sandbox_id,
@@ -3035,6 +3041,48 @@ impl CriMount {
     }
 }
 
+/// Creates any hostPath bind source that is not yet on the node, mirroring
+/// containerd/CRI-O.
+///
+/// The CRI `Mount` carries only `host_path`, never Kubernetes' `HostPathType`:
+/// the kubelet resolves the volume and hands the runtime a plain node path. For
+/// the unset type `""` and for `DirectoryOrCreate` the kubelet creates NOTHING
+/// here — and for the unset type it does not even check the path — so a pod that
+/// expects the node to provide the directory (the `kube-flannel` DaemonSet and
+/// its hostPath `/run/flannel`, type `""`, is the canonical case) relies on the
+/// RUNTIME to make it. The engine's bind goes through `canonicalize`, which
+/// fails `ENOENT` on a path that is not there, and the container dies with
+/// `no such bind path <p>` before it ever starts.
+///
+/// containerd and CRI-O both `MkdirAll` a missing bind source for exactly this
+/// reason. We do the same: a missing source becomes a directory; anything that
+/// already exists — file OR directory — is left untouched, so a `FileOrCreate`
+/// file the kubelet itself created is never clobbered into a directory. A path
+/// we genuinely cannot create (EACCES, a parent that is a file, a dangling
+/// symlink sitting on the name) surfaces ITS error rather than the misleading
+/// "no such bind path".
+///
+/// Image-volume mounts (`host_path` empty, `image` set) are skipped — they are
+/// not host paths.
+fn ensure_cri_mount_sources(mounts: &[Mount]) -> Result<(), Status> {
+    for m in mounts {
+        if m.host_path.is_empty() {
+            continue;
+        }
+        let p = Path::new(&m.host_path);
+        if p.exists() {
+            continue;
+        }
+        std::fs::create_dir_all(p).map_err(|e| {
+            Status::internal(format!(
+                "creating hostPath bind source {:?}: {e}",
+                m.host_path
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 /// Translates the CRI's `Mount` list into the engine's `-v` specs.
 ///
 /// The `-v` grammar splits on `:`, so a path containing one would be parsed into
@@ -3672,6 +3720,47 @@ mod tests {
         let o = start_run_opts(&rec, None, crate::CapCeiling::unlimited(), "x", Vec::new());
         assert!(o.entrypoint.is_none(), "an empty command is not an override");
         assert_eq!(o.command, ["--ip-masq"]);
+    }
+
+    /// Regression: a hostPath whose node directory does not exist (HostPathType
+    /// "", the kube-flannel `/run/flannel` case) is CREATED by the runtime, so
+    /// the bind no longer dies with "no such bind path". An existing path — of
+    /// either kind — is left exactly as it was, never clobbered.
+    #[test]
+    fn a_missing_hostpath_bind_source_is_created() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("run/flannel"); // nested + absent, like /run/flannel
+        let existing_dir = tmp.path().join("existing");
+        std::fs::create_dir(&existing_dir).unwrap();
+        let existing_file = tmp.path().join("hosts");
+        std::fs::write(&existing_file, b"127.0.0.1 localhost\n").unwrap();
+
+        let mount = |p: &std::path::Path| Mount {
+            host_path: p.to_string_lossy().into_owned(),
+            container_path: "/x".into(),
+            ..Default::default()
+        };
+        // host_path empty (image volume) must be ignored, not an error.
+        let image_vol = Mount {
+            host_path: String::new(),
+            container_path: "/img".into(),
+            ..Default::default()
+        };
+
+        ensure_cri_mount_sources(&[
+            mount(&missing),
+            mount(&existing_dir),
+            mount(&existing_file),
+            image_vol,
+        ])
+        .expect("creating a missing hostPath source must succeed");
+
+        assert!(missing.is_dir(), "the absent nested hostPath was created");
+        assert!(existing_dir.is_dir(), "the existing dir is untouched");
+        assert!(
+            existing_file.is_file(),
+            "an existing FILE is left a file, not clobbered into a directory"
+        );
     }
 
     /// An escaping parent is refused at the sandbox, not dropped.
