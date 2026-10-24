@@ -85,8 +85,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::ResourceReadback => S::Supported {
                 evidence: "e2e:comandos de leitura (não destrutivos)",
             },
-            C::Events => S::Partial {
-                detail: "`system events` reads a persisted log the CLI writes on each action; no watch stream (`WatchEvents` unserved)",
+            C::Events => S::Supported {
+                evidence: "test:crates/interfaces/delonix-node-api/tests/grpc_watch_events.rs::watch_stream_delivers_an_event_emitted_after_it_opened",
             },
             C::AsyncOperations => S::NotImplemented,
             C::SystemContainerLifecycle
