@@ -271,6 +271,7 @@ below, or when a table names a path that no longer exists.</p>
 │   ├── dev/                      this handbook (English + translations)
 │   ├── discovery/                dated investigations (historical)
 │   ├── handbook/                 this handbook as HTML — generated
+│   ├── labs/                      executable first-contact labs (prepare/run/verify/cleanup)
 │   ├── releases/                 release notes, one per version (historical)
 │   ├── roadmap/                  improvement-programme traceability matrix
 │   ├── runtime/                  dated runtime discovery (historical)
@@ -596,6 +597,12 @@ below, or when a table names a path that no longer exists.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>
 <td>This handbook as a website (<code>en/</code>, <code>pt-AO/</code>, <code>fr-FR/</code>, <code>zh-CN/</code>, <code>index.html</code>), <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>. Never edit the HTML.</td>
 <td>Regenerated with <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> after a <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> change, and at release time.</td>
+<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/labs" target="_blank" rel="noopener"><code>docs/labs/</code></a></td>
+<td>Executable first-contact labs: one directory per lab (<code>lab-N/</code>) with <code>prepare</code>/<code>run</code>/<code>verify</code>/<code>cleanup</code> shell steps over a shared <code>_lib/common.sh</code>, each asserting a <strong>functional</strong> result (HTTP 200, the real cgroup <code>memory.max</code>) and failing loudly otherwise. The <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/labs.html" target="_blank" rel="noopener"><code>docs/labs.html</code></a> page is <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> and embeds these as the bilingual lab snippets.</td>
+<td>Whoever adds or revises a lab; edit the step scripts and the editorial text in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, then regenerate.</td>
 <td><a href="publishing-docs.html">Publishing the documentation</a></td>
 </tr>
 <tr>
