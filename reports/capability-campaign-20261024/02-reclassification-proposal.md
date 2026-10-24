@@ -4,6 +4,8 @@ Data: 2026-10-24. Frente read-only do Sprint 1. Dois auditores especializados (c
 
 Resultado global: a matriz está bem construída. Dos ~350 estados negativos, só **3 têm fundamento alto para mudar de estado** (todos auto-verificados abaixo), mais um punhado de confiança média/textual que exige prova live antes de mexer.
 
+> **APLICADO em `8cd5c63b`**: A1, A2 e A3 integrados em develop com gates verdes (libvirt 71/0, volume 38/0, não-drift da matriz, espelho node-api, ratchet 112/274, arch-fitness). Matriz publicada regenerada. B/C/D continuam pendentes para Sprint 2.
+
 ## A. Confiança ALTA — verificado directamente nesta sessão
 
 ### A1. libvirt | `vm.migration.live` : `unsupported-by-provider` → `not-implemented`

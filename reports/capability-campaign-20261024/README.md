@@ -10,8 +10,14 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 | Branch de trabalho | `develop` (descendente linear da baseline, +258/−0) |
 | Catálogo | 1.4.0 · Engine 5.1.1 |
 | Fonte-de-verdade | `matrix-structured.json` (515 entradas, lossless) |
-| Sprint actual | **Sprint 0 concluído** (reconciliação + plano) |
-| Próximo | Sprint 1 — riscos de isolamento/dados/classificação (worktree própria off develop) |
+| Sprint actual | **Sprint 1 em curso** — auditoria §4 (`e082a275`) + reclassificação A1–A3 aplicada (`8cd5c63b`, gates verdes) |
+| Próximo | Sprint 1 — riscos de isolamento/dados (OOM distinto, namespaces partilhados por identidade de processo, restauro de snapshot) |
+
+## Histórico de commits da campanha
+
+- `0894caf9` docs — Sprint 0 reconciliação (baseline, matriz 515, diff explicado, plano).
+- `e082a275` docs — Sprint 1 proposta de reclassificação verificada (auditoria §4, 2 especialistas).
+- `8cd5c63b` fix — aplica A1–A3: libvirt `vm.migration.live` unsupported→not-implemented; linux `storage.lvm-thin`/`storage.zfs-btrfs` not-implemented→partial. Matriz regenerada, ratchet applicable 273→274, supported inalterado (sem promoção falsa). Contagens: not-impl 72→71, partial 86→88, unsupported 230→229.
 
 ## Ficheiros
 
