@@ -110,6 +110,22 @@ async fn spawn_expensive_metrics_refresh(base: PathBuf) {
     // worker thread is leaked rather than cancelled on a timeout.
     const COLLECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
     loop {
+        // Per-container network bytes for the per-workload series
+        // (`workload_network_{receive,transmit}_bytes_total`). Its OWN bounded
+        // read (own latch in `dashstats`), so a wedged netns here never blocks
+        // the `DashSummary` collection below, and it is kept OFF the inline
+        // scrape path (each read is an `nsenter` per container). Served stale
+        // from the cache between cycles — never read on a scrape.
+        {
+            let base = base.clone();
+            let net = tokio::task::spawn_blocking(move || {
+                dashstats::collect_container_net_with_timeout(&base, COLLECT_TIMEOUT)
+            })
+            .await;
+            if let Ok(dashstats::Bounded::Done(map)) = net {
+                dashstats::publish_container_net_cache(map);
+            }
+        }
         let base = base.clone();
         let summary = tokio::task::spawn_blocking(move || {
             dashstats::collect_with_timeout(&base, true, true, COLLECT_TIMEOUT)
@@ -292,7 +308,11 @@ async fn ping() -> &'static str {
 ///
 /// The per-workload contention series (CPU throttling, pressure, OOM) are also
 /// refreshed inline: a few small cgroup file reads per running workload, and the
-/// whole set is replaced so a stopped workload stops being exported.
+/// whole set is replaced so a stopped workload stops being exported. The
+/// per-workload NETWORK series (`workload_network_{receive,transmit}_bytes`) are
+/// the exception: they need a netns enter per container, too costly inline, so
+/// they are attached from the cache the background refresh fills — stale by up
+/// to its interval, never read on the scrape itself.
 async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
     let base = s.base.clone();
     let collected = tokio::task::spawn_blocking(move || {

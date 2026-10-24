@@ -21,6 +21,8 @@
 //! |---|---|---|
 //! | `workload_cpu_usage_seconds` | counter | |
 //! | `workload_memory_current_bytes` | gauge | |
+//! | `workload_network_receive_bytes` | counter | |
+//! | `workload_network_transmit_bytes` | counter | |
 //! | `workload_cpu_periods` | counter | |
 //! | `workload_cpu_throttled_periods` | counter | |
 //! | `workload_cpu_throttled_seconds` | counter | |
@@ -107,6 +109,16 @@ pub struct WorkloadSeries {
     /// `memory.current`: bytes the workload charges right now (rendered as
     /// `workload_memory_current_bytes`).
     pub memory_current_bytes: Option<u64>,
+    /// Cumulative bytes received across ALL of the workload's interfaces, read
+    /// inside its own netns (rendered as `workload_network_receive_bytes_total`).
+    /// `None` for a workload with no private netns (`--net host`/`--net none`)
+    /// or one whose netns has not yet been sampled by the background refresh —
+    /// in both cases no sample is emitted (absent is not zero).
+    pub net_rx_bytes: Option<u64>,
+    /// Cumulative bytes transmitted across ALL of the workload's interfaces
+    /// (rendered as `workload_network_transmit_bytes_total`). Same `None`
+    /// semantics as [`Self::net_rx_bytes`].
+    pub net_tx_bytes: Option<u64>,
     pub cpu_throttle: Option<CpuThrottle>,
     pub cpu_pressure: Option<Pressure>,
     pub memory_pressure: Option<Pressure>,
@@ -177,6 +189,8 @@ fn encode_series(
 ) -> Result<(), std::fmt::Error> {
     let mut cpu_usage: Rows<ConstCounter<f64>> = Vec::new();
     let mut mem_current: Rows<ConstGauge<i64>> = Vec::new();
+    let mut net_rx: Rows<ConstCounter<u64>> = Vec::new();
+    let mut net_tx: Rows<ConstCounter<u64>> = Vec::new();
     let mut periods: Rows<ConstCounter<u64>> = Vec::new();
     let mut throttled: Rows<ConstCounter<u64>> = Vec::new();
     let mut throttled_secs: Rows<ConstCounter<f64>> = Vec::new();
@@ -194,6 +208,12 @@ fn encode_series(
         if let Some(b) = s.memory_current_bytes {
             // A gauge: bytes charged now, which falls as the workload frees memory.
             mem_current.push((base.clone(), ConstGauge::new(b as i64)));
+        }
+        if let Some(v) = s.net_rx_bytes {
+            net_rx.push((base.clone(), ConstCounter::new(v)));
+        }
+        if let Some(v) = s.net_tx_bytes {
+            net_tx.push((base.clone(), ConstCounter::new(v)));
         }
         if let Some(c) = s.cpu_throttle {
             periods.push((base.clone(), ConstCounter::new(c.nr_periods)));
@@ -241,6 +261,20 @@ fn encode_series(
         "Memory the workload charges right now, in bytes (memory.current)",
         g,
         &mem_current,
+    )?;
+    emit(
+        &mut enc,
+        "workload_network_receive_bytes",
+        "Cumulative bytes received across all of the workload's interfaces, read in its netns (/proc/net/dev)",
+        c,
+        &net_rx,
+    )?;
+    emit(
+        &mut enc,
+        "workload_network_transmit_bytes",
+        "Cumulative bytes transmitted across all of the workload's interfaces, read in its netns (/proc/net/dev)",
+        c,
+        &net_tx,
     )?;
     emit(
         &mut enc,
@@ -348,6 +382,8 @@ mod tests {
             name: name.into(),
             cpu_usage_usec: None,
             memory_current_bytes: None,
+            net_rx_bytes: None,
+            net_tx_bytes: None,
             cpu_throttle: None,
             cpu_pressure: None,
             memory_pressure: None,
@@ -371,6 +407,8 @@ mod tests {
         WorkloadSeries {
             cpu_usage_usec: Some(9_500_000),
             memory_current_bytes: Some(4_194_304),
+            net_rx_bytes: Some(123_456),
+            net_tx_bytes: Some(7_890),
             cpu_throttle: Some(CpuThrottle {
                 nr_periods: 200,
                 nr_throttled: 50,
@@ -394,6 +432,8 @@ mod tests {
         for want in [
             format!("delonix_workload_cpu_usage_seconds_total{{{l}}} 9.5"),
             format!("delonix_workload_memory_current_bytes{{{l}}} 4194304"),
+            format!("delonix_workload_network_receive_bytes_total{{{l}}} 123456"),
+            format!("delonix_workload_network_transmit_bytes_total{{{l}}} 7890"),
             format!("delonix_workload_cpu_periods_total{{{l}}} 200"),
             format!("delonix_workload_cpu_throttled_periods_total{{{l}}} 50"),
             format!("delonix_workload_cpu_throttled_seconds_total{{{l}}} 1.5"),
@@ -488,6 +528,21 @@ mod tests {
         let out = render(&[w]);
         assert!(out.contains(r#"stall="some""#));
         assert!(!out.contains(r#"stall="full""#), "{out}");
+    }
+
+    #[test]
+    fn a_workload_with_no_sampled_netns_emits_no_network_sample() {
+        // `--net host`/`--net none`, or a netns the background refresh has not
+        // yet read: both leave the two byte fields `None`, and absent is not
+        // zero — no network sample at all for this workload.
+        let mut w = full();
+        w.net_rx_bytes = None;
+        w.net_tx_bytes = None;
+        let out = render(&[w]);
+        assert!(!out.contains("workload_network_receive_bytes"), "{out}");
+        assert!(!out.contains("workload_network_transmit_bytes"), "{out}");
+        // The other families are unaffected.
+        assert!(out.contains("delonix_workload_cpu_usage_seconds_total{"));
     }
 
     #[test]
