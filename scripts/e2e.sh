@@ -5089,6 +5089,85 @@ else
 fi
 
 ########################################
+section "vm: o cloud-init do guest CONSOME o seed NoCloud (libvirt, guestfish)"
+########################################
+# Critério #16: ANEXAR um seed NoCloud e o `vm create` devolver 0 NÃO prova que
+# o cloud-init do convidado o consumiu — o disco virtio `cidata` podia nunca ser
+# lido (era exactamente por isto que `vm.cloud-init` do provider libvirt ficava
+# `partial`: «the battery never logs into a guest»). Aqui boota-se um guest REAL
+# (imagem cloud com cloud-init a bordo) a partir do caminho declarativo do
+# engine — que GERA o seed NoCloud via `cloud-localds` e o anexa como disco
+# virtio — com um `--user-data` que escreve um MARCADOR conhecido. Dá-se tempo
+# ao cloud-init, PÁRA-SE a VM (o QEMU segura o qcow2 em exclusivo enquanto corre)
+# e LÊ-SE o disco com guestfish:
+#   1. o seed está anexado como disco virtio (`domblklist`),
+#   2. o `write_files` escreveu o marcador — o cloud-init CORREU,
+#   3. o hostname do seed foi aplicado — o `meta-data`/`user-data` foi lido,
+#   4. o `cloud-init status` (escrito pelo `runcmd`, logo o runcmd correu) nomeia
+#      a fonte: `DataSourceNoCloud [seed=/dev/vdb]` — o próprio guest a declarar
+#      que identificou e leu o seed do disco virtio que o provider anexou.
+# É a prova de que o seed CORREU dentro do guest, não só de que foi gerado.
+#
+# Precisa de uma imagem cloud com cloud-init a bordo (E2E_CLOUDINIT_IMAGE, ou uma
+# descoberta em $SROOT/vm-images/_base). Sem ela, SKIP honesto — a bateria em
+# CI não transporta uma imagem de arranque.
+CIIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$CIIMG" ]]; then
+  CIIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$CIIMG" && -r "$CIIMG" ]]; then
+  CIVM="ciseed-$PFX"; CIBASE="$OUT/$CIVM-base.qcow2"; CIUD="$OUT/$CIVM-user-data.yaml"
+  cp "$CIIMG" "$CIBASE" && qemu-img resize "$CIBASE" 5G >/dev/null 2>&1
+  cat > "$CIUD" <<'YAML'
+#cloud-config
+hostname: delonix-ci-proof
+package_update: false
+package_upgrade: false
+write_files:
+  - path: /var/lib/delonix-cloudinit-OK
+    permissions: '0644'
+    content: |
+      SEED-CONSUMED-BY-GUEST-CLOUDINIT-v1
+runcmd:
+  - [ sh, -c, "cloud-init status --long > /var/lib/delonix-cloudinit-STATUS 2>&1 || true" ]
+YAML
+  if check_then "vm create libvirt (cloud-init seed)" ok \
+       "$BIN" vm create "$CIVM" --disk "$CIBASE" --backend libvirt --memory 1G --vcpus 2 --user-data "$CIUD"; then
+    CIOVL="$SROOT/vms/$CIVM.qcow2"
+    # O engine gerou o seed NoCloud e anexou-o como disco virtio read-only.
+    check "o seed NoCloud esta anexado como disco virtio" ok bash -c \
+      "virsh -c qemu:///system domblklist '$CIVM' | grep -q 'vms/$CIVM/seed.iso'"
+    # Dar tempo ao cloud-init do guest (write_files + runcmd). A imagem vem
+    # pronta (package_update:false), por isso ~2min bastam com folga.
+    sleep 120
+    # Parar a VM: só com o qcow2 livre é que o guestfish lê o disco de arranque.
+    "$BIN" vm stop "$CIVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 12); do
+      virsh -c qemu:///system domstate "$CIVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$CIVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # A PROVA: o cloud-init do guest escreveu o marcador do write_files.
+    check "o cloud-init do guest escreveu o marcador do write_files" ok bash -c \
+      "guestfish --ro -a '$CIOVL' -i cat /var/lib/delonix-cloudinit-OK | grep -qx SEED-CONSUMED-BY-GUEST-CLOUDINIT-v1"
+    # O hostname do seed foi aplicado — o meta-data/user-data foi lido.
+    check "o cloud-init aplicou o hostname do seed" ok bash -c \
+      "guestfish --ro -a '$CIOVL' -i cat /etc/hostname | grep -qx delonix-ci-proof"
+    # O runcmd correu E o guest nomeia a fonte: o seed NoCloud no disco virtio.
+    check "o guest identificou e leu o seed NoCloud do disco virtio (runcmd correu)" ok bash -c \
+      "guestfish --ro -a '$CIOVL' -i cat /var/lib/delonix-cloudinit-STATUS | grep -q 'DataSourceNoCloud'"
+    "$BIN" delete vm "$CIVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$CIVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$CIBASE" "$CIUD"
+else
+  skip "vm: o cloud-init do guest consome o seed NoCloud" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, ou sem imagem cloud (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
