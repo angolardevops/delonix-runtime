@@ -132,8 +132,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::PodSharedNetwork => S::Supported {
                 evidence: "chaos:scen_pod_namespace_isolation",
             },
-            C::PodSharedIpcUts => S::Partial {
-                detail: "members `setns` into the first member's ipc/uts; no battery check reads them",
+            C::PodSharedIpcUts => S::Supported {
+                evidence: "chaos:scen_pod_shared_ipc_uts",
             },
             C::PodSharedPid => S::NotImplemented,
             C::ContainerImages => S::Supported {
