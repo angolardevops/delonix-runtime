@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **118** |
-| partial | 93 | 86 | 85 |
+| supported | 103 | 112 | **119** |
+| partial | 93 | 86 | 84 |
 | not-implemented | 74 | 72 | 68 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **118/274 (43.1%)** |
+| proved/applicable (N2) | — | 112/273 | **119/274 (43.4%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -61,6 +61,8 @@ Integração: as duas frentes paralelas correram cada uma na sua worktree off de
 
 ### Constrangimento de ambiente
 Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada build release custa ~2–3G de churn; o próximo trabalho build-pesado tem risco de ENOSPC. Mitigado removendo worktrees concluídas; a resolução de fundo é do dono (libertar disco).
+
+- `5519a696`+`1b337766`+`9b00e60d` feat+merge — **`metrics.network.per-workload` partial→supported (§14)**: `/metrics` passa a exportar `workload_network_receive_bytes_total`/`workload_network_transmit_bytes_total` por-container (lidos na netns), cache populada pelo refresh de fundo (reads de netns fora do scrape inline). Scrape live: rx=2306/tx=524 batem com `/proc/net/dev`. Código em inglês (lição lang_ratchet); lang verde. supported 118→119.
 
 ## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
 
