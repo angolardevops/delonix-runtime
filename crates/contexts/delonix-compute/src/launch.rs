@@ -32,6 +32,10 @@ pub struct Launch {
     pub slirp_ports: Vec<String>,
     /// The pod infra container whose IPC/UTS a member joins.
     pub pod_infra_pid: Option<i32>,
+    /// k8s `shareProcessNamespace`: the member also joins the infra's PID
+    /// namespace (not just IPC/UTS), so the pod's containers see each other's
+    /// processes. Only meaningful alongside `pod_infra_pid` on the re-exec pass.
+    pub pod_shared_pid: bool,
     /// The AppArmor profile to apply, `unconfined` included.
     pub apparmor: Option<String>,
     /// Where the process's output goes, if anywhere.
@@ -67,6 +71,13 @@ impl Launch {
         } else {
             None
         }
+    }
+
+    /// Whether this member joins the infra's PID namespace too — only on the
+    /// re-exec pass, and only when there is an infra to join. Same gating as
+    /// [`Self::pod_infra_pid`].
+    pub fn pod_shared_pid(&self) -> bool {
+        self.second_pass && self.pod_shared_pid && self.pod_infra_pid.is_some()
     }
 }
 
@@ -312,18 +323,31 @@ mod tests {
         let first = Launch {
             slirp_ports: vec!["8080:80".into()],
             pod_infra_pid: Some(7),
+            pod_shared_pid: true,
             ..Default::default()
         };
         let mut c = container();
         c.userns = true;
         assert!(first.new_netns() && first.userns(&c) && !first.inherit_userns());
         assert_eq!(first.pod_infra_pid(), None);
+        // Shared PID follows the same pass gate as the infra pid: nothing on the
+        // first pass, honored on the re-exec pass.
+        assert!(!first.pod_shared_pid());
         let second = Launch {
             second_pass: true,
             ..first
         };
         assert!(!second.new_netns() && !second.userns(&c) && second.inherit_userns());
         assert_eq!(second.pod_infra_pid(), Some(7));
+        assert!(second.pod_shared_pid());
+        // Asked for, but no infra to join → not shared.
+        assert!(!Launch {
+            second_pass: true,
+            pod_shared_pid: true,
+            pod_infra_pid: None,
+            ..Default::default()
+        }
+        .pod_shared_pid());
         assert!(Launch {
             net_none: true,
             ..Default::default()
