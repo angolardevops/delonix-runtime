@@ -1813,12 +1813,37 @@ fn sandbox_shared_pid_anchor(base: &Path, sandbox_id: &str, self_id: &str) -> Op
 /// Enabled only on the native-SDN pod path (`opts.pod` set): there the member
 /// re-execs into the pod holder's user namespace, which is what gives it the
 /// privilege to `setns` into a sibling's PID namespace. On `--net host`/CNI
-/// sandboxes the members do not share that user namespace, so the join is left
-/// off (the capability stays proven through the CLI path, and those paths are a
-/// separate, larger problem). The anchor (`head_pid = None` → this member is the
+/// sandboxes the members do not share that user namespace, so the join cannot
+/// work rootless; that path never reaches here — the `start_container` call site
+/// refuses it with [`shared_pid_host_cni_refusal`] instead of starting the
+/// container with its processes silently un-shared. The anchor (`head_pid = None` → this member is the
 /// head) keeps its own PID namespace; every later member joins the head's via
 /// `pod_infra_pid` + `pod_shared_pid`, the pair the engine's `enter_pod_pidns`
 /// needs. Reuses exactly the CLI pod plumbing — no new engine path.
+/// The actionable refusal for `shareProcessNamespace` on a `hostNetwork`/CNI pod
+/// sandbox — the one path the join cannot reach (see the `start_container` call
+/// site and [`apply_shared_pid`] for why). PURE, so the message is testable
+/// without a running node. Rootless names the user-namespace privilege that is
+/// missing; root names it as unimplemented on this path, since the plumbing that
+/// wires the shared PID namespace only exists for the native pod network.
+fn shared_pid_host_cni_refusal(id: &str) -> String {
+    let reason = if delonix_linux::is_rootless() {
+        "its members run with `--net host`, each in its own user namespace, which \
+         does not own the pod's PID namespace — so the kernel refuses the join \
+         (`setns(CLONE_NEWPID)` → EPERM)"
+    } else {
+        "this runtime wires the shared PID namespace only through the default pod \
+         network, whose holder owns the namespace the members join"
+    };
+    format!(
+        "container {id}: shareProcessNamespace is not supported on a hostNetwork \
+         or CNI pod sandbox, because {reason}. Starting the container anyway would \
+         leave its processes silently un-shared. Fix: drop hostNetwork from the pod \
+         so it uses the default pod network (which does support \
+         shareProcessNamespace), or remove shareProcessNamespace from the pod spec."
+    )
+}
+
 fn apply_shared_pid(opts: &mut delonix_compute::RunOpts, shared_pid: bool, head_pid: Option<i32>) {
     if shared_pid && opts.pod.is_some() {
         if let Some(pid) = head_pid {
@@ -2001,13 +2026,27 @@ pub fn start_container(
         .filter(|s| !s.is_empty());
     refuse_unenforceable_resources(&rec.resources, kube_cgroup_parent)?;
     let mut opts = start_run_opts(&rec, sandbox.as_ref(), ceiling, &id, env);
-    // k8s `shareProcessNamespace`: if the sandbox asked for a shared PID namespace
-    // (and this is the native-SDN pod path, where `opts.pod` is set), join this
-    // member to the anchor's PID namespace — resolved HERE, not at write time,
-    // because the anchor is whichever sibling is already live.
-    if sandbox.as_ref().is_some_and(|sb| sb.shared_pid) && opts.pod.is_some() {
-        let head = sandbox_shared_pid_anchor(base, &rec.sandbox_id, &id);
-        apply_shared_pid(&mut opts, true, head);
+    // k8s `shareProcessNamespace`: if the sandbox asked for a shared PID namespace,
+    // join this member to the anchor's PID namespace — resolved HERE, not at write
+    // time, because the anchor is whichever sibling is already live.
+    //
+    // Only the native-SDN pod path (`opts.pod` set) can honour it: there the member
+    // re-execs into the pod holder's user namespace, which OWNS the anchor's PID
+    // namespace, so its `setns(CLONE_NEWPID)` has the privilege the kernel demands.
+    // A `hostNetwork` or root-CNI member instead runs with `--net host` in its own
+    // user namespace (rootless) — which does NOT own the anchor's PID namespace, so
+    // the join is refused with EPERM at `setns` (proven empirically: a process in a
+    // sibling user namespace cannot even open the target `ns/pid`, let alone
+    // reassociate to it). Rather than start the container with its processes
+    // SILENTLY not shared — a sidecar that signals its peer would simply find no
+    // peer — the gap is refused with the reason and the fix.
+    if sandbox.as_ref().is_some_and(|sb| sb.shared_pid) {
+        if opts.pod.is_some() {
+            let head = sandbox_shared_pid_anchor(base, &rec.sandbox_id, &id);
+            apply_shared_pid(&mut opts, true, head);
+        } else {
+            return Err(Status::failed_precondition(shared_pid_host_cni_refusal(&id)));
+        }
     }
     // The run specification goes to the engine as data, not argv — one translation
     // (above) instead of two — in a fresh single-threaded process, where the
@@ -5026,6 +5065,29 @@ mod tests {
         apply_shared_pid(&mut host_net, true, Some(4321));
         assert!(!host_net.pod_shared_pid);
         assert_eq!(host_net.pod_infra_pid, None);
+    }
+
+    /// The `--net host`/CNI path is refused with a reason and a fix, not left to
+    /// start with its processes silently un-shared. The message names the
+    /// container, says shareProcessNamespace is unsupported on a hostNetwork/CNI
+    /// sandbox, and points at the fix (the default pod network). The precise
+    /// privilege clause varies with rootless/root, so it is not asserted verbatim.
+    #[test]
+    fn a_recusa_de_shared_pid_em_host_cni_e_accionavel() {
+        let msg = shared_pid_host_cni_refusal("ctr-abc");
+        assert!(msg.contains("ctr-abc"), "names the container: {msg}");
+        assert!(
+            msg.contains("shareProcessNamespace is not supported"),
+            "states the unsupported feature: {msg}"
+        );
+        assert!(
+            msg.contains("hostNetwork or CNI pod sandbox"),
+            "names the offending sandbox shape: {msg}"
+        );
+        assert!(
+            msg.contains("drop hostNetwork") && msg.contains("default pod network"),
+            "offers an actionable fix: {msg}"
+        );
     }
 
     /// `label_selector` is a SUBSET match. Comparing whole maps would match nothing in
