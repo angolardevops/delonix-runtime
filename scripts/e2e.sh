@@ -5028,6 +5028,67 @@ else
 fi
 
 ########################################
+section "vm: o restore de snapshot RECUPERA dados de disco (libvirt, guestfish)"
+########################################
+# Critério #16: CRIAR um snapshot e ver o comando devolver 0 NÃO comprova
+# recuperabilidade — o `restore` podia transicionar o estado da VM sem nunca
+# repor um único byte do disco. A secção acima prova o CICLO (create/stop/start/
+# restore e as transições de estado), mas corre sobre um qcow2 VAZIO: nenhum dado
+# é escrito, corrompido e confirmado de volta. Aqui fecha-se esse buraco.
+#
+# O guest não arranca um OS (disco de 128M sem bootloader), por isso a prova é ao
+# nível do BLOCO, via `guestfish` (apliance própria, não precisa do módulo nbd):
+#   1. escreve-se um dado conhecido no filesystem do disco (payload = ORIGINAL),
+#   2. `vm snapshot create` com a VM PARADA (snapshot de disco interno do qcow2),
+#   3. CORROMPE-SE o dado no disco (payload = CORROMPIDO),
+#   4. `vm snapshot restore`,
+#   5. relê-se o disco — TEM de voltar a ler ORIGINAL.
+# É a recuperabilidade de DADOS, não a de um código de saída. A VM tem de estar
+# parada nos passos de guestfish porque o QEMU segura o qcow2 em exclusivo quando
+# corre; é por isso que a prova de DISCO usa o caminho offline (= vm.snapshot-disk)
+# e demonstra, pelo mesmo `snapshot-revert`, que o vm.snapshot-restore repõe dados.
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1; then
+  DVM="snapdata-$PFX"; DDISK="$OUT/$DVM.qcow2"
+  qemu-img create -f qcow2 "$DDISK" 128M >/dev/null 2>&1
+  # Filesystem + payload ORIGINAL, antes de a VM existir.
+  guestfish -a "$DDISK" >/dev/null 2>&1 <<'GF'
+run
+part-disk /dev/sda mbr
+mkfs ext4 /dev/sda1
+mount /dev/sda1 /
+write /payload.txt "DADO-ORIGINAL-v1"
+umount /
+GF
+  if check_then "vm create libvirt (data-recovery)" ok \
+       "$BIN" vm create "$DVM" --disk "$DDISK" --backend libvirt --memory 256M --require vm.snapshot.memory; then
+    DQCOW="$SROOT/vms/$DVM.qcow2"
+    check "vm stop (data-recovery)" ok "$BIN" vm stop "$DVM"
+    # vm.snapshot-disk: o snapshot offline CAPTURA o dado para recuperação.
+    check "o snapshot de disco captura o dado para recuperacao" ok \
+      "$BIN" vm snapshot create "$DVM" sdata
+    check "o disco tem o dado ORIGINAL antes de mexer" ok bash -c \
+      "guestfish --ro -a '$DQCOW' -m /dev/sda1 cat /payload.txt | grep -qx DADO-ORIGINAL-v1"
+    # Corromper o dado no disco, com a VM parada (o qcow2 está livre).
+    check "corromper o dado no disco do guest" ok bash -c \
+      "guestfish -a '$DQCOW' -m /dev/sda1 write /payload.txt DADO-CORROMPIDO-v2"
+    check "o disco ja tem o dado CORROMPIDO" ok bash -c \
+      "guestfish --ro -a '$DQCOW' -m /dev/sda1 cat /payload.txt | grep -qx DADO-CORROMPIDO-v2"
+    # vm.snapshot-restore: reverter o snapshot.
+    check "vm snapshot restore (data-recovery)" ok "$BIN" vm snapshot restore "$DVM" sdata
+    # A PROVA: o dado ORIGINAL voltou — recuperabilidade, não só um ficheiro criado.
+    check "o restore RECUPERA o dado de disco (nao so um codigo de saida)" ok bash -c \
+      "guestfish --ro -a '$DQCOW' -m /dev/sda1 cat /payload.txt | grep -qx DADO-ORIGINAL-v1"
+    "$BIN" delete vm "$DVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$DVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$DDISK"
+else
+  skip "vm: restore recupera dados de disco" \
+    "sem libvirt utilizável (virsh/qemu) ou sem guestfish"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
