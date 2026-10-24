@@ -95,3 +95,47 @@ assert_contains() { # ficheiro_ou_stdin agulha mensagem
   local hay="$1" needle="$2" msg="${3:-conteúdo esperado}"
   if printf '%s' "$hay" | grep -qF -- "$needle"; then ok "$msg"; else die "$msg (não encontrei: $needle)"; fi
 }
+
+# --- cgroup v2 (limites rootless) --------------------------------------------
+# PID do processo-raiz do container. `container inspect` devolve um ARRAY
+# (ADR-0005), por isso lemos `[0].pid` — com python3, não com jq.
+container_pid() { # NAME -> pid ou vazio
+  "${DELONIX}" container inspect "$1" 2>/dev/null | python3 -c '
+import sys, json
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(0)
+if isinstance(data, dict): data = [data]
+for c in data or []:
+    if c.get("pid"): print(c["pid"]); break
+'
+}
+
+# Caminho relativo do cgroup v2 de um PID (a linha `0::` de /proc/PID/cgroup).
+cgroup_path_of_pid() { # PID -> /user.slice/.../dlx-<id>  ou vazio
+  awk -F: '/^0::/{print $3}' "/proc/$1/cgroup" 2>/dev/null
+}
+
+# Assere um ficheiro de cgroup REAL do kernel (a verdade, não a saída do CLI).
+# Distingue TRÊS desfechos — não os confunde:
+#   controlador ausente (ficheiro não existe) → die com mensagem própria
+#   limite NÃO aplicado (valor == "max")       → die: delegação em falta / silêncio
+#   valor != esperado                           → die: limite errado
+# e só passa quando o valor é exactamente o esperado.
+assert_cgroup() { # PID ficheiro esperado [rótulo]
+  local pid="$1" file="$2" want="$3" label="${4:-$2}"
+  local rel abs got
+  rel="$(cgroup_path_of_pid "$pid")"
+  [ -n "$rel" ] || die "${label}: não consegui ler o cgroup do PID ${pid}"
+  abs="/sys/fs/cgroup${rel}/${file}"
+  if [ ! -e "$abs" ]; then
+    die "${label}: controlador AUSENTE (${file} não existe em ${rel}). Isto NÃO é 'limite não aplicado' — é o controlador que não desceu até ti (ex.: cpuset/io num host de fábrica)."
+  fi
+  got="$(cat "$abs" 2>/dev/null || true)"
+  if [ "$got" = "max" ]; then
+    die "${label}: limite NÃO aplicado (${file}=max). A delegação de cgroup não está feita — o container corre SEM tecto, em silêncio. É exactamente o que o lab te manda provar."
+  fi
+  if [ "$got" != "$want" ]; then
+    die "${label}: esperava ${file}=${want}, li ${got} do cgroup REAL — o limite não pegou."
+  fi
+  ok "${label}: ${file}=${got} (lido do cgroup REAL do kernel, não da saída do comando)"
+}

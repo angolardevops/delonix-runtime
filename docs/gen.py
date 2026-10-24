@@ -4914,7 +4914,14 @@ limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>
 <p class="note"><strong>Nota:</strong> <code>cpuset</code> e <code>io</code>
 aparecem quase sempre como <em>absent</em>, e está certo — num Ubuntu de
 fábrica o <code>user.slice</code> (da root) só passa <code>cpu memory
-pids</code> para baixo. Nada aqui precisa deles.</p>"""),
+pids</code> para baixo. Nada aqui precisa deles.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — o <code>memory.max</code> REAL do
+cgroup do kernel, não a saída do comando — e <strong>falha em voz alta</strong>
+se o limite não pegou (<code>memory.max=max</code>), em vez de passar em silêncio,
+em <code>docs/labs/lab-2/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-2/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
 
     ("lab-3", "Duas aplicações que se falam por nome", "intermédio", """
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
@@ -5186,7 +5193,14 @@ delonix container rm -f limited</code></pre>
 <p class="note"><strong>Note:</strong> <code>cpuset</code> and <code>io</code>
 almost always show up as <em>absent</em>, and that's correct — on a stock
 Ubuntu, root's <code>user.slice</code> only passes <code>cpu memory
-pids</code> down. Nothing here needs them.</p>"""),
+pids</code> down. Nothing here needs them.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — the REAL <code>memory.max</code> of
+the kernel cgroup, not the command's output — and it <strong>fails loudly</strong>
+if the limit didn't take (<code>memory.max=max</code>) instead of passing
+silently, under <code>docs/labs/lab-2/</code>: <code>prepare → run → verify →
+cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Validated on
+<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
 
     "lab-3": ("Two apps that talk to each other by name", "intermediate", """
 <p>Goal: user network, internal DNS, and isolation — with zero DNS
