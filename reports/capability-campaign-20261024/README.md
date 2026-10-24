@@ -19,11 +19,11 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 |---|---|---|---|
 | supported | 103 | 112 | **114** |
 | partial | 93 | 86 | 86 |
-| not-implemented | 74 | 72 | 71 |
-| unsupported-by-provider | 230 | 230 | 229 |
+| not-implemented | 74 | 72 | 70 |
+| unsupported-by-provider | 230 | 230 | 230 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **114/274 (41.6%)** |
+| proved/applicable (N2) | — | 112/273 | **114/273 (41.8%)** |
 
 Separação do progresso (§17): 1 promoção real a supported (OOM, com teste live + evidência), 3 reclassificações de causa corrigidas (A1–A3), 2 lacunas completadas em classificação (lvm/zfs-btrfs: backend já existia, agora partial honesto). Sem promoção falsa — cada +1 em supported tem evidência verificada.
 
