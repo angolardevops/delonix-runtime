@@ -362,6 +362,93 @@ pub fn spec_to_container(id: &str, bundle: &Path, spec: &Spec) -> Result<(Contai
         }
     }
 
+    // --- Phase 3: security/limits the init reads off the Container ----------
+
+    // `root.readonly` → remount the rootfs read-only after pivot (fail-closed).
+    if spec.root().as_ref().and_then(|r| r.readonly()) == Some(true) {
+        c.read_only = true;
+    }
+    // `process.noNewPrivileges` / `oomScoreAdj` → honoured directly.
+    if let Some(nnp) = process.no_new_privileges() {
+        c.no_new_privs = Some(nnp);
+    }
+    if let Some(adj) = process.oom_score_adj() {
+        c.oom_score_adj = Some(adj);
+    }
+
+    // `process.rlimits` → the engine's `ulimits` ("name=soft:hard"). Only the
+    // resources it maps to `setrlimit` are honoured; any other RLIMIT is refused
+    // by name rather than silently dropped.
+    if let Some(rlimits) = process.rlimits().as_ref() {
+        for rl in rlimits {
+            let name = rlimit_name(rl.typ()).ok_or_else(|| {
+                Error::Invalid(format!(
+                    "oci-runtime: config.json `process.rlimits` has {:?}, which this engine does \
+                     not setrlimit; remove it or run it under runc",
+                    rl.typ()
+                ))
+            })?;
+            c.ulimits.push(format!("{name}={}:{}", rl.soft(), rl.hard()));
+        }
+    }
+
+    // `linux.sysctl` → "k=v". The init installs only NAMESPACED sysctls (net.*
+    // only with an own netns); it refuses the rest loudly at start, so they are
+    // forwarded rather than silently filtered. Sorted for a deterministic order.
+    if let Some(sysctls) = spec.linux().as_ref().and_then(|l| l.sysctl().as_ref()) {
+        let mut kv: Vec<String> = sysctls.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        kv.sort();
+        c.sysctls = kv;
+    }
+
+    // `linux.devices` → refused: the engine binds EXISTING host device nodes by
+    // path (char only); it does not `mknod` an arbitrary major:minor from the
+    // spec, so honouring this field would not do what the bundle asked.
+    if spec
+        .linux()
+        .as_ref()
+        .and_then(|l| l.devices().as_ref())
+        .is_some_and(|d| !d.is_empty())
+    {
+        return Err(Error::Invalid(
+            "oci-runtime: config.json `linux.devices` — creating device nodes from the spec is not \
+             implemented (the engine binds existing host nodes by path); remove it or run it under runc"
+                .to_string(),
+        ));
+    }
+
+    // `linux.seccomp` → a custom profile REPLACES the engine's built-in
+    // allowlist, but the compiler accepts only a bounded subset (≤2 actions, no
+    // per-arg rules, no KILL_PROCESS/TRACE/NOTIFY). Parse it NOW so an
+    // unsupported profile is refused at `create` instead of aborting the
+    // container at init (exit 126); on success store the JSON the init installs.
+    if let Some(seccomp) = spec.linux().as_ref().and_then(|l| l.seccomp().as_ref()) {
+        let json = serde_json::to_string(seccomp)
+            .map_err(|e| Error::Invalid(format!("oci-runtime: serialise linux.seccomp: {e}")))?;
+        // parse() rejects per-arg rules / unsupported action types; compile()
+        // rejects a profile with more than one non-default action. The init runs
+        // both, so run both here to refuse at `create`, not abort at init.
+        let (profile, _) = runtime::seccomp_profile::parse(&json).map_err(|e| {
+            Error::Invalid(format!(
+                "oci-runtime: config.json `linux.seccomp` is outside the supported subset ({e}); \
+                 simplify it (≤2 actions, no per-arg rules) or run it under runc"
+            ))
+        })?;
+        runtime::seccomp_profile::compile(&profile).map_err(|e| {
+            Error::Invalid(format!(
+                "oci-runtime: config.json `linux.seccomp` is outside the supported subset ({e}); \
+                 simplify it (≤2 actions, no per-arg rules) or run it under runc"
+            ))
+        })?;
+        c.seccomp_profile = Some(json);
+    }
+
+    // NOTE: `process.capabilities` is intentionally NOT translated per-set. This
+    // engine's model — shared with `container run` — is a fixed baseline
+    // (`KEPT_CAPS`) adjusted by cap_add/cap_drop, not the five arbitrary OCI
+    // sets. A bundle's capability block is left to that baseline rather than
+    // lossily collapsed into it; exact per-set fidelity is a later phase.
+
     Ok((c, rootfs.to_string_lossy().into_owned()))
 }
 
@@ -382,6 +469,23 @@ fn cpu_cores(quota: Option<i64>, period: Option<u64>) -> Option<String> {
 fn shares_to_weight(shares: u64) -> u64 {
     let s = shares.clamp(2, 262_144);
     (1 + ((s - 2) * 9999) / 262_142).clamp(1, 10_000)
+}
+
+/// OCI `PosixRlimitType` → the engine's `ulimit` name, for the resources it
+/// actually `setrlimit`s (the rest return `None`, to be refused by name).
+fn rlimit_name(t: oci_spec::runtime::PosixRlimitType) -> Option<&'static str> {
+    use oci_spec::runtime::PosixRlimitType::*;
+    Some(match t {
+        RlimitCpu => "cpu",
+        RlimitFsize => "fsize",
+        RlimitStack => "stack",
+        RlimitCore => "core",
+        RlimitNproc => "nproc",
+        RlimitNofile => "nofile",
+        RlimitMemlock => "memlock",
+        RlimitAs => "as",
+        _ => return None,
+    })
 }
 
 /// The caller-added **bind** mounts (`type: bind`, or any mount whose options
@@ -508,9 +612,12 @@ mod tests {
     // ---- Phase 2: broader config.json coverage ----------------------------
 
     use oci_spec::runtime::{
-        Linux, LinuxBuilder, LinuxCpuBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
-        LinuxPidsBuilder, LinuxResourcesBuilder, MountBuilder, Process, UserBuilder,
+        Linux, LinuxBuilder, LinuxCpuBuilder, LinuxDeviceBuilder, LinuxDeviceType,
+        LinuxNamespaceBuilder, LinuxNamespaceType, LinuxPidsBuilder, LinuxResourcesBuilder,
+        LinuxSeccompAction, LinuxSeccompBuilder, LinuxSyscallBuilder, MountBuilder,
+        PosixRlimitBuilder, PosixRlimitType, Process, UserBuilder,
     };
+    use std::collections::HashMap;
 
     // The oci_spec builders consume `self`, so everything is chained in one
     // expression. These helpers keep the tests to the field under test.
@@ -693,5 +800,141 @@ mod tests {
         let err = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process))
             .expect_err("terminal refused");
         assert!(err.to_string().contains("terminal"), "{err}");
+    }
+
+    // ---- Phase 3: security / limits --------------------------------------
+
+    #[test]
+    fn honours_readonly_rootfs_nnp_and_oom() {
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .no_new_privileges(false)
+            .oom_score_adj(-500)
+            .build()
+            .expect("process");
+        let root = RootBuilder::default()
+            .path("rootfs")
+            .readonly(true)
+            .build()
+            .expect("root");
+        let spec = SpecBuilder::default()
+            .version("1.3.0")
+            .root(root)
+            .process(process)
+            .build()
+            .expect("spec");
+        let (c, _) = spec_to_container("c1", Path::new("/b"), &spec).expect("ok");
+        assert!(c.read_only);
+        assert_eq!(c.no_new_privs, Some(false));
+        assert_eq!(c.oom_score_adj, Some(-500));
+    }
+
+    #[test]
+    fn translates_allowlisted_rlimits() {
+        let nofile = PosixRlimitBuilder::default()
+            .typ(PosixRlimitType::RlimitNofile)
+            .soft(1024u64)
+            .hard(4096u64)
+            .build()
+            .expect("rlimit");
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .rlimits(vec![nofile])
+            .build()
+            .expect("process");
+        let (c, _) = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process)).expect("ok");
+        assert_eq!(c.ulimits, vec!["nofile=1024:4096".to_string()]);
+    }
+
+    #[test]
+    fn refuses_unmapped_rlimit() {
+        let rss = PosixRlimitBuilder::default()
+            .typ(PosixRlimitType::RlimitRss)
+            .soft(1u64)
+            .hard(2u64)
+            .build()
+            .expect("rlimit");
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .rlimits(vec![rss])
+            .build()
+            .expect("process");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process))
+            .expect_err("rlimit refused");
+        assert!(err.to_string().contains("rlimits"), "{err}");
+    }
+
+    #[test]
+    fn translates_sysctls_sorted() {
+        let mut sysctl = HashMap::new();
+        sysctl.insert("net.ipv4.ip_forward".to_string(), "1".to_string());
+        sysctl.insert("kernel.shmmax".to_string(), "65536".to_string());
+        let linux = LinuxBuilder::default().sysctl(sysctl).build().expect("linux");
+        let (c, _) =
+            spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+                .expect("ok");
+        assert_eq!(
+            c.sysctls,
+            vec![
+                "kernel.shmmax=65536".to_string(),
+                "net.ipv4.ip_forward=1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_linux_devices() {
+        let dev = LinuxDeviceBuilder::default()
+            .path("/dev/sda")
+            .typ(LinuxDeviceType::B)
+            .major(8i64)
+            .minor(0i64)
+            .build()
+            .expect("device");
+        let linux = LinuxBuilder::default().devices(vec![dev]).build().expect("linux");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+            .expect_err("devices refused");
+        assert!(err.to_string().contains("devices"), "{err}");
+    }
+
+    fn seccomp_syscall(name: &str, action: LinuxSeccompAction) -> oci_spec::runtime::LinuxSyscall {
+        LinuxSyscallBuilder::default()
+            .names(vec![name.to_string()])
+            .action(action)
+            .build()
+            .expect("syscall")
+    }
+
+    #[test]
+    fn honours_simple_seccomp_profile() {
+        let seccomp = LinuxSeccompBuilder::default()
+            .default_action(LinuxSeccompAction::ScmpActErrno)
+            .syscalls(vec![seccomp_syscall("read", LinuxSeccompAction::ScmpActAllow)])
+            .build()
+            .expect("seccomp");
+        let linux = LinuxBuilder::default().seccomp(seccomp).build().expect("linux");
+        let (c, _) =
+            spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+                .expect("ok");
+        assert!(c.seccomp_profile.is_some(), "a 2-action profile is installed");
+    }
+
+    #[test]
+    fn refuses_seccomp_with_more_than_one_non_default_action() {
+        let seccomp = LinuxSeccompBuilder::default()
+            .default_action(LinuxSeccompAction::ScmpActErrno)
+            .syscalls(vec![
+                seccomp_syscall("read", LinuxSeccompAction::ScmpActAllow),
+                seccomp_syscall("write", LinuxSeccompAction::ScmpActLog),
+            ])
+            .build()
+            .expect("seccomp");
+        let linux = LinuxBuilder::default().seccomp(seccomp).build().expect("linux");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+            .expect_err("complex seccomp refused");
+        assert!(err.to_string().contains("seccomp"), "{err}");
     }
 }
