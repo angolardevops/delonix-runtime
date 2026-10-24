@@ -205,14 +205,27 @@ async fn portforward_upgrade(
     let Some(p) = pending else {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     };
-    let Some(pid) = pod_sandbox_pid(&st.base, &p.pod_sandbox_id) else {
-        return (
-            axum::http::StatusCode::CONFLICT,
-            "pod sandbox has no live netns",
-        )
-            .into_response();
-    };
-    crate::spdy::handle_port_forward(req, pid)
+    // A `hostNetwork` sandbox has no own infra/netns: its containers run in the
+    // node's network, so the forward connects directly in the host netns rather
+    // than `setns`-ing into a pod netns that was never created. For a normal pod
+    // the target is the infra container's netns, and a missing/dead pid there is
+    // still the real "no live netns" error (not a reason to reach the host).
+    let netns =
+        if crate::runtime_svc::lifecycle::sandbox_is_host_network(&st.base, &p.pod_sandbox_id) {
+            crate::spdy::PfNetns::Host
+        } else {
+            match pod_sandbox_pid(&st.base, &p.pod_sandbox_id) {
+                Some(pid) => crate::spdy::PfNetns::Pid(pid),
+                None => {
+                    return (
+                        axum::http::StatusCode::CONFLICT,
+                        "pod sandbox has no live netns",
+                    )
+                        .into_response();
+                }
+            }
+        };
+    crate::spdy::handle_port_forward(req, netns)
 }
 
 /// Builds the `delonix` argv to launch to serve this stream: `logs -f`

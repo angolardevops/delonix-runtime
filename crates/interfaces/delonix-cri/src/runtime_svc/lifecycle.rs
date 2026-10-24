@@ -622,6 +622,17 @@ fn now_ns() -> i64 {
 fn sb_dir(base: &Path) -> PathBuf {
     base.join("cri").join("sandboxes")
 }
+
+/// `true` if the sandbox uses the node's network (`hostNetwork`), in which case
+/// it has no own infra container or netns. The port-forward handler reads this
+/// to connect in the host netns directly instead of failing with "no live
+/// netns" (a `hostNetwork` pod never had one). Unknown/missing sandbox → `false`,
+/// which keeps the pod-netns path and its real liveness check.
+pub fn sandbox_is_host_network(base: &Path, sandbox_id: &str) -> bool {
+    read_rec::<SandboxRec>(&sb_dir(base), sandbox_id)
+        .map(|r| r.host_network)
+        .unwrap_or(false)
+}
 fn ct_dir(base: &Path) -> PathBuf {
     base.join("cri").join("containers")
 }

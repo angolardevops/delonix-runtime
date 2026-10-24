@@ -825,13 +825,33 @@ fn connect_in_netns(pid: i32, port: u16) -> std::io::Result<std::net::TcpStream>
         .unwrap_or_else(|_| Err(std::io::Error::other("netns connect thread died")))
 }
 
-pub fn handle_port_forward(mut req: axum::extract::Request, pid: i32) -> Response {
+/// Where the port-forward's TCP connection is made. A normal pod forwards INTO
+/// the infra container's netns (`setns` on its pid); a `hostNetwork` sandbox has
+/// no own netns — its containers run in the node's network — so the forward
+/// connects directly, in `delonix-cri`'s own (host) netns.
+#[derive(Clone, Copy)]
+pub enum PfNetns {
+    Pid(i32),
+    Host,
+}
+
+/// Connects a TCP to `127.0.0.1:<port>` where [`PfNetns`] says: inside the pod's
+/// netns via [`connect_in_netns`], or directly in the host netns for
+/// `hostNetwork` pods.
+fn connect_pf(netns: PfNetns, port: u16) -> std::io::Result<std::net::TcpStream> {
+    match netns {
+        PfNetns::Host => std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)),
+        PfNetns::Pid(pid) => connect_in_netns(pid, port),
+    }
+}
+
+pub fn handle_port_forward(mut req: axum::extract::Request, netns: PfNetns) -> Response {
     let Some(on_upgrade) = req.extensions_mut().remove::<OnUpgrade>() else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     tokio::spawn(async move {
         if let Ok(upgraded) = on_upgrade.await {
-            run_port_forward(TokioIo::new(upgraded), pid).await;
+            run_port_forward(TokioIo::new(upgraded), netns).await;
         }
     });
     Response::builder()
@@ -843,7 +863,7 @@ pub fn handle_port_forward(mut req: axum::extract::Request, pid: i32) -> Respons
         .unwrap()
 }
 
-async fn run_port_forward<S>(io: S, pid: i32)
+async fn run_port_forward<S>(io: S, netns: PfNetns)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -882,7 +902,7 @@ where
                     let port: u16 = get("port").and_then(|p| p.trim().parse().ok()).unwrap_or(0);
                     let _ = out_tx.send(Out::SynReply(sid));
                     if stype == "data" && port != 0 {
-                        match connect_in_netns(pid, port) {
+                        match connect_pf(netns, port) {
                             Ok(std_sock) => {
                                 let _ = std_sock.set_nonblocking(true);
                                 if let Ok(sock) = tokio::net::TcpStream::from_std(std_sock) {

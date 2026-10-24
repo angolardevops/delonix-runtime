@@ -1,0 +1,67 @@
+time="2026-10-24T12:39:10+01:00" level=warning msg="Config \"/etc/crictl.yaml\" does not exist, trying next: \"/home/walter/workspaces/.worktrees/delonix-runtime/crictl.yaml\""
+critest version: v1.36.0
+Running Suite: CRI validation - /home/walter/workspaces/.worktrees/delonix-runtime/cri-portforward-conformance
+==============================================================================================================
+Random Seed: [1m1792841950[0m
+
+Will run [1m2[0m of [1m122[0m specs
+[38;5;10m•[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m
+[38;5;243m------------------------------[0m
+[38;5;9m• [FAILED] [67.292 seconds][0m
+[0m[k8s.io] Streaming [38;5;243mruntime should support streaming interfaces [38;5;9m[1m[It] runtime should support portforward [Conformance][0m
+[38;5;243m/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:130[0m
+
+  [38;5;243mTimeline >>[0m
+  [1mSTEP:[0m create a PodSandbox with container port mapping [38;5;243m@ 10/24/26 12:39:32.629[0m
+  [1mSTEP:[0m create a web server container [38;5;243m@ 10/24/26 12:39:33.705[0m
+  [1mSTEP:[0m Get image status for image: registry.k8s.io/e2e-test-images/nginx:1.14-2 [38;5;243m@ 10/24/26 12:39:33.705[0m
+  [1mSTEP:[0m Pull image : registry.k8s.io/e2e-test-images/nginx:1.14-2 [38;5;243m@ 10/24/26 12:39:33.706[0m
+  [1mSTEP:[0m Create container. [38;5;243m@ 10/24/26 12:39:37.876[0m
+  Oct 24 12:39:37.878: INFO: Created container "b39c4e4e57699bc2"
+
+  [1mSTEP:[0m start the web server container [38;5;243m@ 10/24/26 12:39:37.878[0m
+  [1mSTEP:[0m Start container for containerID: b39c4e4e57699bc2 [38;5;243m@ 10/24/26 12:39:37.878[0m
+  Oct 24 12:39:38.153: INFO: Started container "b39c4e4e57699bc2"
+
+  [1mSTEP:[0m ensure the web server container is serving [38;5;243m@ 10/24/26 12:39:38.153[0m
+  [1mSTEP:[0m get the IP:port needed to be checked [38;5;243m@ 10/24/26 12:39:38.153[0m
+  [1mSTEP:[0m Get PodSandbox status for podID: 30c0e5c75f6f4327 [38;5;243m@ 10/24/26 12:39:38.153[0m
+  Oct 24 12:39:38.154: INFO: the IP:port is http://10.200.0.2:80
+  [1mSTEP:[0m check the content of http://10.200.0.2:80 [38;5;243m@ 10/24/26 12:39:38.154[0m
+  [38;5;9m[FAILED][0m in [It] - /home/runner/work/cri-tools/cri-tools/pkg/validate/networking.go:305 [38;5;243m@ 10/24/26 12:40:39.206[0m
+  [1mSTEP:[0m stop PodSandbox [38;5;243m@ 10/24/26 12:40:39.207[0m
+  [1mSTEP:[0m delete PodSandbox [38;5;243m@ 10/24/26 12:40:39.335[0m
+  [38;5;243m<< Timeline[0m
+
+  [38;5;9m[FAILED] Timed out after 61.052s.
+  Expected success, but got an error:
+      <*url.Error | 0x385899904000>: 
+      Get "http://10.200.0.2:80": dial tcp 10.200.0.2:80: i/o timeout
+      {
+          Op: "Get",
+          URL: "http://10.200.0.2:80",
+          Err: <*net.OpError | 0x38589962a9b0>{
+              Op: "dial",
+              Net: "tcp",
+              Source: nil,
+              Addr: <*net.TCPAddr | 0x385899c03c20>{
+                  IP: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 10, 200, 0, 2],
+                  Port: 80,
+                  Zone: "",
+              },
+              Err: <*poll.DeadlineExceededError | 0x1f24920>{},
+          },
+      }[0m
+  [38;5;9mIn [1m[It][0m[38;5;9m at: [1m/home/runner/work/cri-tools/cri-tools/pkg/validate/networking.go:305[0m [38;5;243m@ 10/24/26 12:40:39.206[0m
+[38;5;243m------------------------------[0m
+[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m
+
+[38;5;9m[1mSummarizing 1 Failure:[0m
+  [38;5;9m[FAIL][0m [0m[k8s.io] Streaming [38;5;243mruntime should support streaming interfaces [38;5;9m[1m[It] runtime should support portforward [Conformance][0m
+  [38;5;243m/home/runner/work/cri-tools/cri-tools/pkg/validate/networking.go:305[0m
+
+[38;5;9m[1mRan 2 of 122 Specs in 89.218 seconds[0m
+[38;5;9m[1mFAIL![0m -- [38;5;10m[1m1 Passed[0m | [38;5;9m[1m1 Failed[0m | [38;5;11m[1m0 Pending[0m | [38;5;14m[1m120 Skipped[0m
+--- FAIL: TestCRISuite (89.22s)
+FAIL
+RC=1
