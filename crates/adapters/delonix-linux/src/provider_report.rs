@@ -199,8 +199,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             | C::VmIpObserved => S::UnsupportedByProvider {
                 reason: "a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's",
             },
-            C::MetricsPrometheus => S::Partial {
-                detail: "`/metrics` on the CRI and management sockets; per-container gauges, no battery scrape",
+            C::MetricsPrometheus => S::Supported {
+                evidence: "e2e:métricas: /metrics expõe gauges por container (cpu/mem)",
             },
             C::MetricsPerWorkloadNetwork => S::Partial {
                 detail: "rx/tx per container read in its netns by the dashboard collector; not exported per container",

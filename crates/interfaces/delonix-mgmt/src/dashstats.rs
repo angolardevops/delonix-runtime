@@ -442,6 +442,8 @@ pub fn workload_series(
         Err(why) => CgroupSeries::unavailable(why),
     };
     let mut unavailable = Vec::new();
+    let cpu_usage_usec = take("cpu_usage", read.cpu_usage_usec, &mut unavailable);
+    let memory_current_bytes = take("memory_current", read.memory_current, &mut unavailable);
     let cpu_throttle =
         take("cpu_throttle", read.cpu_throttle, &mut unavailable).map(|c| CpuThrottle {
             nr_periods: c.nr_periods,
@@ -461,6 +463,8 @@ pub fn workload_series(
         kind,
         id: id.to_string(),
         name: name.to_string(),
+        cpu_usage_usec,
+        memory_current_bytes,
         cpu_throttle,
         cpu_pressure,
         memory_pressure,
@@ -746,7 +750,7 @@ mod tests {
         write(
             p,
             "cpu.stat",
-            "usage_usec 9000000\nnr_periods 200\nnr_throttled 50\nthrottled_usec 1500000\n",
+            "usage_usec 9500000\nnr_periods 200\nnr_throttled 50\nthrottled_usec 1500000\n",
         );
         write(p, "cpu.pressure", PSI);
         write(p, "memory.pressure", PSI);
@@ -756,6 +760,7 @@ mod tests {
             "memory.events.local",
             "low 0\nhigh 0\nmax 4\noom 2\noom_kill 1\n",
         );
+        write(p, "memory.current", "4194304\n");
         d
     }
 
@@ -772,6 +777,8 @@ mod tests {
         let out = delonix_telemetry::workload::render(&[ws]);
         let l = r#"kind="container",id="c1",name="web""#;
         for want in [
+            format!("delonix_workload_cpu_usage_seconds_total{{{l}}} 9.5"),
+            format!("delonix_workload_memory_current_bytes{{{l}}} 4194304"),
             format!("delonix_workload_cpu_periods_total{{{l}}} 200"),
             format!("delonix_workload_cpu_throttled_periods_total{{{l}}} 50"),
             format!("delonix_workload_cpu_throttled_seconds_total{{{l}}} 1.5"),
@@ -817,10 +824,11 @@ mod tests {
     #[test]
     fn a_workload_without_a_readable_cgroup_exports_only_reasons() {
         let ws = workload_series(WorkloadKind::Vm, "vm1", "vm1", Err(Why::SharedCgroup));
-        assert_eq!(ws.unavailable.len(), 5);
+        // cpu_usage, memory_current, cpu_throttle, cpu/memory/io pressure, memory_events.
+        assert_eq!(ws.unavailable.len(), 7);
         assert!(ws.unavailable.iter().all(|u| u.reason == "shared_cgroup"));
         let out = delonix_telemetry::workload::render(&[ws]);
-        assert_eq!(out.matches("series_unavailable{").count(), 5, "{out}");
+        assert_eq!(out.matches("series_unavailable{").count(), 7, "{out}");
         assert!(out.contains(r#"kind="vm",id="vm1",name="vm1""#));
         assert!(!out.contains("delonix_workload_cpu_"), "{out}");
     }
