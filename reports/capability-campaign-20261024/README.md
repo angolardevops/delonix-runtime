@@ -17,13 +17,15 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **115** |
-| partial | 93 | 86 | 87 |
+| supported | 103 | 112 | **114** |
+| partial | 93 | 86 | 88 |
 | not-implemented | 74 | 72 | 69 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **115/274 (42.0%)** |
+| proved/applicable (N2) | — | 112/273 | **114/274 (41.6%)** |
+
+Nota de integridade: o supported desceu de 115 para 114 de propósito — `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial porque o arnês não prova recuperação do conteúdo de RAM (só de disco). Baixar a métrica por honestidade é progresso (§5/§17), não regressão.
 
 Separação do progresso (§17): 1 promoção real a supported (OOM, com teste live + evidência), 3 reclassificações de causa corrigidas (A1–A3), 2 lacunas completadas em classificação (lvm/zfs-btrfs: backend já existia, agora partial honesto). Sem promoção falsa — cada +1 em supported tem evidência verificada.
 
@@ -42,6 +44,9 @@ Separação do progresso (§17): 1 promoção real a supported (OOM, com teste l
 - `ca2d7d88`+`bcc2e47e` fix+merge — **CH `vm.ip.observed` unsupported→partial (§4)**: observação por ARP (`--wait`→`sdn_reachable`) validada ao vivo (guest respondeu ARP), mas o IP reportado continua computado do MAC (não lido de lease/agent) → partial honesto, não supported. Feito em worktree paralela.
 
 Integração: as duas frentes paralelas correram cada uma na sua worktree off develop; integradas em série com regeneração única da matriz/ratchet (115/274); worktrees e branches limpas. develop ganhou também, em paralelo (dono), 2 fixes CRI (`91771918`, `7fbd385f`).
+
+- `85c308c9`+`2bbc1cb7` feat+merge — **restauro de snapshot com DADOS (libvirt)** §7/§14: nova secção e2e escreve `DADO-ORIGINAL-v1`→snapshot→corrompe→restore→relê o original (8/8 PASS live). `vm.snapshot-disk`/`vm.snapshot-restore` ganham evidência de recuperação real; `vm.snapshot-memory` DEMOVIDO supported→partial (RAM não observável sem guest com SO). Worktree paralela.
+- `2b857465`+`387eefea` fix+merge — CH `vm.network.bridge`: razão corrigida (§13); mantém-se `unsupported-by-provider` por ser decisão arquitetural espelhada (CH rootless→SDN; libvirt→host bridge), não incapacidade do VMM. Sem mudança de estado. Worktree paralela.
 
 ## Próximas frentes (fila)
 
