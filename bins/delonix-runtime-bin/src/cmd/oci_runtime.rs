@@ -401,20 +401,25 @@ pub fn spec_to_container(id: &str, bundle: &Path, spec: &Spec) -> Result<(Contai
         c.sysctls = kv;
     }
 
-    // `linux.devices` → refused: the engine binds EXISTING host device nodes by
-    // path (char only); it does not `mknod` an arbitrary major:minor from the
-    // spec, so honouring this field would not do what the bundle asked.
-    if spec
-        .linux()
-        .as_ref()
-        .and_then(|l| l.devices().as_ref())
-        .is_some_and(|d| !d.is_empty())
-    {
-        return Err(Error::Invalid(
-            "oci-runtime: config.json `linux.devices` — creating device nodes from the spec is not \
-             implemented (the engine binds existing host nodes by path); remove it or run it under runc"
-                .to_string(),
-        ));
+    // `linux.devices` → the engine binds the EXISTING host node at each path
+    // (it does not `mknod` the spec's major:minor), and only character devices.
+    // So honour char/unbuffered-char devices as `--device <path>`, and refuse
+    // block/fifo by name rather than appear to create a node that never shows up.
+    if let Some(devs) = spec.linux().as_ref().and_then(|l| l.devices().as_ref()) {
+        use oci_spec::runtime::LinuxDeviceType as DevT;
+        for d in devs {
+            match d.typ() {
+                DevT::C | DevT::U => c.devices.push(d.path().to_string_lossy().into_owned()),
+                other => {
+                    return Err(Error::Invalid(format!(
+                        "oci-runtime: config.json `linux.devices` has a {other:?} device {} — only \
+                         character devices (bound from the host by path) are supported; remove it \
+                         or run it under runc",
+                        d.path().display()
+                    )))
+                }
+            }
+        }
     }
 
     // `linux.seccomp` → a custom profile REPLACES the engine's built-in
@@ -443,11 +448,53 @@ pub fn spec_to_container(id: &str, bundle: &Path, spec: &Spec) -> Result<(Contai
         c.seccomp_profile = Some(json);
     }
 
-    // NOTE: `process.capabilities` is intentionally NOT translated per-set. This
-    // engine's model — shared with `container run` — is a fixed baseline
-    // (`KEPT_CAPS`) adjusted by cap_add/cap_drop, not the five arbitrary OCI
-    // sets. A bundle's capability block is left to that baseline rather than
-    // lossily collapsed into it; exact per-set fidelity is a later phase.
+    // `process.capabilities`: make the kept set equal the bundle's BOUNDING set
+    // (the ceiling) by expressing it as cap_add/cap_drop deltas off the engine's
+    // KEPT_CAPS baseline — so a bundle that drops caps to harden is honoured
+    // instead of silently left at the baseline (over-privileged). The engine's
+    // model is a single kept mask, so it cannot represent distinct effective/
+    // permitted/inheritable sets or raise ambient caps: an ambient request is
+    // refused by name. (bounding is the ceiling the others are subsets of.)
+    if let Some(caps) = process.capabilities().as_ref() {
+        if caps.ambient().as_ref().is_some_and(|a| !a.is_empty()) {
+            return Err(Error::Invalid(
+                "oci-runtime: config.json `process.capabilities.ambient` — ambient capabilities are \
+                 not raised by this engine; remove them or run it under runc"
+                    .to_string(),
+            ));
+        }
+        if let Some(bounding) = caps.bounding().as_ref() {
+            use runtime::capabilities::{cap_name, cap_num, KEPT_CAPS};
+            let mut want = std::collections::BTreeSet::new();
+            for cap in bounding {
+                let name = oci_cap_name(cap);
+                let num = cap_num(&name).ok_or_else(|| {
+                    Error::Invalid(format!(
+                        "oci-runtime: config.json names a capability this engine does not know \
+                         ({name:?}); remove it or run it under runc"
+                    ))
+                })?;
+                want.insert(num);
+            }
+            let kept: std::collections::BTreeSet<u8> = KEPT_CAPS.iter().copied().collect();
+            // Drop what the baseline keeps but the bundle does not want...
+            for &n in &kept {
+                if !want.contains(&n) {
+                    if let Some(name) = cap_name(n) {
+                        c.cap_drop.push(format!("CAP_{name}"));
+                    }
+                }
+            }
+            // ...and add what the bundle wants beyond the baseline.
+            for &n in &want {
+                if !kept.contains(&n) {
+                    if let Some(name) = cap_name(n) {
+                        c.cap_add.push(format!("CAP_{name}"));
+                    }
+                }
+            }
+        }
+    }
 
     Ok((c, rootfs.to_string_lossy().into_owned()))
 }
@@ -469,6 +516,16 @@ fn cpu_cores(quota: Option<i64>, period: Option<u64>) -> Option<String> {
 fn shares_to_weight(shares: u64) -> u64 {
     let s = shares.clamp(2, 262_144);
     (1 + ((s - 2) * 9999) / 262_142).clamp(1, 10_000)
+}
+
+/// The `CAP_<NAME>` string for an OCI capability. The enum serde-renames to
+/// exactly that form, which `capabilities::cap_num` accepts; an unknown value
+/// yields `""` (→ refused upstream as an unknown capability).
+fn oci_cap_name(cap: &oci_spec::runtime::Capability) -> String {
+    serde_json::to_value(cap)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 /// OCI `PosixRlimitType` → the engine's `ulimit` name, for the resources it
@@ -537,6 +594,7 @@ mod tests {
             .args(args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
             .cwd(cwd)
             .env(env.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+            .capabilities(no_caps())
             .build()
             .expect("process");
         let root = RootBuilder::default().path("rootfs").build().expect("root");
@@ -612,19 +670,39 @@ mod tests {
     // ---- Phase 2: broader config.json coverage ----------------------------
 
     use oci_spec::runtime::{
-        Linux, LinuxBuilder, LinuxCpuBuilder, LinuxDeviceBuilder, LinuxDeviceType,
-        LinuxNamespaceBuilder, LinuxNamespaceType, LinuxPidsBuilder, LinuxResourcesBuilder,
-        LinuxSeccompAction, LinuxSeccompBuilder, LinuxSyscallBuilder, MountBuilder,
-        PosixRlimitBuilder, PosixRlimitType, Process, UserBuilder,
+        Capability, Linux, LinuxBuilder, LinuxCapabilitiesBuilder, LinuxCpuBuilder,
+        LinuxDeviceBuilder, LinuxDeviceType, LinuxNamespaceBuilder, LinuxNamespaceType,
+        LinuxPidsBuilder, LinuxResourcesBuilder, LinuxSeccompAction, LinuxSeccompBuilder,
+        LinuxSyscallBuilder, MountBuilder, PosixRlimitBuilder, PosixRlimitType, Process,
+        UserBuilder,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     // The oci_spec builders consume `self`, so everything is chained in one
     // expression. These helpers keep the tests to the field under test.
+
+    // oci_spec's programmatic `Process` default fills `capabilities` with a
+    // non-empty ambient set — unlike a real serialized config (and a real
+    // `delonix image export` bundle), whose `ambient` is `[]`. Give test
+    // processes an all-unset capabilities block so the cap path is a no-op
+    // except in the tests that exercise it on purpose.
+    fn no_caps() -> oci_spec::runtime::LinuxCapabilities {
+        let empty: HashSet<Capability> = HashSet::new();
+        LinuxCapabilitiesBuilder::default()
+            .bounding(empty.clone())
+            .effective(empty.clone())
+            .inheritable(empty.clone())
+            .permitted(empty.clone())
+            .ambient(empty)
+            .build()
+            .expect("caps")
+    }
+
     fn proc_true() -> Process {
         ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .build()
             .expect("process")
     }
@@ -661,6 +739,7 @@ mod tests {
         let process = ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .user(user)
             .build()
             .expect("process");
@@ -676,6 +755,7 @@ mod tests {
         let process = ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .user(user)
             .build()
             .expect("process");
@@ -794,6 +874,7 @@ mod tests {
         let process = ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .terminal(true)
             .build()
             .expect("process");
@@ -809,6 +890,7 @@ mod tests {
         let process = ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .no_new_privileges(false)
             .oom_score_adj(-500)
             .build()
@@ -841,6 +923,7 @@ mod tests {
         let process = ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .rlimits(vec![nofile])
             .build()
             .expect("process");
@@ -859,6 +942,7 @@ mod tests {
         let process = ProcessBuilder::default()
             .args(vec!["/bin/true".to_string()])
             .cwd("/")
+            .capabilities(no_caps())
             .rlimits(vec![rss])
             .build()
             .expect("process");
@@ -936,5 +1020,77 @@ mod tests {
         let err = spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
             .expect_err("complex seccomp refused");
         assert!(err.to_string().contains("seccomp"), "{err}");
+    }
+
+    // ---- Phase 4: capabilities (per bounding set) + char devices ----------
+
+    #[test]
+    fn honours_bounding_capabilities_as_delta_off_baseline() {
+        // bounding = {CHOWN (0, IN KEPT_CAPS), NET_ADMIN (12, NOT in KEPT_CAPS)};
+        // the other sets empty (ambient must be set empty or its builder default
+        // is non-empty and would trip the ambient refusal).
+        let empty: HashSet<Capability> = HashSet::new();
+        let caps = LinuxCapabilitiesBuilder::default()
+            .bounding(
+                vec![Capability::Chown, Capability::NetAdmin]
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+            )
+            .effective(empty.clone())
+            .inheritable(empty.clone())
+            .permitted(empty.clone())
+            .ambient(empty)
+            .build()
+            .expect("caps");
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .capabilities(caps)
+            .build()
+            .expect("process");
+        let (c, _) = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process)).expect("ok");
+        // NET_ADMIN is beyond the baseline → added; a baseline cap not wanted
+        // (DAC_OVERRIDE=1) is dropped; a wanted baseline cap (CHOWN) is neither.
+        assert!(c.cap_add.contains(&"CAP_NET_ADMIN".to_string()), "add: {:?}", c.cap_add);
+        assert!(c.cap_drop.contains(&"CAP_DAC_OVERRIDE".to_string()), "drop: {:?}", c.cap_drop);
+        assert!(!c.cap_drop.contains(&"CAP_CHOWN".to_string()), "CHOWN kept");
+        assert!(!c.cap_add.contains(&"CAP_CHOWN".to_string()), "CHOWN already baseline");
+    }
+
+    #[test]
+    fn refuses_ambient_capabilities() {
+        let caps = LinuxCapabilitiesBuilder::default()
+            .ambient(
+                vec![Capability::NetRaw]
+                    .into_iter()
+                    .collect::<std::collections::HashSet<_>>(),
+            )
+            .build()
+            .expect("caps");
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .capabilities(caps)
+            .build()
+            .expect("process");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process))
+            .expect_err("ambient refused");
+        assert!(err.to_string().contains("ambient"), "{err}");
+    }
+
+    #[test]
+    fn honours_char_device_by_path() {
+        let dev = LinuxDeviceBuilder::default()
+            .path("/dev/fuse")
+            .typ(LinuxDeviceType::C)
+            .major(10i64)
+            .minor(229i64)
+            .build()
+            .expect("device");
+        let linux = LinuxBuilder::default().devices(vec![dev]).build().expect("linux");
+        let (c, _) =
+            spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+                .expect("ok");
+        assert_eq!(c.devices, vec!["/dev/fuse".to_string()]);
     }
 }
