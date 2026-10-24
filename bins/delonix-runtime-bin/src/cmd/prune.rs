@@ -342,6 +342,145 @@ pub(crate) struct ContainerSweep {
 /// stale without the sweep changing a line. `system prune --dry-run` exists so
 /// the next decision is made against a measurement instead of against this
 /// paragraph.
+/// `dlx-*` cgroup directories that are NOT container leaves: the delegated base
+/// itself and the manager cgroup the engine parks itself in. Never swept — they
+/// are infrastructure, not the remains of a dead container.
+const RESERVED_CGROUP_DIRS: &[&str] = &["dlx-containers", "dlx-mgr"];
+
+/// The `(base directory, leaf-name prefix)` pairs under which a container cgroup
+/// leaf may live: root mode (`delonix.slice/delonix-<id>`) AND the rootless
+/// delegated bases (`<user@uid.service>/dlx-containers/dlx-<id>` and the engine's
+/// own scope). These are EXACTLY the locations [`delonix_linux`]'s
+/// `remove_container_cgroup` cleans on a normal stop — so `system prune` reclaims
+/// what an engine that died before that cleanup left behind, and nothing else. A
+/// base that does not exist on this host (e.g. `delonix.slice` under rootless) is
+/// simply skipped by the `read_dir` in [`orphan_cgroup_leaves`].
+fn container_cgroup_bases() -> Vec<(std::path::PathBuf, &'static str)> {
+    let mut bases: Vec<(std::path::PathBuf, &'static str)> = vec![(
+        std::path::PathBuf::from(delonix_compute::DELONIX_SLICE),
+        "delonix-",
+    )];
+    let add =
+        |p: std::path::PathBuf, prefix, bases: &mut Vec<(std::path::PathBuf, &'static str)>| {
+            if !bases.iter().any(|(b, _)| *b == p) {
+                bases.push((p, prefix));
+            }
+        };
+    if let Some(cur) = delonix_linux::current_cgroup_v2() {
+        if let Some(base) = delonix_linux::user_service_base(&cur) {
+            add(std::path::PathBuf::from(base), "dlx-", &mut bases);
+        }
+        add(std::path::PathBuf::from(cur), "dlx-", &mut bases);
+    }
+    bases
+}
+
+/// **PURE** — is `dir` a cgroup v2 leaf `rmdir` would accept? NOT directory
+/// emptiness: a cgroup directory is NEVER empty — the kernel fills it with
+/// interface files (`cgroup.procs`, `cgroup.controllers`, …). `rmdir` on
+/// cgroupfs ignores those and succeeds iff the cgroup has no CHILD cgroups
+/// (subdirectories) and no member processes. So the removable test is exactly
+/// that pair — which is also why the dry-run can trust it without calling
+/// `remove_dir`. A directory with no `cgroup.procs` is not a cgroup at all and
+/// is left alone.
+fn cgroup_leaf_removable(dir: &std::path::Path) -> bool {
+    let no_child_cgroups = match std::fs::read_dir(dir) {
+        Ok(rd) => !rd
+            .flatten()
+            .any(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)),
+        Err(_) => return false,
+    };
+    let procs_empty = std::fs::read_to_string(dir.join("cgroup.procs"))
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(false);
+    no_child_cgroups && procs_empty
+}
+
+/// **PURE** — the orphan cgroup leaf directories directly under `base` whose id
+/// is not in `live_ids` and which `rmdir` would accept ([`cgroup_leaf_removable`]).
+/// The dry-run plan counts these and the real sweep `remove_dir`s them, over the
+/// same predicate, so the two can never disagree. Reserved non-leaf directories
+/// ([`RESERVED_CGROUP_DIRS`]) are never returned, and a non-existent or
+/// unreadable `base` yields nothing.
+fn orphan_cgroup_leaves(
+    base: &std::path::Path,
+    prefix: &str,
+    live_ids: &HashSet<String>,
+) -> Vec<std::path::PathBuf> {
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if RESERVED_CGROUP_DIRS.contains(&name.as_str()) {
+            continue;
+        }
+        let Some(id) = name.strip_prefix(prefix) else {
+            continue;
+        };
+        if live_ids.contains(id) {
+            continue;
+        }
+        if cgroup_leaf_removable(&e.path()) {
+            out.push(e.path());
+        }
+    }
+    out
+}
+
+/// **PURE** — every orphan leaf across ALL container cgroup bases, flattened.
+/// The `(base, prefix)` pairs are exactly what [`container_cgroup_bases`] yields,
+/// but taken as an argument so the selection can be exercised against a temp
+/// directory in a test — no real cgroupfs, no live store, no process-once guard.
+/// Both the real [`gc_orphan_cgroup_leaves_once`] sweep and the startup GC share
+/// this one predicate, so they can never disagree about what is an orphan.
+fn orphan_cgroup_leaves_in(
+    bases: &[(std::path::PathBuf, &'static str)],
+    live_ids: &HashSet<String>,
+) -> Vec<std::path::PathBuf> {
+    bases
+        .iter()
+        .flat_map(|(base, prefix)| orphan_cgroup_leaves(base, prefix, live_ids))
+        .collect()
+}
+
+/// Runs the startup cgroup GC at most once in this process.
+static CGROUP_GC: std::sync::Once = std::sync::Once::new();
+
+/// Opportunistic, daemonless GC of the orphan cgroup leaves a previous engine
+/// left behind by dying — a crash, an OOM-kill, a `kill -9` — BEFORE
+/// `remove_container_cgroup` ran. Before this, the only thing that reclaimed them
+/// was a manual `system prune`; an engine that is daemonless has no resident
+/// process to do it on its own, so a node that crashed under load kept leaking
+/// empty `dlx-<id>` leaves until a human remembered to prune.
+///
+/// So the same sweep `system prune` does for cgroups is hung on the FIRST use of
+/// the container store in a process ([`super::util::open_stores`], which every
+/// command that touches state goes through — `system info`, the first
+/// `container run`, …) and guarded by [`CGROUP_GC`] to run exactly once. It is
+/// NOT a daemon: nothing resides, the work happens on a path a command already
+/// runs, and it is over before `open_stores` returns.
+///
+/// Selection is [`orphan_cgroup_leaves_in`] over [`container_cgroup_bases`] with
+/// the live ids from the store — byte-for-byte the predicate `system prune`'s
+/// cgroup phase uses, so the GC can never reap a leaf the plan would spare. It is
+/// best-effort and silent: `remove_dir` removes only an EMPTY cgroup (a leaf a
+/// race just refilled stays, exactly as in the prune sweep), and every error —
+/// an unreadable store, a `remove_dir` that lost the race — is swallowed, because
+/// a GC that failed must never fail the command that happened to trigger it.
+pub(crate) fn gc_orphan_cgroup_leaves_once(store: &Store) {
+    CGROUP_GC.call_once(|| {
+        let Ok(containers) = store.list() else {
+            return;
+        };
+        let live_ids: HashSet<String> = containers.into_iter().map(|c| c.id).collect();
+        for leaf in orphan_cgroup_leaves_in(&container_cgroup_bases(), &live_ids) {
+            let _ = std::fs::remove_dir(&leaf);
+        }
+    });
+}
+
 pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<ContainerSweep> {
     // Orphan slirps (dead target) — the SAFE reaper, never the fail-open
     // `reap_orphan_hostfwds` (see the history of the reaper that deleted live
@@ -450,17 +589,15 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         out.dirs += 1;
     }
 
-    // 4) orphan EMPTY cgroups in delonix.slice.
-    let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
-    if let Ok(rd) = std::fs::read_dir(delonix_compute::DELONIX_SLICE) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            // `remove_dir` (not `_all`): only removes if EMPTY — a cgroup with
-            // processes inside refuses, and rightly so.
-            if name.starts_with("delonix-")
-                && !live_cg.contains(&name)
-                && std::fs::remove_dir(e.path()).is_ok()
-            {
+    // 4) orphan EMPTY cgroup leaves an engine left behind by dying before
+    //    `remove_container_cgroup` ran. Both the root slice (`delonix.slice`,
+    //    `delonix-<id>`) AND the rootless delegated bases (`dlx-<id>`) — before
+    //    this it only looked in `delonix.slice`, so a rootless node (the DEFAULT)
+    //    reclaimed nothing while still reporting a cgroup count. `remove_dir`
+    //    only removes an EMPTY cgroup; a leaf a race just refilled stays.
+    for (base, prefix) in container_cgroup_bases() {
+        for leaf in orphan_cgroup_leaves(&base, prefix, &live_ids) {
+            if std::fs::remove_dir(&leaf).is_ok() {
                 out.cgroups += 1;
             }
         }
@@ -984,21 +1121,11 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
         out.dirs += 1;
     }
 
-    // B — empty `delonix-*` cgroups. `read_dir` on an empty directory is the
-    // same test `remove_dir` makes, without making it.
-    let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
-    if let Ok(rd) = std::fs::read_dir(delonix_compute::DELONIX_SLICE) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with("delonix-")
-                && !live_cg.contains(&name)
-                && std::fs::read_dir(e.path())
-                    .map(|mut d| d.next().is_none())
-                    .unwrap_or(false)
-            {
-                out.cgroups += 1;
-            }
-        }
+    // B — empty orphan cgroup leaves, over the SAME bases the sweep walks (root
+    // slice + rootless delegated bases), via the same pure helper — so a leaf
+    // cannot be counted by the plan and spared by the sweep, or vice versa.
+    for (base, prefix) in container_cgroup_bases() {
+        out.cgroups += orphan_cgroup_leaves(&base, prefix, &live_ids).len();
     }
 
     // B — blobs nothing would reference once the doomed images are gone.
@@ -1781,6 +1908,95 @@ mod tests {
 
     fn set(items: &[&str]) -> std::collections::HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Build a fake cgroup v2 leaf: a directory with an (empty, by default)
+    /// `cgroup.procs`, mimicking the interface file the kernel always creates so
+    /// directory-emptiness is never the test.
+    fn fake_cgroup(base: &std::path::Path, name: &str, procs: &str) -> std::path::PathBuf {
+        let d = base.join(name);
+        std::fs::create_dir(&d).unwrap();
+        std::fs::write(d.join("cgroup.procs"), procs).unwrap();
+        d
+    }
+
+    #[test]
+    fn orphan_cgroup_leaves_takes_dead_leaves_and_spares_live_busy_running_and_reserved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        fake_cgroup(base, "dlx-aaa", ""); // dead orphan
+        fake_cgroup(base, "dlx-bbb", ""); // dead orphan
+        fake_cgroup(base, "dlx-live", ""); // id is live — spared
+        fake_cgroup(base, "dlx-running", "4242\n"); // has a process — not rmdir-able
+        fake_cgroup(base, "dlx-busy", ""); // has a child cgroup — not rmdir-able
+        std::fs::create_dir(base.join("dlx-busy").join("dlx-child")).unwrap();
+        fake_cgroup(base, "dlx-containers", ""); // reserved base — never a leaf
+        fake_cgroup(base, "dlx-mgr", ""); // reserved manager cgroup
+        std::fs::create_dir(base.join("unrelated")).unwrap(); // wrong prefix
+
+        let mut got: Vec<String> = super::orphan_cgroup_leaves(base, "dlx-", &set(&["live"]))
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        got.sort();
+        assert_eq!(got, vec!["dlx-aaa".to_string(), "dlx-bbb".to_string()]);
+    }
+
+    #[test]
+    fn cgroup_leaf_removable_matches_what_rmdir_would_accept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        assert!(super::cgroup_leaf_removable(&fake_cgroup(base, "dead", "")));
+        assert!(!super::cgroup_leaf_removable(&fake_cgroup(
+            base, "running", "99\n"
+        )));
+        let busy = fake_cgroup(base, "busy", "");
+        std::fs::create_dir(busy.join("child")).unwrap();
+        assert!(!super::cgroup_leaf_removable(&busy));
+        // a directory with no `cgroup.procs` is not a cgroup — left alone.
+        std::fs::create_dir(base.join("plain")).unwrap();
+        assert!(!super::cgroup_leaf_removable(&base.join("plain")));
+    }
+
+    #[test]
+    fn orphan_cgroup_leaves_tolerates_a_missing_base() {
+        // The rootless default has no `delonix.slice`; scanning it must be a
+        // no-op, not an error.
+        let missing = std::path::Path::new("/nonexistent/delonix/cgroup/base");
+        assert!(super::orphan_cgroup_leaves(missing, "delonix-", &set(&[])).is_empty());
+    }
+
+    #[test]
+    fn startup_gc_selects_only_dead_orphan_leaves_across_every_base() {
+        // The startup GC (`gc_orphan_cgroup_leaves_once`) reaps exactly what
+        // `orphan_cgroup_leaves_in` returns, over every container cgroup base. A
+        // real cgroupfs, a live store and the process-once guard are not needed to
+        // prove the SELECTION — only that, given two bases (the root slice and a
+        // rootless delegated base), it takes the empty, process-less, child-less
+        // leaves whose id is neither live nor reserved, and nothing else.
+        let tmp = tempfile::tempdir().unwrap();
+        let slice = tmp.path().join("delonix.slice");
+        let rootless = tmp.path().join("dlx-containers");
+        std::fs::create_dir(&slice).unwrap();
+        std::fs::create_dir(&rootless).unwrap();
+
+        fake_cgroup(&slice, "delonix-dead", ""); // root-mode dead orphan — taken
+        fake_cgroup(&slice, "delonix-live", ""); // id is live — spared
+        fake_cgroup(&rootless, "dlx-dead", ""); // rootless dead orphan — taken
+        fake_cgroup(&rootless, "dlx-running", "7\n"); // has a process — spared
+        fake_cgroup(&rootless, "dlx-containers", ""); // reserved base — spared
+        fake_cgroup(&rootless, "dlx-mgr", ""); // reserved manager cgroup — spared
+
+        let bases = vec![(slice, "delonix-"), (rootless, "dlx-")];
+        let mut got: Vec<String> = super::orphan_cgroup_leaves_in(&bases, &set(&["live"]))
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["delonix-dead".to_string(), "dlx-dead".to_string()]
+        );
     }
 
     #[test]

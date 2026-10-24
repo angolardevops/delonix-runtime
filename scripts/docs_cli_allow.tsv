@@ -27,6 +27,7 @@ docs/kinds.html	delonix values also	comentário YAML sobre valores aceites, não
 examples/pod.yaml	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»
 docs/comandos/cluster.html	delonix picks a free one	prosa do `--help` do clap: «Omit = delonix picks a free one»
 docs/comandos/cluster.html	delonix generates its own	prosa do `--help` do clap
+docs/comandos/cluster.html	delonix honours the fields it can	prosa do `--help` do clap no `--config`: «delonix honours the fields it can (…) e RECUSA o resto»
 docs/guia-vm.html	delonix base	saída capturada do build: «official delonix base delonix-vm-base:ubuntu-24.04»
 docs/guia-vm-lab.md	delonix base	saída capturada do build (a mesma linha, antes de gerar)
 docs/guia-rede.md	delonix state root on this	mensagem de erro capturada: «another delonix state root on this user…»

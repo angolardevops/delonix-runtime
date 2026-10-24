@@ -98,8 +98,12 @@ pub fn report(host: &StorageHost) -> ProviderReport {
             C::VolumeProvisionNas => S::RequiresExternalComponent {
                 component: "a TrueNAS SCALE 25.x API (`spec.provision.truenas`, ADR-0009); `scen_truenas_destroy` skips without one",
             },
-            C::StorageLvmThin => S::NotImplemented,
-            C::StorageZfsBtrfs => S::NotImplemented,
+            C::StorageLvmThin => S::Partial {
+                detail: "driver lvm-thin implementado, registado no arranque e aceite pela allowlist; sem prova e2e num pool LVM-thin real",
+            },
+            C::StorageZfsBtrfs => S::Partial {
+                detail: "drivers zfs e btrfs implementados, registados no arranque e aceites pela allowlist; sem prova e2e num pool real",
+            },
             C::StorageCeph => S::RequiresExternalComponent {
                 component: "a Ceph cluster and an RBD/CephFS driver the engine does not ship",
             },

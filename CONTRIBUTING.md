@@ -49,8 +49,12 @@ the node contract gate, the version gate, the CLI surface and documentation gate
 the generated site, and a check that the tests leave nothing behind in their temp dir
 (`scripts/tmp_roots_gate.py`). Each one, with the command to run it locally, is listed in
 [docs/dev/build-and-test.md](docs/dev/build-and-test.md#the-gates-ci-runs). Zero clippy
-warnings is enforced, not a suggestion. How to work (one worktree per task, version alignment,
-English-only code, when to write an ADR) is in
+warnings is enforced, not a suggestion. The branch model and task lifecycle — `develop` is the
+integration line and `main` the released line; features branch from `develop`, fixes from `main`;
+integration is by squash PR with CI green — are the canonical
+[docs/dev/engineering-process.md](docs/dev/engineering-process.md), with the runnable harness in
+`scripts/gitflow.py`. The rest of how to work (worktree hygiene, version alignment, English-only
+code, when to write an ADR) is in
 [docs/dev/contributing-workflow.md](docs/dev/contributing-workflow.md).
 
 **If you touch runtime/namespace/cgroup code**, unit tests alone don't prove much — validate live

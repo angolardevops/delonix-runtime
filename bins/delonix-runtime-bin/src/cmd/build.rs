@@ -853,6 +853,7 @@ fn work_launch(rootfs: &str) -> delonix_compute::launch::Launch {
         attached_ip: None,
         slirp_ports: vec![],
         pod_infra_pid: None,
+        pod_shared_pid: false,
         apparmor: None,
         log_path: None,
         replaces_record: false,

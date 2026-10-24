@@ -14,6 +14,15 @@ que interessa. O que uma sessão precisa de saber **antes** de editar é só ist
 make ci     # fmt + gates de script + clippy + testes — é o que a CI corre
 ```
 
+**Fluxo (develop-GitFlow, decisão do dono 2026-10-23).** `develop` é a linha de
+integração; `main` é a linha publicada. `feat/chore/refactor/perf/docs/test/ci/build`
+partem de `origin/develop` e voltam a `develop`; `fix/bug/hotfix` partem de
+`origin/main` e vão a `develop` e, quando tocam a linha publicada, também a `main`.
+A fonte canónica — tabela de branches, ciclo de vida, estados, integração por PR e
+limpeza — é [`docs/dev/engineering-process.md`](docs/dev/engineering-process.md), e o
+harness que a executa é `scripts/gitflow.py` (`make gitflow ARGS="…"`). Esta secção
+e as skills de sessão não repetem a política: deferem para esse ficheiro.
+
 **Definição de Pronto.** Uma mudança está pronta quando, observado e não presumido:
 `make ci` passa (ou os gates que ela toca passam, com o `rc=0` citado); existe um
 teste que falha sem ela e passa com ela; a documentação do mesmo comportamento
@@ -29,11 +38,11 @@ desce.
 - `docs_cli_gate.py` e `cli-tree.sh --gate` resolvem contra
   `target/release/delonix`. Um binário velho **inventa** falhas: reconstrói
   (`cargo build --release -p delonix-runtime-bin`) ou não acredites no resultado.
-- A `main` faz **squash-merge**: os commits de uma branch desaparecem da sua
-  história mas o conteúdo fica. Usa `git cherry main <branch>`, não `git log`,
-  para saber se algo já está lá.
-- Uma branch empurrada **não corre CI**: a `ci.yml` dispara em push para `main` ou
-  PR para `main`. "CI verde" exige sempre uma PR.
+- A integração faz **squash-merge**: os commits de uma branch desaparecem da sua
+  história mas o conteúdo fica. Usa `git cherry develop <branch>` (o alvo de
+  integração), não `git log`, para saber se algo já está lá.
+- Uma branch empurrada corre CI: a `ci.yml` dispara em push para `main`/`develop`
+  e em PR para qualquer das duas. "CI verde" exige sempre uma PR.
 
 **Commits**: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `wip:`),
 assunto em português, corpo com **Porquê** e **Como validar** (os comandos e o seu
@@ -460,21 +469,27 @@ diferença. Ao lado, o `git worktree list` tinha **oito** worktrees vivos, vári
 muito fechadas. Por isso:
 
 1. **Criar o worktree antes da primeira edição**, em
-   `<workspace>/.worktrees/delonix-runtime/<tarefa>` (a convenção da `CLAUDE.md` da raiz
-   do workspace, #53 do harness) e **nunca em `/tmp`**:
-   `git worktree add -b <branch> ~/workspace/ngolacloud/.worktrees/delonix-runtime/<tarefa> origin/main`,
-   com `CARGO_TARGET_DIR=<repo>/target` para reaproveitar o cache de build.
+   `<workspace>/.worktrees/delonix-runtime/<tarefa>` e **nunca em `/tmp`**, a partir da
+   **base certa pela classificação** (`origin/develop` para feat/chore/…, `origin/main`
+   para fix/bug/hotfix — ver [`docs/dev/engineering-process.md`](docs/dev/engineering-process.md)):
+   `python3 scripts/gitflow.py start <prefixo>/<tarefa>` fá-lo (fetch + base + worktree +
+   contrato), ou à mão `git worktree add -b <branch> <path> origin/<base>`, com
+   `CARGO_TARGET_DIR=<repo>/target` para reaproveitar o cache de build.
    O `/tmp` é esvaziado a cada arranque, e esta máquina reinicia: a 2026-09-16 um reinício
    levou cinco worktrees de integração a meio de uma pilha de PRs; nada se perdeu só porque
    as branches já estavam empurradas. O `.worktrees/` fica fora deste repo e já é ignorado
    pelo `.gitignore` do harness. **Trabalho longo: commit e push da branch cedo e a cada
    passo com valor**, e logs de builds longos fora do `/tmp` — um worktree persistente
    protege contra o reinício, uma branch empurrada protege contra tudo o resto.
-2. **No fim**: commitar no worktree → `git cherry-pick <sha>` na `main` → **correr os gates
-   OUTRA VEZ na `main`** → push → remover. Um cherry-pick limpo **não** prova que compila: a
-   base mudou desde que o worktree partiu, e é aí que a `main` cresceu quatro commits alheios.
-3. **Remover as DUAS coisas**: `git worktree remove <path>` **e** `git branch -D <branch>` — o
-   branch sobrevive ao worktree, e é assim que o lixo se torna invisível.
+2. **No fim**: commitar no worktree → PR para `develop` com **squash + CI verde**
+   (`python3 scripts/gitflow.py integrate --execute`) → confirmar inclusão por
+   `git cherry develop <branch>` antes de limpar. Um cherry-pick/rebase limpo **não** prova
+   que compila: a base mudou desde que o worktree partiu, por isso os gates correm OUTRA VEZ
+   após o rebase sobre `origin/develop`.
+3. **Remover as DUAS coisas**: `git worktree remove <path>` **e** `git branch -d <branch>` —
+   o branch sobrevive ao worktree, e é assim que o lixo se torna invisível.
+   `python3 scripts/gitflow.py cleanup <branch> --execute` fá-lo com segurança (recusa-se se
+   houver trabalho não integrado ou alterações por commitar).
 
 Três armadilhas medidas, todas com custo real:
 

@@ -310,25 +310,25 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmStop => bin(S::Supported {
                 evidence: "check:CH: vm stop",
             }),
-            C::VmDestroy => bin(S::Partial {
-                detail: "terminates the VMM (pid + starttime guard) and removes the overlay; no named battery check",
+            C::VmDestroy => bin(S::Supported {
+                evidence: "check:CH: vm destroy",
             }),
-            C::VmRestart => bin(S::Partial {
-                detail: "stop-then-start; no battery check names it",
+            C::VmRestart => bin(S::Supported {
+                evidence: "check:CH: vm restart",
             }),
-            C::VmPause => bin(S::Partial {
-                detail: "`PUT /api/v1/vm.pause` on the VMM socket; no battery check",
+            C::VmPause => bin(S::Supported {
+                evidence: "check:CH: vm pause",
             }),
-            C::VmResume => bin(S::Partial {
-                detail: "`vm.resume` on the VMM socket; no battery check",
+            C::VmResume => bin(S::Supported {
+                evidence: "check:CH: vm resume",
             }),
             C::VmResumeSameIdentity => bin(S::Supported {
                 evidence: "check:CH: vm start",
             }),
             C::VmClone => S::NotImplemented,
             C::VmTemplate => S::NotImplemented,
-            C::VmResizeCold => bin(S::Partial {
-                detail: "`vm resize` rewrites vcpus/memory in the record and `vm start` rebuilds the vmm command line from it; no battery check yet",
+            C::VmResizeCold => bin(S::Supported {
+                evidence: "check:CH: vm resize --vcpus 2 com a VM parada",
             }),
             C::VmHotplugCpuAdd => bin(S::Partial {
                 detail: "`vm update --vcpus` via `vm.resize`, add only; always reports `partial` — no channel to confirm the guest onlined the vCPU (ADR-0068 D4/Q5), no battery check yet",
@@ -366,8 +366,8 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmHugepages => bin(S::Partial {
                 detail: "`--memory hugepages=on`; unit-tested argument, pool not probed",
             }),
-            C::VmCloudInit => bin(S::Partial {
-                detail: "NoCloud seed ISO attached as a second disk; the battery never logs into a guest",
+            C::VmCloudInit => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-lifecycle.sh",
             }),
             C::VmRestartPolicyNative => S::UnsupportedByProvider {
                 reason: "the VMM has no crash policy; the engine's supervisor restarts it (`restart_policy_unsupervised`)",
@@ -416,7 +416,7 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 reason: "no hypervisor NAT network: the tap joins the engine's SDN, which does the NAT",
             },
             C::VmNetworkBridge => S::UnsupportedByProvider {
-                reason: "the NIC is a tap on the SDN bridge inside the holder, never a host bridge",
+                reason: "the VMM is indifferent to the bridge, but this rootless provider puts its tap on the engine's SDN in the holder netns; a host bridge needs the host netns (root), which is libvirt's `netMode: bridge`",
             },
             C::VmNetworkSdn => bin(S::Supported {
                 evidence: "check:CH: vm start",
@@ -468,9 +468,9 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 reason: "no VNC device on the CH command line",
             },
             C::VmGuestAgent => S::NotImplemented,
-            C::VmIpObserved => S::UnsupportedByProvider {
-                reason: "the address is PREDICTED from the MAC (`ip_is_predicted`); `--wait` verifies it by ARP instead",
-            },
+            C::VmIpObserved => bin(S::Partial {
+                detail: "the reported address is COMPUTED from the MAC (`ip_is_predicted`), never read from a lease or agent, so confidence stays `Predicted` and `vm show`/`vm ls` never promote it to observed; but `--wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), confirming the guest answers at that address (a booted guest answered live, 2026-10-24); no battery check reads the IP yet",
+            }),
             C::MetricsPrometheus => S::Partial {
                 detail: "`delonix_vms_running/total` only",
             },

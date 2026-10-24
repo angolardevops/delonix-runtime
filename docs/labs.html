@@ -151,16 +151,17 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <p class='lang-pt'>A verificação no fim de cada lab não é decorativa: é o que separa «copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em silêncio, o lab diz exactamente o que olhar.</p><p class='lang-en'>The verification at the end of each lab isn't decorative: it's what tells apart "I copied commands" from "I know what this does." Where a step could fail silently, the lab tells you exactly what to look at.</p>
 <h2 id='lab-1'><span class='lang-pt'>Primeiro serviço, em 60 segundos</span><span class='lang-en'>First service, in 60 seconds</span> <span class='badge'><span class='lang-pt'>iniciante</span><span class='lang-en'>beginner</span></span></h2>
 <div class='lang-pt'>
-<p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver
-que não há daemon nenhum por baixo.</p>
+<p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver,
+com rigor, o que «daemonless» quer dizer neste motor.</p>
 <pre><code># 1. Um serviço web, em segundo plano, publicado na porta 8080 do host
 delonix container run -d --name web -p 8080:80 nginx:alpine
 
 # 2. Confirmar — o STATUS diz há quanto tempo está de pé
 delonix container ps
 
-# 3. A prova de que não há daemon: NENHUM processo residente do motor
-pgrep -a delonix || echo "sem daemon — o container é filho do init do host"
+# 3. O que «daemonless» É: não há um daemon central arrancado no boot.
+#    Mas cada recurso tem holders leves — repara em QUEM os pariu (coluna PPID):
+ps -o pid,ppid,comm,args -C delonix
 
 # 4. Falar com ele
 curl -s localhost:8080 | head -3
@@ -173,19 +174,29 @@ delonix container logs web | tail -5
 
 # 7. Limpar
 delonix container rm -f web</code></pre>
-<p class="note"><strong>Verificação:</strong> o passo 3 não imprime processo
-nenhum do motor. Um container a correr sem supervisor residente é a diferença
-de fundo para o Docker, e vê-se aqui em duas linhas.</p></div><div class='lang-en'>
-<p>Goal: understand the <code>run → ps → logs → exec → rm</code> cycle and see
-that there's no daemon underneath.</p>
+<p class="note"><strong>Verificação:</strong> o passo 3 mostra alguns processos
+<code>delonix</code> — tipicamente <code>netns pin</code>, <code>netns control</code>
+e o holder do próprio <code>run</code> — e o PPID de todos é o
+<code>systemd --user</code> do teu utilizador, não um serviço do sistema. É esta
+a diferença de fundo para o Docker: <em>não</em> há um <code>dockerd</code> central
+a supervisionar tudo; há um holder mínimo por recurso, que morre com o recurso.
+(Num host tranquilo e sem <code>-p</code> podes nem ver holder nenhum.)</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> (HTTP 200 — não um exit-code isolado),
+em <code>docs/labs/lab-1/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-1/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, cgroup v2, rootless) a 2026-10-24.</p></div><div class='lang-en'>
+<p>Goal: understand the <code>run → ps → logs → exec → rm</code> cycle and see,
+precisely, what «daemonless» means in this engine.</p>
 <pre><code># 1. A web service, in the background, published on host port 8080
 delonix container run -d --name web -p 8080:80 nginx:alpine
 
 # 2. Confirm — STATUS shows how long it's been up
 delonix container ps
 
-# 3. Proof there's no daemon: NO resident engine process
-pgrep -a delonix || echo "no daemon — the container is a child of the host's init"
+# 3. What «daemonless» IS: no central daemon is started at boot.
+#    But each resource has lightweight holders — note WHO spawned them (PPID):
+ps -o pid,ppid,comm,args -C delonix
 
 # 4. Talk to it
 curl -s localhost:8080 | head -3
@@ -198,9 +209,19 @@ delonix container logs web | tail -5
 
 # 7. Clean up
 delonix container rm -f web</code></pre>
-<p class="note"><strong>Verification:</strong> step 3 prints no engine process
-at all. A container running with no resident supervisor is the fundamental
-difference from Docker, and you can see it here in two lines.</p></div>
+<p class="note"><strong>Verification:</strong> step 3 shows a few
+<code>delonix</code> processes — typically <code>netns pin</code>,
+<code>netns control</code> and the <code>run</code> holder itself — and every
+one's PPID is your own <code>systemd --user</code>, not a system service. That is
+the fundamental difference from Docker: there is <em>no</em> central
+<code>dockerd</code> supervising everything; there's a minimal holder per
+resource, which dies with the resource. (On a quiet host with no <code>-p</code>
+you may see no holder at all.)</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result (HTTP 200 — not an isolated exit
+code), under <code>docs/labs/lab-1/</code>: <code>prepare → run → verify →
+cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Validated on
+<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
 <h2 id='lab-2'><span class='lang-pt'>Limites de recursos que pegam mesmo</span><span class='lang-en'>Resource limits that actually take</span> <span class='badge'><span class='lang-pt'>iniciante</span><span class='lang-en'>beginner</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
@@ -229,7 +250,14 @@ limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>
 <p class="note"><strong>Nota:</strong> <code>cpuset</code> e <code>io</code>
 aparecem quase sempre como <em>absent</em>, e está certo — num Ubuntu de
 fábrica o <code>user.slice</code> (da root) só passa <code>cpu memory
-pids</code> para baixo. Nada aqui precisa deles.</p></div><div class='lang-en'>
+pids</code> para baixo. Nada aqui precisa deles.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — o <code>memory.max</code> REAL do
+cgroup do kernel, não a saída do comando — e <strong>falha em voz alta</strong>
+se o limite não pegou (<code>memory.max=max</code>), em vez de passar em silêncio,
+em <code>docs/labs/lab-2/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-2/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, cgroup v2, rootless) a 2026-10-24.</p></div><div class='lang-en'>
 <p>Goal: find out whether this host enforces limits — and what to do when it
 doesn't. It's mistake #1 for anyone starting out in rootless.</p>
 <pre><code># 1. Ask BEFORE assuming
@@ -256,7 +284,14 @@ delonix container rm -f limited</code></pre>
 <p class="note"><strong>Note:</strong> <code>cpuset</code> and <code>io</code>
 almost always show up as <em>absent</em>, and that's correct — on a stock
 Ubuntu, root's <code>user.slice</code> only passes <code>cpu memory
-pids</code> down. Nothing here needs them.</p></div>
+pids</code> down. Nothing here needs them.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — the REAL <code>memory.max</code> of
+the kernel cgroup, not the command's output — and it <strong>fails loudly</strong>
+if the limit didn't take (<code>memory.max=max</code>) instead of passing
+silently, under <code>docs/labs/lab-2/</code>: <code>prepare → run → verify →
+cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Validated on
+<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
 <h2 id='lab-3'><span class='lang-pt'>Duas aplicações que se falam por nome</span><span class='lang-en'>Two apps that talk to each other by name</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
@@ -290,7 +325,15 @@ delonix container run --rm --net loja alpine sh -c 'nc -z -w2 db 5432 || echo BL
 delonix container rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 3 diz "porta aberta" e o
 passo 5 diz "BLOQUEADO". A mesma rede, dois resultados — é isso que
-<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p></div><div class='lang-en'>
+<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — a app resolve a <code>db</code> pelo
+nome (<code>getent hosts db</code> → IP) e a porta responde ao par autorizado — e
+<strong>falha em voz alta</strong> se a <code>db</code> ficar aberta a todos
+(o terceiro container ainda a alcançar), distinguindo «bloqueado por política» de
+«serviço em baixo», em vez de passar em silêncio, em <code>docs/labs/lab-3/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
+Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p></div><div class='lang-en'>
 <p>Goal: user network, internal DNS, and isolation — with zero DNS
 configuration.</p>
 <pre><code># 1. Your own network
@@ -322,7 +365,15 @@ delonix container run --rm --net shop alpine sh -c 'nc -z -w2 db 5432 || echo BL
 delonix container rm -f db app; delonix network rm shop; rm dep.yaml</code></pre>
 <p class="note"><strong>Verification:</strong> step 3 says "port open" and
 step 5 says "BLOCKED". Same network, two different outcomes — that's what
-<code>kind: Dependency</code> does that a plain network alone doesn't.</p></div>
+<code>kind: Dependency</code> does that a plain network alone doesn't.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — the app resolves <code>db</code> by
+name (<code>getent hosts db</code> → IP) and the port answers the authorized peer —
+and it <strong>fails loudly</strong> if <code>db</code> is left open to everyone
+(the third container still reaching it), telling "blocked by policy" apart from
+"service down" instead of passing silently, under <code>docs/labs/lab-3/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
+Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
 <h2 id='lab-4'><span class='lang-pt'>Do Dockerfile à imagem, sem daemon</span><span class='lang-en'>From Dockerfile to image, no daemon</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: construir uma imagem e correr o que construíste.</p>
@@ -347,7 +398,16 @@ delonix container ps
 delonix container rm -f a1; delonix image remove minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
 <code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
-sozinho — sem systemd, ao contrário do Podman rootless.</p></div><div class='lang-en'>
+sozinho — sem systemd, ao contrário do Podman rootless.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê <code>(healthy)</code> da coluna
+STATUS de <code>container ps -o json</code> (não só <code>Up</code>), com retry, e
+prova que <code>delonix build</code> acha o <code>Delonixfile</code> antes de
+qualquer <code>Dockerfile</code> sem <code>-f</code> — e <strong>falha em voz
+alta</strong> distinguindo «build falhou» de «healthcheck nunca passou», em vez de
+passar em silêncio, em <code>docs/labs/lab-4/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
+Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p></div><div class='lang-en'>
 <p>Goal: build an image and run what you built.</p>
 <pre><code>mkdir -p lab-build &amp;&amp; cd lab-build
 cat &gt; Delonixfile &lt;&lt;'EOF'
@@ -370,7 +430,16 @@ delonix container ps
 delonix container rm -f a1; delonix image remove my-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verification:</strong> <code>ps</code> shows
 <code>(healthy)</code> in the STATUS column. The engine is probing the
-container on its own — no systemd, unlike rootless Podman.</p></div>
+container on its own — no systemd, unlike rootless Podman.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads <code>(healthy)</code> from
+the STATUS column of <code>container ps -o json</code> (not just <code>Up</code>),
+with retry, and proves <code>delonix build</code> finds the <code>Delonixfile</code>
+before any <code>Dockerfile</code> with no <code>-f</code> — and it <strong>fails
+loudly</strong>, telling "build failed" apart from "healthcheck never passed"
+instead of passing silently, under <code>docs/labs/lab-4/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
+Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
 <h2 id='lab-5'><span class='lang-pt'>Uma microVM a sério</span><span class='lang-en'>A real microVM</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
@@ -391,11 +460,24 @@ delonix vm snapshot ls dev
 # 5. Estragar alguma coisa lá dentro e voltar atrás
 delonix vm snapshot restore dev limpa
 
-delonix delete vms dev</code></pre>
+# Teardown: vm destroy leva o disco, os snapshots E o record (sem órfãos)
+delonix vm destroy dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
-VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
-<code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
-órfãos.</p></div><div class='lang-en'>
+VM A CORRER, e o snapshot fica como um <em>checkpoint de sistema</em> —
+<strong>memória E disco</strong>. Com a VM parada seria <em>disk-only</em> (não
+falha — o <code>vm stop</code> faz <em>undefine</em> do domínio em execução, mas
+preserva disco, record e snapshots). O teardown é <code>vm destroy</code>, que
+remove tudo o que a VM possui.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê de <code>vm ls -o json</code>
+que a VM fica <code>Running</code> com IPv4, que o snapshot tirado com a VM a
+correr aparece em <code>snapshot ls</code> e que o <code>restore</code> a mantém
+de pé, e prova que <code>vm destroy</code> <strong>não deixa órfãos</strong>
+(<code>describe vm</code> deixa de resolver) — <strong>falha em voz alta</strong>
+distinguindo «VM nunca arrancou» de «sem IP» de «snapshot/restore falhou», em
+<code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-5/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, libvirt, rootless) a 2026-10-24.</p></div><div class='lang-en'>
 <p>Goal: a full VM with the same CLI as containers.</p>
 <pre><code># 1. With no local image, create downloads the official one on its own
 delonix vm create dev
@@ -414,10 +496,24 @@ delonix vm snapshot ls dev
 # 5. Break something inside and roll back
 delonix vm snapshot restore dev clean
 
-delonix delete vms dev</code></pre>
-<p class="note"><strong>Verification:</strong> step 4 returns with no error
-and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
-<code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p></div>
+# Teardown: vm destroy takes the disk, the snapshots AND the record (no orphans)
+delonix vm destroy dev</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 returns with no error and
+the VM STILL RUNNING, and the snapshot is a <em>system checkpoint</em> —
+<strong>memory AND disk</strong>. A stopped VM would give a <em>disk-only</em>
+snapshot (it does not fail — <code>vm stop</code> <em>undefines</em> the running
+domain but preserves the disk, record and snapshots). The teardown is
+<code>vm destroy</code>, which removes everything the VM owns.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads from <code>vm ls -o json</code>
+that the VM reaches <code>Running</code> with an IPv4, that the snapshot taken
+while running shows up in <code>snapshot ls</code> and that <code>restore</code>
+keeps it up, and it proves <code>vm destroy</code> <strong>leaves no orphans</strong>
+(<code>describe vm</code> stops resolving) — it <strong>fails loudly</strong>,
+telling "VM never started" apart from "no IP" apart from "snapshot/restore
+failed", under <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-5/lab.sh</code>). Validated on <strong>delonix 5.1.1</strong>
+(Linux, libvirt, rootless) on 2026-10-24.</p></div>
 <h2 id='lab-6'><span class='lang-pt'>A tua própria imagem de VM, com VMfile</span><span class='lang-en'>Your own VM image, with a VMfile</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
@@ -441,14 +537,28 @@ delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
 
-delonix delete vms teste; cd ..; rm -rf lab-vm</code></pre>
+delonix vm destroy teste; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verificação:</strong> o build imprime
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
 image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
 publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.
 A chave que injectas vai para a conta <code>delonix</code>, não para a conta
 default da distro — o bloco de próximos passos do <code>vm create</code>
-imprime o <code>ssh</code> exacto.</p></div><div class='lang-en'>
+imprime o <code>ssh</code> exacto.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê de
+<code>vm image ls -o json</code> que a imagem <code>minha-base:1.0</code> ficou no
+store, de <code>vm ls -o json</code> que uma VM arranca <code>Running</code> com
+IPv4 <strong>a partir dela</strong>, e prova que <code>vm destroy</code>
+<strong>não deixa órfãos</strong> e que a imagem <strong>sobrevive</strong> ao
+destroy (o overlay era por-VM) — <strong>falha em voz alta</strong> distinguindo
+«imagem não construiu» de «VM não arrancou» de «órfão», em
+<code>docs/labs/lab-6/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-6/lab.sh</code>). Precisa de libguestfs
+(<code>virt-customize</code>) no host; o arnês gera a sua própria chave SSH e
+aponta o <code>SSHKEY</code> do scaffold para ela. Validado em
+<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a
+2026-10-24.</p></div><div class='lang-en'>
 <p>Goal: build your own qcow2 image, the same way you build a container
 image.</p>
 <pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
@@ -470,7 +580,7 @@ delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
 
-delonix delete vms test; cd ..; rm -rf lab-vm</code></pre>
+delonix vm destroy test; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verification:</strong> the build prints
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
 checksum. With <code>--url-img</code>, if there's no published
@@ -478,7 +588,22 @@ checksum. With <code>--url-img</code>, if there's no published
 alone — instead of staying quiet. The key you inject goes to the
 <code>delonix</code> account, not the distro's default account — the
 "next steps" block from <code>vm create</code> prints the exact
-<code>ssh</code> command.</p></div>
+<code>ssh</code> command.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads from
+<code>vm image ls -o json</code> that the <code>minha-base:1.0</code> image
+landed in the store, from <code>vm ls -o json</code> that a VM boots
+<code>Running</code> with an IPv4 <strong>from it</strong>, and it proves
+<code>vm destroy</code> <strong>leaves no orphans</strong> and that the image
+<strong>survives</strong> the destroy (the overlay was per-VM) — it
+<strong>fails loudly</strong>, telling "image did not build" apart from "VM never
+started" apart from "orphan", under <code>docs/labs/lab-6/</code>:
+<code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-6/lab.sh</code>). Needs libguestfs
+(<code>virt-customize</code>) on the host; the harness generates its own SSH key
+and points the scaffold's <code>SSHKEY</code> at it. Validated on
+<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on
+2026-10-24.</p></div>
 <h2 id='lab-7'><span class='lang-pt'>Kubernetes sem Docker</span><span class='lang-en'>Kubernetes with no Docker</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>

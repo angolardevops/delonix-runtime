@@ -41,6 +41,13 @@ struct SandboxRec {
     host_pid: bool,
     #[serde(default)]
     host_ipc: bool,
+    /// k8s `shareProcessNamespace`: the sandbox's containers share ONE PID
+    /// namespace (`namespace_options.pid = POD`, as opposed to the default
+    /// `CONTAINER` isolation or the `NODE` host-PID waiver above). Carried so
+    /// `start_container` wires each member into the anchor's PID namespace —
+    /// the CRI counterpart of the CLI pod's `shareProcessNamespace`.
+    #[serde(default)]
+    shared_pid: bool,
     /// Pod `sysctl`s (`key=value`), applied to the sandbox's containers.
     #[serde(default)]
     sysctls: Vec<String>,
@@ -84,6 +91,14 @@ fn ns_mode(host: bool) -> i32 {
     } else {
         NamespaceMode::Pod as i32
     }
+}
+
+/// `true` when the sandbox asks its containers to SHARE one PID namespace (k8s
+/// `shareProcessNamespace` → `namespace_options.pid == POD`). The default
+/// `CONTAINER` (per-container isolation) and `NODE` (host PID, carried by
+/// `host_pid`) are both `false`, as is an absent `namespace_options`. PURE.
+fn wants_shared_pid(ns: Option<&NamespaceOption>) -> bool {
+    ns.map(|n| n.pid == NamespaceMode::Pod as i32).unwrap_or(false)
 }
 
 fn sandbox_state(r: &SandboxRec) -> i32 {
@@ -1011,6 +1026,10 @@ pub fn run_pod_sandbox(
     let host_network = ns.map(|n| is_node(n.network)).unwrap_or(false);
     let host_pid = ns.map(|n| is_node(n.pid)).unwrap_or(false);
     let host_ipc = ns.map(|n| is_node(n.ipc)).unwrap_or(false);
+    // k8s `shareProcessNamespace` → `namespace_options.pid == POD`. Mutually
+    // exclusive with `host_pid` (NODE) at the wire; `CONTAINER` (the default) and
+    // an absent `namespace_options` both mean per-container isolation.
+    let shared_pid = wants_shared_pid(ns);
     // pod sysctls (`net.*`, `kernel.shm*`, …) → `key=value`.
     let sysctls: Vec<String> = cfg
         .linux
@@ -1182,6 +1201,7 @@ pub fn run_pod_sandbox(
         host_network,
         host_pid,
         host_ipc,
+        shared_pid,
         sysctls,
         cgroup_parent,
         dns_servers: cfg
@@ -1634,6 +1654,12 @@ pub fn create_container(
     } else {
         write_env_file(base, &id, &cfg.envs)?
     };
+    // A hostPath whose node directory does not exist yet is CREATED here, before
+    // the spec reaches the engine's `canonicalize`-backed bind — otherwise a pod
+    // like kube-flannel (hostPath `/run/flannel`, type "") dies with "no such
+    // bind path" that the kubelet never resolves on its own. See
+    // `ensure_cri_mount_sources`.
+    ensure_cri_mount_sources(&cfg.mounts)?;
     let rec = ContainerRec {
         id: id.clone(),
         sandbox_id: req.pod_sandbox_id,
@@ -1758,6 +1784,50 @@ fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
 /// boundary where a wrong flag showed up only as a cluster that did not start
 /// (`hostNetwork: true` spent months not being the host's network). Pure and
 /// testable, like the argv was.
+/// Host PID of the container that ANCHORS a `shareProcessNamespace` sandbox's PID
+/// namespace — the sandbox's first *live* member, `self_id` excluded.
+///
+/// There is no per-pod "pause" process here with a PID of its own (the rootless
+/// ingress holder serves MANY netns), so the anchor is the first started
+/// container, exactly as the CLI pod path takes `members.first()` as the holder of
+/// the pod's namespaces (`cmd::pod`). Earliest `started_at` wins so the choice is
+/// stable across a member's coming and going; because every later member joins the
+/// anchor's PID namespace (and the kernel keeps a namespace alive while ANY member
+/// is), a successor that joins a surviving sibling still lands in the same one.
+/// `None` means no live peer yet — this container IS the anchor and keeps its own.
+fn sandbox_shared_pid_anchor(base: &Path, sandbox_id: &str, self_id: &str) -> Option<i32> {
+    let mut members: Vec<ContainerRec> = list_recs::<ContainerRec>(&ct_dir(base))
+        .into_iter()
+        .filter(|c| c.sandbox_id == sandbox_id && c.id != self_id && c.started)
+        .collect();
+    members.sort_by_key(|c| if c.started_at > 0 { c.started_at } else { c.created_at });
+    members.into_iter().find_map(|c| {
+        load_reconciled(base, &c.id)
+            .filter(delonix_compute::Container::is_live)
+            .and_then(|lc| lc.pid)
+    })
+}
+
+/// Wires a CRI pod member's `RunOpts` for k8s `shareProcessNamespace`. PURE.
+///
+/// Enabled only on the native-SDN pod path (`opts.pod` set): there the member
+/// re-execs into the pod holder's user namespace, which is what gives it the
+/// privilege to `setns` into a sibling's PID namespace. On `--net host`/CNI
+/// sandboxes the members do not share that user namespace, so the join is left
+/// off (the capability stays proven through the CLI path, and those paths are a
+/// separate, larger problem). The anchor (`head_pid = None` → this member is the
+/// head) keeps its own PID namespace; every later member joins the head's via
+/// `pod_infra_pid` + `pod_shared_pid`, the pair the engine's `enter_pod_pidns`
+/// needs. Reuses exactly the CLI pod plumbing — no new engine path.
+fn apply_shared_pid(opts: &mut delonix_compute::RunOpts, shared_pid: bool, head_pid: Option<i32>) {
+    if shared_pid && opts.pod.is_some() {
+        if let Some(pid) = head_pid {
+            opts.pod_shared_pid = true;
+            opts.pod_infra_pid = Some(pid);
+        }
+    }
+}
+
 fn start_run_opts(
     rec: &ContainerRec,
     sandbox: Option<&SandboxRec>,
@@ -1858,7 +1928,19 @@ fn start_run_opts(
         Some(g) => format!("{u}:{g}"),
         None => u,
     });
-    o.command = rec.command.iter().chain(rec.args.iter()).cloned().collect();
+    // CRI/k8s: `command` IS the entrypoint override and `args` ARE its arguments
+    // (the same two fields this engine's RunOpts carries), so each maps straight
+    // across — exactly as the pod path does (see `pod.rs`). An empty `command`
+    // means "no override": the image's own ENTRYPOINT stays and `args` replace its
+    // CMD, so `entrypoint` is left `None` and only the command is set. This used to
+    // fold both into `o.command` and never set `o.entrypoint`, which made the pod's
+    // command get APPENDED to the image's ENTRYPOINT instead of replacing it.
+    if rec.command.is_empty() {
+        o.command = rec.args.clone();
+    } else {
+        o.entrypoint = Some(rec.command.clone());
+        o.command = rec.args.clone();
+    }
     o
 }
 
@@ -1918,7 +2000,15 @@ pub fn start_container(
         .map(|sb| sb.cgroup_parent.as_str())
         .filter(|s| !s.is_empty());
     refuse_unenforceable_resources(&rec.resources, kube_cgroup_parent)?;
-    let opts = start_run_opts(&rec, sandbox.as_ref(), ceiling, &id, env);
+    let mut opts = start_run_opts(&rec, sandbox.as_ref(), ceiling, &id, env);
+    // k8s `shareProcessNamespace`: if the sandbox asked for a shared PID namespace
+    // (and this is the native-SDN pod path, where `opts.pod` is set), join this
+    // member to the anchor's PID namespace — resolved HERE, not at write time,
+    // because the anchor is whichever sibling is already live.
+    if sandbox.as_ref().is_some_and(|sb| sb.shared_pid) && opts.pod.is_some() {
+        let head = sandbox_shared_pid_anchor(base, &rec.sandbox_id, &id);
+        apply_shared_pid(&mut opts, true, head);
+    }
     // The run specification goes to the engine as data, not argv — one translation
     // (above) instead of two — in a fresh single-threaded process, where the
     // supervisor's `fork` is safe.
@@ -3023,6 +3113,48 @@ impl CriMount {
     }
 }
 
+/// Creates any hostPath bind source that is not yet on the node, mirroring
+/// containerd/CRI-O.
+///
+/// The CRI `Mount` carries only `host_path`, never Kubernetes' `HostPathType`:
+/// the kubelet resolves the volume and hands the runtime a plain node path. For
+/// the unset type `""` and for `DirectoryOrCreate` the kubelet creates NOTHING
+/// here — and for the unset type it does not even check the path — so a pod that
+/// expects the node to provide the directory (the `kube-flannel` DaemonSet and
+/// its hostPath `/run/flannel`, type `""`, is the canonical case) relies on the
+/// RUNTIME to make it. The engine's bind goes through `canonicalize`, which
+/// fails `ENOENT` on a path that is not there, and the container dies with
+/// `no such bind path <p>` before it ever starts.
+///
+/// containerd and CRI-O both `MkdirAll` a missing bind source for exactly this
+/// reason. We do the same: a missing source becomes a directory; anything that
+/// already exists — file OR directory — is left untouched, so a `FileOrCreate`
+/// file the kubelet itself created is never clobbered into a directory. A path
+/// we genuinely cannot create (EACCES, a parent that is a file, a dangling
+/// symlink sitting on the name) surfaces ITS error rather than the misleading
+/// "no such bind path".
+///
+/// Image-volume mounts (`host_path` empty, `image` set) are skipped — they are
+/// not host paths.
+fn ensure_cri_mount_sources(mounts: &[Mount]) -> Result<(), Status> {
+    for m in mounts {
+        if m.host_path.is_empty() {
+            continue;
+        }
+        let p = Path::new(&m.host_path);
+        if p.exists() {
+            continue;
+        }
+        std::fs::create_dir_all(p).map_err(|e| {
+            Status::internal(format!(
+                "creating hostPath bind source {:?}: {e}",
+                m.host_path
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 /// Translates the CRI's `Mount` list into the engine's `-v` specs.
 ///
 /// The `-v` grammar splits on `:`, so a path containing one would be parsed into
@@ -3606,6 +3738,101 @@ mod tests {
             Vec::new(),
         );
         assert!(bare.kube_cgroup_parent.is_none());
+    }
+
+    /// CRI/k8s `command` REPLACES the image's ENTRYPOINT; `args` are its arguments.
+    /// This used to fold both into `o.command` and leave `o.entrypoint` unset, so
+    /// `build_record` fell through to the image's own ENTRYPOINT and APPENDED the
+    /// pod's command to it — a flannel pod whose spec said `command:["echo"]
+    /// args:["X"]` ran `/opt/bin/flanneld echo X` instead of `echo X`, and the node
+    /// never went Ready. The container's command must be exactly `echo X`, with the
+    /// image's entrypoint nowhere in it.
+    #[test]
+    fn cri_command_overrides_the_image_entrypoint() {
+        let rec = ContainerRec {
+            command: vec!["echo".into()],
+            args: vec!["X".into()],
+            ..Default::default()
+        };
+        let o = start_run_opts(&rec, None, crate::CapCeiling::unlimited(), "x", Vec::new());
+        // The override is carried as the entrypoint; the args are the command.
+        assert_eq!(o.entrypoint.as_deref(), Some(["echo".to_string()].as_slice()));
+        assert_eq!(o.command, ["X"]);
+
+        // Fed to the record builder against an image whose ENTRYPOINT is flannel's:
+        // the final argv is `echo X`, and `/opt/bin/flanneld` appears nowhere.
+        let resolved = delonix_compute::run::ResolvedRun {
+            // What the bug would have run: the image's ENTRYPOINT with the pod's
+            // command appended. `build_record` must NOT reach for this.
+            image_command: vec!["/opt/bin/flanneld".into(), "echo".into(), "X".into()],
+            default_memory: "max".into(),
+            default_cpus: String::new(),
+            ..Default::default()
+        };
+        let built = delonix_compute::run::build_record(&o, resolved).unwrap();
+        assert_eq!(built.command, ["echo", "X"]);
+        assert!(
+            !built.command.iter().any(|a| a.contains("flanneld")),
+            "the image's entrypoint leaked into the argv: {:?}",
+            built.command
+        );
+    }
+
+    /// The other side of the contract: an empty `command` is NOT an override, so the
+    /// image's ENTRYPOINT stays and `args` replace only its CMD. `o.entrypoint` must
+    /// be left `None` (the image's own entrypoint applies) and `args` become the
+    /// command that `build_record` folds onto it.
+    #[test]
+    fn cri_empty_command_keeps_the_image_entrypoint() {
+        let rec = ContainerRec {
+            command: Vec::new(),
+            args: vec!["--ip-masq".into()],
+            ..Default::default()
+        };
+        let o = start_run_opts(&rec, None, crate::CapCeiling::unlimited(), "x", Vec::new());
+        assert!(o.entrypoint.is_none(), "an empty command is not an override");
+        assert_eq!(o.command, ["--ip-masq"]);
+    }
+
+    /// Regression: a hostPath whose node directory does not exist (HostPathType
+    /// "", the kube-flannel `/run/flannel` case) is CREATED by the runtime, so
+    /// the bind no longer dies with "no such bind path". An existing path — of
+    /// either kind — is left exactly as it was, never clobbered.
+    #[test]
+    fn a_missing_hostpath_bind_source_is_created() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("run/flannel"); // nested + absent, like /run/flannel
+        let existing_dir = tmp.path().join("existing");
+        std::fs::create_dir(&existing_dir).unwrap();
+        let existing_file = tmp.path().join("hosts");
+        std::fs::write(&existing_file, b"127.0.0.1 localhost\n").unwrap();
+
+        let mount = |p: &std::path::Path| Mount {
+            host_path: p.to_string_lossy().into_owned(),
+            container_path: "/x".into(),
+            ..Default::default()
+        };
+        // host_path empty (image volume) must be ignored, not an error.
+        let image_vol = Mount {
+            host_path: String::new(),
+            container_path: "/img".into(),
+            ..Default::default()
+        };
+
+        ensure_cri_mount_sources(&[
+            mount(&missing),
+            mount(&existing_dir),
+            mount(&existing_file),
+            image_vol,
+        ])
+        .expect("creating a missing hostPath source must succeed");
+
+        assert!(missing.is_dir(), "the absent nested hostPath was created");
+        assert!(existing_dir.is_dir(), "the existing dir is untouched");
+        assert!(
+            existing_file.is_file(),
+            "an existing FILE is left a file, not clobbered into a directory"
+        );
     }
 
     /// An escaping parent is refused at the sandbox, not dropped.
@@ -4742,6 +4969,63 @@ mod tests {
         // `network` alone and leaving the neighbours reporting whatever the zero value is.
         assert_eq!(opts.pid, NamespaceMode::Pod as i32);
         assert_eq!(opts.ipc, NamespaceMode::Pod as i32);
+    }
+
+    /// k8s `shareProcessNamespace` at the CRI wire: `namespace_options.pid == POD`
+    /// means share, and nothing else does. The default `CONTAINER` and the host-PID
+    /// `NODE` (carried separately by `host_pid`) must both stay OFF, or a pod would
+    /// silently merge PID namespaces it never asked to.
+    #[test]
+    fn wants_shared_pid_so_responde_sim_a_pod() {
+        let mk = |pid| {
+            Some(NamespaceOption {
+                pid,
+                ..Default::default()
+            })
+        };
+        assert!(wants_shared_pid(mk(NamespaceMode::Pod as i32).as_ref()));
+        assert!(!wants_shared_pid(mk(NamespaceMode::Container as i32).as_ref()));
+        assert!(!wants_shared_pid(mk(NamespaceMode::Node as i32).as_ref()));
+        assert!(!wants_shared_pid(None), "no namespace_options → isolated");
+    }
+
+    /// The core of the CRI `shareProcessNamespace` wiring: a pod member on the
+    /// native-SDN path (`opts.pod` set) whose sandbox asked for a shared PID
+    /// namespace joins the anchor's — `pod_shared_pid` + `pod_infra_pid`, the pair
+    /// the engine's `enter_pod_pidns` needs — while the anchor itself, every
+    /// non-sharing sandbox, and the `--net host`/CNI paths (no `opts.pod`) keep
+    /// their own PID namespace.
+    #[test]
+    fn apply_shared_pid_junta_o_membro_ao_infra_pid_do_head() {
+        let native = || delonix_compute::RunOpts {
+            pod: Some("cri-sb".into()),
+            ..Default::default()
+        };
+
+        // Sandbox pid==POD, a live sibling exists → this member joins its PID ns.
+        let mut member = native();
+        apply_shared_pid(&mut member, true, Some(4321));
+        assert!(member.pod_shared_pid);
+        assert_eq!(member.pod_infra_pid, Some(4321));
+
+        // The anchor itself (no live peer yet) keeps its own PID namespace.
+        let mut head = native();
+        apply_shared_pid(&mut head, true, None);
+        assert!(!head.pod_shared_pid);
+        assert_eq!(head.pod_infra_pid, None);
+
+        // Sandbox did NOT ask for sharing → untouched even with a candidate pid.
+        let mut isolated = native();
+        apply_shared_pid(&mut isolated, false, Some(4321));
+        assert!(!isolated.pod_shared_pid);
+        assert_eq!(isolated.pod_infra_pid, None);
+
+        // `--net host`/CNI member (no `opts.pod`) does not share the holder's
+        // user namespace, so PID sharing is left off whatever the sandbox asked.
+        let mut host_net = delonix_compute::RunOpts::default();
+        apply_shared_pid(&mut host_net, true, Some(4321));
+        assert!(!host_net.pod_shared_pid);
+        assert_eq!(host_net.pod_infra_pid, None);
     }
 
     /// `label_selector` is a SUBSET match. Comparing whole maps would match nothing in

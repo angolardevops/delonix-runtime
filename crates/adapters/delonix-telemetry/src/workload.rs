@@ -19,6 +19,8 @@
 //!
 //! | name | type | labels beyond the workload's |
 //! |---|---|---|
+//! | `workload_cpu_usage_seconds` | counter | |
+//! | `workload_memory_current_bytes` | gauge | |
 //! | `workload_cpu_periods` | counter | |
 //! | `workload_cpu_throttled_periods` | counter | |
 //! | `workload_cpu_throttled_seconds` | counter | |
@@ -98,6 +100,13 @@ pub struct WorkloadSeries {
     pub kind: WorkloadKind,
     pub id: String,
     pub name: String,
+    /// `cpu.stat` `usage_usec`: total CPU time the workload consumed (rendered
+    /// as `workload_cpu_usage_seconds_total`). Always available for a running
+    /// workload, so it is the per-workload CPU signal that is never absent.
+    pub cpu_usage_usec: Option<u64>,
+    /// `memory.current`: bytes the workload charges right now (rendered as
+    /// `workload_memory_current_bytes`).
+    pub memory_current_bytes: Option<u64>,
     pub cpu_throttle: Option<CpuThrottle>,
     pub cpu_pressure: Option<Pressure>,
     pub memory_pressure: Option<Pressure>,
@@ -166,6 +175,8 @@ fn encode_series(
     mut enc: DescriptorEncoder,
     series: &[WorkloadSeries],
 ) -> Result<(), std::fmt::Error> {
+    let mut cpu_usage: Rows<ConstCounter<f64>> = Vec::new();
+    let mut mem_current: Rows<ConstGauge<i64>> = Vec::new();
     let mut periods: Rows<ConstCounter<u64>> = Vec::new();
     let mut throttled: Rows<ConstCounter<u64>> = Vec::new();
     let mut throttled_secs: Rows<ConstCounter<f64>> = Vec::new();
@@ -177,6 +188,13 @@ fn encode_series(
 
     for s in series {
         let base = base_labels(s);
+        if let Some(u) = s.cpu_usage_usec {
+            cpu_usage.push((base.clone(), ConstCounter::new(seconds(u))));
+        }
+        if let Some(b) = s.memory_current_bytes {
+            // A gauge: bytes charged now, which falls as the workload frees memory.
+            mem_current.push((base.clone(), ConstGauge::new(b as i64)));
+        }
         if let Some(c) = s.cpu_throttle {
             periods.push((base.clone(), ConstCounter::new(c.nr_periods)));
             throttled.push((base.clone(), ConstCounter::new(c.nr_throttled)));
@@ -210,6 +228,20 @@ fn encode_series(
     }
 
     let (c, g) = (MetricType::Counter, MetricType::Gauge);
+    emit(
+        &mut enc,
+        "workload_cpu_usage_seconds",
+        "Total CPU time the workload consumed (cpu.stat usage_usec); always present for a running workload",
+        c,
+        &cpu_usage,
+    )?;
+    emit(
+        &mut enc,
+        "workload_memory_current_bytes",
+        "Memory the workload charges right now, in bytes (memory.current)",
+        g,
+        &mem_current,
+    )?;
     emit(
         &mut enc,
         "workload_cpu_periods",
@@ -314,6 +346,8 @@ mod tests {
             kind: WorkloadKind::Container,
             id: id.into(),
             name: name.into(),
+            cpu_usage_usec: None,
+            memory_current_bytes: None,
             cpu_throttle: None,
             cpu_pressure: None,
             memory_pressure: None,
@@ -335,6 +369,8 @@ mod tests {
             }),
         };
         WorkloadSeries {
+            cpu_usage_usec: Some(9_500_000),
+            memory_current_bytes: Some(4_194_304),
             cpu_throttle: Some(CpuThrottle {
                 nr_periods: 200,
                 nr_throttled: 50,
@@ -356,6 +392,8 @@ mod tests {
         let out = render(&[full()]);
         let l = r#"kind="container",id="c1",name="web""#;
         for want in [
+            format!("delonix_workload_cpu_usage_seconds_total{{{l}}} 9.5"),
+            format!("delonix_workload_memory_current_bytes{{{l}}} 4194304"),
             format!("delonix_workload_cpu_periods_total{{{l}}} 200"),
             format!("delonix_workload_cpu_throttled_periods_total{{{l}}} 50"),
             format!("delonix_workload_cpu_throttled_seconds_total{{{l}}} 1.5"),

@@ -29,15 +29,23 @@ area) and in [`docs/adr/`](../adr/README.md).
 
 ## One worktree per task
 
+> **Branch model and lifecycle:** the canonical rules — which branch a change starts from, how it
+> lands, and how it is cleaned up — live in [Engineering process](engineering-process.md). In
+> short: `develop` is the integration line, `main` is the released line;
+> `feat/chore/refactor/perf/docs/test/ci/build` start from `origin/develop`, `fix/bug/hotfix` start
+> from `origin/main`. `python3 scripts/gitflow.py` (or `make gitflow ARGS="…"`) runs the flow. This
+> section is only the worktree hygiene that applies whatever the base.
+
 Several people and tools often work on the same clone at the same time. Editing in a shared
 checkout has already cost real work here: edits absorbed into someone else's commit, `HEAD`
 switching branches in the middle of a task, and a green `cargo test` on a dirty tree that did not
-prove `HEAD` compiled. So every task gets its own git worktree and branch, created from
-`origin/main`:
+prove `HEAD` compiled. So every task gets its own git worktree and branch, created from the base
+its classification selects:
 
 ```bash
-git fetch origin
-git worktree add -b <topic>/<task> <workspace>/.worktrees/delonix-runtime/<task> origin/main
+git fetch origin --prune
+# base is origin/develop for feat/chore/…, origin/main for fix/bug/hotfix
+git worktree add -b <prefix>/<task> <workspace>/.worktrees/delonix-runtime/<task> origin/<base>
 cd <workspace>/.worktrees/delonix-runtime/<task>
 ```
 
@@ -55,13 +63,18 @@ cd <workspace>/.worktrees/delonix-runtime/<task>
 - **Rebase, do not merge**, when your push is rejected for divergence: `git pull --rebase`. The
   history is linear.
 - **When the task is done, remove both** the worktree and the branch — the branch survives
-  `worktree remove`, and that is how stale branches pile up:
+  `worktree remove`, and that is how stale branches pile up. Prove the content is already in
+  `develop` first (`git cherry develop <branch>`), then use `-d` (never `-D`, which would hide
+  un-integrated commits):
 
   ```bash
   git worktree remove <path>
-  git branch -D <topic>/<task>
-  git worktree list
+  git branch -d <prefix>/<task>
+  git worktree prune
   ```
+
+  `python3 scripts/gitflow.py cleanup <branch> --execute` does exactly this and refuses when work
+  is not yet integrated or the tree is dirty.
 
 ## Version alignment
 

@@ -208,7 +208,9 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::NetApplyStaged => S::UnsupportedByProvider {
                     reason: "`nft -f` replaces a ruleset atomically in one step; nothing is staged to activate later",
                 },
-                C::NetApplyRollback => S::NotImplemented,
+                C::NetApplyRollback => S::UnsupportedByProvider {
+                    reason: "nothing is staged to discard: `net.apply.staged` is itself unsupported because `nft -f` activates atomically (ADR-0059)",
+                },
                 C::NetObserve => base(S::Partial {
                     detail: "rules and publishes are read back (`net ingress ls`, `net egress ls`); no comparison with the record yet (ADR-0059 F4)",
                 }),

@@ -266,6 +266,8 @@ mod tests {
             kind: WorkloadKind::Container,
             id: id.into(),
             name: "svc".into(),
+            cpu_usage_usec: None,
+            memory_current_bytes: None,
             cpu_throttle: Some(CpuThrottle {
                 nr_periods: 10,
                 nr_throttled: 3,
