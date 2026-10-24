@@ -5018,11 +5018,24 @@ delonix vm snapshot ls dev
 # 5. Estragar alguma coisa lá dentro e voltar atrás
 delonix vm snapshot restore dev limpa
 
-delonix delete vms dev</code></pre>
+# Teardown: vm destroy leva o disco, os snapshots E o record (sem órfãos)
+delonix vm destroy dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
-VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
-<code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
-órfãos.</p>"""),
+VM A CORRER, e o snapshot fica como um <em>checkpoint de sistema</em> —
+<strong>memória E disco</strong>. Com a VM parada seria <em>disk-only</em> (não
+falha — o <code>vm stop</code> faz <em>undefine</em> do domínio em execução, mas
+preserva disco, record e snapshots). O teardown é <code>vm destroy</code>, que
+remove tudo o que a VM possui.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê de <code>vm ls -o json</code>
+que a VM fica <code>Running</code> com IPv4, que o snapshot tirado com a VM a
+correr aparece em <code>snapshot ls</code> e que o <code>restore</code> a mantém
+de pé, e prova que <code>vm destroy</code> <strong>não deixa órfãos</strong>
+(<code>describe vm</code> deixa de resolver) — <strong>falha em voz alta</strong>
+distinguindo «VM nunca arrancou» de «sem IP» de «snapshot/restore falhou», em
+<code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-5/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, libvirt, rootless) a 2026-10-24.</p>"""),
 
     ("lab-6", "A tua própria imagem de VM, com VMfile", "avançado", """
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
@@ -5046,14 +5059,28 @@ delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
 
-delonix delete vms teste; cd ..; rm -rf lab-vm</code></pre>
+delonix vm destroy teste; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verificação:</strong> o build imprime
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
 image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
 publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.
 A chave que injectas vai para a conta <code>delonix</code>, não para a conta
 default da distro — o bloco de próximos passos do <code>vm create</code>
-imprime o <code>ssh</code> exacto.</p>"""),
+imprime o <code>ssh</code> exacto.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê de
+<code>vm image ls -o json</code> que a imagem <code>minha-base:1.0</code> ficou no
+store, de <code>vm ls -o json</code> que uma VM arranca <code>Running</code> com
+IPv4 <strong>a partir dela</strong>, e prova que <code>vm destroy</code>
+<strong>não deixa órfãos</strong> e que a imagem <strong>sobrevive</strong> ao
+destroy (o overlay era por-VM) — <strong>falha em voz alta</strong> distinguindo
+«imagem não construiu» de «VM não arrancou» de «órfão», em
+<code>docs/labs/lab-6/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-6/lab.sh</code>). Precisa de libguestfs
+(<code>virt-customize</code>) no host; o arnês gera a sua própria chave SSH e
+aponta o <code>SSHKEY</code> do scaffold para ela. Validado em
+<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a
+2026-10-24.</p>"""),
 
     ("lab-7", "Kubernetes sem Docker", "avançado", """
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
@@ -5314,10 +5341,24 @@ delonix vm snapshot ls dev
 # 5. Break something inside and roll back
 delonix vm snapshot restore dev clean
 
-delonix delete vms dev</code></pre>
-<p class="note"><strong>Verification:</strong> step 4 returns with no error
-and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
-<code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p>"""),
+# Teardown: vm destroy takes the disk, the snapshots AND the record (no orphans)
+delonix vm destroy dev</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 returns with no error and
+the VM STILL RUNNING, and the snapshot is a <em>system checkpoint</em> —
+<strong>memory AND disk</strong>. A stopped VM would give a <em>disk-only</em>
+snapshot (it does not fail — <code>vm stop</code> <em>undefines</em> the running
+domain but preserves the disk, record and snapshots). The teardown is
+<code>vm destroy</code>, which removes everything the VM owns.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads from <code>vm ls -o json</code>
+that the VM reaches <code>Running</code> with an IPv4, that the snapshot taken
+while running shows up in <code>snapshot ls</code> and that <code>restore</code>
+keeps it up, and it proves <code>vm destroy</code> <strong>leaves no orphans</strong>
+(<code>describe vm</code> stops resolving) — it <strong>fails loudly</strong>,
+telling "VM never started" apart from "no IP" apart from "snapshot/restore
+failed", under <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-5/lab.sh</code>). Validated on <strong>delonix 5.1.1</strong>
+(Linux, libvirt, rootless) on 2026-10-24.</p>"""),
 
     "lab-6": ("Your own VM image, with a VMfile", "advanced", """
 <p>Goal: build your own qcow2 image, the same way you build a container
@@ -5341,7 +5382,7 @@ delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
 
-delonix delete vms test; cd ..; rm -rf lab-vm</code></pre>
+delonix vm destroy test; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verification:</strong> the build prints
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
 checksum. With <code>--url-img</code>, if there's no published
@@ -5349,7 +5390,22 @@ checksum. With <code>--url-img</code>, if there's no published
 alone — instead of staying quiet. The key you inject goes to the
 <code>delonix</code> account, not the distro's default account — the
 "next steps" block from <code>vm create</code> prints the exact
-<code>ssh</code> command.</p>"""),
+<code>ssh</code> command.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads from
+<code>vm image ls -o json</code> that the <code>minha-base:1.0</code> image
+landed in the store, from <code>vm ls -o json</code> that a VM boots
+<code>Running</code> with an IPv4 <strong>from it</strong>, and it proves
+<code>vm destroy</code> <strong>leaves no orphans</strong> and that the image
+<strong>survives</strong> the destroy (the overlay was per-VM) — it
+<strong>fails loudly</strong>, telling "image did not build" apart from "VM never
+started" apart from "orphan", under <code>docs/labs/lab-6/</code>:
+<code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-6/lab.sh</code>). Needs libguestfs
+(<code>virt-customize</code>) on the host; the harness generates its own SSH key
+and points the scaffold's <code>SSHKEY</code> at it. Validated on
+<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on
+2026-10-24.</p>"""),
 
     "lab-7": ("Kubernetes with no Docker", "advanced", """
 <p>Goal: a local cluster whose node runtime IS Delonix.</p>
