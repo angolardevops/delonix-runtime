@@ -1494,6 +1494,13 @@ pub struct RmArgs {
     /// Force (kill it if running).
     #[arg(short, long)]
     force: bool,
+    /// Isolation namespace of the target(s). A BARE name is resolved within this
+    /// namespace — the symmetric counterpart of `ps -n/--namespace`, so a
+    /// container created with `run --namespace team` is removable by name without
+    /// hunting for its id. An id, or an explicit `<namespace>/<name>`, is used
+    /// as-is (ids are node-wide). Omit for `default`/node-unique names.
+    #[arg(short = 'n', long, add = ArgValueCandidates::new(super::complete::namespaces))]
+    namespace: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -2063,9 +2070,14 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         }
         ContainerCmd::Rename { id, new_name } => cmd_rename(&store, &id, &new_name),
         ContainerCmd::Port { id } => cmd_port(&store, &id),
-        ContainerCmd::Rm(RmArgs { ids, force }) => {
-            for_each_id(&ids, |id| cmd_rm(&images, &store, id, force))
-        }
+        ContainerCmd::Rm(RmArgs {
+            ids,
+            force,
+            namespace,
+        }) => for_each_id(&ids, |id| {
+            let q = resolve_rm_query(&store, id, namespace.as_deref());
+            cmd_rm(&images, &store, &q, force)
+        }),
         ContainerCmd::Prune { force } => cmd_prune(&images, &store, force),
         ContainerCmd::Exec(ExecArgs {
             interactive,
@@ -5399,6 +5411,28 @@ fn cmd_prune(images: &ImageStore, store: &Store, force: bool) -> Result<()> {
     );
     super::prune::note_partial(c.freed);
     Ok(())
+}
+
+/// Resolve the token the user typed for `rm --namespace`. A BARE name is tried
+/// as `<ns>/<name>` first (the unambiguous form `find` already understands), so
+/// a container created with `run --namespace team` is removable by name — the
+/// symmetric counterpart of `ps -n`. Falls back to the raw token when the
+/// qualified form does not resolve, so an id or prefix still works even if the
+/// caller redundantly passed `--namespace`; a slash or absent `--namespace`
+/// leaves the token untouched. Pure string-shaping — the single authoritative
+/// lookup still happens in `cmd_rm`'s `find`.
+pub(crate) fn resolve_rm_query(store: &Store, token: &str, namespace: Option<&str>) -> String {
+    match namespace {
+        Some(ns) if !token.contains('/') => {
+            let qualified = format!("{ns}/{token}");
+            if find(store, &qualified).is_ok() {
+                qualified
+            } else {
+                token.to_string()
+            }
+        }
+        _ => token.to_string(),
+    }
 }
 
 pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {
@@ -9397,5 +9431,79 @@ mod ps_default_listing_tests {
                 "{hidden:?} must need -a to be listed"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod rm_namespace_tests {
+    use super::{find, resolve_rm_query};
+    use delonix_compute::Container;
+    use delonix_state::Store;
+
+    fn ns_container(id: &str, name: &str, ns: &str) -> Container {
+        let mut c = Container::new(
+            id.to_string(),
+            name.to_string(),
+            "img".to_string(),
+            vec!["sh".to_string()],
+            "64M".to_string(),
+        );
+        c.namespace = ns.to_string();
+        c
+    }
+
+    /// DEF-002: a BARE name shared across two namespaces is ambiguous to `find`
+    /// (it refuses and lists both). `rm --namespace <ns> <name>` must resolve the
+    /// one in that namespace — the symmetric counterpart of `ps -n`. Without the
+    /// fix the only handle on a non-`default` container was its id.
+    #[test]
+    fn namespace_disambiguates_a_shared_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .save(&ns_container("1111aaaa1111aaaa", "db", "default"))
+            .unwrap();
+        store
+            .save(&ns_container("2222bbbb2222bbbb", "db", "team"))
+            .unwrap();
+
+        // Bare "db" is ambiguous on its own.
+        assert!(
+            find(&store, "db").is_err(),
+            "a shared name must stay ambiguous"
+        );
+
+        // --namespace team qualifies it to the right record.
+        let q = resolve_rm_query(&store, "db", Some("team"));
+        assert_eq!(q, "team/db");
+        assert_eq!(find(&store, &q).unwrap().id, "2222bbbb2222bbbb");
+
+        // --namespace default picks the other one.
+        let q = resolve_rm_query(&store, "db", Some("default"));
+        assert_eq!(find(&store, &q).unwrap().id, "1111aaaa1111aaaa");
+    }
+
+    /// --namespace is a hint for bare names only: an id stays node-wide (the
+    /// qualified form would not resolve, so it falls back to the raw token), and
+    /// an already-qualified `<ns>/<name>` or a missing --namespace is untouched.
+    #[test]
+    fn namespace_leaves_ids_and_qualified_forms_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .save(&ns_container("2222bbbb2222bbbb", "db", "team"))
+            .unwrap();
+
+        // An id with a redundant --namespace still resolves to the container.
+        let q = resolve_rm_query(&store, "2222bbbb2222bbbb", Some("team"));
+        assert_eq!(q, "2222bbbb2222bbbb");
+        assert_eq!(find(&store, &q).unwrap().name, "db");
+
+        // No --namespace, and an explicit slash, are passed through verbatim.
+        assert_eq!(resolve_rm_query(&store, "db", None), "db");
+        assert_eq!(
+            resolve_rm_query(&store, "team/db", Some("other")),
+            "team/db"
+        );
     }
 }
