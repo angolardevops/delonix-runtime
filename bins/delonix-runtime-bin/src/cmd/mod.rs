@@ -42,6 +42,7 @@ pub mod kube;
 pub mod kubeadm_config;
 pub mod lb;
 pub mod man;
+pub mod oci_runtime;
 pub mod manifest;
 pub(crate) mod manifestcmd;
 pub mod manual;
