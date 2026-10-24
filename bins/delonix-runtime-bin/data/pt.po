@@ -4716,8 +4716,8 @@ msgstr "Dashboard de volumes/armazenamento (KPIs + tabela) — TUI, ou snapshot 
 msgid "Volumes/storage dashboard (KPIs + table) — TUI, or `--once` snapshot.\n\nMoved here from `storage dash` (B5 CLI collapse): the scope it renders (`DashScope::Storage`) always covered BOTH network storages and plain volumes together (its own title says \"STORAGE/VOLUMES\") — `storage` was never the only Kind it described, just the only group that could reach it. `volume` is now that one entry point."
 msgstr "Dashboard de volumes/armazenamento (KPIs + tabela) — TUI, ou snapshot com `--once`.\n\nMovido para aqui a partir de `storage dash` (colapso B5 da CLI): o âmbito que renderiza (`DashScope::Storage`) sempre cobriu TANTO os armazenamentos de rede como os volumes simples juntos (o próprio título diz \"STORAGE/VOLUMES\") — `storage` nunca foi o único Kind que descrevia, só o único grupo que lá chegava. `volume` é agora esse único ponto de entrada."
 
-msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything."
-msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa."
+msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus` to mean anything."
+msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus` queiram dizer alguma coisa."
 
 # help do grupo `net` — netns/egress/tunnel/boot, os ultimos 21 dos 103 medidos
 
@@ -4858,11 +4858,11 @@ msgstr ""
 "O comando que falta a um `apply` em CI: o `apply` devolve assim que criou as coisas, o que não é o mesmo que a stack estar a funcionar. Sai com código diferente de zero ao esgotar o tempo, nomeando exactamente o que não subiu."
 
 msgid ""
-"Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything.\n"
+"Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus` to mean anything.\n"
 "\n"
 "Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
 msgstr ""
-"Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa.\n"
+"Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus` queiram dizer alguma coisa.\n"
 "\n"
 "Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha que este comando existe para apanhar, e é invisível sem se perguntar."
 
@@ -7976,20 +7976,20 @@ msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation."
 msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup."
 
 msgid ""
-"It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
+"It is the prerequisite for `--memory`/`--cpus` to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
 msgstr ""
-"É o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` signifiquem alguma coisa. Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha para que este comando existe, e é invisível sem perguntar."
+"É o pré-requisito para que `--memory`/`--cpus` signifiquem alguma coisa. Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha para que este comando existe, e é invisível sem perguntar."
 
 msgid ""
 "Diagnose — and, with `--delegate`, fix — cgroup delegation."
 "\n"
 "\n"
-"It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
+"It is the prerequisite for `--memory`/`--cpus` to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
 msgstr ""
 "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup."
 "\n"
 "\n"
-"É o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` signifiquem alguma coisa. Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha para que este comando existe, e é invisível sem perguntar."
+"É o pré-requisito para que `--memory`/`--cpus` signifiquem alguma coisa. Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha para que este comando existe, e é invisível sem perguntar."
 
 msgid ""
 "Thermal governor for Delonix's CPU budget. Runs continuously (see `--once`)."
