@@ -16999,3 +16999,29 @@ msgstr "Namespace de isolamento do(s) alvo(s). Um nome SIMPLES é resolvido dent
 
 msgid "Emit a ROOTLESS bundle: add a user namespace and the current user's uid/gid mappings (container root -> your uid, then the delegated subuids), so `runc`/`crun` run it without root. Without it the bundle has no mappings and only runs as real root (`runc` refuses it rootless with \"requires user namespaces\"). The mappings are specific to THIS user, so the bundle is tied to this host's `/etc/subuid`"
 msgstr "Emite um bundle ROOTLESS: adiciona um user namespace e os mapeamentos uid/gid do utilizador atual (root do container -> o teu uid, depois os subuids delegados), para que o `runc`/`crun` o corram sem root. Sem ele o bundle não tem mapeamentos e só corre como root real (o `runc` recusa-o rootless com \"requires user namespaces\"). Os mapeamentos são específicos DESTE utilizador, por isso o bundle fica preso ao `/etc/subuid` deste host"
+
+# ---- oci-runtime (RT-4, ADR-0080): about dos comandos + help das flags ----
+
+msgid "OCI runtime (runc-compatible CLI): create/start/state/kill/delete a container from a bundle. The engine's own init behind the runc contract, so it can sit where runc/crun do (ADR-0080)"
+msgstr "Runtime OCI (CLI compatível com o runc): create/start/state/kill/delete de um container a partir de um bundle. O init do próprio motor por trás do contrato do runc, para poder ocupar o lugar do runc/crun (ADR-0080)"
+
+msgid "Create a container from an OCI bundle WITHOUT starting it"
+msgstr "Cria um container a partir de um bundle OCI SEM o arrancar"
+
+msgid "Start a container previously `create`d"
+msgstr "Arranca um container previamente criado com `create`"
+
+msgid "Print the OCI state JSON of a container"
+msgstr "Imprime o JSON de estado OCI de um container"
+
+msgid "Send a signal to a container (default `SIGTERM`)"
+msgstr "Envia um sinal a um container (por omissão `SIGTERM`)"
+
+msgid "Delete a container's state (teardown; `--force` kills it first)"
+msgstr "Apaga o estado de um container (desmontagem; `--force` mata-o primeiro)"
+
+msgid "State directory (the per-runtime root, like `runc --root`). Default: `$XDG_RUNTIME_DIR/delonix-runtime` (rootless) or `/run/delonix-runtime`"
+msgstr "Diretório de estado (o root por runtime, como o `runc --root`). Por omissão: `$XDG_RUNTIME_DIR/delonix-runtime` (rootless) ou `/run/delonix-runtime`"
+
+msgid "Path to the OCI bundle (its `rootfs/` and `config.json`)"
+msgstr "Caminho do bundle OCI (o seu `rootfs/` e `config.json`)"
