@@ -468,9 +468,9 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 reason: "no VNC device on the CH command line",
             },
             C::VmGuestAgent => S::NotImplemented,
-            C::VmIpObserved => S::UnsupportedByProvider {
-                reason: "the address is PREDICTED from the MAC (`ip_is_predicted`); `--wait` verifies it by ARP instead",
-            },
+            C::VmIpObserved => bin(S::Partial {
+                detail: "the reported address is COMPUTED from the MAC (`ip_is_predicted`), never read from a lease or agent, so confidence stays `Predicted` and `vm show`/`vm ls` never promote it to observed; but `--wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), confirming the guest answers at that address (a booted guest answered live, 2026-10-24); no battery check reads the IP yet",
+            }),
             C::MetricsPrometheus => S::Partial {
                 detail: "`delonix_vms_running/total` only",
             },
