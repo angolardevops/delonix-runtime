@@ -1,0 +1,78 @@
+==> critest focus='portforward \[Conformance\]'
+time="2026-10-24T13:09:16Z" level=warning msg="Config \"/etc/crictl.yaml\" does not exist, trying next: \"/crictl.yaml\""
+critest version: v1.36.0
+Running Suite: CRI validation - /
+=================================
+Random Seed: 1792847356
+
+Will run 1 of 122 specs
+SSSSSSSSSSS
+------------------------------
+• [FAILED] [83.518 seconds]
+[k8s.io] Streaming runtime should support streaming interfaces [It] runtime should support portforward [Conformance]
+/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:130
+
+  Timeline >>
+  STEP: create a PodSandbox with container port mapping @ 10/24/26 13:09:16.539
+  STEP: create a web server container @ 10/24/26 13:09:16.609
+  STEP: Get image status for image: registry.k8s.io/e2e-test-images/nginx:1.14-2 @ 10/24/26 13:09:16.609
+  STEP: Pull image : registry.k8s.io/e2e-test-images/nginx:1.14-2 @ 10/24/26 13:09:16.61
+  STEP: Create container. @ 10/24/26 13:09:39.355
+  Oct 24 13:09:39.357: INFO: Created container "7e6171065bd7cb55"
+
+  STEP: start the web server container @ 10/24/26 13:09:39.357
+  STEP: Start container for containerID: 7e6171065bd7cb55 @ 10/24/26 13:09:39.357
+  Oct 24 13:09:39.757: INFO: Started container "7e6171065bd7cb55"
+
+  STEP: ensure the web server container is serving @ 10/24/26 13:09:39.757
+  STEP: get the IP:port needed to be checked @ 10/24/26 13:09:39.757
+  STEP: Get PodSandbox status for podID: 840de5297e5ab456 @ 10/24/26 13:09:39.757
+  Oct 24 13:09:39.760: INFO: the IP:port is http://10.88.0.2:80
+  STEP: check the content of http://10.88.0.2:80 @ 10/24/26 13:09:39.761
+  Oct 24 13:09:39.762: INFO: check port mapping succeed
+  STEP: port forward PodSandbox: 840de5297e5ab456 @ 10/24/26 13:09:39.762
+  Oct 24 13:09:39.764: INFO: Get port forward URL: http://127.0.0.1:33891/portforward/14f5bb95f840601157fe68f3022f32e0
+  STEP: check the output of portforward @ 10/24/26 13:09:39.764
+  Oct 24 13:09:39.764: INFO: Parse URL "http://127.0.0.1:33891/portforward/14f5bb95f840601157fe68f3022f32e0" succeed
+  STEP: check if we can get nginx main page via localhost:12001 @ 10/24/26 13:09:39.764
+  STEP: get the IP:port needed to be checked @ 10/24/26 13:09:39.764
+  Oct 24 13:09:39.764: INFO: the IP:port is http://127.0.0.1:12001
+  STEP: check the content of http://127.0.0.1:12001 @ 10/24/26 13:09:39.764
+  STEP: start port forward @ 10/24/26 13:09:39.764
+  Oct 24 13:09:39.766: INFO: Unexpected error occurred: error upgrading connection: unable to upgrade connection: pod sandbox has no live netns
+  [FAILED] in [It] - /home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:391 @ 10/24/26 13:10:39.765
+  STEP: stop PodSandbox @ 10/24/26 13:10:39.765
+  STEP: delete PodSandbox @ 10/24/26 13:10:39.898
+  << Timeline
+
+  [FAILED] failed to start port forward for "http://127.0.0.1:33891/portforward/14f5bb95f840601157fe68f3022f32e0", stdout: , stderr: 
+  Unexpected error:
+      <*errors.errorString | 0x3b6b13b98370>: 
+      error upgrading connection: unable to upgrade connection: pod sandbox has no live netns
+      {
+          s: "error upgrading connection: unable to upgrade connection: pod sandbox has no live netns",
+      }
+  occurred
+  In [It] at: /home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:391 @ 10/24/26 13:10:39.765
+------------------------------
+SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS
+
+Summarizing 1 Failure:
+  [FAIL] [k8s.io] Streaming runtime should support streaming interfaces [It] runtime should support portforward [Conformance]
+  /home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:391
+
+Ran 1 of 122 Specs in 83.520 seconds
+FAIL! -- 0 Passed | 1 Failed | 0 Pending | 121 Skipped
+--- FAIL: TestCRISuite (83.53s)
+FAIL
+RC=1
+=== delonix-cri server log (tail) ===
+[2m2026-10-24T13:09:16.187960Z[0m [32m INFO[0m [2mdelonix_cri[0m[2m:[0m delonix-cri starting [3maddr[0m[2m=[0munix:///run/cri.sock [3mroot[0m[2m=[0m/run/dlx
+delonix-cri (CRI v1) listening on unix:///run/cri.sock
+delonix-cri: streaming (exec/attach) at http://127.0.0.1:33891
+delonix-cri: WARNING: no capability ceiling (DELONIX_CRI_CAP_CEILING=all) — a privileged pod gets all capabilities; unset it, or set 'default' or a list of names, to bound it
+[2m2026-10-24T13:09:16.189184Z[0m [33m WARN[0m [2mdelonix_cri[0m[2m:[0m delonix-cri: WARNING: no capability ceiling (DELONIX_CRI_CAP_CEILING=all) — a privileged pod gets all capabilities; unset it, or set 'default' or a list of names, to bound it
+[2m2026-10-24T13:09:16.611556Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling e2e-test-images/nginx:1.14-2 from registry.k8s.io [3mrepo[0m[2m=[0me2e-test-images/nginx [3mreference[0m[2m=[0m1.14-2 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-24T13:09:28.229843Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+[2m2026-10-24T13:10:39.766575Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI StopPodSandbox [3msandbox[0m[2m=[0m840de5297e5ab456
+[2m2026-10-24T13:10:39.899842Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI RemovePodSandbox [3msandbox[0m[2m=[0m840de5297e5ab456
