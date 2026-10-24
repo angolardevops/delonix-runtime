@@ -208,7 +208,18 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::HostHealth => S::Supported {
                 evidence: "check:system info",
             },
-            C::HostCapacity => S::NotImplemented,
+            // `node::capacity()` (served at `/v1/node/capacity`, ADR-0042 step
+            // C): CPUs, memory, pids and the state/images/volumes/vm-images
+            // filesystems. `*_total` is the HOST's; `*_allocatable` is what THIS
+            // engine can actually enforce — read from the delegated cgroup slice
+            // (`cpu.max`, `memory.max`, `pids.max`), so under rootless it is the
+            // room the delegated subtree grants, not the whole machine. A number
+            // that could not be measured goes into `unmeasured` and is never
+            // reported as a silent zero.
+            C::HostCapacity => S::Supported {
+                evidence:
+                    "check:GET /v1/node/capacity: cada número é medido ou está em unmeasured, nunca um zero calado",
+            },
             C::TransportVerified => S::Partial {
                 detail: "unix sockets with SO_PEERCRED (CRI, management, docker-api); no TCP is ever bound",
             },
