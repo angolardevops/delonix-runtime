@@ -474,13 +474,25 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             }),
             C::StoragePools => S::NotImplemented,
             C::VmSnapshotDisk => bin(S::Supported {
-                evidence: "check:snapshot create com a VM parada",
+                // #16: o snapshot de disco (offline) é provado pela RECUPERAÇÃO
+                // de dados — escreve-se um dado no disco, tira-se o snapshot,
+                // corrompe-se o dado e o restore relê o ORIGINAL (guestfish).
+                evidence: "check:o snapshot de disco captura o dado para recuperacao",
             }),
-            C::VmSnapshotMemory => bin(S::Supported {
-                evidence: "check:vm snapshot create",
+            C::VmSnapshotMemory => bin(S::Partial {
+                // `snapshot-create-as` numa VM a correr captura RAM + disco e um
+                // revert retoma a VM (o e2e prova que o snapshot vivo a traz de
+                // volta a Running). O que NÃO se observa é a recuperação do
+                // CONTEÚDO de memória do guest: o arnês não tem um guest que
+                // arranque um OS para ler o estado de RAM antes/depois do revert.
+                // Só a recuperabilidade de DISCO está provada (vm.snapshot-restore).
+                detail: "running-domain snapshot captures RAM + disk and a revert resumes the VM; recovery of in-guest MEMORY CONTENT is not observed (no bootable guest on the harness) — only disk-data recovery is proved",
             }),
             C::VmSnapshotRestore => bin(S::Supported {
-                evidence: "check:vm snapshot restore depois do start",
+                // #16: o restore é provado pela recuperabilidade de DADOS, não
+                // por um código de saída nem por criar um ficheiro. Ver o ciclo
+                // ORIGINAL→snapshot→CORROMPIDO→restore→ORIGINAL em e2e.sh.
+                evidence: "check:o restore RECUPERA o dado de disco (nao so um codigo de saida)",
             }),
             C::VmSnapshotDelete => bin(S::Supported {
                 evidence: "check:vm snapshot rm",
