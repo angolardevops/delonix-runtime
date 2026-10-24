@@ -1536,13 +1536,9 @@ mod tests {
 
         // GAP-RT-2: a --rootless bundle DOES carry the user namespace + mappings
         // (container root -> our euid, then the delegated subuids).
-        let rootless_spec = build_runtime_spec(
-            vec!["/bin/sh".to_string()],
-            vec![],
-            "/".to_string(),
-            true,
-        )
-        .expect("rootless spec");
+        let rootless_spec =
+            build_runtime_spec(vec!["/bin/sh".to_string()], vec![], "/".to_string(), true)
+                .expect("rootless spec");
         let rlinux = rootless_spec.linux().as_ref().expect("linux");
         assert!(
             rlinux
@@ -1559,11 +1555,15 @@ mod tests {
             "container uid 0 mapeia para um único uid do host (o nosso)"
         );
         assert!(
-            umaps.iter().any(|m| m.container_id() == 1
-                && m.host_id() == delonix_linux::USERNS_UID_BASE),
+            umaps
+                .iter()
+                .any(|m| m.container_id() == 1 && m.host_id() == delonix_linux::USERNS_UID_BASE),
             "container uid 1.. mapeia para os subuids delegados"
         );
-        assert!(rlinux.gid_mappings().is_some(), "--rootless: gid mappings presentes");
+        assert!(
+            rlinux.gid_mappings().is_some(),
+            "--rootless: gid mappings presentes"
+        );
 
         // ociVersion present and the version `runc`/`crun` emit (GAP-RT-1).
         assert_eq!(parsed.version(), "1.3.0");
