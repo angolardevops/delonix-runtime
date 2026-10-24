@@ -5018,11 +5018,24 @@ delonix vm snapshot ls dev
 # 5. Estragar alguma coisa lá dentro e voltar atrás
 delonix vm snapshot restore dev limpa
 
-delonix delete vms dev</code></pre>
+# Teardown: vm destroy leva o disco, os snapshots E o record (sem órfãos)
+delonix vm destroy dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
-VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
-<code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
-órfãos.</p>"""),
+VM A CORRER, e o snapshot fica como um <em>checkpoint de sistema</em> —
+<strong>memória E disco</strong>. Com a VM parada seria <em>disk-only</em> (não
+falha — o <code>vm stop</code> faz <em>undefine</em> do domínio em execução, mas
+preserva disco, record e snapshots). O teardown é <code>vm destroy</code>, que
+remove tudo o que a VM possui.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê de <code>vm ls -o json</code>
+que a VM fica <code>Running</code> com IPv4, que o snapshot tirado com a VM a
+correr aparece em <code>snapshot ls</code> e que o <code>restore</code> a mantém
+de pé, e prova que <code>vm destroy</code> <strong>não deixa órfãos</strong>
+(<code>describe vm</code> deixa de resolver) — <strong>falha em voz alta</strong>
+distinguindo «VM nunca arrancou» de «sem IP» de «snapshot/restore falhou», em
+<code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-5/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, libvirt, rootless) a 2026-10-24.</p>"""),
 
     ("lab-6", "A tua própria imagem de VM, com VMfile", "avançado", """
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
@@ -5314,10 +5327,24 @@ delonix vm snapshot ls dev
 # 5. Break something inside and roll back
 delonix vm snapshot restore dev clean
 
-delonix delete vms dev</code></pre>
-<p class="note"><strong>Verification:</strong> step 4 returns with no error
-and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
-<code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p>"""),
+# Teardown: vm destroy takes the disk, the snapshots AND the record (no orphans)
+delonix vm destroy dev</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 returns with no error and
+the VM STILL RUNNING, and the snapshot is a <em>system checkpoint</em> —
+<strong>memory AND disk</strong>. A stopped VM would give a <em>disk-only</em>
+snapshot (it does not fail — <code>vm stop</code> <em>undefines</em> the running
+domain but preserves the disk, record and snapshots). The teardown is
+<code>vm destroy</code>, which removes everything the VM owns.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads from <code>vm ls -o json</code>
+that the VM reaches <code>Running</code> with an IPv4, that the snapshot taken
+while running shows up in <code>snapshot ls</code> and that <code>restore</code>
+keeps it up, and it proves <code>vm destroy</code> <strong>leaves no orphans</strong>
+(<code>describe vm</code> stops resolving) — it <strong>fails loudly</strong>,
+telling "VM never started" apart from "no IP" apart from "snapshot/restore
+failed", under <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-5/lab.sh</code>). Validated on <strong>delonix 5.1.1</strong>
+(Linux, libvirt, rootless) on 2026-10-24.</p>"""),
 
     "lab-6": ("Your own VM image, with a VMfile", "advanced", """
 <p>Goal: build your own qcow2 image, the same way you build a container
