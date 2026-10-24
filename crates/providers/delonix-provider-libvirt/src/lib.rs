@@ -414,8 +414,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmHugepages => bin(S::Partial {
                 detail: "`<memoryBacking><hugepages/>`; the host's hugepage pool is not probed",
             }),
-            C::VmCloudInit => bin(S::Partial {
-                detail: "NoCloud seed on a virtio disk (#435); the battery never logs into a guest",
+            C::VmCloudInit => sys(S::Supported {
+                evidence: "e2e:vm: o cloud-init do guest CONSOME o seed NoCloud (libvirt, guestfish)",
             }),
             C::VmRestartPolicyNative => bin(S::Partial {
                 detail: "`on_crash=restart` for always/on-failure; unit-tested, no guest crashed on purpose",
