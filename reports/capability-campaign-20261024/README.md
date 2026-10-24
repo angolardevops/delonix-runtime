@@ -10,14 +10,30 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 | Branch de trabalho | `develop` (descendente linear da baseline, +258/−0) |
 | Catálogo | 1.4.0 · Engine 5.1.1 |
 | Fonte-de-verdade | `matrix-structured.json` (515 entradas, lossless) |
-| Sprint actual | **Sprint 1 em curso** — auditoria §4 (`e082a275`) + reclassificação A1–A3 aplicada (`8cd5c63b`, gates verdes) |
-| Próximo | Sprint 1 — riscos de isolamento/dados (OOM distinto, namespaces partilhados por identidade de processo, restauro de snapshot) |
+| Sprint actual | **Sprint 1 em curso** — auditoria §4 + reclassificação A1–A3 + 1.ª promoção real (OOM) a supported |
+| Próximo | Sprint 1 — riscos restantes: namespaces partilhados por identidade de processo, restauro de snapshot com dados; depois candidatos B (CH bridge/ip.observed, net.apply.rollback) |
+
+## Métricas antes/depois (medido @ develop)
+
+| estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
+|---|---|---|---|
+| supported | 103 | 112 | **113** |
+| partial | 93 | 86 | 87 |
+| not-implemented | 74 | 72 | 71 |
+| unsupported-by-provider | 230 | 230 | 229 |
+| requires-external-component | 12 | 12 | 12 |
+| unavailable-on-host | 3 | 3 | 3 |
+| proved/applicable (N2) | — | 112/273 | **113/274 (41.2%)** |
+
+Separação do progresso (§17): 1 promoção real a supported (OOM, com teste live + evidência), 3 reclassificações de causa corrigidas (A1–A3), 2 lacunas completadas em classificação (lvm/zfs-btrfs: backend já existia, agora partial honesto). Sem promoção falsa — cada +1 em supported tem evidência verificada.
 
 ## Histórico de commits da campanha
 
 - `0894caf9` docs — Sprint 0 reconciliação (baseline, matriz 515, diff explicado, plano).
 - `e082a275` docs — Sprint 1 proposta de reclassificação verificada (auditoria §4, 2 especialistas).
-- `8cd5c63b` fix — aplica A1–A3: libvirt `vm.migration.live` unsupported→not-implemented; linux `storage.lvm-thin`/`storage.zfs-btrfs` not-implemented→partial. Matriz regenerada, ratchet applicable 273→274, supported inalterado (sem promoção falsa). Contagens: not-impl 72→71, partial 86→88, unsupported 230→229.
+- `8cd5c63b` fix — aplica A1–A3: libvirt `vm.migration.live` unsupported→not-implemented; linux `storage.lvm-thin`/`storage.zfs-btrfs` not-implemented→partial.
+- `34f7afd5` docs — marca A1–A3 aplicadas no checkpoint.
+- `b6aa53ff` feat — **`container.oom-detection` partial→supported (§9)**: `scen_oom` reforçado para asserir `crash_reason=oom_killed` (distingue OOM de término não-OOM); provado ao vivo. supported 112→113.
 
 ## Ficheiros
 
