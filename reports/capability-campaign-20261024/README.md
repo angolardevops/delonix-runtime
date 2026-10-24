@@ -62,6 +62,11 @@ Integração: as duas frentes paralelas correram cada uma na sua worktree off de
 ### Constrangimento de ambiente
 Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada build release custa ~2–3G de churn; o próximo trabalho build-pesado tem risco de ENOSPC. Mitigado removendo worktrees concluídas; a resolução de fundo é do dono (libertar disco).
 
+## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
+
+- **CH/libvirt `host.capacity` = not-implemented** está CERTO. HostHealth é o único host-level que os providers VM expõem (teste libvirt:5149). `host.capacity` para um provider VM significaria capacidade VM-alocável do hipervisor (vCPU/RAM para VMs), distinta da capacidade cgroup-delegada de containers que o `/v1/node/capacity` reporta (a que o linux promoveu). Não é o mesmo número → não é mimetizável.
+- **CH/libvirt `provider.events` = not-implemented** está CERTO. Confirmado por grep: nenhum `events::emit(..., "vm", ...)` existe — as ações de VM não escrevem no log de eventos; só o linux (container/volume/stack/pod/security) emite. Por isso linux `provider.events` é supported e os VM não.
+
 ## Próximas frentes (fila)
 
 1. `provider.async-operations` (linux not-impl; proxmox partial — job handle) (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
