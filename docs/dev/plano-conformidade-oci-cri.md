@@ -20,11 +20,18 @@
 
 | Contrato | Estado | Fonte |
 |---|---|---|
-| CRI — critest v1.36.0 | **79 / 103** (24 fail, 19 skip) | `docs/cri-conformance.md`, `scripts/critest.sh` |
-| OCI Image | sem suite upstream corrida; testes dirigidos | `reports/.../oci-conformance.md` |
-| OCI Distribution | push/pull por digest OK; sem suite corrida | campanha 2026-10 |
-| OCI Runtime | init próprio + `image export` p/ runc/crun; sem `runtime-tools` | idem |
-| Docker Engine API | **15 / 26** rotas servidas | `delonix serve docker-api --matrix` |
+| CRI — critest v1.36.0 | **79/103 é de v0.63 (2026-08) — A RE-MEDIR na v5.1.1** (o dono está a correr critest agora em C2/C3) | `scripts/critest.sh` |
+| OCI Image | **interop provada na v5.1.1**: delonix→docker **e** delonix→podman + docker→delonix, por digest (IMG-1 corrigido 2026-10-24) | `reports/conformance/A1-oci-image-distribution.md` |
+| OCI Distribution | push/pull cross-engine OK na v5.1.1; suite `distribution-spec` é server-side → **N/A** (Delonix é cliente) | A1 |
+| OCI Runtime — bundle | **v5.1.1**: ociVersion 1.3.0 ✅, seccomp ✅, `runc run` rootless rc=0 ✅ (RT-1/2/3) — `oci-runtime-tool validate` OK | B1/B2 reports |
+| OCI Runtime — CLI runc | **não existe** (o único gap de runtime real) — RT-4 / ADR-0080 | B1 |
+| Docker Engine API | **15/26** rotas (medido ao vivo na v5.1.1) | `delonix serve docker-api --matrix` |
+
+> **Aviso de proveniência (importante).** A primeira versão deste plano herdou a matriz de gaps do
+> relatório **v3.1.0** (`fa8c6297`). Estamos na **v5.1.1**: re-medir contra o código actual mostrou
+> que vários "gaps" estão **stale** — a mount-propagation já funciona (B2), o `.tmp` de layer já é
+> limpo em-processo (G-035), e o `tag@digest` é formato válido, não bug (G-033). **Este plano é
+> conduzido por medições na v5.1.1, não pela matriz v3.1.0.** Um "gap" só entra se REPRODUZIR na v5.1.1.
 
 **As 24 falhas do CRI, por área:** AppArmor 9 · Security Context 4 · Mount Propagation 3 ·
 Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mount 1 · OOM 1.
@@ -39,7 +46,12 @@ Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mo
 
 ---
 
-## Track C — CRI (PRIORITÁRIO) · gate: 79 → ~100/103 em rootful
+## Track C — CRI (PRIORITÁRIO) · gate: re-medir na v5.1.1, depois → ~100/103 em rootful
+
+**Passo zero: re-medir o critest na v5.1.1** (`scripts/critest.sh`). O 79/103 é de v0.63 (2026-08) e
+a repartição de falhas abaixo é dessa corrida — pode já não bater. O dono está a correr isto agora
+(worktrees `cri-image-repodigests-and-user` = C2, `cri-portforward-conformance` = C3). As fases
+abaixo mantêm-se como mapa das ÁREAS, mas os números (`+4`, etc.) só valem depois da re-medição.
 
 Cada fase = uma área de falha do critest, com a spec que falha nomeada.
 
@@ -70,12 +82,28 @@ Cada fase = uma área de falha do critest, com a spec que falha nomeada.
 
 ## Track A — OCI Image + Distribution (fundação de interop de imagens)
 
-| Fase | O que fazer | Gate |
+**Re-baseline na v5.1.1 (2026-10-24): esta track está em grande parte FEITA — o resto é opcional.**
+A interop OCI de imagem foi **provada ao vivo** nos três motores (IMG-1 corrigido: `push` publica
+manifesto OCI, puxável por docker E podman). Os "gaps" G-033/035/039 do relatório v3.1.0 **saíram**
+após re-medição:
+
+- **G-033** (tag+digest) — **NÃO é bug**: `repo:tag@digest` é formato OCI/Docker válido e comum (o
+  kind usa-o); recusar partiria o kind. Se um dia se quiser detectar um *conflito* real (a tag
+  resolve para outro digest), é uma decisão de representação local — fora do âmbito até ser pedido.
+- **G-035** (`.tmp` de layer) — **já limpo em-processo** (`overlay.rs:492-508`). Resíduo mínimo: só
+  um `.tmp` órfão de um processo MORTO a meio, que o `prune` não varre — melhoria pequena, agrupável
+  numa futura passagem do `prune`, não um gap de conformidade.
+- **G-039** (archive docker-save LEGADO `<hash>/layer.tar`) — real mas **só afecta archives
+  pré-OCI**; o `docker save` moderno produz o layout `blobs/sha256/` que o `load` já aceita. Baixa
+  prioridade; a correcção (mapa path→digest) tem subtileza nos layers.
+
+| Opcional | O que fica | Gate |
 |---|---|---|
-| **A1** | Instalar e correr as suites `opencontainers/image-spec` e `distribution-spec` (como o `critest.sh` fez para CRI); publicar baseline + script | baseline publicado |
-| **A2** | Fechar **G-033** (tag+digest em conflito grava conteúdo errado sem aviso → recusar/avisar), **G-035** (`.tmp` órfãos; `prune` limpa), **G-039** (load de archive formato antigo `layer.tar`) | testes dirigidos verdes |
-| **A3** | Manifest-list / multi-arch no `push` (hoje 1 arch por invocação) | distribution-spec |
-| **A4** | Regressão de whiteouts (já corrigido em `507c7cad`, char-dev de overlay por-camada) contra `wordpress:6.7` e `rabbitmq` que o bug quebrava | E2E verde |
+| A-sbom/scan/sign | `image sbom`/`scan`/`verify`/`sign` — medir a cobertura real na v5.1.1 (não medido nesta campanha) | baseline publicado |
+| A-manifest-list | multi-arch no `push` (hoje 1 arch por invocação) | round-trip multi-arch |
+
+> `oci-image-tool` (image-spec) **não compila** (breakage `Sirupsen/logrus`) e a `distribution-spec`
+> é server-side — por isso a prova de imagem na v5.1.1 é a **interop entre motores**, não uma suite.
 
 ## Track D — Docker Engine API (ecossistema; ressalva §5)
 
@@ -92,17 +120,23 @@ Cada fase = uma área de falha do critest, com a spec que falha nomeada.
 
 ## Sequência e dependências
 
+**Estado na v5.1.1:** Track A (imagem) **provada** (IMG-1); Track B RT-1/2/3 + B2 **feitos** — só falta
+**RT-4** (CLI runc, ADR-0080, GO-gated). O trabalho real restante é RT-4, o Track C (a re-medir) e o
+Track D.
+
 ```
-B1 ─► B2 ──────────────► C4
-          \
-A1 ─► A2 ─► A3 ─► A4      C1 ─► C2 ─► C3 ─┬─► C5 ─► C6 ─► C7
+[v5.1.1 feito]  A (interop) ✅   B2 mount-prop ✅   RT-1/2/3 bundle ✅
+[real restante]
+   RT-4 (ADR-0080, GO) ─► runtime-tools validation suite contra o Delonix
+   C0 re-medir critest ─► C1 ─► C2 ─► C3 ─┬─► C4 ─► C5 ─► C6 ─► C7
                                           └─(C3 streaming)─► D3 ─► D1 ─► D2
 ```
 
-1. **Arrancar com B1+B2** (runtime-tools + mount propagation) — pequeno e desbloqueia C4.
-2. **Track C** em paralelo (C1→C2→C3→C5→C6→C7) — o retorno estratégico.
-3. **Track A** quando houver folga (fundação; não bloqueia o CRI no dia-a-dia mas certifica as imagens).
-4. **Track D** por último, com a ressalva; D3 cai de borla com o C3 (mesmo servidor de streaming).
+1. **Track C**: re-medir o critest na v5.1.1 (C0), depois fechar por área — o retorno estratégico
+   (em curso pelo dono: C2/C3).
+2. **RT-4** (quando o dono der GO): desbloqueia medir o runtime pela suite upstream.
+3. **Track D** por último, com a ressalva; D3 cai de borla com o C3 (mesmo servidor de streaming).
+4. **Track A**: só o opcional (sbom/scan/sign, manifest-list) — a interop já está provada.
 
 ## Como medir (reproduzível, por fase)
 
