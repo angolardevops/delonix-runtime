@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **113** |
-| partial | 93 | 86 | 87 |
+| supported | 103 | 112 | **114** |
+| partial | 93 | 86 | 86 |
 | not-implemented | 74 | 72 | 71 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **113/274 (41.2%)** |
+| proved/applicable (N2) | — | 112/273 | **114/274 (41.6%)** |
 
 Separação do progresso (§17): 1 promoção real a supported (OOM, com teste live + evidência), 3 reclassificações de causa corrigidas (A1–A3), 2 lacunas completadas em classificação (lvm/zfs-btrfs: backend já existia, agora partial honesto). Sem promoção falsa — cada +1 em supported tem evidência verificada.
 
@@ -34,6 +34,15 @@ Separação do progresso (§17): 1 promoção real a supported (OOM, com teste l
 - `8cd5c63b` fix — aplica A1–A3: libvirt `vm.migration.live` unsupported→not-implemented; linux `storage.lvm-thin`/`storage.zfs-btrfs` not-implemented→partial.
 - `34f7afd5` docs — marca A1–A3 aplicadas no checkpoint.
 - `b6aa53ff` feat — **`container.oom-detection` partial→supported (§9)**: `scen_oom` reforçado para asserir `crash_reason=oom_killed` (distingue OOM de término não-OOM); provado ao vivo. supported 112→113.
+- `560939e0` docs — checkpoint pós-OOM.
+- `fe3f529e` feat — **`pod.shared-ipc-uts` partial→supported (§9)**: novo `scen_pod_shared_ipc_uts` prova por IDENTIDADE que 2 membros de um pod leem a mesma `/proc/self/ns/{ipc,uts}` e um container fora lê outra; provado ao vivo. supported 113→114. Confirmado em paralelo que `pod.shared-pid` é genuinamente not-implemented (membros recebem `CLONE_NEWPID`; `shareProcessNamespace` não ligado) — feature de Sprint 2+.
+
+## Próximas frentes (fila)
+
+1. `pod.shared-pid` not-implemented→implementar `shareProcessNamespace` (membros setns no PID ns do infra em vez de `CLONE_NEWPID`) — feature real, Sprint 2+.
+2. Candidatos B da proposta §4 (precisam de prova live): CH `vm.ip.observed` (ARP `--wait`), CH `vm.network.bridge`, `net.apply.rollback` (reclassificação not-impl→unsupported por ADR-0059).
+3. Restauro de snapshot com dados (§7/§14): provar recuperabilidade, não só criação.
+4. Frentes com ambiente dedicado: Proxmox via nó `pve`, rede multi-node, storage.
 
 ## Ficheiros
 
