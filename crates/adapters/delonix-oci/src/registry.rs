@@ -2329,11 +2329,18 @@ pub fn push_to_registry_with_progress(
         return Err(Error::Registry(errs.join("; ")));
     }
 
-    // 3) Docker schema-2 manifest (`oci_spec::image::ImageManifest`) + publication
-    // under the tag. Same construction shared by `build_manifest`.
-    let manifest = docker_manifest(store, &image)?;
+    // 3) OCI image manifest + publication under the tag. We push the OCI twin,
+    // NOT the Docker schema-2 shape: `docker_manifest` labels a plain-tar layer
+    // with the OCI `application/vnd.oci.image.layer.v1.tar` type, and a Docker
+    // v2s2 manifest carrying an OCI layer type is a non-conformant hybrid —
+    // `docker` tolerates it but `podman`/`skopeo`/`containers-image` reject it
+    // ("unsupported docker v2s2 media type", GAP-OCI-IMG-1, measured 2026-10-24
+    // delonix→podman). `to_oci_manifest` keeps the SAME config/layer blobs (so
+    // the image id is unchanged; only the manifest digest differs) and makes the
+    // manifest/config/layer media types consistently OCI, which both engines accept.
+    let manifest = to_oci_manifest(&docker_manifest(store, &image)?)?;
     let manifest_bytes = serde_json::to_vec(&manifest)?;
-    c.push_manifest(&refr, &manifest_bytes, DOCKER_MANIFEST_MEDIA_TYPE)?;
+    c.push_manifest(&refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
     tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "pushed: {host}/{repo}:{refr}");

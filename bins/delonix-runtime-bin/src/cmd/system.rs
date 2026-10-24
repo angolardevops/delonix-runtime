@@ -54,7 +54,7 @@ pub enum SystemCmd {
     },
     /// Diagnose — and, with `--delegate`, fix — cgroup delegation.
     ///
-    /// It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean
+    /// It is the prerequisite for `--memory`/`--cpus` to mean
     /// anything. Without it the flags are ACCEPTED and INERT: the container
     /// runs with no limit at all. That is the failure mode this command exists
     /// for, and it is invisible without asking.
@@ -2172,6 +2172,18 @@ fn have_tool(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The run flags cgroup delegation gates, named for the user. ONLY flags that
+/// `container run` actually has — `--pids-limit`/`--memory-swap`/`--cpuset-mems`/
+/// `--io-max` are Docker's spellings this engine deliberately does NOT ship
+/// (`main.rs::advisory_flag_tests`), so advisory text must never print them. The
+/// `delegation_labels_name_only_real_flags` test holds this honest. The `pids`
+/// controller IS delegated and used (a default `pids.max`), but there is no
+/// per-`run` pids flag to advertise — compose's `deploy.resources.limits.pids`
+/// is where a pids cap is set.
+pub(crate) const DELEGATION_CHECK_LABEL: &str = "cgroup2 delegation (--memory/--cpus)";
+pub(crate) const DELEGATION_LIMITS_APPLY: &str = "APPLY — --memory/--cpus take effect";
+pub(crate) const DELEGATION_LIMITS_INERT: &str = "INERT — --memory/--cpus are accepted and ignored";
+
 /// `system doctor` — the host prerequisites, measured.
 ///
 /// # Why this is a command and not a paragraph in the README
@@ -2186,7 +2198,7 @@ fn have_tool(bin: &str) -> bool {
 ///   success — and the boundary does not exist. Measured 2026-08-12 in a clean
 ///   VM: `teamA` reached `teamB`. It is the most expensive silent failure this
 ///   engine can have, because the thing that fails reads as applied.
-/// - **cgroup delegation.** Without it `-m`/`--cpus`/`--pids-limit` are
+/// - **cgroup delegation.** Without it `-m`/`--cpus` are
 ///   accepted and ignored — the limits go nowhere and nothing says so.
 /// - **subuid/subgid.** Without a range the userns maps a single uid, and
 ///   images that need more than one user break in confusing ways.
@@ -2229,7 +2241,7 @@ fn cmd_doctor(strict: bool) -> Result<()> {
 
     let limits = runtime::cgroup_limits_apply();
     checks.push(Check {
-        name: "cgroup2 delegation (--memory/--cpus/--pids-limit)",
+        name: DELEGATION_CHECK_LABEL,
         ok: Some(limits),
         detail: runtime::current_cgroup_v2().unwrap_or_else(|| "<unknown>".into()),
         fix: "systemd-run --user --scope -p Delegate=yes -- delonix … \
@@ -2502,7 +2514,7 @@ pub(crate) const DELEGATE_DROPIN: &str =
 pub(crate) const DELEGATE_LINE: &str = "Delegate=cpu cpuset io memory pids";
 const DELEGATE_BODY: &str = "# Written by `delonix system setup --delegate`.\n\
                              # Gives each user's systemd manager a delegated cgroup subtree, so\n\
-                             # rootless containers can carry --memory/--cpus/--pids-limit AND a\n\
+                             # rootless containers can carry --memory/--cpus AND a\n\
                              # Kubernetes node can boot (its entrypoint refuses without `cpu`).\n\
                              #\n\
                              # The controllers are NAMED rather than `Delegate=yes`: on this host\n\
@@ -2820,9 +2832,9 @@ fn diagnose_this_process(rootless: bool) -> Verdict {
     println!(
         "  limits:   {}",
         if ok {
-            super::po::t("APPLY — --memory/--cpus/--pids-limit take effect")
+            super::po::t(DELEGATION_LIMITS_APPLY)
         } else {
-            super::po::t("INERT — --memory/--cpus/--pids-limit are accepted and ignored")
+            super::po::t(DELEGATION_LIMITS_INERT)
         }
     );
 
