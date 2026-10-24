@@ -1,0 +1,11 @@
+info Creating cluster "relc-k8s"
+ • Ensuring node image (kindest/node:v1.34.0) 🖼
+ ✓ Ensuring node image (kindest/node:v1.34.0) 🖼 0.0s
+ • Preparing nodes (1) 📦
+c5200fb54c24550e
+ ✓ Preparing nodes (1) 📦 24.5s
+ • Writing configuration 📜
+ ✓ Writing configuration 📜 0.0s
+ • Starting control-plane 🕹️
+ ✗ Starting control-plane 🕹️ 4m20s
+error[DX-1000] invalid argument: kubeadm init failed on node 'relc-k8s-control-plane' (exit 137)

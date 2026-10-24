@@ -1,0 +1,22 @@
+info Creating cluster "relccluster"
+ • Ensuring node image (kindest/node:v1.34.0) 🖼
+ ✓ Ensuring node image (kindest/node:v1.34.0) 🖼 0.0s
+ • Preparing nodes (1) 📦
+5fb74e123ee80269
+ ✓ Preparing nodes (1) 📦 25.8s
+ • Writing configuration 📜
+ ✓ Writing configuration 📜 0.0s
+ • Starting control-plane 🕹️
+ ✓ Starting control-plane 🕹️ 1m07s
+ • Installing CNI (kindnet) 🔌
+ ✓ Installing CNI (kindnet) 🔌 0.2s
+ • Waiting for control-plane to be Ready ⏳
+ ✓ Waiting for control-plane to be Ready ⏳ 19.3s
+kubeconfig: /home/walter/.local/share/delonix/clusters/relccluster-kubeconfig.yaml
+ • Setting kubectl context to "delonix-relccluster" 📇
+ ✓ Setting kubectl context to "delonix-relccluster" 📇 0.0s
+
+You can now use your cluster:
+
+  kubectl cluster-info --context delonix-relccluster
+

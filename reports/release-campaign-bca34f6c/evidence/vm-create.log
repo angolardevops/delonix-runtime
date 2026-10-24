@@ -1,0 +1,17 @@
+Creating VM 'relcvm'…
+ • preparing the overlay disk 💽
+ ✓ preparing the overlay disk 💽 0.0s
+ • configuring the network 🌐
+ ✓ configuring the network 🌐 0.1s
+ • defining the domain 📋
+ ✓ defining the domain 📋 0.0s
+ • starting the VM ▶
+ ✓ starting the VM ▶ 0.9s
+✓ VM 'relcvm' started.
+relcvm
+
+Next steps:
+  delonix vm console relcvm      # open the serial console (back to host: Ctrl+D)
+  delonix vm ls                  # state, backend and IP
+  delonix describe vm relcvm     # full details
+  delonix vm stop relcvm         # stop it (keeps the disk)
