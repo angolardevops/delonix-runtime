@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **115** |
+| supported | 103 | 112 | **116** |
 | partial | 93 | 86 | 87 |
-| not-implemented | 74 | 72 | 69 |
+| not-implemented | 74 | 72 | 68 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **115/274 (42.0%)** |
+| proved/applicable (N2) | — | 112/273 | **116/274 (42.3%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -51,9 +51,12 @@ Integração: as duas frentes paralelas correram cada uma na sua worktree off de
 - `9b35fffd`+`e28ea711` feat+merge — **cobertura CRI de `shareProcessNamespace`**: `lifecycle.rs` lê `namespace_options.pid==POD`, persiste `SandboxRec.shared_pid` e liga `pod_shared_pid`+`pod_infra_pid` (pid-âncora = 1.º membro vivo) nos membros SDN nativos. 95 testes delonix-cri + 2 novos. Matriz intocada (cobertura; já era supported via CLI). Provado por teste de unidade da decisão (não por pod CRI real — precisaria de kubelet).
 - `288b0f48`+`9a2ca746` feat+merge — **`metrics.prometheus` partial→supported (§14)**: os gauges por-container eram só de contenção (throttling/PSI); acrescentei `workload_cpu_usage_seconds_total` + `workload_memory_current_bytes` (sempre presentes no cgroup v2). Scrape live provou as séries por container (mem 331776 B). supported 114→115.
 
+- `e6624da7`+`d6f024c4` feat+merge — **PID partilhado em `--net host`/CNI**: provado empiricamente ao vivo que é IMPOSSÍVEL rootless (`setns(CLONE_NEWPID)` exige `CAP_SYS_ADMIN` na userns dona da pid ns; userns irmã nem abre `ns/pid`). Em vez de silêncio, `lifecycle.rs` passa a RECUSAR com erro accionável (nomeia o fix: largar hostNetwork). pod.shared-pid mantém-se supported pelo caminho nativo. CNI rootless (`DELONIX_CNI=1`) não afetado. Matriz intocada.
+- `ad2e7358`+`cb89aee6` feat+merge — **`host.capacity` not-impl→supported (§4/§9/§14)**: o reporte já existia (`node.rs:362 capacity()`, servido em `/v1/node/capacity`, e2e-testado) — só a classificação estava errada. Live: allocatable < total (CPU 17000/20000 millis; mem 53/62 GiB) confirma que reflete o cgroup delegado rootless, não a máquina. supported 115→116.
+
 ## Próximas frentes (fila)
 
-1. Cablar PID partilhado para os caminhos `--net host`/CNI (ficou fora por fronteira de userns) (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
+1. `provider.events` watch-stream (linux partial: "no watch stream, WatchEvents unserved") (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
 2. Restauro de snapshot com dados (§7/§14): provar recuperabilidade, não só criação.
 3. Candidatos B restantes: CH `vm.network.bridge` (adapter ignora `net_mode`).
 4. Frentes com ambiente dedicado: Proxmox via nó `pve`, rede multi-node, storage, GPU (sem hardware → pendente).
