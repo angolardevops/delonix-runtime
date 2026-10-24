@@ -96,6 +96,46 @@ assert_contains() { # ficheiro_ou_stdin agulha mensagem
   if printf '%s' "$hay" | grep -qF -- "$needle"; then ok "$msg"; else die "$msg (não encontrei: $needle)"; fi
 }
 
+# --- rede de utilizador: DNS interno e alcançabilidade dirigida ---------------
+# Resolução de nome PELO DNS interno, de DENTRO de um container (getent, musl).
+# Ecoa o IP (primeira coluna da 1.ª linha) ou vazio se não resolver.
+container_resolves() { # CONTAINER NOME -> IP ou vazio
+  "${DELONIX}" container exec "$1" getent hosts "$2" 2>/dev/null | awk 'NR==1{print $1}'
+}
+
+# Sonda TCP feita DE DENTRO da rede — o único ponto de vista que vê a política.
+# Ecoa exactamente UM token, para o chamador NÃO confundir três desfechos:
+#   REACH  — a porta respondeu (ligação TCP estabelecida)
+#   BLOCK  — recusada/sem rota (política ou serviço) dentro do timeout
+#   NOTOOL — não há `nc` no provador: NÃO é bloqueio, é falta de ferramenta
+_probe_body() { # ALVO PORTA TIMEOUT -> script sh que ecoa o token
+  printf 'command -v nc >/dev/null 2>&1 || { echo NOTOOL; exit 0; }; if nc -z -w%s %s %s 2>/dev/null; then echo REACH; else echo BLOCK; fi' "$3" "$1" "$2"
+}
+# A partir de um container JÁ a correr (par com identidade — ex. a app autorizada).
+container_reaches() { # CONTAINER ALVO PORTA [timeout_s]
+  "${DELONIX}" container exec "$1" sh -c "$(_probe_body "$2" "$3" "${4:-3}")" 2>/dev/null | tail -1
+}
+# A partir de um container EFÉMERO novo na rede (o "terceiro" sem identidade).
+ephemeral_reaches() { # REDE IMAGEM ALVO PORTA [timeout_s]
+  "${DELONIX}" container run --rm --net "$1" "$2" sh -c "$(_probe_body "$3" "$4" "${5:-3}")" 2>/dev/null | tail -1
+}
+
+# Assere alcançabilidade do par AUTORIZADO com repetição (o alvo pode estar a
+# aquecer — ex. o postgres demora a abrir o 5432). Distingue serviço-em-baixo de
+# falta de ferramenta; só passa quando o token é exactamente REACH.
+assert_reach() { # CONTAINER ALVO PORTA [timeout_s] [rótulo]
+  local c="$1" host="$2" port="$3" timeout="${4:-20}" label="${5:-$1→$2:$3}" tok=""
+  for _ in $(seq 1 "${timeout}"); do
+    tok="$(container_reaches "$c" "$host" "$port" 2)"
+    case "$tok" in
+      REACH)  ok "${label}: porta ${port} responde (REACH, de dentro da rede)"; return 0 ;;
+      NOTOOL) die "${label}: sem 'nc' em '${c}' — não consigo provar alcançabilidade (não é bloqueio, é ferramenta em falta)" ;;
+    esac
+    sleep 1
+  done
+  die "${label}: o par AUTORIZADO não alcança ${host}:${port} (último: ${tok:-vazio}) — serviço em baixo, NÃO política"
+}
+
 # --- cgroup v2 (limites rootless) --------------------------------------------
 # PID do processo-raiz do container. `container inspect` devolve um ARRAY
 # (ADR-0005), por isso lemos `[0].pid` — com python3, não com jq.

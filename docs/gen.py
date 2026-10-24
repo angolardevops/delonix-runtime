@@ -4955,7 +4955,15 @@ delonix container run --rm --net loja alpine sh -c 'nc -z -w2 db 5432 || echo BL
 delonix container rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 3 diz "porta aberta" e o
 passo 5 diz "BLOQUEADO". A mesma rede, dois resultados — é isso que
-<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>"""),
+<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — a app resolve a <code>db</code> pelo
+nome (<code>getent hosts db</code> → IP) e a porta responde ao par autorizado — e
+<strong>falha em voz alta</strong> se a <code>db</code> ficar aberta a todos
+(o terceiro container ainda a alcançar), distinguindo «bloqueado por política» de
+«serviço em baixo», em vez de passar em silêncio, em <code>docs/labs/lab-3/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
+Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
 
     ("lab-4", "Do Dockerfile à imagem, sem daemon", "intermédio", """
 <p>Objectivo: construir uma imagem e correr o que construíste.</p>
@@ -5234,7 +5242,15 @@ delonix container run --rm --net shop alpine sh -c 'nc -z -w2 db 5432 || echo BL
 delonix container rm -f db app; delonix network rm shop; rm dep.yaml</code></pre>
 <p class="note"><strong>Verification:</strong> step 3 says "port open" and
 step 5 says "BLOCKED". Same network, two different outcomes — that's what
-<code>kind: Dependency</code> does that a plain network alone doesn't.</p>"""),
+<code>kind: Dependency</code> does that a plain network alone doesn't.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — the app resolves <code>db</code> by
+name (<code>getent hosts db</code> → IP) and the port answers the authorized peer —
+and it <strong>fails loudly</strong> if <code>db</code> is left open to everyone
+(the third container still reaching it), telling "blocked by policy" apart from
+"service down" instead of passing silently, under <code>docs/labs/lab-3/</code>:
+<code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
+Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
 
     "lab-4": ("From Dockerfile to image, no daemon", "intermediate", """
 <p>Goal: build an image and run what you built.</p>
