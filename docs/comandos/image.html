@@ -548,7 +548,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix image remove alpine:3.19</code></pre></div>
 <h2 id='export'><code>image export</code></h2>
 <p class='intro'>Export an OCI runtime bundle (rootfs + config.json) for <code>runc</code>/<code>crun</code></p>
-<div class='help'><pre><code>Usage: delonix image export &lt;IMAGE&gt; &lt;DIR&gt;
+<div class='help'><pre><code>Usage: delonix image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
 
 Arguments:
   &lt;IMAGE&gt;
@@ -558,6 +558,9 @@ Arguments:
           
 
 Options:
+      --rootless
+          Emit a ROOTLESS bundle: add a user namespace and the current user&#x27;s uid/gid mappings (container root -&gt; your uid, then the delegated subuids), so `runc`/`crun` run it without root. Without it the bundle has no mappings and only runs as real root (`runc` refuses it rootless with &quot;requires user namespaces&quot;). The mappings are specific to THIS user, so the bundle is tied to this host&#x27;s `/etc/subuid`
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
