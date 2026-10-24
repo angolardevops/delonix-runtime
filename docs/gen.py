@@ -4851,16 +4851,17 @@ KINDS_DOC_EN = [
 # confirmar o resultado ensina a copiar comandos, não a usar a ferramenta.
 LABS = [
     ("lab-1", "Primeiro serviço, em 60 segundos", "iniciante", """
-<p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver
-que não há daemon nenhum por baixo.</p>
+<p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver,
+com rigor, o que «daemonless» quer dizer neste motor.</p>
 <pre><code># 1. Um serviço web, em segundo plano, publicado na porta 8080 do host
 delonix container run -d --name web -p 8080:80 nginx:alpine
 
 # 2. Confirmar — o STATUS diz há quanto tempo está de pé
 delonix container ps
 
-# 3. A prova de que não há daemon: NENHUM processo residente do motor
-pgrep -a delonix || echo "sem daemon — o container é filho do init do host"
+# 3. O que «daemonless» É: não há um daemon central arrancado no boot.
+#    Mas cada recurso tem holders leves — repara em QUEM os pariu (coluna PPID):
+ps -o pid,ppid,comm,args -C delonix
 
 # 4. Falar com ele
 curl -s localhost:8080 | head -3
@@ -4873,9 +4874,18 @@ delonix container logs web | tail -5
 
 # 7. Limpar
 delonix container rm -f web</code></pre>
-<p class="note"><strong>Verificação:</strong> o passo 3 não imprime processo
-nenhum do motor. Um container a correr sem supervisor residente é a diferença
-de fundo para o Docker, e vê-se aqui em duas linhas.</p>"""),
+<p class="note"><strong>Verificação:</strong> o passo 3 mostra alguns processos
+<code>delonix</code> — tipicamente <code>netns pin</code>, <code>netns control</code>
+e o holder do próprio <code>run</code> — e o PPID de todos é o
+<code>systemd --user</code> do teu utilizador, não um serviço do sistema. É esta
+a diferença de fundo para o Docker: <em>não</em> há um <code>dockerd</code> central
+a supervisionar tudo; há um holder mínimo por recurso, que morre com o recurso.
+(Num host tranquilo e sem <code>-p</code> podes nem ver holder nenhum.)</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> (HTTP 200 — não um exit-code isolado),
+em <code>docs/labs/lab-1/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-1/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
+(Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
 
     ("lab-2", "Limites de recursos que pegam mesmo", "iniciante", """
 <p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
@@ -5112,16 +5122,17 @@ este lab nunca apagar mais do que os dois recursos que ele próprio criou.</p>""
 # naturalidade de leitura; os comandos em si nunca mudam.
 LABS_EN = {
     "lab-1": ("First service, in 60 seconds", "beginner", """
-<p>Goal: understand the <code>run → ps → logs → exec → rm</code> cycle and see
-that there's no daemon underneath.</p>
+<p>Goal: understand the <code>run → ps → logs → exec → rm</code> cycle and see,
+precisely, what «daemonless» means in this engine.</p>
 <pre><code># 1. A web service, in the background, published on host port 8080
 delonix container run -d --name web -p 8080:80 nginx:alpine
 
 # 2. Confirm — STATUS shows how long it's been up
 delonix container ps
 
-# 3. Proof there's no daemon: NO resident engine process
-pgrep -a delonix || echo "no daemon — the container is a child of the host's init"
+# 3. What «daemonless» IS: no central daemon is started at boot.
+#    But each resource has lightweight holders — note WHO spawned them (PPID):
+ps -o pid,ppid,comm,args -C delonix
 
 # 4. Talk to it
 curl -s localhost:8080 | head -3
@@ -5134,9 +5145,19 @@ delonix container logs web | tail -5
 
 # 7. Clean up
 delonix container rm -f web</code></pre>
-<p class="note"><strong>Verification:</strong> step 3 prints no engine process
-at all. A container running with no resident supervisor is the fundamental
-difference from Docker, and you can see it here in two lines.</p>"""),
+<p class="note"><strong>Verification:</strong> step 3 shows a few
+<code>delonix</code> processes — typically <code>netns pin</code>,
+<code>netns control</code> and the <code>run</code> holder itself — and every
+one's PPID is your own <code>systemd --user</code>, not a system service. That is
+the fundamental difference from Docker: there is <em>no</em> central
+<code>dockerd</code> supervising everything; there's a minimal holder per
+resource, which dies with the resource. (On a quiet host with no <code>-p</code>
+you may see no holder at all.)</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result (HTTP 200 — not an isolated exit
+code), under <code>docs/labs/lab-1/</code>: <code>prepare → run → verify →
+cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Validated on
+<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
 
     "lab-2": ("Resource limits that actually take", "beginner", """
 <p>Goal: find out whether this host enforces limits — and what to do when it
