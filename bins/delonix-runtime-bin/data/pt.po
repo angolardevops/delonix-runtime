@@ -16985,3 +16985,9 @@ msgstr "Segundos a esperar antes de desistir (saída 124). Só na forma de manif
 
 msgid "`delonix wait <container>…` is the container form (docker wait); `-f`/`--timeout` belong to the manifest form `delonix wait -f <file>`. Use one or the other, not both."
 msgstr "`delonix wait <container>…` é a forma de container (docker wait); `-f`/`--timeout` pertencem à forma de manifesto `delonix wait -f <file>`. Usa uma ou a outra, não ambas."
+
+msgid "  config.json carries this user's uid/gid mappings (--rootless): runc/crun run it without root."
+msgstr "  config.json leva os mapeamentos uid/gid deste utilizador (--rootless): runc/crun correm-no sem root."
+
+msgid "  config.json declares no uid/gid mappings, so runc reads these ids literally. Export with --rootless for a bundle that carries them."
+msgstr "  config.json não declara mapeamentos uid/gid, logo o runc lê estes ids à letra. Exporta com --rootless para um bundle que os carregue."

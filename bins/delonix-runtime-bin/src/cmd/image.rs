@@ -9,8 +9,9 @@ use delonix_model::{Error, Result};
 use delonix_oci::ImageStore;
 use oci_spec::runtime::{
     get_default_maskedpaths, get_default_mounts, get_default_namespaces,
-    get_default_readonly_paths, Capability, LinuxBuilder, LinuxCapabilitiesBuilder, ProcessBuilder,
-    RootBuilder, Spec, SpecBuilder, User,
+    get_default_readonly_paths, Arch, Capability, LinuxBuilder, LinuxCapabilitiesBuilder,
+    LinuxIdMappingBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, LinuxSeccompAction,
+    LinuxSeccompBuilder, LinuxSyscallBuilder, ProcessBuilder, RootBuilder, Spec, SpecBuilder, User,
 };
 use serde::{Deserialize, Serialize};
 
@@ -355,6 +356,14 @@ pub enum ImageCmd {
         image: String,
         #[arg(value_hint = clap::ValueHint::DirPath)]
         dir: PathBuf,
+        /// Emit a ROOTLESS bundle: add a user namespace and the current user's
+        /// uid/gid mappings (container root -> your uid, then the delegated
+        /// subuids), so `runc`/`crun` run it without root. Without it the bundle
+        /// has no mappings and only runs as real root (`runc` refuses it rootless
+        /// with "requires user namespaces"). The mappings are specific to THIS
+        /// user, so the bundle is tied to this host's `/etc/subuid`.
+        #[arg(long)]
+        rootless: bool,
     },
     /// Save an image to a portable archive (`docker save`'s counterpart).
     ///
@@ -473,7 +482,11 @@ pub fn run(action: ImageCmd) -> Result<()> {
         ImageCmd::Sbom { image } => super::scan::cmd_sbom(&image),
         ImageCmd::Remove(RemoveArgs { image, force }) => cmd_rm(&images, &store, &image, force),
         ImageCmd::Prune { force, all } => cmd_prune(&images, &store, force, all),
-        ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
+        ImageCmd::Export {
+            image,
+            dir,
+            rootless,
+        } => cmd_export(&images, &image, &dir, rootless),
         ImageCmd::Save(SaveArgs { image, output }) => cmd_save(&images, &image, &output),
         ImageCmd::Load(LoadArgs { input }) => cmd_load(&images, &input),
         ImageCmd::Apply { file } => {
@@ -1198,6 +1211,7 @@ fn report_bundle_owners(
     images: &ImageStore,
     img: &delonix_oci::image::Image,
     rootfs: &std::path::Path,
+    rootless: bool,
 ) {
     let owners = match images.image_owners(img) {
         Ok(o) => o,
@@ -1257,21 +1271,35 @@ fn report_bundle_owners(
             )
         );
     }
-    eprintln!(
-        "{}",
-        super::po::t(
-            "  config.json declares no uid/gid mappings, so runc reads these ids literally. Export as real root for a bundle that carries them."
-        )
-    );
+    if rootless {
+        eprintln!(
+            "{}",
+            super::po::t(
+                "  config.json carries this user's uid/gid mappings (--rootless): runc/crun run it without root."
+            )
+        );
+    } else {
+        eprintln!(
+            "{}",
+            super::po::t(
+                "  config.json declares no uid/gid mappings, so runc reads these ids literally. Export with --rootless for a bundle that carries them."
+            )
+        );
+    }
 }
 
-fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Result<()> {
+fn cmd_export(
+    images: &ImageStore,
+    reference: &str,
+    dir: &std::path::Path,
+    rootless: bool,
+) -> Result<()> {
     let img = resolve_or_pull(images, reference)?;
     std::fs::create_dir_all(dir)
         .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dir.display())))?;
     let rootfs = dir.join("rootfs");
     images.export_rootfs(&img, &rootfs)?;
-    report_bundle_owners(images, &img, &rootfs);
+    report_bundle_owners(images, &img, &rootfs, rootless);
     let args = effective_command(&img, &[]);
     let args = if args.is_empty() {
         vec!["/bin/sh".to_string()]
@@ -1283,7 +1311,7 @@ fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Re
     } else {
         img.config.working_dir.clone()
     };
-    let spec = build_runtime_spec(args, img.config.env.clone(), cwd)?;
+    let spec = build_runtime_spec(args, img.config.env.clone(), cwd, rootless)?;
     let cfg = dir.join("config.json");
     let json = serde_json::to_vec_pretty(&spec)
         .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("serializing OCI spec"))))?;
@@ -1326,7 +1354,12 @@ fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Re
 ///    (least privilege, consistent with `noNewPrivileges`).
 /// 3. **`maskedPaths`/`readonlyPaths`** — standard hardening (`/proc/kcore`, …)
 ///    that the previous bundle omitted entirely.
-fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Result<Spec> {
+fn build_runtime_spec(
+    args: Vec<String>,
+    env: Vec<String>,
+    cwd: String,
+    rootless: bool,
+) -> Result<Spec> {
     let mkerr = |what: &'static str| {
         move |e: oci_spec::OciSpecError| Error::Invalid(format!("{what}: {e}"))
     };
@@ -1372,15 +1405,86 @@ fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Resul
     // Standard namespaces/masked/readonly-paths of the `runc spec` — the
     // conformance target. (Includes an isolated network namespace, like the `runc spec`;
     // whoever wants host networking edits the `config.json`.)
-    let linux = LinuxBuilder::default()
-        .namespaces(get_default_namespaces())
+    // GAP-RT-3: carry THIS engine's own syscall allowlist as an OCI seccomp
+    // profile. The engine enforces seccomp in its own init, but an exported
+    // bundle is run by `runc`/`crun`, which take the policy from `config.json` —
+    // without this the bundle ran with NO seccomp at all. default-deny
+    // (`SCMP_ACT_ERRNO`) + allow exactly the engine's own list, resolved to names
+    // from the same table `syscall_number` uses, so the bundle and the engine
+    // enforce the SAME policy (no drift, no vendored upstream profile). The
+    // architectures are the export host's (x86_64 + its 32-bit compat); a bundle
+    // for another arch is a documented follow-up.
+    let allow_rule = LinuxSyscallBuilder::default()
+        .names(
+            delonix_linux::allowed_syscall_names()
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>(),
+        )
+        .action(LinuxSeccompAction::ScmpActAllow)
+        .build()
+        .map_err(mkerr("seccomp syscall rule"))?;
+    let seccomp = LinuxSeccompBuilder::default()
+        .default_action(LinuxSeccompAction::ScmpActErrno)
+        .architectures(vec![Arch::ScmpArchX86_64, Arch::ScmpArchX86])
+        .syscalls(vec![allow_rule])
+        .build()
+        .map_err(mkerr("seccomp"))?;
+
+    // GAP-RT-2: a ROOTLESS bundle adds a user namespace and this user's id
+    // mappings, so `runc`/`crun` run it without root (as-is the bundle has no
+    // mappings and runc refuses it rootless, "requires user namespaces"). The
+    // mapping mirrors the engine's OWN rootless map (`write_userns_maps`):
+    // container 0 -> our euid (1 id), then container 1.. -> the delegated subuids
+    // (`USERNS_UID_BASE`), so container root is an unprivileged host uid. The
+    // mappings are specific to this user; a root bundle is still the default.
+    let mut namespaces = get_default_namespaces();
+    let mut linux_builder = LinuxBuilder::default();
+    if rootless {
+        namespaces.push(
+            LinuxNamespaceBuilder::default()
+                .typ(LinuxNamespaceType::User)
+                .build()
+                .map_err(mkerr("user namespace"))?,
+        );
+        // SAFETY: geteuid/getegid have no preconditions and cannot fail.
+        let (euid, egid) = unsafe { (libc::geteuid(), libc::getegid()) };
+        let base = delonix_linux::USERNS_UID_BASE;
+        let sub_range = delonix_linux::USERNS_RANGE - 1; // container 1..RANGE
+        let id_maps = |root_host: u32| -> Result<Vec<_>> {
+            Ok(vec![
+                LinuxIdMappingBuilder::default()
+                    .container_id(0u32)
+                    .host_id(root_host)
+                    .size(1u32)
+                    .build()
+                    .map_err(mkerr("id mapping"))?,
+                LinuxIdMappingBuilder::default()
+                    .container_id(1u32)
+                    .host_id(base)
+                    .size(sub_range)
+                    .build()
+                    .map_err(mkerr("id mapping"))?,
+            ])
+        };
+        linux_builder = linux_builder
+            .uid_mappings(id_maps(euid)?)
+            .gid_mappings(id_maps(egid)?);
+    }
+    let linux = linux_builder
+        .namespaces(namespaces)
         .masked_paths(get_default_maskedpaths())
         .readonly_paths(get_default_readonly_paths())
+        .seccomp(seccomp)
         .build()
         .map_err(mkerr("linux"))?;
 
     SpecBuilder::default()
-        .version("1.0.2")
+        // Match the runtime-spec version `runc`/`crun` themselves emit (`runc spec`
+        // on 1.5.2 → "1.3.0"). The old "1.0.2" made modern OCI tooling
+        // (`oci-runtime-tool validate`, which only handles the current spec) refuse
+        // the bundle outright, even though its shape was conformant. GAP-RT-1.
+        .version("1.3.0")
         .hostname("delonix")
         .root(root)
         .process(process)
@@ -1407,14 +1511,89 @@ mod tests {
             ],
             vec!["PATH=/usr/bin".to_string()],
             "/work".to_string(),
+            false,
         )
         .expect("build spec");
 
         let json = serde_json::to_vec(&spec).expect("serializar");
         let parsed: Spec = serde_json::from_slice(&json).expect("round-trip pelo tipo canónico");
 
-        // ociVersion present and semantically valid.
-        assert_eq!(parsed.version(), "1.0.2");
+        // GAP-RT-2: the default (non-rootless) bundle has NO user namespace and
+        // NO id mappings — it is a real-root bundle.
+        {
+            let linux = parsed.linux().as_ref().expect("linux");
+            assert!(
+                !linux
+                    .namespaces()
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|n| n.typ() == LinuxNamespaceType::User),
+                "default bundle não deve ter user namespace"
+            );
+            assert!(linux.uid_mappings().is_none(), "default: sem uid mappings");
+        }
+
+        // GAP-RT-2: a --rootless bundle DOES carry the user namespace + mappings
+        // (container root -> our euid, then the delegated subuids).
+        let rootless_spec = build_runtime_spec(
+            vec!["/bin/sh".to_string()],
+            vec![],
+            "/".to_string(),
+            true,
+        )
+        .expect("rootless spec");
+        let rlinux = rootless_spec.linux().as_ref().expect("linux");
+        assert!(
+            rlinux
+                .namespaces()
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|n| n.typ() == LinuxNamespaceType::User),
+            "--rootless tem de adicionar o user namespace"
+        );
+        let umaps = rlinux.uid_mappings().as_ref().expect("uid mappings");
+        assert!(
+            umaps.iter().any(|m| m.container_id() == 0 && m.size() == 1),
+            "container uid 0 mapeia para um único uid do host (o nosso)"
+        );
+        assert!(
+            umaps.iter().any(|m| m.container_id() == 1
+                && m.host_id() == delonix_linux::USERNS_UID_BASE),
+            "container uid 1.. mapeia para os subuids delegados"
+        );
+        assert!(rlinux.gid_mappings().is_some(), "--rootless: gid mappings presentes");
+
+        // ociVersion present and the version `runc`/`crun` emit (GAP-RT-1).
+        assert_eq!(parsed.version(), "1.3.0");
+
+        // GAP-RT-3: the bundle carries a seccomp profile (default-deny + the
+        // engine's own allowlist), so a `runc`/`crun` run is not unconfined.
+        let seccomp = parsed
+            .linux()
+            .as_ref()
+            .and_then(|l| l.seccomp().as_ref())
+            .expect("bundle tem de carregar um perfil seccomp (GAP-RT-3)");
+        assert_eq!(
+            seccomp.default_action(),
+            LinuxSeccompAction::ScmpActErrno,
+            "default-deny: tudo o que não está na allowlist devolve ERRNO"
+        );
+        let allowed: Vec<String> = seccomp
+            .syscalls()
+            .as_ref()
+            .expect("regras de syscalls")
+            .iter()
+            .filter(|s| s.action() == LinuxSeccompAction::ScmpActAllow)
+            .flat_map(|s| s.names().clone())
+            .collect();
+        for essential in ["read", "write", "execve", "openat"] {
+            assert!(
+                allowed.iter().any(|n| n == essential),
+                "a allowlist do bundle tem de conter o syscall essencial {essential}"
+            );
+        }
 
         // The central FIX: standard mounts present — in particular `/proc`, without which
         // the container started broken. Before this commit there were no mounts at all.

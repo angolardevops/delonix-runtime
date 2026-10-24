@@ -752,6 +752,26 @@ fn allowed_syscalls() -> Vec<i64> {
     v
 }
 
+/// This engine's own syscall allowlist, rendered as NAMES instead of numbers.
+///
+/// The engine enforces its policy numerically (`allowed_syscalls` → seccompiler
+/// BPF, never a names table). But an exported OCI bundle (`image export`) is run
+/// by `runc`/`crun`, which take the policy as an OCI seccomp JSON keyed by NAME.
+/// This resolves each allowed number back to its name (via the same table
+/// `syscall_number` uses) so the exported bundle can carry the SAME allowlist the
+/// engine itself enforces — no drift, no vendored upstream profile. A number with
+/// no name in the table is skipped (and would be a table gap, not a policy gap).
+/// Sorted and de-duplicated for a stable, reviewable profile.
+pub fn allowed_syscall_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = allowed_syscalls()
+        .into_iter()
+        .filter_map(seccomp_profile::syscall_name)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// Enables `NO_NEW_PRIVS`: an `execve` never gains privileges (nullifies setuid/
 /// setgid/file capabilities). Key defense against escalation — always active.
 fn set_no_new_privs() {
