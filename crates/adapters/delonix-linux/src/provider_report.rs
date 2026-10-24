@@ -202,8 +202,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::MetricsPrometheus => S::Supported {
                 evidence: "e2e:métricas: /metrics expõe gauges por container (cpu/mem)",
             },
-            C::MetricsPerWorkloadNetwork => S::Partial {
-                detail: "rx/tx per container read in its netns by the dashboard collector; not exported per container",
+            C::MetricsPerWorkloadNetwork => S::Supported {
+                evidence: "e2e:métricas: /metrics expõe rx/tx de rede por container",
             },
             C::HostHealth => S::Supported {
                 evidence: "check:system info",

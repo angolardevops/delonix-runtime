@@ -268,6 +268,8 @@ mod tests {
             name: "svc".into(),
             cpu_usage_usec: None,
             memory_current_bytes: None,
+            net_rx_bytes: None,
+            net_tx_bytes: None,
             cpu_throttle: Some(CpuThrottle {
                 nr_periods: 10,
                 nr_throttled: 3,

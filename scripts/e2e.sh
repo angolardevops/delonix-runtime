@@ -9036,6 +9036,68 @@ else
 fi
 
 ########################################
+section "métricas: /metrics expõe rx/tx de rede por container"
+########################################
+# §14 "metrics.network.per-workload": para CADA container com netns própria, o
+# `/metrics` exporta duas séries COUNTER com as labels kind/id/name —
+# `workload_network_receive_bytes_total` e `workload_network_transmit_bytes_total`
+# — lidas de /proc/net/dev DENTRO da netns do container (todas as interfaces,
+# não só eth0). Ao contrário das de cpu/mem (lidas inline no scrape), a rede
+# precisa de um `nsenter` por container, caro demais no scrape, por isso é
+# recolhida pelo refresh de fundo e servida da cache; o primeiro ciclo corre no
+# arranque da API, daí o polling abaixo. Containers `--net host/none` não têm
+# netns e NÃO aparecem (ausente != zero). Este check arranca um container COM
+# rede, gera tráfego de dentro, faz o SCRAPE real e confirma as duas séries com
+# o id/nome do container. É a prova viva por trás de
+# MetricsPerWorkloadNetwork=supported (provider_report.rs).
+MGMTSOCK="/tmp/dlxe2e-mgmtnet-$$.sock"
+if [[ $E2E_HAVE_IMAGE -eq 1 ]] && command -v curl >/dev/null; then
+  _mc="metricsnet-$PFX"
+  _mnet="metricsnet-net-$PFX"
+  # COM netns própria: attachado a uma bridge custom, ao contrário do default
+  # (`net_mode: host`, sem netns) e do check de cpu/mem que usa --net none —
+  # sem netns não há rx/tx por container para medir.
+  "$BIN" network create "$_mnet" --subnet 10.231.0.0/16 >/dev/null 2>&1 || true
+  if check_then "métricas rede: o container de prova arranca com rede (container run -d --net)" ok \
+       "$BIN" container run -d --name "$_mc" --net "$_mnet" "$IMG" sleep 120; then
+    # Tráfego para a série ter bytes plausíveis: pings à gateway de dentro da
+    # netns (best-effort — a série existir já é a prova; os bytes reforçam-na).
+    "$BIN" container exec "$_mc" sh -c \
+      'GW=$(ip route 2>/dev/null | awk "/default/{print \$3; exit}"); [ -n "$GW" ] && ping -c 5 -W 1 "$GW" >/dev/null 2>&1 || true' \
+      >/dev/null 2>&1 || true
+    "$BIN" serve api --addr "unix://$MGMTSOCK" >"$OUT/mgmt-api-net.log" 2>&1 &
+    MGMTPID=$!
+    for _ in $(seq 100); do [[ -S "$MGMTSOCK" ]] && break; sleep 0.05; done
+    # A cache de rede enche no 1º ciclo do refresh de fundo; sonda o /metrics até
+    # a série aparecer (ou desiste ao fim de ~40s).
+    for _ in $(seq 80); do
+      curl -s --unix-socket "$MGMTSOCK" http://localhost/metrics \
+        | grep -q "delonix_workload_network_receive_bytes_total{kind=\"container\",id=\"[^\"]*\",name=\"$_mc\"}" && break
+      sleep 0.5
+    done
+    check "métricas rede: /metrics tem rx e tx por container com o id/nome e valor plausível" ok env \
+      MET="$(curl -s --unix-socket "$MGMTSOCK" http://localhost/metrics)" MCN="$_mc" \
+      python3 -c '
+import os,re
+met=os.environ["MET"]; name=os.environ["MCN"]
+rx=re.search(r"delonix_workload_network_receive_bytes_total\{kind=\"container\",id=\"[^\"]+\",name=\""+re.escape(name)+r"\"\} ([0-9.eE+]+)", met)
+tx=re.search(r"delonix_workload_network_transmit_bytes_total\{kind=\"container\",id=\"[^\"]+\",name=\""+re.escape(name)+r"\"\} ([0-9.eE+]+)", met)
+assert rx, "sem workload_network_receive_bytes_total para "+name+"\n"+met
+assert tx, "sem workload_network_transmit_bytes_total para "+name+"\n"+met
+assert float(rx.group(1))>=0 and float(tx.group(1))>=0, "bytes negativos?!"
+'
+    kill "$MGMTPID" 2>/dev/null || true
+  fi
+  "$BIN" container rm -f "$_mc" >/dev/null 2>&1 || true
+  "$BIN" network rm "$_mnet" >/dev/null 2>&1 || true
+  rm -f "$MGMTSOCK"
+  unset _mc _mnet
+else
+  skip "métricas rede: /metrics tem rx e tx por container com o id/nome e valor plausível" \
+       "sem imagem base ($IMG) ou sem curl no host"
+fi
+
+########################################
 section "cluster kind, ao vivo (E2E_CLUSTER=1)"
 ########################################
 # Um cluster kind REAL de ponta a ponta: `cluster create` single-node a Ready, e

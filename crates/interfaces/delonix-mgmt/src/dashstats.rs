@@ -13,7 +13,9 @@
 //! cgroup/netns access of `delonix-linux`/`delonix-vm`/`delonix-sdn`/
 //! `delonix-oci`/`delonix-volume` — adapters a lower layer cannot depend on.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use delonix_linux::pressure::{self, CgroupSeries, Why};
@@ -383,9 +385,44 @@ pub fn publish_to_metrics(s: &DashSummary) {
     }
 }
 
+/// Last-known per-container network bytes (`id -> (rx, tx)`), refreshed by the
+/// background loop (`spawn_expensive_metrics_refresh`) via
+/// [`publish_container_net_cache`] and merged into the inline per-workload
+/// snapshot by [`collect_workload_series`].
+///
+/// WHY A CACHE (and not read inline like cpu/mem): a container's rx/tx live in
+/// its netns, reachable only by an `nsenter`+`cat` per container — the exact
+/// cost the `/metrics` handler keeps OFF the scrape path (it already passes
+/// `include_network=false` to [`collect`]; see `lib.rs::metrics`). So network
+/// follows the aggregate's pattern: refreshed on the slow background cadence and
+/// served stale-but-never-wrong, while cpu/mem stay fresh-every-scrape.
+static CONTAINER_NET_CACHE: LazyLock<Mutex<HashMap<String, (u64, u64)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Replaces the per-container network cache read by [`collect_workload_series`].
+/// Called from the background refresh loop with the latest netns reads.
+pub fn publish_container_net_cache(map: HashMap<String, (u64, u64)>) {
+    *CONTAINER_NET_CACHE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = map;
+}
+
+fn container_net_from_cache(id: &str) -> Option<(u64, u64)> {
+    CONTAINER_NET_CACHE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(id)
+        .copied()
+}
+
 /// Per-workload contention series (CPU throttling, pressure, OOM) for every
 /// RUNNING container and VM, read from cgroup v2 files with no new privilege.
 /// Three to five small file reads per workload, so it is safe on a scrape.
+///
+/// Per-workload network bytes are attached from [`CONTAINER_NET_CACHE`] (the
+/// background loop fills it) — NOT read here, to keep this inline-on-scrape path
+/// free of netns enters. A container absent from the cache (host/none netns, or
+/// not yet sampled) simply carries no network sample.
 ///
 /// A container is read from its own live cgroup. A VM is read only when its
 /// VMM is alone in its cgroup (see [`delonix_linux::pressure::vmm_cgroup`]);
@@ -400,12 +437,13 @@ pub fn collect_workload_series(root: &Path) -> Vec<WorkloadSeries> {
                 delonix_linux::reconcile_status(&mut c);
                 if c.status == Status::Running {
                     let dir = std::path::PathBuf::from(delonix_linux::live_cgroup(&c));
-                    out.push(workload_series(
-                        WorkloadKind::Container,
-                        &c.id,
-                        &c.name,
-                        Ok(dir),
-                    ));
+                    let mut ws =
+                        workload_series(WorkloadKind::Container, &c.id, &c.name, Ok(dir));
+                    if let Some((rx, tx)) = container_net_from_cache(&c.id) {
+                        ws.net_rx_bytes = Some(rx);
+                        ws.net_tx_bytes = Some(tx);
+                    }
+                    out.push(ws);
                 }
             }
         }
@@ -465,6 +503,11 @@ pub fn workload_series(
         name: name.to_string(),
         cpu_usage_usec,
         memory_current_bytes,
+        // Network is NOT a cgroup read: it needs a netns enter, too costly for
+        // the inline scrape path (see the module note on the cache). The caller
+        // fills these from the background-refreshed cache; left `None` here.
+        net_rx_bytes: None,
+        net_tx_bytes: None,
         cpu_throttle,
         cpu_pressure,
         memory_pressure,
