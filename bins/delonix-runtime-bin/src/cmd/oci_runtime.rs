@@ -1,15 +1,18 @@
 //! `delonix oci-runtime` — the engine's own init behind the runc command-line
 //! contract (`create/start/state/kill/delete <id> --bundle <dir> --root <state>`),
 //! so Delonix *is* an OCI runtime, not only a producer of bundles for one
-//! (ADR-0080, GAP-RT-4). This file is Phase 1a: the OCI `state` model and the
-//! pure `config.json` → `Container` translator. The CLI handlers + the live
-//! lifecycle (wiring `create_with`/`send_signal`/`remove`) are Phase 1b.
+//! (ADR-0080, GAP-RT-4). Phase 1a is the OCI `state` model + the pure
+//! `config.json` → `Container` translator; Phase 1b is the CLI handlers + the
+//! live lifecycle (`create_with`/`send_signal`/`remove`); Phase 2 broadens the
+//! translator — `process.user`, bind mounts, CPU bandwidth/weight, an isolated
+//! network namespace — and refuses by name what has no honoured path here
+//! (interactive terminal, per-container pids limit, cpuset, joining a netns).
 //!
 //! The key reuse (see `docs/dev/rt4-phase1-impl-map.md`): `delonix_linux::create_with`
 //! launches from a `Container` + a rootfs PATH, not an image — and a bundle
 //! already carries `rootfs/` + `config.json`, so no image store is involved.
 
-use delonix_compute::Container;
+use delonix_compute::{Container, Mount};
 use delonix_model::records::Status;
 use delonix_model::{Error, Result};
 use delonix_state::Store;
@@ -120,9 +123,16 @@ fn start(store: &Store, id: &str) -> Result<()> {
     let spec = Spec::load(Path::new(&bundle).join("config.json"))
         .map_err(|e| Error::Invalid(format!("oci-runtime: config.json: {e}")))?;
     let (_c2, rootfs) = spec_to_container(id, Path::new(&bundle), &spec)?;
+    // `gather`/`spawn` read uid/gid/mounts from the RunSpec, not the Container
+    // (launch_spec.rs is the engine's own builder): carry them explicitly or the
+    // translated `process.user`/`mounts` become silent no-ops on launch.
     let spec = runtime::RunSpec {
         detach: true,
         userns: c.userns,
+        new_netns: c.net_mode.as_deref() == Some("none"),
+        run_uid: c.run_uid,
+        run_gid: c.run_gid,
+        mounts: c.mounts.clone(),
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
@@ -191,7 +201,7 @@ impl OciState {
 /// `id` names the container; `bundle` is the bundle directory (its `rootfs/` and
 /// `config.json` live there); `spec` is the parsed `config.json`.
 pub fn spec_to_container(id: &str, bundle: &Path, spec: &Spec) -> Result<(Container, String)> {
-    // Refuse-by-name the pieces Phase 1 does not honour, so a caller never
+    // Refuse-by-name the pieces this engine does not honour, so a caller never
     // believes they took effect (the whiteout/--add-host audits' lesson).
     if spec.hooks().is_some() {
         return Err(Error::Invalid(format!(
@@ -211,14 +221,49 @@ pub fn spec_to_container(id: &str, bundle: &Path, spec: &Spec) -> Result<(Contai
             "oci-runtime: config.json `process.args` is empty".to_string(),
         ));
     }
+    // An interactive terminal has no honoured path here (the only pty is the
+    // privileged+detached+logged `/dev/console` for a systemd PID 1, not an OCI
+    // terminal). Refuse `terminal: true` rather than run without the tty the
+    // caller asked for.
+    if process.terminal() == Some(true) {
+        return Err(Error::Invalid(
+            "oci-runtime: config.json `process.terminal: true` — an interactive terminal is not \
+             implemented; set it to false or run it under runc"
+                .to_string(),
+        ));
+    }
 
+    // `linux.resources`: only the controllers delegated to a rootless user on
+    // cgroup2 can be enforced (memory + cpu bandwidth/weight). The rest is
+    // refused by name so a limit the caller set never silently fails to apply.
+    let resources = spec.linux().as_ref().and_then(|l| l.resources().as_ref());
+    // A per-container pids.max is NOT honoured: the init writes a fixed
+    // DEFAULT_PIDS_MAX to the leaf `pids.max` (only an aggregate group ceiling
+    // exists). Refuse rather than ignore a requested limit.
+    if resources.and_then(|r| r.pids().as_ref()).is_some() {
+        return Err(Error::Invalid(
+            "oci-runtime: config.json `linux.resources.pids` — a per-container pids limit is not \
+             honoured here (the engine writes a fixed leaf pids.max); remove it or run it under runc"
+                .to_string(),
+        ));
+    }
+    let cpu = resources.and_then(|r| r.cpu().as_ref());
+    // cpuset (cpus/mems pinning) needs the `cpuset` controller, which is not
+    // delegated to a rootless user here — refuse rather than fail mid-launch
+    // writing `cpuset.cpus`.
+    if let Some(cpu) = cpu {
+        if cpu.cpus().is_some() || cpu.mems().is_some() {
+            return Err(Error::Invalid(
+                "oci-runtime: config.json `linux.resources.cpu.cpus`/`mems` (cpuset) — the cpuset \
+                 controller is not delegated rootless; remove it or run it under runc"
+                    .to_string(),
+            ));
+        }
+    }
     // Memory ceiling from `linux.resources.memory.limit` when present; else the
     // engine's own default (`max` lets the engine derive its quarter-budget, as
     // `container run` without `-m` does). Same honest default as the CLI.
-    let memory_max = spec
-        .linux()
-        .as_ref()
-        .and_then(|l| l.resources().as_ref())
+    let memory_max = resources
         .and_then(|r| r.memory().as_ref())
         .and_then(|m| m.limit())
         .map(|bytes| bytes.to_string())
@@ -259,20 +304,122 @@ pub fn spec_to_container(id: &str, bundle: &Path, spec: &Spec) -> Result<(Contai
     if let Some(h) = spec.hostname().as_ref() {
         c.hostname = Some(h.clone());
     }
-    // A user namespace in the bundle means a rootless-style launch (the mappings
-    // come from the bundle's own `linux.uidMappings`, which the init honours).
-    c.userns = spec
-        .linux()
-        .as_ref()
-        .and_then(|l| l.namespaces().as_ref())
-        .map(|ns| {
-            ns.iter().any(|n| {
-                n.typ() == oci_spec::runtime::LinuxNamespaceType::User
-            })
-        })
-        .unwrap_or(false);
+
+    // `process.user`: honour a non-root uid/gid (the common rootless-image case).
+    // uid/gid 0 is the container-root default the init already runs as, so leave
+    // `run_uid`/`run_gid` unset there (keeps the proven root path untouched).
+    // `additionalGids` always map to supplementary groups.
+    let user = process.user();
+    if user.uid() != 0 {
+        c.run_uid = Some(user.uid());
+    }
+    if user.gid() != 0 {
+        c.run_gid = Some(user.gid());
+    }
+    if let Some(gids) = user.additional_gids() {
+        c.group_add = gids.clone();
+    }
+
+    // `linux.resources.cpu`: quota/period → a cores string (`cpu.max`), shares →
+    // a cgroup2 `cpu.weight` (the kernel's own shares↦weight conversion). Both
+    // controllers are delegated, so these actually take effect.
+    if let Some(cpu) = cpu {
+        if let Some(cores) = cpu_cores(cpu.quota(), cpu.period()) {
+            c.cpus = cores;
+        }
+        if let Some(w) = cpu.shares().map(shares_to_weight) {
+            c.cpu_weight = Some(w.to_string());
+        }
+    }
+
+    // Bind mounts the caller added (the `-v` case). The standard pseudo-
+    // filesystems (proc/sys/dev/devpts/mqueue/shm/cgroup) are set up by the init
+    // itself, so they are skipped — passing them as binds would double-mount.
+    c.mounts = oci_bind_mounts(spec);
+
+    // Namespaces: a user namespace means a rootless-style launch (mappings come
+    // from the bundle's own `linux.uidMappings`, which the init honours). A
+    // network namespace with NO path is an isolated netns (`--net none`); one
+    // WITH a path asks to join an existing netns, which has no honoured path.
+    if let Some(nss) = spec.linux().as_ref().and_then(|l| l.namespaces().as_ref()) {
+        use oci_spec::runtime::LinuxNamespaceType as NsT;
+        for ns in nss {
+            match ns.typ() {
+                NsT::User => c.userns = true,
+                NsT::Network => {
+                    if ns.path().is_some() {
+                        return Err(Error::Invalid(
+                            "oci-runtime: config.json declares a network namespace with a `path` \
+                             (join an existing netns) — not implemented; remove the path (for an \
+                             isolated netns) or run it under runc"
+                                .to_string(),
+                        ));
+                    }
+                    c.net_mode = Some("none".to_string());
+                }
+                _ => {}
+            }
+        }
+    }
 
     Ok((c, rootfs.to_string_lossy().into_owned()))
+}
+
+/// CPU bandwidth as a cores string for `Container.cpus` (the engine writes it to
+/// `cpu.max`). OCI gives `quota` (µs of CPU per `period`); cores = quota/period.
+/// The OCI default period is 100 000 µs. `None` when there is no positive quota.
+fn cpu_cores(quota: Option<i64>, period: Option<u64>) -> Option<String> {
+    let quota = quota.filter(|q| *q > 0)? as f64;
+    let period = period.unwrap_or(100_000).max(1) as f64;
+    let cores = quota / period;
+    // Trim to a compact decimal ("0.5", "2", "1.5") the engine's parser accepts.
+    Some(format!("{cores}"))
+}
+
+/// OCI/Docker CPU `shares` (2..=262144, default 1024) → a cgroup2 `cpu.weight`
+/// (1..=10000). This is the kernel's own conversion, the same one runc applies
+/// when it translates a v1 `shares` request onto a v2 host.
+fn shares_to_weight(shares: u64) -> u64 {
+    let s = shares.clamp(2, 262_144);
+    (1 + ((s - 2) * 9999) / 262_142).clamp(1, 10_000)
+}
+
+/// The caller-added **bind** mounts (`type: bind`, or any mount whose options
+/// carry `bind`/`rbind`). The standard pseudo-filesystems (proc/sysfs/tmpfs/
+/// devpts/mqueue/cgroup) are mounted by the init itself, so they are skipped —
+/// forwarding them as binds would double-mount. A bind with no `source` is
+/// skipped (nothing to bind from).
+fn oci_bind_mounts(spec: &Spec) -> Vec<Mount> {
+    let Some(mounts) = spec.mounts().as_ref() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for m in mounts {
+        let opts = m.options().clone().unwrap_or_default();
+        let is_bind = m.typ().as_deref() == Some("bind")
+            || opts.iter().any(|o| o == "bind" || o == "rbind");
+        if !is_bind {
+            continue;
+        }
+        let Some(source) = m.source().as_ref() else {
+            continue;
+        };
+        let propagation = if opts.iter().any(|o| o == "rshared" || o == "shared") {
+            Some("rshared".to_string())
+        } else if opts.iter().any(|o| o == "rslave" || o == "slave") {
+            Some("rslave".to_string())
+        } else {
+            None
+        };
+        out.push(Mount {
+            source: source.to_string_lossy().into_owned(),
+            target: m.destination().to_string_lossy().into_owned(),
+            readonly: opts.iter().any(|o| o == "ro"),
+            propagation,
+            optional: false,
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -356,5 +503,195 @@ mod tests {
         assert_eq!(j["status"], "created");
         assert_eq!(j["pid"], 0);
         assert_eq!(j["bundle"], "/srv/bundles/c1");
+    }
+
+    // ---- Phase 2: broader config.json coverage ----------------------------
+
+    use oci_spec::runtime::{
+        Linux, LinuxBuilder, LinuxCpuBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
+        LinuxPidsBuilder, LinuxResourcesBuilder, MountBuilder, Process, UserBuilder,
+    };
+
+    // The oci_spec builders consume `self`, so everything is chained in one
+    // expression. These helpers keep the tests to the field under test.
+    fn proc_true() -> Process {
+        ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .build()
+            .expect("process")
+    }
+
+    fn spec_with_linux(process: Process, linux: Linux) -> Spec {
+        let root = RootBuilder::default().path("rootfs").build().expect("root");
+        SpecBuilder::default()
+            .version("1.3.0")
+            .root(root)
+            .process(process)
+            .linux(linux)
+            .build()
+            .expect("spec")
+    }
+
+    fn spec_no_linux(process: Process) -> Spec {
+        let root = RootBuilder::default().path("rootfs").build().expect("root");
+        SpecBuilder::default()
+            .version("1.3.0")
+            .root(root)
+            .process(process)
+            .build()
+            .expect("spec")
+    }
+
+    #[test]
+    fn honours_non_root_user_and_additional_gids() {
+        let user = UserBuilder::default()
+            .uid(1000u32)
+            .gid(1000u32)
+            .additional_gids(vec![10u32, 20u32])
+            .build()
+            .expect("user");
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .user(user)
+            .build()
+            .expect("process");
+        let (c, _) = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process)).expect("ok");
+        assert_eq!(c.run_uid, Some(1000));
+        assert_eq!(c.run_gid, Some(1000));
+        assert_eq!(c.group_add, vec![10, 20]);
+    }
+
+    #[test]
+    fn root_user_leaves_run_ids_unset() {
+        let user = UserBuilder::default().uid(0u32).gid(0u32).build().expect("user");
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .user(user)
+            .build()
+            .expect("process");
+        let (c, _) = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process)).expect("ok");
+        assert_eq!(c.run_uid, None);
+        assert_eq!(c.run_gid, None);
+    }
+
+    #[test]
+    fn translates_bind_mounts_and_skips_pseudo_fs() {
+        let bind = MountBuilder::default()
+            .destination("/data")
+            .typ("bind")
+            .source("/host/data")
+            .options(vec!["rbind".to_string(), "ro".to_string()])
+            .build()
+            .expect("bind");
+        let procfs = MountBuilder::default()
+            .destination("/proc")
+            .typ("proc")
+            .source("proc")
+            .build()
+            .expect("proc");
+        let root = RootBuilder::default().path("rootfs").build().expect("root");
+        let spec = SpecBuilder::default()
+            .version("1.3.0")
+            .root(root)
+            .process(proc_true())
+            .mounts(vec![bind, procfs])
+            .build()
+            .expect("spec");
+        let (c, _) = spec_to_container("c1", Path::new("/b"), &spec).expect("ok");
+        assert_eq!(c.mounts.len(), 1, "only the bind, not /proc");
+        assert_eq!(c.mounts[0].source, "/host/data");
+        assert_eq!(c.mounts[0].target, "/data");
+        assert!(c.mounts[0].readonly);
+    }
+
+    #[test]
+    fn cpu_cores_and_shares_conversions() {
+        assert_eq!(cpu_cores(Some(50_000), Some(100_000)).as_deref(), Some("0.5"));
+        assert_eq!(cpu_cores(Some(200_000), Some(100_000)).as_deref(), Some("2"));
+        assert_eq!(cpu_cores(Some(150_000), None).as_deref(), Some("1.5"));
+        assert_eq!(cpu_cores(Some(-1), Some(100_000)), None);
+        assert_eq!(cpu_cores(None, Some(100_000)), None);
+        assert_eq!(shares_to_weight(2), 1);
+        assert_eq!(shares_to_weight(1024), 39);
+        assert_eq!(shares_to_weight(262_144), 10_000);
+    }
+
+    #[test]
+    fn cpu_quota_and_shares_land_on_container() {
+        let cpu = LinuxCpuBuilder::default()
+            .quota(50_000i64)
+            .period(100_000u64)
+            .shares(2048u64)
+            .build()
+            .expect("cpu");
+        let res = LinuxResourcesBuilder::default().cpu(cpu).build().expect("res");
+        let linux = LinuxBuilder::default().resources(res).build().expect("linux");
+        let (c, _) =
+            spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+                .expect("ok");
+        assert_eq!(c.cpus, "0.5");
+        assert_eq!(c.cpu_weight, Some(shares_to_weight(2048).to_string()));
+    }
+
+    #[test]
+    fn refuses_per_container_pids_limit() {
+        let pids = LinuxPidsBuilder::default().limit(100i64).build().expect("pids");
+        let res = LinuxResourcesBuilder::default().pids(pids).build().expect("res");
+        let linux = LinuxBuilder::default().resources(res).build().expect("linux");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+            .expect_err("pids refused");
+        assert!(err.to_string().contains("pids"), "{err}");
+    }
+
+    #[test]
+    fn refuses_cpuset_pinning() {
+        let cpu = LinuxCpuBuilder::default().cpus("0-1").build().expect("cpu");
+        let res = LinuxResourcesBuilder::default().cpu(cpu).build().expect("res");
+        let linux = LinuxBuilder::default().resources(res).build().expect("linux");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+            .expect_err("cpuset refused");
+        assert!(err.to_string().contains("cpuset"), "{err}");
+    }
+
+    #[test]
+    fn refuses_network_namespace_with_path() {
+        let ns = LinuxNamespaceBuilder::default()
+            .typ(LinuxNamespaceType::Network)
+            .path("/var/run/netns/x")
+            .build()
+            .expect("ns");
+        let linux = LinuxBuilder::default().namespaces(vec![ns]).build().expect("linux");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+            .expect_err("netns path refused");
+        assert!(err.to_string().contains("network namespace"), "{err}");
+    }
+
+    #[test]
+    fn pathless_network_namespace_is_isolated_none() {
+        let ns = LinuxNamespaceBuilder::default()
+            .typ(LinuxNamespaceType::Network)
+            .build()
+            .expect("ns");
+        let linux = LinuxBuilder::default().namespaces(vec![ns]).build().expect("linux");
+        let (c, _) =
+            spec_to_container("c1", Path::new("/b"), &spec_with_linux(proc_true(), linux))
+                .expect("ok");
+        assert_eq!(c.net_mode.as_deref(), Some("none"));
+    }
+
+    #[test]
+    fn refuses_interactive_terminal() {
+        let process = ProcessBuilder::default()
+            .args(vec!["/bin/true".to_string()])
+            .cwd("/")
+            .terminal(true)
+            .build()
+            .expect("process");
+        let err = spec_to_container("c1", Path::new("/b"), &spec_no_linux(process))
+            .expect_err("terminal refused");
+        assert!(err.to_string().contains("terminal"), "{err}");
     }
 }
