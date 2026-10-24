@@ -112,7 +112,8 @@ PAGES = [
     ("operate", ["troubleshooting.md", "service-names-and-hosts.md"]),
     ("contributing", ["coding-conventions.md", "adding-a-kind.md", "engineering-process.md",
                       "contributing-workflow.md", "releases-and-stability.md", "publishing-docs.md"]),
-    ("reference", ["cloud-native-standards.md", "environment-variables.md", "glossary.md"]),
+    ("reference", ["cloud-native-standards.md", "plano-conformidade-oci-cri.md",
+                   "environment-variables.md", "glossary.md"]),
 ]
 
 

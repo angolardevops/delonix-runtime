@@ -160,6 +160,9 @@ Options:
   -f, --force
           Force (kill it if running)
 
+  -n, --namespace &lt;NAMESPACE&gt;
+          Isolation namespace of the target(s). A BARE name is resolved within this namespace — the symmetric counterpart of `ps -n/--namespace`, so a container created with `run --namespace team` is removable by name without hunting for its id. An id, or an explicit `&lt;namespace&gt;/&lt;name&gt;`, is used as-is (ids are node-wide). Omit for `default`/node-unique names
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

@@ -78,6 +78,53 @@ sys.exit(1)
 ' "$1"
 }
 
+# --- consulta de VMs (saída JSON estável, ADR-0005) --------------------------
+# `vm ls -o json` traz name/status/ip/backend/image/... Lemos um campo com
+# python3, como no `container_field`. (`snapshot ls`/`describe vm` NÃO aceitam
+# `-o json` — são texto.)
+vm_field() { # NAME CAMPO(status|ip|backend|image|memory|vcpus) -> valor ou vazio
+  "${DELONIX}" vm ls -o json 2>/dev/null | python3 -c '
+import sys, json
+name, field = sys.argv[1], sys.argv[2]
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(0)
+for v in data or []:
+    if v.get("name") == name:
+        val = v.get(field, ""); print("" if val is None else val); break
+' "$1" "$2"
+}
+
+# Existe uma imagem de VM LOCAL com este nome/tag? (lê `vm image ls -o json`, a
+# verdade estável — ADR-0005 — não um grep da tabela). Par do `image_exists`,
+# mas para o store de imagens de VM, não o de containers.
+vm_image_exists() { # NOME[:TAG]
+  "${DELONIX}" vm image ls -o json 2>/dev/null | python3 -c '
+import sys, json
+want = sys.argv[1]
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(1)
+for img in data or []:
+    if img.get("name") == want:
+        sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
+# Espera a VM ficar Running com um IPv4 atribuído (o cloud-init/DHCP demora).
+# Ecoa o IP e devolve 0; devolve 1 em timeout. Distingue "nunca Running" de
+# "Running mas sem IP" pela mensagem do chamador.
+vm_wait_running_ip() { # NAME [timeout_s] -> ecoa IP
+  local name="$1" timeout="${2:-60}" st ip
+  for _ in $(seq 1 "${timeout}"); do
+    st="$(vm_field "$name" status)"; ip="$(vm_field "$name" ip)"
+    if [ "$st" = "Running" ] && printf '%s' "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+      printf '%s' "$ip"; return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 delonix_ok() {
   if ! "${DELONIX}" version >/dev/null 2>&1 && ! "${DELONIX}" --version >/dev/null 2>&1; then
     die "o binário '${DELONIX}' não responde. Instala o Delonix ou define DELONIX=<caminho>."
