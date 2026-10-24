@@ -16991,3 +16991,11 @@ msgstr "  config.json leva os mapeamentos uid/gid deste utilizador (--rootless):
 
 msgid "  config.json declares no uid/gid mappings, so runc reads these ids literally. Export with --rootless for a bundle that carries them."
 msgstr "  config.json não declara mapeamentos uid/gid, logo o runc lê estes ids à letra. Exporta com --rootless para um bundle que os carregue."
+
+# ---- help: flags novas (container rm --namespace, image export --rootless) --
+
+msgid "Isolation namespace of the target(s). A BARE name is resolved within this namespace — the symmetric counterpart of `ps -n/--namespace`, so a container created with `run --namespace team` is removable by name without hunting for its id. An id, or an explicit `<namespace>/<name>`, is used as-is (ids are node-wide). Omit for `default`/node-unique names"
+msgstr "Namespace de isolamento do(s) alvo(s). Um nome SIMPLES é resolvido dentro deste namespace — o contraponto simétrico de `ps -n/--namespace`, por isso um container criado com `run --namespace team` é removível pelo nome sem andar à procura do id. Um id, ou um `<namespace>/<name>` explícito, é usado tal e qual (os ids são de todo o nó). Omite para nomes `default`/únicos no nó"
+
+msgid "Emit a ROOTLESS bundle: add a user namespace and the current user's uid/gid mappings (container root -> your uid, then the delegated subuids), so `runc`/`crun` run it without root. Without it the bundle has no mappings and only runs as real root (`runc` refuses it rootless with \"requires user namespaces\"). The mappings are specific to THIS user, so the bundle is tied to this host's `/etc/subuid`"
+msgstr "Emite um bundle ROOTLESS: adiciona um user namespace e os mapeamentos uid/gid do utilizador atual (root do container -> o teu uid, depois os subuids delegados), para que o `runc`/`crun` o corram sem root. Sem ele o bundle não tem mapeamentos e só corre como root real (o `runc` recusa-o rootless com \"requires user namespaces\"). Os mapeamentos são específicos DESTE utilizador, por isso o bundle fica preso ao `/etc/subuid` deste host"
