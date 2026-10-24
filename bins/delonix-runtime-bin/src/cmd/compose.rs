@@ -3731,6 +3731,25 @@ fn cmd_up(
                 opts.add_host.extend(service_host_entries(&nets, &others));
                 super::container::cmd_run(&images, &store, opts)?;
             }
+            // DEF-003: `up` means "Creates/STARTS every service" (its own `--help`)
+            // and `docker compose up` restarts a project's stopped containers. An
+            // existing container left `Stopped`/`Exited` (a crash, a manual `stop`,
+            // a half-finished earlier `up`) is DRIFT from the declared desired
+            // state; reapplying the manifest must reconcile it back to `Running`,
+            // not report "nothing to do". Reconcile the on-disk status against
+            // reality first (a record may say `Running` over a dead process), then
+            // start it if it is not actually up. `Created` (made by this engine's
+            // `create`, never started) is included on purpose — `up` is where it
+            // starts. The existing-and-running case stays a no-op.
+            let mut started = false;
+            if !created {
+                let mut c = find(&store, &final_name)?;
+                delonix_linux::reconcile_status(&mut c);
+                if compose_up_should_start(&c.status) {
+                    super::container::cmd_start(&images, &store, &final_name)?;
+                    started = true;
+                }
+            }
             // Connected on every `up`, not only the one that created the
             // container, so a re-run completes a container an interrupted run
             // left on fewer networks. `network connect` refuses a network the
@@ -3751,12 +3770,19 @@ fn cmd_up(
                 super::container::cmd_network_connect(&store, &final_name, net)?;
                 connected.push(net.clone());
             }
-            match (created, connected.is_empty()) {
-                (true, _) => println!("compose: {name} ({final_name}): created"),
-                (false, true) => {
+            match (created, started, connected.is_empty()) {
+                (true, _, _) => println!("compose: {name} ({final_name}): created"),
+                (false, true, true) => {
+                    println!("compose: {name} ({final_name}): started")
+                }
+                (false, true, false) => println!(
+                    "compose: {name} ({final_name}): started, connected to {}",
+                    connected.join(", ")
+                ),
+                (false, false, true) => {
                     println!("compose: {name} ({final_name}): already exists, nothing to do")
                 }
-                (false, false) => println!(
+                (false, false, false) => println!(
                     "compose: {name} ({final_name}): already exists, connected to {}",
                     connected.join(", ")
                 ),
@@ -3764,6 +3790,20 @@ fn cmd_up(
         }
     }
     Ok(())
+}
+
+/// DEF-003: which existing-container states `compose up` must reconcile back to
+/// `Running`. A down service (`Stopped`/`Failed`/`Crashed`), and a `Created`
+/// one never yet started, are drift that reapplying the manifest must fix —
+/// `docker compose up` restarts them and this engine's own `up --help` says
+/// "Creates/STARTS every service". `Running` is already the desired state (no
+/// churn). `Paused` is DELIBERATELY frozen (`container pause`) and owns its own
+/// verb (`unpause`); `up` leaves it alone rather than force-starting it.
+fn compose_up_should_start(status: &Status) -> bool {
+    matches!(
+        status,
+        Status::Created | Status::Stopped | Status::Failed(_) | Status::Crashed
+    )
 }
 
 fn cmd_down(file: Vec<PathBuf>, project: Option<String>, remove_volumes: bool) -> Result<()> {
@@ -3981,6 +4021,26 @@ fn cmd_config(file: Vec<PathBuf>, project: Option<String>, profile: Vec<String>)
 
 #[cfg(test)]
 mod tests {
+    use super::compose_up_should_start;
+    use delonix_model::records::Status;
+
+    /// DEF-003 regression: `compose up` reconciles a down service back to
+    /// `Running`. Before the fix an existing container short-circuited to
+    /// "already exists, nothing to do" regardless of state, so a stopped or
+    /// crashed service was never restarted by reapplying the manifest.
+    #[test]
+    fn up_restarts_down_services_but_not_running_or_paused() {
+        // Drift that `up` must heal.
+        assert!(compose_up_should_start(&Status::Stopped));
+        assert!(compose_up_should_start(&Status::Failed(1)));
+        assert!(compose_up_should_start(&Status::Crashed));
+        assert!(compose_up_should_start(&Status::Created));
+        // Already the desired state — no churn.
+        assert!(!compose_up_should_start(&Status::Running));
+        // Deliberately frozen — `unpause` owns this, not `up`.
+        assert!(!compose_up_should_start(&Status::Paused));
+    }
+
     /// The specification list is the DENOMINATOR of every number
     /// `compatibility compose` prints. A key we claim to serve and the
     /// specification does not have would mean one of the two lists is wrong,
