@@ -5035,7 +5035,7 @@ mod tests {
     /// non-sharing sandbox, and the `--net host`/CNI paths (no `opts.pod`) keep
     /// their own PID namespace.
     #[test]
-    fn apply_shared_pid_junta_o_membro_ao_infra_pid_do_head() {
+    fn apply_shared_pid_joins_the_member_to_the_head_infra_pid() {
         let native = || delonix_compute::RunOpts {
             pod: Some("cri-sb".into()),
             ..Default::default()
@@ -5073,7 +5073,7 @@ mod tests {
     /// sandbox, and points at the fix (the default pod network). The precise
     /// privilege clause varies with rootless/root, so it is not asserted verbatim.
     #[test]
-    fn a_recusa_de_shared_pid_em_host_cni_e_accionavel() {
+    fn the_shared_pid_refusal_on_host_cni_is_actionable() {
         let msg = shared_pid_host_cni_refusal("ctr-abc");
         assert!(msg.contains("ctr-abc"), "names the container: {msg}");
         assert!(

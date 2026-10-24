@@ -474,24 +474,24 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             }),
             C::StoragePools => S::NotImplemented,
             C::VmSnapshotDisk => bin(S::Supported {
-                // #16: o snapshot de disco (offline) é provado pela RECUPERAÇÃO
-                // de dados — escreve-se um dado no disco, tira-se o snapshot,
-                // corrompe-se o dado e o restore relê o ORIGINAL (guestfish).
+                // #16: the offline disk snapshot is proved by DATA RECOVERY — a
+                // datum is written to the disk, the snapshot is taken, the datum is
+                // corrupted, and the restore reads the ORIGINAL back (guestfish).
                 evidence: "check:o snapshot de disco captura o dado para recuperacao",
             }),
             C::VmSnapshotMemory => bin(S::Partial {
-                // `snapshot-create-as` numa VM a correr captura RAM + disco e um
-                // revert retoma a VM (o e2e prova que o snapshot vivo a traz de
-                // volta a Running). O que NÃO se observa é a recuperação do
-                // CONTEÚDO de memória do guest: o arnês não tem um guest que
-                // arranque um OS para ler o estado de RAM antes/depois do revert.
-                // Só a recuperabilidade de DISCO está provada (vm.snapshot-restore).
+                // `snapshot-create-as` on a running VM captures RAM + disk and a
+                // revert resumes the VM (the e2e proves a live snapshot brings it
+                // back to Running). What is NOT observed is recovery of the guest's
+                // in-memory CONTENT: the harness has no guest that boots an OS to
+                // read RAM state before/after the revert. Only DISK recoverability
+                // is proved (vm.snapshot-restore).
                 detail: "running-domain snapshot captures RAM + disk and a revert resumes the VM; recovery of in-guest MEMORY CONTENT is not observed (no bootable guest on the harness) — only disk-data recovery is proved",
             }),
             C::VmSnapshotRestore => bin(S::Supported {
-                // #16: o restore é provado pela recuperabilidade de DADOS, não
-                // por um código de saída nem por criar um ficheiro. Ver o ciclo
-                // ORIGINAL→snapshot→CORROMPIDO→restore→ORIGINAL em e2e.sh.
+                // #16: the restore is proved by DATA recoverability, not by an
+                // exit code nor by creating a file. See the cycle
+                // ORIGINAL->snapshot->CORRUPTED->restore->ORIGINAL in e2e.sh.
                 evidence: "check:o restore RECUPERA o dado de disco (nao so um codigo de saida)",
             }),
             C::VmSnapshotDelete => bin(S::Supported {
@@ -512,12 +512,12 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmMigrationCold => bin(S::Partial {
                 detail: "`vm migrate`: stop, flatten, copy over SSH, import, start; no battery",
             }),
-            // libvirt/QEMU suporta migração ao vivo sem storage partilhado via
-            // `--copy-storage-all` (libvirt >= 1.0.3); a capacidade é do provider,
-            // falta o engine ligá-la — logo not-implemented, não unsupported
-            // (ADR-0031). Se o intento de produto for exigir storage partilhado em
-            // vez de construir o caminho copy-storage-all, mover para
-            // RequiresExternalComponent (como C::VmReplication abaixo).
+            // libvirt/QEMU supports live migration without shared storage via
+            // `--copy-storage-all` (libvirt >= 1.0.3); the capability is the
+            // provider's, the engine just has not wired it — hence not-implemented,
+            // not unsupported (ADR-0031). If the product intent is to require shared
+            // storage instead of building the copy-storage-all path, move this to
+            // RequiresExternalComponent (like C::VmReplication below).
             C::VmMigrationLive => S::NotImplemented,
             C::VmReplication => S::RequiresExternalComponent {
                 component: "shared or replicated VM storage outside the engine (ADR-0031)",
