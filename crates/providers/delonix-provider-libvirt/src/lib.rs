@@ -500,9 +500,13 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmMigrationCold => bin(S::Partial {
                 detail: "`vm migrate`: stop, flatten, copy over SSH, import, start; no battery",
             }),
-            C::VmMigrationLive => S::UnsupportedByProvider {
-                reason: "ADR-0031: needs shared VM storage or a privileged libvirt daemon listening on the network; neither is a default of this engine",
-            },
+            // libvirt/QEMU suporta migração ao vivo sem storage partilhado via
+            // `--copy-storage-all` (libvirt >= 1.0.3); a capacidade é do provider,
+            // falta o engine ligá-la — logo not-implemented, não unsupported
+            // (ADR-0031). Se o intento de produto for exigir storage partilhado em
+            // vez de construir o caminho copy-storage-all, mover para
+            // RequiresExternalComponent (como C::VmReplication abaixo).
+            C::VmMigrationLive => S::NotImplemented,
             C::VmReplication => S::RequiresExternalComponent {
                 component: "shared or replicated VM storage outside the engine (ADR-0031)",
             },
@@ -5115,8 +5119,8 @@ mod tests {
         };
         assert_eq!(by(C::VmStart).label(), "supported");
         assert_eq!(by(C::VmNetworkNat).label(), "unavailable-on-host");
-        // A declared "no" stays a "no" whatever the host looks like.
-        assert_eq!(by(C::VmMigrationLive).label(), "unsupported-by-provider");
+        // A declared negative stays a negative whatever the host looks like.
+        assert_eq!(by(C::VmMigrationLive).label(), "not-implemented");
     }
     #[test]
     fn without_virsh_nothing_that_needs_it_reads_as_supported() {
