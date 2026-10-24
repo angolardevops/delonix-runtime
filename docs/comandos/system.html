@@ -309,7 +309,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>O que o host oferece de virtualização, e o que há para afinar</div><div class='cap lang-en'>What the host offers for virtualization, and what&#x27;s left to tune</div><pre><code>delonix system virt</code></pre></div><div class="ex"><div class='cap lang-pt'>Aplicar a afinação recomendada</div><div class='cap lang-en'>Apply the recommended tuning</div><pre><code>sudo delonix system virt --tune</code></pre></div>
 <h2 id='setup'><code>system setup</code></h2>
 <p class='intro'>Diagnose — and, with <code>--delegate</code>, fix — cgroup delegation.</p>
-<p class='intro'>It is the prerequisite for <code>--memory</code>/<code>--cpus</code>/<code>--pids-limit</code> to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking.</p>
+<p class='intro'>It is the prerequisite for <code>--memory</code>/<code>--cpus</code> to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking.</p>
 <div class='help'><pre><code>Usage: delonix system setup [OPTIONS]
 
 Options:

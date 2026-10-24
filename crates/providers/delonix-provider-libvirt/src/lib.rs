@@ -474,13 +474,25 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             }),
             C::StoragePools => S::NotImplemented,
             C::VmSnapshotDisk => bin(S::Supported {
-                evidence: "check:snapshot create com a VM parada",
+                // #16: o snapshot de disco (offline) é provado pela RECUPERAÇÃO
+                // de dados — escreve-se um dado no disco, tira-se o snapshot,
+                // corrompe-se o dado e o restore relê o ORIGINAL (guestfish).
+                evidence: "check:o snapshot de disco captura o dado para recuperacao",
             }),
-            C::VmSnapshotMemory => bin(S::Supported {
-                evidence: "check:vm snapshot create",
+            C::VmSnapshotMemory => bin(S::Partial {
+                // `snapshot-create-as` numa VM a correr captura RAM + disco e um
+                // revert retoma a VM (o e2e prova que o snapshot vivo a traz de
+                // volta a Running). O que NÃO se observa é a recuperação do
+                // CONTEÚDO de memória do guest: o arnês não tem um guest que
+                // arranque um OS para ler o estado de RAM antes/depois do revert.
+                // Só a recuperabilidade de DISCO está provada (vm.snapshot-restore).
+                detail: "running-domain snapshot captures RAM + disk and a revert resumes the VM; recovery of in-guest MEMORY CONTENT is not observed (no bootable guest on the harness) — only disk-data recovery is proved",
             }),
             C::VmSnapshotRestore => bin(S::Supported {
-                evidence: "check:vm snapshot restore depois do start",
+                // #16: o restore é provado pela recuperabilidade de DADOS, não
+                // por um código de saída nem por criar um ficheiro. Ver o ciclo
+                // ORIGINAL→snapshot→CORROMPIDO→restore→ORIGINAL em e2e.sh.
+                evidence: "check:o restore RECUPERA o dado de disco (nao so um codigo de saida)",
             }),
             C::VmSnapshotDelete => bin(S::Supported {
                 evidence: "check:vm snapshot rm",
@@ -500,9 +512,13 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmMigrationCold => bin(S::Partial {
                 detail: "`vm migrate`: stop, flatten, copy over SSH, import, start; no battery",
             }),
-            C::VmMigrationLive => S::UnsupportedByProvider {
-                reason: "ADR-0031: needs shared VM storage or a privileged libvirt daemon listening on the network; neither is a default of this engine",
-            },
+            // libvirt/QEMU suporta migração ao vivo sem storage partilhado via
+            // `--copy-storage-all` (libvirt >= 1.0.3); a capacidade é do provider,
+            // falta o engine ligá-la — logo not-implemented, não unsupported
+            // (ADR-0031). Se o intento de produto for exigir storage partilhado em
+            // vez de construir o caminho copy-storage-all, mover para
+            // RequiresExternalComponent (como C::VmReplication abaixo).
+            C::VmMigrationLive => S::NotImplemented,
             C::VmReplication => S::RequiresExternalComponent {
                 component: "shared or replicated VM storage outside the engine (ADR-0031)",
             },
@@ -5115,8 +5131,8 @@ mod tests {
         };
         assert_eq!(by(C::VmStart).label(), "supported");
         assert_eq!(by(C::VmNetworkNat).label(), "unavailable-on-host");
-        // A declared "no" stays a "no" whatever the host looks like.
-        assert_eq!(by(C::VmMigrationLive).label(), "unsupported-by-provider");
+        // A declared negative stays a negative whatever the host looks like.
+        assert_eq!(by(C::VmMigrationLive).label(), "not-implemented");
     }
     #[test]
     fn without_virsh_nothing_that_needs_it_reads_as_supported() {

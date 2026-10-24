@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::CString;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
 pub mod capabilities;
@@ -750,6 +750,26 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_vfork,
     ]);
     v
+}
+
+/// This engine's own syscall allowlist, rendered as NAMES instead of numbers.
+///
+/// The engine enforces its policy numerically (`allowed_syscalls` → seccompiler
+/// BPF, never a names table). But an exported OCI bundle (`image export`) is run
+/// by `runc`/`crun`, which take the policy as an OCI seccomp JSON keyed by NAME.
+/// This resolves each allowed number back to its name (via the same table
+/// `syscall_number` uses) so the exported bundle can carry the SAME allowlist the
+/// engine itself enforces — no drift, no vendored upstream profile. A number with
+/// no name in the table is skipped (and would be a table gap, not a policy gap).
+/// Sorted and de-duplicated for a stable, reviewable profile.
+pub fn allowed_syscall_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = allowed_syscalls()
+        .into_iter()
+        .filter_map(seccomp_profile::syscall_name)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// Enables `NO_NEW_PRIVS`: an `execve` never gains privileges (nullifies setuid/
@@ -6852,8 +6872,22 @@ pub struct RunSpec<'a> {
     /// because the `--pod` re-exec already put us in the holder's userns (which
     /// owns those namespaces), where `setns` has privilege — the reason the old
     /// `join_netns` setns failed no longer applies. The netns is joined earlier by
-    /// the re-exec's `ip netns exec`. (PID sharing lands with `shareProcessNamespace`.)
+    /// the re-exec's `ip netns exec`.
     pub pod_infra_pid: Option<i32>,
+    /// **Pod PID sharing** (k8s `shareProcessNamespace`): when set together with
+    /// `pod_infra_pid`, this container does NOT create its own PID namespace —
+    /// it is cloned straight INTO the infra container's, so the pod's members
+    /// see each other's processes. Unlike IPC/UTS (joined with `setns` from
+    /// `container_init`), the PID namespace cannot be joined by the process
+    /// itself: `setns(CLONE_NEWPID)` only moves FUTURE children. So `spawn`
+    /// enters the infra's PID namespace in the PARENT, right before the
+    /// `clone` — the child is then born inside it — and restores the parent's
+    /// own immediately after, so the slirp hook / log shim / late-mount watcher
+    /// it forks next stay in the host's PID namespace. Privilege comes from the
+    /// holder's user namespace (the `--pod` re-exec), the same reason the
+    /// IPC/UTS `setns` works. The infra container (the pod's first member) is
+    /// PID 1 of the shared namespace and reaps the orphans reparented to it.
+    pub pod_shared_pid: bool,
     /// Volumes/bind mounts to inject into the rootfs.
     pub mounts: Vec<Mount>,
     /// Log file for the stdout/stderr (detached) — the "file" *log driver*.
@@ -7538,7 +7572,16 @@ fn spawn(
         ready_w: Some(pipes.ready.1),
         exec_w: pipes.exec.map(|(_, w)| w),
     };
-    let pid = clone_init(inputs, io, flags, &pipes)?;
+    // Pod PID sharing (`shareProcessNamespace`): enter the infra's PID namespace
+    // HERE, in the parent, so the `clone` below is born inside it —
+    // `setns(CLONE_NEWPID)` only moves FUTURE children, never the caller. The
+    // guard restores our own PID namespace the instant the clone returns (success
+    // or not), so the slirp hook, the log shim and the late-mount watcher we fork
+    // afterwards stay in the host's PID namespace.
+    let pidns_guard = enter_pod_pidns(spec)?;
+    let cloned = clone_init(inputs, io, flags, &pipes);
+    drop(pidns_guard);
+    let pid = cloned?;
 
     // CRITICAL ORDER: the user namespace handshake (releasing the child with the byte
     // "GO") MUST come BEFORE the console recv. In console mode the init only allocates the
@@ -7965,11 +8008,15 @@ fn open_console_sock() -> Option<(i32, i32)> {
 /// requires) — instead of anchoring in the cgroup-scope shared with `kind`.
 fn clone_flags(spec: &RunSpec<'_>) -> (CloneFlags, bool) {
     let join_pod = spec.pod_infra_pid.is_some();
+    // Pod PID sharing: the member is cloned straight into the infra's PID
+    // namespace (the parent `setns`es there just before the `clone`, see
+    // `spawn`), so it must NOT be given a fresh one here.
+    let share_pod_pid = join_pod && spec.pod_shared_pid;
     let mut flags = CloneFlags::CLONE_NEWNS;
     if !join_pod {
         flags |= CloneFlags::CLONE_NEWUTS;
     }
-    if !spec.host_pid {
+    if !spec.host_pid && !share_pod_pid {
         flags |= CloneFlags::CLONE_NEWPID;
     }
     if !spec.host_ipc && !join_pod {
@@ -8058,6 +8105,61 @@ fn open_start_pipes(userns: bool) -> Result<StartPipes> {
 /// copy, the pipe never reaches EOF, so a child that dies before signalling
 /// would leave the read in [`wait_for_mounts`] waiting forever. On a failed
 /// `clone` both ends go, or the error path would leak a pair of fds per attempt.
+/// Restores, on drop, the PID namespace the parent creates children in — the
+/// other half of [`enter_pod_pidns`]. It holds an fd to the parent's OWN PID
+/// namespace and `setns`es back to it, which resets the children-namespace
+/// WITHOUT moving the parent (it never left: `setns(CLONE_NEWPID)` changes only
+/// the namespace of future children). Best-effort: a failed restore would only
+/// mean the parent's next fork lands in the infra's PID namespace, and the only
+/// forks left in `spawn` by then (log shim, late-mount watcher, slirp hook) are
+/// harmless there — but it has never been observed to fail.
+struct PidnsGuard(OwnedFd);
+
+impl Drop for PidnsGuard {
+    fn drop(&mut self) {
+        let _ = setns(self.0.as_fd(), CloneFlags::CLONE_NEWPID);
+    }
+}
+
+/// Enters the pod infra's PID namespace for the NEXT child — the shared-PID
+/// (`shareProcessNamespace`) half the PID namespace needs that IPC/UTS do not:
+/// a process cannot `setns` ITSELF into a PID namespace (that only moves its
+/// future children), so the join has to happen in the parent, right before the
+/// `clone`. `Ok(None)` when nothing was asked (the common case); `Ok(Some)`
+/// after a successful `setns`, the guard restoring the parent's own namespace on
+/// drop. Privilege comes from the holder's user namespace (the `--pod`
+/// re-exec), which owns the infra's PID namespace — the same reason the IPC/UTS
+/// `setns` in `container_init` works.
+fn enter_pod_pidns(spec: &RunSpec<'_>) -> Result<Option<PidnsGuard>> {
+    if !spec.pod_shared_pid {
+        return Ok(None);
+    }
+    let Some(infra) = spec.pod_infra_pid else {
+        return Ok(None);
+    };
+    // Our OWN PID namespace first, opened before the `setns` so the restore
+    // cannot fail to find it.
+    let own = open(
+        "/proc/self/ns/pid",
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(syserr("open /proc/self/ns/pid"))?;
+    // SAFETY: a valid fd just returned by `open`.
+    let own = unsafe { OwnedFd::from_raw_fd(own) };
+    let path = format!("/proc/{infra}/ns/pid");
+    let target = open(
+        path.as_str(),
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(syserr("open pod infra pid ns"))?;
+    // SAFETY: a valid fd just returned by `open`.
+    let target = unsafe { OwnedFd::from_raw_fd(target) };
+    setns(target, CloneFlags::CLONE_NEWPID).map_err(syserr("setns pod pid ns"))?;
+    Ok(Some(PidnsGuard(own)))
+}
+
 fn clone_init(
     inputs: InitInputs,
     io: IoSpec,
@@ -14416,6 +14518,25 @@ mod spawn_step_tests {
         assert!(!f.contains(CloneFlags::CLONE_NEWUTS));
         assert!(!f.contains(CloneFlags::CLONE_NEWIPC));
         assert!(f.contains(CloneFlags::CLONE_NEWPID));
+
+        // With `shareProcessNamespace`, the member is cloned INTO the infra's
+        // PID namespace (the parent `setns`es there first): no fresh one here.
+        let shared_pid = RunSpec {
+            pod_infra_pid: Some(42),
+            pod_shared_pid: true,
+            ..Default::default()
+        };
+        let (f, _) = clone_flags(&shared_pid);
+        assert!(!f.contains(CloneFlags::CLONE_NEWPID));
+        assert!(!f.contains(CloneFlags::CLONE_NEWUTS));
+        assert!(!f.contains(CloneFlags::CLONE_NEWIPC));
+        // `shareProcessNamespace` without an infra to join keeps its own PID ns
+        // (nothing to share into).
+        let orphan_shared = RunSpec {
+            pod_shared_pid: true,
+            ..Default::default()
+        };
+        assert!(clone_flags(&orphan_shared).0.contains(CloneFlags::CLONE_NEWPID));
 
         let host = RunSpec {
             host_pid: true,

@@ -403,6 +403,12 @@ pub fn pod_member_run_opts(
         )));
     }
     let hostname = pod.hostname.clone().unwrap_or_else(|| pod_name.to_string());
+    // k8s `shareProcessNamespace`: a pod-level fact, read before the loop
+    // consumes `pod`. Carried on EVERY member's `RunOpts`; the member join only
+    // takes effect once `cmd::pod` has filled in `pod_infra_pid` (the head
+    // member, which holds the shared PID namespace, gets none and keeps its
+    // own).
+    let share_process_namespace = pod.share_process_namespace;
     // Os membros partilham a netns, por isso partilham também as entradas de
     // `/etc/hosts` do pod — mas cada um tem rootfs próprio, logo é preciso
     // escrevê-las em cada um.
@@ -426,6 +432,7 @@ pub fn pod_member_run_opts(
             notices,
         )?;
         opts.pod = Some(pod_netns.to_string());
+        opts.pod_shared_pid = share_process_namespace;
         opts.add_host = add_host.clone();
         opts.labels.push(format!("delonix.io/pod={pod_name}"));
         opts.labels

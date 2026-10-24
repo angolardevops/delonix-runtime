@@ -126,16 +126,18 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             C::ContainerSeccompCustomProfile => S::Supported {
                 evidence: "check:seccomp: a regra ERRNO continua a negar",
             },
-            C::ContainerOomDetection => cg(S::Partial {
-                detail: "`Dead (OOMKilled)` from `memory.events.local`, read by the supervisor; `scen_oom` kills but does not assert the reason yet",
+            C::ContainerOomDetection => cg(S::Supported {
+                evidence: "chaos:scen_oom",
             }),
             C::PodSharedNetwork => S::Supported {
                 evidence: "chaos:scen_pod_namespace_isolation",
             },
-            C::PodSharedIpcUts => S::Partial {
-                detail: "members `setns` into the first member's ipc/uts; no battery check reads them",
+            C::PodSharedIpcUts => S::Supported {
+                evidence: "chaos:scen_pod_shared_ipc_uts",
             },
-            C::PodSharedPid => S::NotImplemented,
+            C::PodSharedPid => S::Supported {
+                evidence: "chaos:scen_pod_shared_pid",
+            },
             C::ContainerImages => S::Supported {
                 evidence: "e2e:image",
             },
@@ -197,8 +199,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             | C::VmIpObserved => S::UnsupportedByProvider {
                 reason: "a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's",
             },
-            C::MetricsPrometheus => S::Partial {
-                detail: "`/metrics` on the CRI and management sockets; per-container gauges, no battery scrape",
+            C::MetricsPrometheus => S::Supported {
+                evidence: "e2e:métricas: /metrics expõe gauges por container (cpu/mem)",
             },
             C::MetricsPerWorkloadNetwork => S::Partial {
                 detail: "rx/tx per container read in its netns by the dashboard collector; not exported per container",

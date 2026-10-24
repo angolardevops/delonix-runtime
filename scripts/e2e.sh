@@ -5028,6 +5028,67 @@ else
 fi
 
 ########################################
+section "vm: o restore de snapshot RECUPERA dados de disco (libvirt, guestfish)"
+########################################
+# Critério #16: CRIAR um snapshot e ver o comando devolver 0 NÃO comprova
+# recuperabilidade — o `restore` podia transicionar o estado da VM sem nunca
+# repor um único byte do disco. A secção acima prova o CICLO (create/stop/start/
+# restore e as transições de estado), mas corre sobre um qcow2 VAZIO: nenhum dado
+# é escrito, corrompido e confirmado de volta. Aqui fecha-se esse buraco.
+#
+# O guest não arranca um OS (disco de 128M sem bootloader), por isso a prova é ao
+# nível do BLOCO, via `guestfish` (apliance própria, não precisa do módulo nbd):
+#   1. escreve-se um dado conhecido no filesystem do disco (payload = ORIGINAL),
+#   2. `vm snapshot create` com a VM PARADA (snapshot de disco interno do qcow2),
+#   3. CORROMPE-SE o dado no disco (payload = CORROMPIDO),
+#   4. `vm snapshot restore`,
+#   5. relê-se o disco — TEM de voltar a ler ORIGINAL.
+# É a recuperabilidade de DADOS, não a de um código de saída. A VM tem de estar
+# parada nos passos de guestfish porque o QEMU segura o qcow2 em exclusivo quando
+# corre; é por isso que a prova de DISCO usa o caminho offline (= vm.snapshot-disk)
+# e demonstra, pelo mesmo `snapshot-revert`, que o vm.snapshot-restore repõe dados.
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1; then
+  DVM="snapdata-$PFX"; DDISK="$OUT/$DVM.qcow2"
+  qemu-img create -f qcow2 "$DDISK" 128M >/dev/null 2>&1
+  # Filesystem + payload ORIGINAL, antes de a VM existir.
+  guestfish -a "$DDISK" >/dev/null 2>&1 <<'GF'
+run
+part-disk /dev/sda mbr
+mkfs ext4 /dev/sda1
+mount /dev/sda1 /
+write /payload.txt "DADO-ORIGINAL-v1"
+umount /
+GF
+  if check_then "vm create libvirt (data-recovery)" ok \
+       "$BIN" vm create "$DVM" --disk "$DDISK" --backend libvirt --memory 256M --require vm.snapshot.memory; then
+    DQCOW="$SROOT/vms/$DVM.qcow2"
+    check "vm stop (data-recovery)" ok "$BIN" vm stop "$DVM"
+    # vm.snapshot-disk: o snapshot offline CAPTURA o dado para recuperação.
+    check "o snapshot de disco captura o dado para recuperacao" ok \
+      "$BIN" vm snapshot create "$DVM" sdata
+    check "o disco tem o dado ORIGINAL antes de mexer" ok bash -c \
+      "guestfish --ro -a '$DQCOW' -m /dev/sda1 cat /payload.txt | grep -qx DADO-ORIGINAL-v1"
+    # Corromper o dado no disco, com a VM parada (o qcow2 está livre).
+    check "corromper o dado no disco do guest" ok bash -c \
+      "guestfish -a '$DQCOW' -m /dev/sda1 write /payload.txt DADO-CORROMPIDO-v2"
+    check "o disco ja tem o dado CORROMPIDO" ok bash -c \
+      "guestfish --ro -a '$DQCOW' -m /dev/sda1 cat /payload.txt | grep -qx DADO-CORROMPIDO-v2"
+    # vm.snapshot-restore: reverter o snapshot.
+    check "vm snapshot restore (data-recovery)" ok "$BIN" vm snapshot restore "$DVM" sdata
+    # A PROVA: o dado ORIGINAL voltou — recuperabilidade, não só um ficheiro criado.
+    check "o restore RECUPERA o dado de disco (nao so um codigo de saida)" ok bash -c \
+      "guestfish --ro -a '$DQCOW' -m /dev/sda1 cat /payload.txt | grep -qx DADO-ORIGINAL-v1"
+    "$BIN" delete vm "$DVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$DVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$DDISK"
+else
+  skip "vm: restore recupera dados de disco" \
+    "sem libvirt utilizável (virsh/qemu) ou sem guestfish"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
@@ -8848,6 +8909,51 @@ YAML
   sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
   gox stack destroy -f "$GO/app-destroy.yaml" --name "$GSS" >/dev/null 2>&1 || true
   gox stack destroy -f "$GO/source.yaml" --name "$GSB" >/dev/null 2>&1 || true
+fi
+
+########################################
+section "métricas: /metrics expõe gauges por container (cpu/mem)"
+########################################
+# §14 "métricas recolhidas por scrape": o endpoint Prometheus `/metrics` da API
+# de gestão (`serve api`, o irmão delonix-mgmt) expõe, para CADA container a
+# correr, séries com as labels kind/id/name lidas do seu cgroup v2 vivo — entre
+# elas o uso de CPU (`workload_cpu_usage_seconds_total`, de cpu.stat usage_usec,
+# sempre presente num cgroup v2) e a memória corrente
+# (`workload_memory_current_bytes`, de memory.current). Este check arranca um
+# container, faz o SCRAPE real pelo socket e confirma que a série do container
+# lá está, com o id e um valor de memória plausível; depois limpa tudo. É a
+# prova viva por trás de MetricsPrometheus=supported (provider_report.rs).
+MGMTSOCK="/tmp/dlxe2e-mgmt-$$.sock"
+if [[ $E2E_HAVE_IMAGE -eq 1 ]] && command -v curl >/dev/null; then
+  _mc="metrics-$PFX"
+  if check_then "métricas: o container de prova arranca (container run -d)" ok \
+       "$BIN" container run -d --name "$_mc" --net none "$IMG" sleep 120; then
+    "$BIN" serve api --addr "unix://$MGMTSOCK" >"$OUT/mgmt-api.log" 2>&1 &
+    MGMTPID=$!
+    for _ in $(seq 100); do [[ -S "$MGMTSOCK" ]] && break; sleep 0.05; done
+    check "métricas: o socket da API de gestão existe e é 0600" ok bash -c \
+      "[[ -S '$MGMTSOCK' ]] && [[ \$(stat -c %a '$MGMTSOCK') == 600 ]]"
+    check "métricas: GET /metrics devolve OpenMetrics com o registo partilhado" ok bash -c \
+      "curl -s --unix-socket '$MGMTSOCK' http://localhost/metrics | grep -q '^# TYPE delonix_build_info '"
+    check "métricas: há uma gauge de CPU e uma de memória com o id/nome do container e um valor plausível" ok env \
+      MET="$(curl -s --unix-socket "$MGMTSOCK" http://localhost/metrics)" MCN="$_mc" \
+      python3 -c '
+import os,re
+met=os.environ["MET"]; name=os.environ["MCN"]
+cpu=re.search(r"delonix_workload_cpu_usage_seconds_total\{kind=\"container\",id=\"[^\"]+\",name=\""+re.escape(name)+r"\"\} ([0-9.eE+]+)", met)
+mem=re.search(r"delonix_workload_memory_current_bytes\{kind=\"container\",id=\"[^\"]+\",name=\""+re.escape(name)+r"\"\} ([0-9.eE+]+)", met)
+assert cpu, "sem workload_cpu_usage_seconds_total para "+name+"\n"+met
+assert mem, "sem workload_memory_current_bytes para "+name+"\n"+met
+assert float(mem.group(1))>0, "memory.current nao e plausivel: "+mem.group(1)
+'
+    kill "$MGMTPID" 2>/dev/null || true
+  fi
+  "$BIN" container rm -f "$_mc" >/dev/null 2>&1 || true
+  rm -f "$MGMTSOCK"
+  unset _mc
+else
+  skip "métricas: há uma gauge de CPU e uma de memória com o id/nome do container e um valor plausível" \
+       "sem imagem base ($IMG) ou sem curl no host"
 fi
 
 ########################################

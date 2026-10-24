@@ -5,6 +5,13 @@
 //! owner does not already have (they are plain reads of files the kernel
 //! exposes in the cgroup directory):
 //!
+//! - **CPU usage** — `cpu.stat` `usage_usec`: the total CPU time the workload
+//!   consumed, a monotonic counter. Unlike the bandwidth fields below it is
+//!   ALWAYS present in cgroup v2 (it does not need a `cpu.max` quota), so it is
+//!   the one per-workload CPU signal that is non-zero for any running
+//!   container, limited or not.
+//! - **Memory usage** — `memory.current`: the bytes the workload's cgroup
+//!   charges right now, always present when the memory controller is on.
 //! - **CPU throttling** — `cpu.stat` `nr_periods`, `nr_throttled`,
 //!   `throttled_usec`: how many enforcement periods the workload ran in, how
 //!   many of them it hit its `cpu.max` quota in, and for how long it was held
@@ -107,11 +114,15 @@ pub struct MemoryEvents {
 /// `io.pressure` still reports the CPU and memory groups.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CgroupSeries {
+    /// `cpu.stat` `usage_usec`: total CPU time the cgroup consumed, microseconds.
+    pub cpu_usage_usec: Result<u64, Why>,
     pub cpu_throttle: Result<CpuThrottle, Why>,
     pub cpu_pressure: Result<Pressure, Why>,
     pub memory_pressure: Result<Pressure, Why>,
     pub io_pressure: Result<Pressure, Why>,
     pub memory_events: Result<MemoryEvents, Why>,
+    /// `memory.current`: bytes the cgroup charges right now.
+    pub memory_current: Result<u64, Why>,
 }
 
 impl CgroupSeries {
@@ -119,11 +130,13 @@ impl CgroupSeries {
     /// read at all).
     pub fn unavailable(why: Why) -> Self {
         Self {
+            cpu_usage_usec: Err(why),
             cpu_throttle: Err(why),
             cpu_pressure: Err(why),
             memory_pressure: Err(why),
             io_pressure: Err(why),
             memory_events: Err(why),
+            memory_current: Err(why),
         }
     }
 }
@@ -154,6 +167,21 @@ pub fn parse_cpu_stat_throttle(text: &str) -> Option<CpuThrottle> {
         nr_periods: periods?,
         nr_throttled: throttled?,
         throttled_usec: usec?,
+    })
+}
+
+/// `usage_usec` of a `cpu.stat`: the total CPU time the cgroup consumed, in
+/// microseconds. Always present in cgroup v2 (the bandwidth fields are not —
+/// they appear only once a `cpu.max` quota is set), so this is the one CPU
+/// number that is non-zero for any running workload. `None` when the line is
+/// absent or does not parse.
+pub fn parse_cpu_usage_usec(text: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let mut it = line.split_whitespace();
+        match (it.next(), it.next()) {
+            (Some("usage_usec"), Some(value)) => value.parse::<u64>().ok(),
+            _ => None,
+        }
     })
 }
 
@@ -240,6 +268,14 @@ fn read_memory_events(dir: &Path) -> Result<MemoryEvents, Why> {
     Err(Why::FileMissing)
 }
 
+/// `memory.current`: a single integer file (bytes). Always present in a cgroup
+/// v2 with the memory controller enabled.
+fn read_memory_current(dir: &Path) -> Result<u64, Why> {
+    let text =
+        std::fs::read_to_string(dir.join("memory.current")).map_err(|e| classify(&e, false))?;
+    text.trim().parse::<u64>().map_err(|_| Why::Incomplete)
+}
+
 /// Reads every group from one cgroup v2 directory.
 pub fn read_cgroup(dir: &Path) -> CgroupSeries {
     if !dir.is_dir() {
@@ -248,14 +284,20 @@ pub fn read_cgroup(dir: &Path) -> CgroupSeries {
     if !dir.join("cgroup.controllers").exists() {
         return CgroupSeries::unavailable(Why::NotCgroupV2);
     }
+    // `cpu.stat` is read once and both its usage and its bandwidth fields are
+    // parsed from the same text.
+    let cpu_stat = std::fs::read_to_string(dir.join("cpu.stat")).map_err(|e| classify(&e, false));
     CgroupSeries {
-        cpu_throttle: std::fs::read_to_string(dir.join("cpu.stat"))
-            .map_err(|e| classify(&e, false))
-            .and_then(|t| parse_cpu_stat_throttle(&t).ok_or(Why::Incomplete)),
+        cpu_usage_usec: cpu_stat
+            .as_ref()
+            .map_err(|e| *e)
+            .and_then(|t| parse_cpu_usage_usec(t).ok_or(Why::Incomplete)),
+        cpu_throttle: cpu_stat.and_then(|t| parse_cpu_stat_throttle(&t).ok_or(Why::Incomplete)),
         cpu_pressure: read_pressure(dir, "cpu.pressure"),
         memory_pressure: read_pressure(dir, "memory.pressure"),
         io_pressure: read_pressure(dir, "io.pressure"),
         memory_events: read_memory_events(dir),
+        memory_current: read_memory_current(dir),
     }
 }
 
@@ -431,13 +473,37 @@ mod tests {
         write(d.path(), "io.pressure", PSI_FULL);
         write(d.path(), "memory.events", "oom 9\noom_kill 9\n");
         write(d.path(), "memory.events.local", "oom 2\noom_kill 1\n");
+        write(d.path(), "memory.current", "4194304\n");
         let s = read_cgroup(d.path());
+        // `usage_usec` and `memory.current` are read from the same cgroup.
+        assert_eq!(s.cpu_usage_usec, Ok(9_000_000));
+        assert_eq!(s.memory_current, Ok(4_194_304));
         assert_eq!(s.cpu_throttle.unwrap().nr_throttled, 50);
         assert_eq!(s.cpu_pressure.unwrap().some.avg10_percent, 12.5);
         assert_eq!(s.memory_pressure.unwrap().full.unwrap().total_usec, 900_000);
         assert!(s.io_pressure.is_ok());
         // `.local` wins over the hierarchical file.
         assert_eq!(s.memory_events.unwrap().oom_kill, Some(1));
+    }
+
+    #[test]
+    fn cpu_usage_usec_is_read_even_without_the_bandwidth_fields() {
+        // An unlimited container: `cpu.stat` has no nr_periods/nr_throttled, so
+        // the throttle group is Incomplete, but `usage_usec` is still there and
+        // is the one per-workload CPU number that survives. `memory.current`
+        // likewise has no bandwidth prerequisite.
+        let d = v2_dir();
+        write(
+            d.path(),
+            "cpu.stat",
+            "usage_usec 123456\nuser_usec 100000\nsystem_usec 23456\n",
+        );
+        write(d.path(), "memory.current", "1048576\n");
+        let s = read_cgroup(d.path());
+        assert_eq!(s.cpu_usage_usec, Ok(123_456));
+        assert_eq!(s.cpu_throttle, Err(Why::Incomplete));
+        assert_eq!(s.memory_current, Ok(1_048_576));
+        assert_eq!(parse_cpu_usage_usec("nr_periods 4\n"), None);
     }
 
     #[test]
