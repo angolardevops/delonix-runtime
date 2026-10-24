@@ -416,7 +416,7 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 reason: "no hypervisor NAT network: the tap joins the engine's SDN, which does the NAT",
             },
             C::VmNetworkBridge => S::UnsupportedByProvider {
-                reason: "the NIC is a tap on the SDN bridge inside the holder, never a host bridge",
+                reason: "the VMM is indifferent to the bridge, but this rootless provider puts its tap on the engine's SDN in the holder netns; a host bridge needs the host netns (root), which is libvirt's `netMode: bridge`",
             },
             C::VmNetworkSdn => bin(S::Supported {
                 evidence: "check:CH: vm start",
