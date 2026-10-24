@@ -17,15 +17,15 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **114** |
-| partial | 93 | 86 | 88 |
+| supported | 103 | 112 | **115** |
+| partial | 93 | 86 | 87 |
 | not-implemented | 74 | 72 | 69 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **114/274 (41.6%)** |
+| proved/applicable (N2) | — | 112/273 | **115/274 (42.0%)** |
 
-Nota de integridade: o supported desceu de 115 para 114 de propósito — `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial porque o arnês não prova recuperação do conteúdo de RAM (só de disco). Baixar a métrica por honestidade é progresso (§5/§17), não regressão.
+Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
 Separação do progresso (§17): 1 promoção real a supported (OOM, com teste live + evidência), 3 reclassificações de causa corrigidas (A1–A3), 2 lacunas completadas em classificação (lvm/zfs-btrfs: backend já existia, agora partial honesto). Sem promoção falsa — cada +1 em supported tem evidência verificada.
 
@@ -48,9 +48,12 @@ Integração: as duas frentes paralelas correram cada uma na sua worktree off de
 - `85c308c9`+`2bbc1cb7` feat+merge — **restauro de snapshot com DADOS (libvirt)** §7/§14: nova secção e2e escreve `DADO-ORIGINAL-v1`→snapshot→corrompe→restore→relê o original (8/8 PASS live). `vm.snapshot-disk`/`vm.snapshot-restore` ganham evidência de recuperação real; `vm.snapshot-memory` DEMOVIDO supported→partial (RAM não observável sem guest com SO). Worktree paralela.
 - `2b857465`+`387eefea` fix+merge — CH `vm.network.bridge`: razão corrigida (§13); mantém-se `unsupported-by-provider` por ser decisão arquitetural espelhada (CH rootless→SDN; libvirt→host bridge), não incapacidade do VMM. Sem mudança de estado. Worktree paralela.
 
+- `9b35fffd`+`e28ea711` feat+merge — **cobertura CRI de `shareProcessNamespace`**: `lifecycle.rs` lê `namespace_options.pid==POD`, persiste `SandboxRec.shared_pid` e liga `pod_shared_pid`+`pod_infra_pid` (pid-âncora = 1.º membro vivo) nos membros SDN nativos. 95 testes delonix-cri + 2 novos. Matriz intocada (cobertura; já era supported via CLI). Provado por teste de unidade da decisão (não por pod CRI real — precisaria de kubelet).
+- `288b0f48`+`9a2ca746` feat+merge — **`metrics.prometheus` partial→supported (§14)**: os gauges por-container eram só de contenção (throttling/PSI); acrescentei `workload_cpu_usage_seconds_total` + `workload_memory_current_bytes` (sempre presentes no cgroup v2). Scrape live provou as séries por container (mem 331776 B). supported 114→115.
+
 ## Próximas frentes (fila)
 
-1. Cablar `shareProcessNamespace` no caminho CRI (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
+1. Cablar PID partilhado para os caminhos `--net host`/CNI (ficou fora por fronteira de userns) (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
 2. Restauro de snapshot com dados (§7/§14): provar recuperabilidade, não só criação.
 3. Candidatos B restantes: CH `vm.network.bridge` (adapter ignora `net_mode`).
 4. Frentes com ambiente dedicado: Proxmox via nó `pve`, rede multi-node, storage, GPU (sem hardware → pendente).
