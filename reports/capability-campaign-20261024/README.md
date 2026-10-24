@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **116** |
-| partial | 93 | 86 | 87 |
+| supported | 103 | 112 | **118** |
+| partial | 93 | 86 | 85 |
 | not-implemented | 74 | 72 | 68 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **116/274 (42.3%)** |
+| proved/applicable (N2) | — | 112/273 | **118/274 (43.1%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -54,9 +54,17 @@ Integração: as duas frentes paralelas correram cada uma na sua worktree off de
 - `e6624da7`+`d6f024c4` feat+merge — **PID partilhado em `--net host`/CNI**: provado empiricamente ao vivo que é IMPOSSÍVEL rootless (`setns(CLONE_NEWPID)` exige `CAP_SYS_ADMIN` na userns dona da pid ns; userns irmã nem abre `ns/pid`). Em vez de silêncio, `lifecycle.rs` passa a RECUSAR com erro accionável (nomeia o fix: largar hostNetwork). pod.shared-pid mantém-se supported pelo caminho nativo. CNI rootless (`DELONIX_CNI=1`) não afetado. Matriz intocada.
 - `ad2e7358`+`cb89aee6` feat+merge — **`host.capacity` not-impl→supported (§4/§9/§14)**: o reporte já existia (`node.rs:362 capacity()`, servido em `/v1/node/capacity`, e2e-testado) — só a classificação estava errada. Live: allocatable < total (CPU 17000/20000 millis; mem 53/62 GiB) confirma que reflete o cgroup delegado rootless, não a máquina. supported 115→116.
 
+- `b3323619`+`ba25af84` feat+merge — **`provider.events` partial→supported (§14)**: `WatchEvents` já estava servido (stream com tail incremental); provado ao vivo (`system events --follow` captou um `secret/remove` externo; teste de integração gRPC novo). supported→+1.
+- `f210ee3f`+`4b092a0c` feat+merge — **`vm.cloud-init` partial→supported (§7)**: guest declara `DataSourceNoCloud [seed=/dev/vdb]`, marcador `write_files` + hostname aplicados; lidos do disco com guestfish (e2e 5/5 PASS). supported→+1.
+- `af3cb654` docs — regenera matriz combinada (118/274, 43.1%).
+- `fe6093ad` chore(lang) — **reconciliação lang_ratchet**: a campanha introduziu 16 comentários + 2 nomes de teste em pt-AO; o gate é um ratchet só-descendente (código em inglês). Traduzidos → inglês; lang_ratchet verde (3181/1044/116). Comportamento/evidência intactos.
+
+### Constrangimento de ambiente
+Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada build release custa ~2–3G de churn; o próximo trabalho build-pesado tem risco de ENOSPC. Mitigado removendo worktrees concluídas; a resolução de fundo é do dono (libertar disco).
+
 ## Próximas frentes (fila)
 
-1. `provider.events` watch-stream (linux partial: "no watch stream, WatchEvents unserved") (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
+1. `provider.async-operations` (linux not-impl; proxmox partial — job handle) (`lifecycle.rs` lê `namespace_options.pid==POD` e injeta `pod_infra_pid`) — hoje pod.shared-pid/ipc-uts são provados pelo caminho público CLI `pod create`; extensão consistente.
 2. Restauro de snapshot com dados (§7/§14): provar recuperabilidade, não só criação.
 3. Candidatos B restantes: CH `vm.network.bridge` (adapter ignora `net_mode`).
 4. Frentes com ambiente dedicado: Proxmox via nó `pve`, rede multi-node, storage, GPU (sem hardware → pendente).
