@@ -8912,6 +8912,51 @@ YAML
 fi
 
 ########################################
+section "métricas: /metrics expõe gauges por container (cpu/mem)"
+########################################
+# §14 "métricas recolhidas por scrape": o endpoint Prometheus `/metrics` da API
+# de gestão (`serve api`, o irmão delonix-mgmt) expõe, para CADA container a
+# correr, séries com as labels kind/id/name lidas do seu cgroup v2 vivo — entre
+# elas o uso de CPU (`workload_cpu_usage_seconds_total`, de cpu.stat usage_usec,
+# sempre presente num cgroup v2) e a memória corrente
+# (`workload_memory_current_bytes`, de memory.current). Este check arranca um
+# container, faz o SCRAPE real pelo socket e confirma que a série do container
+# lá está, com o id e um valor de memória plausível; depois limpa tudo. É a
+# prova viva por trás de MetricsPrometheus=supported (provider_report.rs).
+MGMTSOCK="/tmp/dlxe2e-mgmt-$$.sock"
+if [[ $E2E_HAVE_IMAGE -eq 1 ]] && command -v curl >/dev/null; then
+  _mc="metrics-$PFX"
+  if check_then "métricas: o container de prova arranca (container run -d)" ok \
+       "$BIN" container run -d --name "$_mc" --net none "$IMG" sleep 120; then
+    "$BIN" serve api --addr "unix://$MGMTSOCK" >"$OUT/mgmt-api.log" 2>&1 &
+    MGMTPID=$!
+    for _ in $(seq 100); do [[ -S "$MGMTSOCK" ]] && break; sleep 0.05; done
+    check "métricas: o socket da API de gestão existe e é 0600" ok bash -c \
+      "[[ -S '$MGMTSOCK' ]] && [[ \$(stat -c %a '$MGMTSOCK') == 600 ]]"
+    check "métricas: GET /metrics devolve OpenMetrics com o registo partilhado" ok bash -c \
+      "curl -s --unix-socket '$MGMTSOCK' http://localhost/metrics | grep -q '^# TYPE delonix_build_info '"
+    check "métricas: há uma gauge de CPU e uma de memória com o id/nome do container e um valor plausível" ok env \
+      MET="$(curl -s --unix-socket "$MGMTSOCK" http://localhost/metrics)" MCN="$_mc" \
+      python3 -c '
+import os,re
+met=os.environ["MET"]; name=os.environ["MCN"]
+cpu=re.search(r"delonix_workload_cpu_usage_seconds_total\{kind=\"container\",id=\"[^\"]+\",name=\""+re.escape(name)+r"\"\} ([0-9.eE+]+)", met)
+mem=re.search(r"delonix_workload_memory_current_bytes\{kind=\"container\",id=\"[^\"]+\",name=\""+re.escape(name)+r"\"\} ([0-9.eE+]+)", met)
+assert cpu, "sem workload_cpu_usage_seconds_total para "+name+"\n"+met
+assert mem, "sem workload_memory_current_bytes para "+name+"\n"+met
+assert float(mem.group(1))>0, "memory.current nao e plausivel: "+mem.group(1)
+'
+    kill "$MGMTPID" 2>/dev/null || true
+  fi
+  "$BIN" container rm -f "$_mc" >/dev/null 2>&1 || true
+  rm -f "$MGMTSOCK"
+  unset _mc
+else
+  skip "métricas: há uma gauge de CPU e uma de memória com o id/nome do container e um valor plausível" \
+       "sem imagem base ($IMG) ou sem curl no host"
+fi
+
+########################################
 section "cluster kind, ao vivo (E2E_CLUSTER=1)"
 ########################################
 # Um cluster kind REAL de ponta a ponta: `cluster create` single-node a Ready, e
