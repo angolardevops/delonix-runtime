@@ -537,14 +537,28 @@ delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
 
-delonix delete vms teste; cd ..; rm -rf lab-vm</code></pre>
+delonix vm destroy teste; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verificação:</strong> o build imprime
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
 image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
 publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.
 A chave que injectas vai para a conta <code>delonix</code>, não para a conta
 default da distro — o bloco de próximos passos do <code>vm create</code>
-imprime o <code>ssh</code> exacto.</p></div><div class='lang-en'>
+imprime o <code>ssh</code> exacto.</p>
+<p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
+com asserção de resultado <em>funcional</em> — lê de
+<code>vm image ls -o json</code> que a imagem <code>minha-base:1.0</code> ficou no
+store, de <code>vm ls -o json</code> que uma VM arranca <code>Running</code> com
+IPv4 <strong>a partir dela</strong>, e prova que <code>vm destroy</code>
+<strong>não deixa órfãos</strong> e que a imagem <strong>sobrevive</strong> ao
+destroy (o overlay era por-VM) — <strong>falha em voz alta</strong> distinguindo
+«imagem não construiu» de «VM não arrancou» de «órfão», em
+<code>docs/labs/lab-6/</code>: <code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-6/lab.sh</code>). Precisa de libguestfs
+(<code>virt-customize</code>) no host; o arnês gera a sua própria chave SSH e
+aponta o <code>SSHKEY</code> do scaffold para ela. Validado em
+<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a
+2026-10-24.</p></div><div class='lang-en'>
 <p>Goal: build your own qcow2 image, the same way you build a container
 image.</p>
 <pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
@@ -566,7 +580,7 @@ delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
 
-delonix delete vms test; cd ..; rm -rf lab-vm</code></pre>
+delonix vm destroy test; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verification:</strong> the build prints
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
 checksum. With <code>--url-img</code>, if there's no published
@@ -574,7 +588,22 @@ checksum. With <code>--url-img</code>, if there's no published
 alone — instead of staying quiet. The key you inject goes to the
 <code>delonix</code> account, not the distro's default account — the
 "next steps" block from <code>vm create</code> prints the exact
-<code>ssh</code> command.</p></div>
+<code>ssh</code> command.</p>
+<p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
+own, asserting a <em>functional</em> result — it reads from
+<code>vm image ls -o json</code> that the <code>minha-base:1.0</code> image
+landed in the store, from <code>vm ls -o json</code> that a VM boots
+<code>Running</code> with an IPv4 <strong>from it</strong>, and it proves
+<code>vm destroy</code> <strong>leaves no orphans</strong> and that the image
+<strong>survives</strong> the destroy (the overlay was per-VM) — it
+<strong>fails loudly</strong>, telling "image did not build" apart from "VM never
+started" apart from "orphan", under <code>docs/labs/lab-6/</code>:
+<code>prepare → run → verify → cleanup</code>
+(<code>bash docs/labs/lab-6/lab.sh</code>). Needs libguestfs
+(<code>virt-customize</code>) on the host; the harness generates its own SSH key
+and points the scaffold's <code>SSHKEY</code> at it. Validated on
+<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on
+2026-10-24.</p></div>
 <h2 id='lab-7'><span class='lang-pt'>Kubernetes sem Docker</span><span class='lang-en'>Kubernetes with no Docker</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>

@@ -94,6 +94,22 @@ for v in data or []:
 ' "$1" "$2"
 }
 
+# Existe uma imagem de VM LOCAL com este nome/tag? (lê `vm image ls -o json`, a
+# verdade estável — ADR-0005 — não um grep da tabela). Par do `image_exists`,
+# mas para o store de imagens de VM, não o de containers.
+vm_image_exists() { # NOME[:TAG]
+  "${DELONIX}" vm image ls -o json 2>/dev/null | python3 -c '
+import sys, json
+want = sys.argv[1]
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(1)
+for img in data or []:
+    if img.get("name") == want:
+        sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
 # Espera a VM ficar Running com um IPv4 atribuído (o cloud-init/DHCP demora).
 # Ecoa o IP e devolve 0; devolve 1 em timeout. Distingue "nunca Running" de
 # "Running mas sem IP" pela mensagem do chamador.
