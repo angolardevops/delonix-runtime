@@ -459,6 +459,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - OCI images: pull, ls, remove, export, scan, sign, verify. ``vm image <cmd>`` for golden VM images (build/import/push/convert).
    * - ``build``
      - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
+   * - ``oci-runtime``
+     - runc-compatible runtime CLI (ADR-0080): ``create``/``start``/``state``/``kill``/``delete`` a container from an OCI bundle, driving the engine's own init behind the runc contract — so it can sit where ``runc``/``crun`` do.
    * - ``run`` · ``create`` · ``ps`` · ``start`` · ``stop`` · ``restart`` · ``rm`` · ``exec`` · ``logs`` · ``kill`` · ``attach`` · ``stats`` · ``pull`` · ``images`` · ``rmi`` · ``tag`` · ``save`` · ``load`` · ``push``
      - Docker/Podman root aliases: each is the SAME flag struct and handler as the ``container <verb>`` / ``image <verb>`` it shortcuts, so you change only the executable name. ``wait`` is polymorphic (container ids vs manifest ``-f``) — see the stability doc.
    * - ``volume``
