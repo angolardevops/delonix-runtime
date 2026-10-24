@@ -3963,6 +3963,9 @@ msgstr "`--network` é para builds de VMfile; a receita dourada decide isso com 
 msgid "log in with the key you injected"
 msgstr "entrar com a chave que injectaste"
 
+msgid "or by IP, from a host that can reach the VM"
+msgstr "ou por IP, a partir de um host que alcance a VM"
+
 # ---- vm convert / default-backend / HYPERVISOR do VMfile -------------------
 
 msgid "no such local VM image or file: {source} (see `delonix vm image ls`)"
