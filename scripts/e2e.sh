@@ -5419,6 +5419,244 @@ else
 fi
 
 ########################################
+section "vm: um vCPU a QUENTE e ONLINE DENTRO do guest (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.hotplug.cpu.add` do provider libvirt estava `partial`
+# («`virsh setvcpus --live`… unit-tested, never run against a guest»). Mandar
+# o `setvcpus --live` e o `vcpucount` passar a contar o vCPU novo prova que o
+# HIPERVISOR aceitou (níveis 1-2), mas NÃO prova que o convidado vê o CPU nem
+# que ele passa a contar para o trabalho — era o buraco que mantinha a
+# capacidade a meio (o mesmo buraco que as frentes irmãs do DISCO e da NIC
+# fecharam). Aqui fecham-se os QUATRO níveis, ao vivo, contra um guest REAL:
+#   1. PEDIDO ACEITE — `vm update --vcpus 3` passa pelo provider e o
+#      `setvcpus --live` devolve ok; a CLI imprime `vcpus -> 3` e sai 124
+#      (`DX-8504`) porque sem guest-agent não há quem confirme o nível 4 PELO
+#      canal do agente — mas o vCPU É anexado, e os níveis 3-4 abaixo provam-no
+#      por um caminho independente do agente;
+#   2. APLICADO AO DOMÍNIO — o `vcpucount --live --active` do domínio passa a
+#      devolver 3 (o vCPU quente está no domínio vivo);
+#   3. DETECTADO PELO GUEST — dentro do convidado aparece um `cpuN` novo em
+#      `/sys/devices/system/cpu` (um poller plantado por cloud-init baseline-a
+#      os cores de arranque e regista o directório que aparece DEPOIS);
+#   4. ONLINE E A CONTAR — o guest põe o core quente online
+#      (`echo 1 > /sys/devices/system/cpu/cpuN/online`, caso não venha sozinho)
+#      e o `nproc` sobe acima do baseline de arranque — prova de que o vCPU é
+#      UTILIZÁVEL, não só presente; o veredicto fica num ficheiro na raiz, lido
+#      depois com guestfish (a VM parada, que o QEMU larga o qcow2).
+# A detecção e o online NÃO passam pelo guest-agent: o poller corre dentro do
+# guest e grava a prova no disco de arranque, por isso esta secção vale mesmo
+# num guest sem agente — é o teste do RECURSO, não do canal de confirmação. A
+# folga de hotplug vem do `--vcpus-max 4` no create (ADR-0068 D3): sem ela o
+# `vm update` recusa por não haver teto acima do arranque.
+#
+# Precisa de uma imagem cloud com cloud-init a bordo (E2E_CLOUDINIT_IMAGE, ou
+# uma descoberta em $SROOT/vm-images/_base), guestfish e cloud-localds. Sem
+# isso, SKIP honesto — a bateria em CI não transporta uma imagem de arranque.
+CPUIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$CPUIMG" ]]; then
+  CPUIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$CPUIMG" && -r "$CPUIMG" ]]; then
+  CPUVM="cpuadd-$PFX"; CPUBASE="$OUT/$CPUVM-base.qcow2"
+  CPUUD="$OUT/$CPUVM-user-data.yaml"; CPUPOLL="$OUT/$CPUVM-poll.sh"
+  cp "$CPUIMG" "$CPUBASE" && qemu-img resize "$CPUBASE" 5G >/dev/null 2>&1
+  # O poller in-guest: baseline-a os cores de arranque (nproc + nº de dirs
+  # cpuN), espera por um cpuN que apareça DEPOIS, põe-no online se vier offline,
+  # e grava o veredicto (detecção + nproc antes/depois) na raiz para o guestfish
+  # ler com a VM parada.
+  cat > "$CPUPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-cpu-RESULT
+exec >>/var/lib/delonix-cpu-LOG 2>&1
+base_nproc=$(nproc)
+base_dirs=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | wc -l)
+for _ in $(seq 1 600); do
+  for o in /sys/devices/system/cpu/cpu[0-9]*/online; do
+    [ -f "$o" ] && [ "$(cat "$o")" = 0 ] && echo 1 > "$o" 2>/dev/null
+  done
+  now_nproc=$(nproc)
+  now_dirs=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | wc -l)
+  if [ "$now_dirs" -gt "$base_dirs" ]; then det=ok; else det=no; fi
+  if [ "$now_nproc" -gt "$base_nproc" ]; then up=ok; else up=no; fi
+  if [ "$det" = ok ] && [ "$up" = ok ]; then
+    { echo "== lscpu =="; lscpu 2>/dev/null; echo "== online =="; cat /sys/devices/system/cpu/online; } > /var/lib/delonix-cpu-INFO 2>&1
+    echo "BASE_NPROC=$base_nproc NEW_NPROC=$now_nproc BASE_CPUDIRS=$base_dirs NEW_CPUDIRS=$now_dirs CPU_DETECT=$det NPROC_UP=$up" > "$R"
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"
+    echo "hostname: dlx-cpu-proof"
+    echo "package_update: false"
+    echo "package_upgrade: false"
+    echo "write_files:"
+    echo "  - path: /usr/local/bin/cpu-poll.sh"
+    echo "    permissions: '0755'"
+    echo "    encoding: b64"
+    echo "    content: $(base64 -w0 "$CPUPOLL")"
+    echo "runcmd:"
+    echo "  - [ sh, -c, \"setsid bash /usr/local/bin/cpu-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$CPUUD"
+  if check_then "vm create libvirt (hotplug-cpu guest, headroom --vcpus-max 4)" ok \
+       "$BIN" vm create "$CPUVM" --disk "$CPUBASE" --backend libvirt --memory 1G --vcpus 2 --vcpus-max 4 --user-data "$CPUUD"; then
+    CPUOVL="$SROOT/vms/$CPUVM.qcow2"
+    # Dar tempo ao guest de arrancar e o cloud-init plantar o poller.
+    sleep 100
+    # NÍVEL 1: o provider aceita o pedido. A CLI sai 124 (`partial`) por falta de
+    # agente; exige-se a MENSAGEM `vcpus -> 3` do provider, não o rc 0.
+    check "nivel 1: o provider ACEITA o vCPU a quente (setvcpus live)" ok bash -c \
+      "'$BIN' vm update '$CPUVM' --vcpus 3 --wait-secs 15 2>&1 | grep -Eq 'vcpus -> 3 \\((partial|complete)\\)'"
+    # NÍVEL 2: o vCPU quente está no domínio vivo (vcpucount activo = 3).
+    check "nivel 2: o vCPU quente conta no domínio (vcpucount live active = 3)" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system vcpucount '$CPUVM' --live --active 2>/dev/null | tr -d '[:space:]')\" = 3 ]"
+    # Dar tempo ao poller in-guest de detectar + pôr online.
+    sleep 40
+    # Parar a VM: só com o qcow2 livre é que o guestfish lê o disco de arranque.
+    "$BIN" vm stop "$CPUVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$CPUVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$CPUVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 3: o guest DETECTOU o core novo (apareceu um cpuN acima do baseline).
+    check "nivel 3: o guest DETECTA o vCPU quente (novo cpuN em sys-devices)" ok bash -c \
+      "guestfish --ro -a '$CPUOVL' -i cat /var/lib/delonix-cpu-RESULT | grep -q 'CPU_DETECT=ok'"
+    # NÍVEL 4: o core quente está ONLINE e a contar — nproc subiu acima do boot.
+    check "nivel 4: o vCPU quente fica ONLINE DENTRO do guest (nproc sobe)" ok bash -c \
+      "guestfish --ro -a '$CPUOVL' -i cat /var/lib/delonix-cpu-RESULT | grep -q 'NPROC_UP=ok'"
+    "$BIN" delete vm "$CPUVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$CPUVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$CPUBASE" "$CPUUD" "$CPUPOLL"
+else
+  skip "vm: um vCPU a quente e online dentro do guest" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, ou sem imagem cloud (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
+section "vm: memoria a QUENTE e ONLINE DENTRO do guest (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.hotplug.memory.add` do provider libvirt estava `partial`
+# («plugs a DIMM (`attach-device --live`)… unit-tested, never run against a
+# guest»). Anexar um `<memory model='dimm'>` ao vivo e o `dumpxml`/`dominfo`
+# passar a mostrá-lo prova que o HIPERVISOR aceitou (níveis 1-2), mas NÃO prova
+# que o convidado vê a RAM nova nem que ela entra no `MemTotal` — era o buraco
+# que mantinha a capacidade a meio. Aqui fecham-se os QUATRO níveis, ao vivo,
+# contra um guest REAL:
+#   1. PEDIDO ACEITE — `vm update --memory 2G` passa pelo provider e o
+#      `attach-device --live` devolve ok; a CLI imprime `memory -> 2048M` e sai
+#      124 (`DX-8504`) porque sem guest-agent não há quem confirme o nível 4
+#      PELO canal do agente — mas o DIMM É anexado, e os níveis 3-4 provam-no à
+#      parte;
+#   2. APLICADO AO DOMÍNIO — o `dumpxml` do domínio vivo passa a listar o
+#      `<memory model='dimm'>` quente (a RAM nova está no domínio);
+#   3. DETECTADA PELO GUEST — dentro do convidado aparecem blocos novos em
+#      `/sys/devices/system/memory` (um poller plantado por cloud-init baseline-a
+#      os blocos de arranque e regista os que aparecem DEPOIS);
+#   4. ONLINE E A CONTAR — o guest põe os blocos quentes online
+#      (`echo online > /sys/devices/system/memory/memoryN/state`, caso não venham
+#      sozinhos) e o `MemTotal` do `/proc/meminfo` sobe acima do baseline de
+#      arranque — prova de que a RAM é UTILIZÁVEL, não só presente; o veredicto
+#      fica num ficheiro na raiz, lido depois com guestfish (a VM parada).
+# A detecção e o online NÃO passam pelo guest-agent: o poller corre dentro do
+# guest e grava a prova no disco de arranque, por isso esta secção vale mesmo
+# num guest sem agente — é o teste do RECURSO, não do canal de confirmação. A
+# folga de hotplug vem do `--memory-max 2G` no create (ADR-0068 D3): reserva os
+# slots `<maxMemory>` e a topologia de nó NUMA que um DIMM precisa.
+#
+# Precisa de uma imagem cloud com cloud-init a bordo (E2E_CLOUDINIT_IMAGE, ou
+# uma descoberta em $SROOT/vm-images/_base), guestfish e cloud-localds. Sem
+# isso, SKIP honesto — a bateria em CI não transporta uma imagem de arranque.
+MEMIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$MEMIMG" ]]; then
+  MEMIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$MEMIMG" && -r "$MEMIMG" ]]; then
+  MEMVM="memadd-$PFX"; MEMBASE="$OUT/$MEMVM-base.qcow2"
+  MEMUD="$OUT/$MEMVM-user-data.yaml"; MEMPOLL="$OUT/$MEMVM-poll.sh"
+  cp "$MEMIMG" "$MEMBASE" && qemu-img resize "$MEMBASE" 5G >/dev/null 2>&1
+  # O poller in-guest: baseline-a o MemTotal e os blocos de memória de arranque,
+  # espera por blocos que apareçam DEPOIS, põe-nos online se vierem offline, e
+  # grava o veredicto (MemTotal antes/depois) na raiz para o guestfish ler com a
+  # VM parada.
+  cat > "$MEMPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-mem-RESULT
+exec >>/var/lib/delonix-mem-LOG 2>&1
+memtotal() { awk '/^MemTotal:/{print $2}' /proc/meminfo; }
+base_mt=$(memtotal)
+base_blk=$(ls -d /sys/devices/system/memory/memory[0-9]* 2>/dev/null | wc -l)
+for _ in $(seq 1 600); do
+  for s in /sys/devices/system/memory/memory[0-9]*/state; do
+    [ -f "$s" ] && [ "$(cat "$s")" = offline ] && echo online > "$s" 2>/dev/null
+  done
+  now_mt=$(memtotal)
+  now_blk=$(ls -d /sys/devices/system/memory/memory[0-9]* 2>/dev/null | wc -l)
+  if [ "$now_blk" -gt "$base_blk" ]; then det=ok; else det=no; fi
+  if [ "$now_mt" -gt "$base_mt" ]; then up=ok; else up=no; fi
+  if [ "$det" = ok ] && [ "$up" = ok ]; then
+    echo "BASE_MEMTOTAL_KB=$base_mt NEW_MEMTOTAL_KB=$now_mt BASE_BLOCKS=$base_blk NEW_BLOCKS=$now_blk MEM_DETECT=$det MEMTOTAL_UP=$up" > "$R"
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"
+    echo "hostname: dlx-mem-proof"
+    echo "package_update: false"
+    echo "package_upgrade: false"
+    echo "write_files:"
+    echo "  - path: /usr/local/bin/mem-poll.sh"
+    echo "    permissions: '0755'"
+    echo "    encoding: b64"
+    echo "    content: $(base64 -w0 "$MEMPOLL")"
+    echo "runcmd:"
+    echo "  - [ sh, -c, \"setsid bash /usr/local/bin/mem-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$MEMUD"
+  if check_then "vm create libvirt (hotplug-memory guest, headroom --memory-max 2G)" ok \
+       "$BIN" vm create "$MEMVM" --disk "$MEMBASE" --backend libvirt --memory 1G --memory-max 2G --vcpus 2 --user-data "$MEMUD"; then
+    MEMOVL="$SROOT/vms/$MEMVM.qcow2"
+    # Dar tempo ao guest de arrancar e o cloud-init plantar o poller.
+    sleep 100
+    # NÍVEL 1: o provider aceita o pedido. A CLI sai 124 (`partial`) por falta de
+    # agente; exige-se a MENSAGEM `memory -> 2048M` do provider, não o rc 0.
+    check "nivel 1: o provider ACEITA a memoria a quente (attach-device DIMM live)" ok bash -c \
+      "'$BIN' vm update '$MEMVM' --memory 2G --wait-secs 15 2>&1 | grep -Eq 'memory -> 2048M \\((partial|complete)\\)'"
+    # NÍVEL 2: o DIMM quente está no domínio vivo (dumpxml lista-o).
+    check "nivel 2: o DIMM quente aparece no dumpxml do domínio" ok bash -c \
+      "virsh -c qemu:///system dumpxml '$MEMVM' 2>/dev/null | grep -q \"model='dimm'\""
+    # Dar tempo ao poller in-guest de detectar + pôr online.
+    sleep 40
+    # Parar a VM: só com o qcow2 livre é que o guestfish lê o disco de arranque.
+    "$BIN" vm stop "$MEMVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$MEMVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$MEMVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 3: o guest DETECTOU os blocos novos (apareceram acima do baseline).
+    check "nivel 3: o guest DETECTA a memoria quente (novos blocos em sys-devices)" ok bash -c \
+      "guestfish --ro -a '$MEMOVL' -i cat /var/lib/delonix-mem-RESULT | grep -q 'MEM_DETECT=ok'"
+    # NÍVEL 4: a RAM quente está ONLINE e a contar — MemTotal subiu acima do boot.
+    check "nivel 4: a memoria quente fica ONLINE DENTRO do guest (MemTotal sobe)" ok bash -c \
+      "guestfish --ro -a '$MEMOVL' -i cat /var/lib/delonix-mem-RESULT | grep -q 'MEMTOTAL_UP=ok'"
+    "$BIN" delete vm "$MEMVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$MEMVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$MEMBASE" "$MEMUD" "$MEMPOLL"
+else
+  skip "vm: memoria a quente e online dentro do guest" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, ou sem imagem cloud (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o

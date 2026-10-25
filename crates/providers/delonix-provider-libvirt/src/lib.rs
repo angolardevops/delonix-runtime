@@ -374,12 +374,12 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:o domínio arranca com 2 vCPU",
             }),
-            C::VmHotplugCpuAdd => bin(S::Partial {
-                detail: "`vm update --vcpus` via `virsh setvcpus --live` into the `<vcpu current=…>` maximum fixed at create (ADR-0068 D3), read back with `vcpucount`; the guest agent's `guest-get-vcpus` decides complete or partial (D4/D8); unit-tested, never run against a guest",
+            C::VmHotplugCpuAdd => sys(S::Supported {
+                evidence: "e2e:vm: um vCPU a QUENTE e ONLINE DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmHotplugCpuRemove => S::NotImplemented,
-            C::VmHotplugMemoryAdd => bin(S::Partial {
-                detail: "`vm update --memory` plugs a DIMM (`attach-device --live`) into the `<maxMemory>` slots fixed at create (ADR-0068 D3), read back with `dominfo`; the agent's memory blocks decide complete or partial (D4/D8); unit-tested, never run against a guest",
+            C::VmHotplugMemoryAdd => sys(S::Supported {
+                evidence: "e2e:vm: memoria a QUENTE e ONLINE DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
             C::VmHotplugDiskAdd => sys(S::Supported {
