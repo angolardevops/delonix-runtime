@@ -408,6 +408,97 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
     );
 }
 
+/// A snapshot SURVIVES a stop and a start: the create/destroy case takes a
+/// snapshot and deletes it before it ever stops the VM, so it proves the four
+/// snapshot verbs but never that a snapshot is durable node state rather than
+/// something the running process holds. This case takes a snapshot, powers the
+/// VM all the way down, and reads the node's snapshot list back while the VM is
+/// STOPPED and again after it is STARTED — the snapshot has to be in both. The
+/// proof is the node's own list each time (`snapshots`), never the call that
+/// took it; a snapshot that only lived as long as the VM ran would be gone from
+/// the first of those two reads.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn a_snapshot_survives_a_stop_and_a_start() {
+    let t = target().expect(NEEDS_TARGET);
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+
+    let name = format!("dlxpersist{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+
+    let boot = b
+        .boot(vmdir, &cfg, &cfg.disk, &|s: CreateStage| {
+            eprintln!("  stage: {s:?}")
+        })
+        .expect("boot");
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    assert!(b.is_running(&vm), "the VM must be running after boot");
+
+    // Take the snapshot while the VM is running, then confirm the node lists it
+    // — the same first step the create/destroy case takes.
+    b.snapshot(vmdir, &vm, "persist1").expect("snapshot");
+    let while_running = b.snapshots(vmdir, &vm).expect("snapshots while running");
+    assert!(
+        while_running.iter().any(|s| s == "persist1"),
+        "the snapshot is not in the node's list right after taking it: {while_running:?}"
+    );
+
+    // Power the VM all the way down. The snapshot is not held by the running
+    // guest — it is the node's state — so it has to still be there with the VM
+    // off. (`stop` parks the VM; the config, and with it the snapshots, stays.)
+    b.stop(vmdir, &vm).expect("stop");
+    assert!(!b.is_running(&vm), "the VM must be stopped after stop");
+    let while_stopped = b.snapshots(vmdir, &vm).expect("snapshots while stopped");
+    assert!(
+        while_stopped.iter().any(|s| s == "persist1"),
+        "the snapshot vanished while the VM was stopped — it was not durable: {while_stopped:?}"
+    );
+
+    // Start it again and read the list once more: a snapshot that survived the
+    // stop AND the start is persistent node state by any honest reading.
+    b.resume(vmdir, &vm)
+        .expect("resume")
+        .expect("a record with a handle on an existing VM must be resumed, not recreated");
+    assert!(b.is_running(&vm), "the VM must be running after resume");
+    let after_restart = b.snapshots(vmdir, &vm).expect("snapshots after restart");
+    assert!(
+        after_restart.iter().any(|s| s == "persist1"),
+        "the snapshot was gone after the stop/start cycle: {after_restart:?}"
+    );
+
+    // Clean up: delete the snapshot, stop, and destroy — leaving nothing on the
+    // node, the same discipline the create/destroy case keeps.
+    b.delete_snapshot(vmdir, &vm, "persist1")
+        .expect("delete snapshot");
+    b.stop(vmdir, &vm).expect("second stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        b.client().config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — it is an orphan"
+    );
+}
+
 /// A backup lands on the storage as a crash-consistent archive, and comes
 /// OFF it: `backup_vm` (`POST …/vzdump`) never stops the VM, `list_backups`
 /// reads back what the node actually has (never what the call said), and
