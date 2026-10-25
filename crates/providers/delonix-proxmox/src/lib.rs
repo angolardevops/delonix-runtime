@@ -7553,8 +7553,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::VmSnapshotDelete => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real",
             },
-            C::VmSnapshotPersistent => S::Partial {
-                detail: "snapshots live on the node; the live case lists `live1` back from the node right after taking it, but deletes it BEFORE the stop, so nothing asserts a snapshot is still there after a stop/start",
+            C::VmSnapshotPersistent => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_snapshot_survives_a_stop_and_a_start",
             },
             C::VmBackupDisk => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_lands_on_the_storage_and_comes_off_it",
