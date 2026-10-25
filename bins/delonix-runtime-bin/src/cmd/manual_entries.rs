@@ -2784,6 +2784,23 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm start", "vm stop", "vm console", "get"],
     },
     Entry {
+        path: "vm clone",
+        group: "Lifecycle",
+        examples: &[
+            ("clone a VM into a new, independent one — a copied disk, a new MAC and UUID", "delonix vm clone dev dev-copy"),
+            ("clone a template into a fresh VM and wait until it answers", "delonix vm clone base-template web-1 --wait"),
+        ],
+        see_also: &["vm template", "vm create", "vm snapshot", "vm ls"],
+    },
+    Entry {
+        path: "vm template",
+        group: "Lifecycle",
+        examples: &[
+            ("freeze a VM into a base for `vm clone` — it stops and will not boot again", "delonix vm template base"),
+        ],
+        see_also: &["vm clone", "vm create", "vm stop"],
+    },
+    Entry {
         path: "vm migrate",
         group: "Lifecycle",
         examples: &[

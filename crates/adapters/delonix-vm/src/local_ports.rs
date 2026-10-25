@@ -82,6 +82,42 @@ impl LocalDiskImages for QemuImgDisks {
     ) -> delonix_model::Result<(PathBuf, PathBuf)> {
         Ok(prepare_local_overlay(vmdir, name, base, size_gib, on)?)
     }
+
+    fn clone_disk(&self, src: &Path, dest: &Path) -> delonix_model::Result<()> {
+        Ok(clone_disk_independent(src, dest)?)
+    }
+}
+
+/// `qemu-img convert` the whole backing chain of `src` into a single,
+/// standalone qcow2 at `dest`. `convert` reads every layer and writes the
+/// RESULT, so the output has no `backing file` of its own — the clone shares
+/// nothing with the source and survives the source being destroyed. (`-O
+/// qcow2` keeps it thin/compressible; the source is read-only here, so a
+/// clone of a running VM is crash-consistent, the same guarantee a disk
+/// snapshot gives.)
+fn clone_disk_independent(src: &Path, dest: &Path) -> super::Result<()> {
+    let src = std::fs::canonicalize(src).map_err(|e| {
+        super::Error::from(delonix_model::Error::not_found_or_io(e, || {
+            format!("source disk {}", src.display())
+        }))
+    })?;
+    run_quiet(
+        "qemu-img",
+        &[
+            "convert",
+            // `-U` reads the source even while a running VM holds the qcow2
+            // write lock: without it `convert` demands a shared lock the live
+            // qemu refuses, and cloning a running VM failed outright. The copy
+            // is then crash-consistent — exactly the guarantee a disk snapshot
+            // of a running guest gives. A stopped source (the template case)
+            // holds no lock and is copied cleanly regardless.
+            "-U",
+            "-O",
+            "qcow2",
+            &src.to_string_lossy(),
+            &dest.to_string_lossy(),
+        ],
+    )
 }
 
 /// Reads an image's own recorded defaults straight off

@@ -191,6 +191,14 @@ pub trait LocalDiskImages {
         size_gib: Option<u32>,
         on: &dyn Fn(crate::vm_backend::CreateStage),
     ) -> Result<(std::path::PathBuf, std::path::PathBuf)>;
+
+    /// Makes `dest` an INDEPENDENT copy of `src` — a standalone qcow2 that
+    /// keeps no backing file pointing at the source, so that from the moment it
+    /// exists a write to either disk never reaches the other. The disk half of
+    /// `vm clone`: a per-VM overlay points at a shared read-only base, which is
+    /// exactly what a clone must NOT do (two VMs writing the same file), so the
+    /// chain is flattened into one file here rather than overlaid.
+    fn clone_disk(&self, src: &std::path::Path, dest: &std::path::Path) -> Result<()>;
 }
 
 /// A VM image's own recorded recommendation (ADR-0076 D3): the `VCPUS`/

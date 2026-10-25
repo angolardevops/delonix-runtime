@@ -1234,6 +1234,23 @@ pub enum VmCmd {
         #[arg(long = "boot-timeout", default_value_t = 120)]
         boot_timeout: u64,
     },
+    /// Clone a VM into a new, independent one — its own disk, MAC and UUID (libvirt).
+    Clone {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        source: String,
+        name: String,
+        /// After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running.
+        #[arg(long)]
+        wait: bool,
+        /// Seconds to wait with --wait (default 120).
+        #[arg(long = "boot-timeout", default_value_t = 120)]
+        boot_timeout: u64,
+    },
+    /// Mark a VM as a template: a frozen base for `vm clone`, which does not boot (libvirt).
+    Template {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Move a VM to another `delonix` host — real downtime, no shared storage.
     ///
     /// Stops the VM (if running), flattens its overlay to a standalone qcow2,
@@ -4122,6 +4139,38 @@ pub fn run(action: VmCmd) -> Result<()> {
             if wait {
                 wait_for_boot(&base, &name, std::time::Duration::from_secs(boot_timeout))?;
             }
+            Ok(())
+        }
+        VmCmd::Clone {
+            source,
+            name,
+            wait,
+            boot_timeout,
+        } => {
+            let vm = delonix_vm::clone_vm(&base, &source, &name)?;
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "✓ VM '{name}' cloned from '{source}'.",
+                    &[("name", &vm.name), ("source", &source)]
+                )
+            );
+            println!("{}", vm.name);
+            if wait {
+                wait_for_boot(&base, &vm.name, std::time::Duration::from_secs(boot_timeout))?;
+            }
+            Ok(())
+        }
+        VmCmd::Template { name } => {
+            delonix_vm::mark_template(&base, &name)?;
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "✓ VM '{name}' is now a template (clone it with `delonix vm clone`).",
+                    &[("name", &name)]
+                )
+            );
+            println!("{name}");
             Ok(())
         }
         VmCmd::Migrate {

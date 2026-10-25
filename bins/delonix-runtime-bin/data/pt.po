@@ -2273,6 +2273,30 @@ msgstr "a arrancar a VM"
 msgid "✓ VM '{name}' started."
 msgstr "✓ VM '{name}' arrancada."
 
+msgid "(internal) join the pod infra's PID namespace (k8s `shareProcessNamespace`), so the pod's containers see each other's processes. Set by `delonix pod`."
+msgstr "(interno) juntar-se ao namespace de PID do infra do pod (k8s `shareProcessNamespace`), para os containers do pod verem os processos uns dos outros. Definido por `delonix pod`."
+
+msgid "✓ VM '{name}' cloned from '{source}'."
+msgstr "✓ VM '{name}' clonada de '{source}'."
+
+msgid "✓ VM '{name}' is now a template (clone it with `delonix vm clone`)."
+msgstr "✓ VM '{name}' é agora um template (clona-a com `delonix vm clone`)."
+
+msgid "Clone a VM into a new, independent one — its own disk, MAC and UUID (libvirt)."
+msgstr "Clona uma VM numa nova e independente — disco, MAC e UUID próprios (libvirt)."
+
+msgid "Mark a VM as a template: a frozen base for `vm clone`, which does not boot (libvirt)."
+msgstr "Marca uma VM como template: base congelada para `vm clone`, que não arranca (libvirt)."
+
+msgid "clone a VM into a new, independent one — a copied disk, a new MAC and UUID"
+msgstr "clona uma VM numa nova e independente — disco copiado, MAC e UUID novos"
+
+msgid "clone a template into a fresh VM and wait until it answers"
+msgstr "clona um template numa VM nova e espera até ela responder"
+
+msgid "freeze a VM into a base for `vm clone` — it stops and will not boot again"
+msgstr "congela uma VM como base para `vm clone` — pára e não volta a arrancar"
+
 msgid "Next steps:"
 msgstr "Próximos passos:"
 

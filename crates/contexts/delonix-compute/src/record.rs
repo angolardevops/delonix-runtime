@@ -1212,6 +1212,15 @@ pub struct Vm {
     /// no headroom" convention as `vcpus_max`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_max_mib: Option<u64>,
+    /// Marked as a TEMPLATE (`vm template`): a frozen base a `vm clone` copies
+    /// its disk from, never a VM that runs. `start`/`restart` refuse it — a
+    /// template that booted would drift from the base every clone is supposed
+    /// to be an exact copy of. `#[serde(default)]` so every record already on
+    /// disk reads back as an ordinary VM (which it is), and the mark is dropped
+    /// from the JSON when false so a plain VM's record is byte-for-byte what it
+    /// was before this field existed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub template: bool,
 }
 
 /// Default backend for VMs persisted before multi-backend support.
@@ -1274,6 +1283,8 @@ impl Vm {
             // Same reasoning: filled in by `create_with` from `VmConfig`.
             vcpus_max: None,
             memory_max_mib: None,
+            // A VM is born runnable; only `vm template` ever sets this.
+            template: false,
         }
     }
 }

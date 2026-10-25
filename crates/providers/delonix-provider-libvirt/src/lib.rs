@@ -369,8 +369,12 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmResumeSameIdentity => bin(S::Supported {
                 evidence: "check:vm start depois do stop de uma VM pausada",
             }),
-            C::VmClone => S::NotImplemented,
-            C::VmTemplate => S::NotImplemented,
+            C::VmClone => bin(S::Supported {
+                evidence: "test:crates/providers/delonix-provider-libvirt/tests/live.rs::vm_clone_boots_an_independent_domain_from_a_copied_disk",
+            }),
+            C::VmTemplate => bin(S::Supported {
+                evidence: "test:crates/contexts/delonix-compute/src/vm.rs::mark_template_freezes_the_vm_and_start_refuses_it",
+            }),
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:o domínio arranca com 2 vCPU",
             }),
@@ -1830,10 +1834,25 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str("    <disk type='file' device='disk'>\n");
     s.push_str("      <driver name='qemu' type='qcow2'/>\n");
     s.push_str(&format!("      <source file='{}'/>\n", xml_escape(overlay)));
-    if !cfg.disk.is_empty() {
-        let base = std::fs::canonicalize(&cfg.disk)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| cfg.disk.clone());
+    // The backing file (the base image) is declared only when it is a
+    // DIFFERENT file from the overlay. A `vm clone` hands the backend a
+    // standalone qcow2 as both `disk` and overlay (the flattened copy IS the
+    // disk — no chain): declaring it as its own `<backingStore>` opened the one
+    // file twice and QEMU refused the second open ("Failed to get write
+    // lock"), so the clone never booted. The comparison is on the canonical
+    // paths because `cfg.disk` and `overlay` reach here spelled differently
+    // (one relative, one absolute) for the very same file.
+    let overlay_canon = std::fs::canonicalize(overlay)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| overlay.to_string());
+    let base = (!cfg.disk.is_empty())
+        .then(|| {
+            std::fs::canonicalize(&cfg.disk)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| cfg.disk.clone())
+        })
+        .filter(|base| base != &overlay_canon);
+    if let Some(base) = base {
         let fmt = disk_backing_format(Path::new(&base));
         s.push_str("      <backingStore type='file'>\n");
         s.push_str(&format!("        <format type='{}'/>\n", xml_escape(&fmt)));
