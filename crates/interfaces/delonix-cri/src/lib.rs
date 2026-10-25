@@ -68,25 +68,7 @@ impl ImageService for DelonixImage {
         let list = tokio::task::spawn_blocking(move || images(&base)?.list().map_err(st_oci))
             .await
             .map_err(st)??;
-        let images = list
-            .into_iter()
-            .map(|i| {
-                let (uid, username) = image_user(&i.config.user);
-                Image {
-                    id: i.id.clone(),
-                    repo_tags: i.repo_tags.clone(),
-                    repo_digests: vec![],
-                    size: layer_size(&i),
-                    uid,
-                    username,
-                    spec: Some(ImageSpec {
-                        image: i.id.clone(),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }
-            })
-            .collect();
+        let images = list.iter().map(to_cri_image).collect();
         Ok(Response::new(ListImagesResponse { images }))
     }
 
@@ -99,21 +81,7 @@ impl ImageService for DelonixImage {
         let found = tokio::task::spawn_blocking(move || images(&base).ok()?.resolve(&name).ok())
             .await
             .map_err(st)?;
-        let image = found.map(|i| {
-            let (uid, username) = image_user(&i.config.user);
-            Image {
-                id: i.id.clone(),
-                repo_tags: i.repo_tags.clone(),
-                size: layer_size(&i),
-                uid,
-                username,
-                spec: Some(ImageSpec {
-                    image: i.id.clone(),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }
-        });
+        let image = found.as_ref().map(to_cri_image);
         Ok(Response::new(ImageStatusResponse {
             image,
             info: Default::default(),
@@ -203,25 +171,69 @@ impl ImageService for DelonixImage {
     }
 }
 
-/// Size (bytes) of an image's layers, summing the CAS blobs.
 /// Maps the image OCI config's `user` to the `uid`/`username` fields of the CRI
 /// `Image` (`crictl`/kubelet use them to validate RunAsNonRoot). Rule:
 /// `""` (no USER) → root, `uid = 0`; numeric `"uid[:gid]"` → `uid`; a name →
 /// `username` (resolved at runtime against the image's `/etc/passwd`). The
 /// conformance spec `image status … should not have Uid|Username empty` requires
 /// that ONE of the two be filled — before, both came back empty.
+///
+/// The `USER` directive is `user[:group]` in BOTH forms. The group is NOT part
+/// of the CRI `username`/`uid`: only the user half is taken, from the same
+/// `split(':').next()` used for the numeric case. Returning the whole string
+/// (`"www-data:1004"`) made the spec `image status … should not have Uid|Username
+/// empty` fail on the `name:group` image, which compares `username` to the user
+/// name alone (`"www-data"`).
 fn image_user(user: &str) -> (Option<Int64Value>, String) {
     let u = user.trim();
     if u.is_empty() {
         return (Some(Int64Value { value: 0 }), String::new());
     }
-    let uid_part = u.split(':').next().unwrap_or(u);
-    match uid_part.parse::<i64>() {
+    let user_part = u.split(':').next().unwrap_or(u);
+    match user_part.parse::<i64>() {
         Ok(uid) => (Some(Int64Value { value: uid }), String::new()),
-        Err(_) => (None, u.to_string()),
+        Err(_) => (None, user_part.to_string()),
     }
 }
 
+/// Splits a store's reference list into the CRI `Image`'s two distinct fields:
+/// `(repo_tags, repo_digests)`. A reference is a DIGEST reference when it carries
+/// an `@` (`name@sha256:…`, the form a `crictl pull <name>@<digest>` records) and
+/// a tag reference otherwise (`name:tag`). The engine's `ImageStore` keeps every
+/// reference in one `repo_tags` list; the split is the CRI boundary's job because
+/// the proto has separate fields and the kubelet/`crictl` read them apart — a pull
+/// by digest must come back with `repo_tags` EMPTY and the digest in `repo_digests`
+/// (conformance `public image with digest should be pulled and removed`), and a
+/// pull by tag the other way round.
+///
+/// Split on `@` and not on `sha256:` so a non-`sha256` algorithm still classifies
+/// as a digest; the `:` of the tag never collides because the `@` precedes it.
+fn partition_refs(refs: &[String]) -> (Vec<String>, Vec<String>) {
+    refs.iter().cloned().partition(|r| !r.contains('@'))
+}
+
+/// The store's [`delonix_oci::Image`] → the CRI `Image` message. Shared by
+/// `list_images` and `image_status` so the two cannot drift (they built the same
+/// struct inline, and `repo_digests` was missing from both).
+fn to_cri_image(i: &delonix_oci::Image) -> Image {
+    let (uid, username) = image_user(&i.config.user);
+    let (repo_tags, repo_digests) = partition_refs(&i.repo_tags);
+    Image {
+        id: i.id.clone(),
+        repo_tags,
+        repo_digests,
+        size: layer_size(i),
+        uid,
+        username,
+        spec: Some(ImageSpec {
+            image: i.id.clone(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// Size (bytes) of an image's layers, summing the CAS blobs.
 fn layer_size(img: &delonix_oci::Image) -> u64 {
     let mut total = 0u64;
     for l in &img.layers {
@@ -397,4 +409,74 @@ pub fn serve_blocking(
                 message: e.to_string(),
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `image_user`: maps the OCI `USER` to the CRI `(uid, username)` pair. Each
+    // case is a `test-image-user-*` image the `critest` "image status … should
+    // not have Uid|Username empty" spec pulls, with the value it asserts.
+    #[test]
+    fn image_user_maps_user_to_uid_or_username() {
+        // No USER → root, uid 0, no name (the spec wants ONE of the two set).
+        assert_eq!(
+            image_user(""),
+            (Some(Int64Value { value: 0 }), String::new())
+        );
+        assert_eq!(
+            image_user("  "),
+            (Some(Int64Value { value: 0 }), String::new())
+        );
+        // Numeric uid → uid set, username empty.
+        assert_eq!(
+            image_user("1002"),
+            (Some(Int64Value { value: 1002 }), String::new())
+        );
+        // Numeric uid:gid → the gid is dropped; uid only.
+        assert_eq!(
+            image_user("1003:1003"),
+            (Some(Int64Value { value: 1003 }), String::new())
+        );
+        // Name → username set, uid nil.
+        assert_eq!(image_user("www-data"), (None, "www-data".to_string()));
+    }
+
+    // The `name:group` form is the regression: it returned the whole string
+    // (`"www-data:1004"`), and the spec compares `username` to the user name
+    // ALONE. The group must be dropped, exactly as for the numeric case.
+    #[test]
+    fn image_user_drops_group_from_name() {
+        assert_eq!(image_user("www-data:1004"), (None, "www-data".to_string()));
+        assert_eq!(
+            image_user("www-data:www-data"),
+            (None, "www-data".to_string())
+        );
+    }
+
+    // `partition_refs`: a digest reference (`name@sha256:…`) belongs in
+    // `repo_digests`, a tag reference (`name:tag`) in `repo_tags`. A pull by
+    // digest must come back with `repo_tags` EMPTY (conformance "public image
+    // with digest should be pulled and removed").
+    #[test]
+    fn partition_refs_splits_digests_from_tags() {
+        let (tags, digests) =
+            partition_refs(&["gcr.io/x/test-image-digest@sha256:9700f9a2f5bf".to_string()]);
+        assert!(tags.is_empty(), "a digest pull must not populate repo_tags");
+        assert_eq!(
+            digests,
+            vec!["gcr.io/x/test-image-digest@sha256:9700f9a2f5bf"]
+        );
+
+        let (tags, digests) = partition_refs(&["docker.io/library/nginx:latest".to_string()]);
+        assert_eq!(tags, vec!["docker.io/library/nginx:latest"]);
+        assert!(digests.is_empty());
+
+        // Mixed list keeps each reference on its correct side, order preserved.
+        let (tags, digests) =
+            partition_refs(&["repo:tag".to_string(), "repo@sha256:abc".to_string()]);
+        assert_eq!(tags, vec!["repo:tag"]);
+        assert_eq!(digests, vec!["repo@sha256:abc"]);
+    }
 }
