@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **126** |
+| supported | 103 | 112 | **130** |
 | partial | 93 | 86 | 78 |
-| not-implemented | 74 | 72 | 67 |
+| not-implemented | 74 | 72 | 63 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **126/274 (46.0%)** |
+| proved/applicable (N2) | — | 112/273 | **130/274 (47.4%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -75,6 +75,10 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 - `144c4d4e`+merge — **libvirt `vm.hotplug.cpu.add` + `vm.hotplug.memory.add` partial→supported (§7)**: 4 níveis no guest — CPU nproc 2→3 (cpuN online); memória MemTotal 917896→1966472 KB (+1 GiB, blocos online). supported→+2.
 - `426455a9`+merge — **proxmox `host.capacity` not-impl→supported (§9)**: GET puro `/nodes/{node}/status` (cpus 4, mem 16.7G, rootfs 19.5G); §11-limpo (sem criar nada no nó). supported→+1.
 - `c46b1661` docs — regenera matriz (126/274, 46.0%).
+
+- `d915b2ea`+merge — **linux `firewall.icmp-type` + `firewall.logging` not-impl→supported (§10)**: lowering nftables de `meta l4proto icmp [icmp type N]` + `log prefix ... limit rate 10/s`. Live: icmp type 8 permitido 3/3, type 13 bloqueado 0/3 (contadores); logging 40→5 logados (rate-limit observável). supported→+2.
+- `2b4d4494`+merge — **libvirt `vm.clone` + `vm.template` not-impl→supported (§7)**: clone independente (`qemu-img convert -U`, disco standalone, UUID/MAC/seed próprios; corrigido bug `<backingStore>` auto-referente que impedia o arranque); template marca VM congelada (start recusa DX-1501, instancia por clone). CLI `vm clone`/`vm template` nova com todos os gates CLI/docs/folhas/pt.po atualizados. supported→+2.
+- `73650bd2` docs — regenera matriz (130/274, 47.4%).
 
 ## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
 
