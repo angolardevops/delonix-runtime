@@ -438,7 +438,7 @@ fn a_snapshot_survives_a_stop_and_a_start() {
 
     let boot = b
         .boot(vmdir, &cfg, &cfg.disk, &|s: CreateStage| {
-            eprintln!("  stage: {s:?}")
+            let _ = s;
         })
         .expect("boot");
     let vm = delonix_compute::Vm::new(
@@ -528,7 +528,7 @@ fn a_snapshot_of_a_running_vm_captures_its_ram_state() {
 
     let boot = b
         .boot(vmdir, &cfg, &cfg.disk, &|s: CreateStage| {
-            eprintln!("  stage: {s:?}")
+            let _ = s;
         })
         .expect("boot");
     let vm = delonix_compute::Vm::new(
@@ -570,7 +570,6 @@ fn a_snapshot_of_a_running_vm_captures_its_ram_state() {
         !vmstate.is_empty(),
         "the snapshot of a running VM carries no `vmstate`, so no RAM was saved: {snap_cfg}"
     );
-    eprintln!("snapshot ram1 vmstate = {vmstate}");
 
     // The behavioural half: a rollback to a RAM snapshot resumes the guest, so
     // `is_running` is true after it — a disk-only snapshot would have no memory
