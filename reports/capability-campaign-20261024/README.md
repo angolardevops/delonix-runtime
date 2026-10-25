@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **123** |
-| partial | 93 | 86 | 80 |
-| not-implemented | 74 | 72 | 68 |
+| supported | 103 | 112 | **126** |
+| partial | 93 | 86 | 78 |
+| not-implemented | 74 | 72 | 67 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **123/274 (44.9%)** |
+| proved/applicable (N2) | — | 112/273 | **126/274 (46.0%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -71,6 +71,10 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 - `bfd626e1`+merge — **libvirt `vm.hotplug.nic.add` partial→supported (§7)**: 4 níveis ao vivo — aceite → `domiflist` (vnet na rede nova) → detectado (`enp7s0` no guest) → **tráfego real** (ping 4/4 ao gateway pela NIC nova, rx/tx a subir). supported→+1.
 - `448ddfb9`+merge — **proxmox `vm.snapshot.memory` partial→supported (§7)**: live contra o nó pve — o nó confirma `vmstate = local-lvm:vm-100-state-ram1` (RAM guardada). VM efémera destruída, §11 ok. supported→+1.
 - `a42af347` docs — regenera matriz (123/274, 44.9%).
+
+- `144c4d4e`+merge — **libvirt `vm.hotplug.cpu.add` + `vm.hotplug.memory.add` partial→supported (§7)**: 4 níveis no guest — CPU nproc 2→3 (cpuN online); memória MemTotal 917896→1966472 KB (+1 GiB, blocos online). supported→+2.
+- `426455a9`+merge — **proxmox `host.capacity` not-impl→supported (§9)**: GET puro `/nodes/{node}/status` (cpus 4, mem 16.7G, rootfs 19.5G); §11-limpo (sem criar nada no nó). supported→+1.
+- `c46b1661` docs — regenera matriz (126/274, 46.0%).
 
 ## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
 
