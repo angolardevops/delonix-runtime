@@ -386,8 +386,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 evidence: "e2e:vm: um disco a QUENTE e detectado e fica R/W DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmHotplugDiskRemove => S::NotImplemented,
-            C::VmHotplugNicAdd => bin(S::Partial {
-                detail: "`vm update --nic-add` attaches the same `<interface>` the boot XML writes, MAC pinned in the record; read back with `domiflist`, complete when the guest agent lists the MAC; unit-tested, never run against a guest",
+            C::VmHotplugNicAdd => sys(S::Supported {
+                evidence: "e2e:vm: uma NIC a QUENTE e detectada e passa TRAFEGO REAL DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => bin(S::Partial {
