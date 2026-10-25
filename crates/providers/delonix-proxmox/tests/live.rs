@@ -7311,6 +7311,46 @@ fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
     );
 }
 
+/// `host.capacity` (ADR-0049 slice 3): `GET /nodes/{node}/status` read back as
+/// the node's own capacity — vCPUs, memory and root storage, and how much is in
+/// use. A read-only node-level query, so it needs nothing beyond the node and
+/// leaves it exactly as found. Asserts the counts are coherent (CPUs and totals
+/// positive, used never above total) rather than any one lab's numbers.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_node_reports_its_cpu_memory_and_disk_capacity() {
+    let t = target().expect(NEEDS_TARGET);
+    let b = backend(&t).expect("connect");
+    let cap = b.client().host_capacity().expect("host capacity");
+    assert!(cap.cpus >= 1, "the node has at least one vCPU: {cap:?}");
+    // `cpus`, `cores` and `sockets` are each the node's own count; their
+    // product is NOT `cpus` on a nested/virtualised node (the lab reports
+    // 4/4/4), so only their positivity is asserted, never a relationship.
+    assert!(cap.cores >= 1, "the node reports its cores: {cap:?}");
+    assert!(cap.sockets >= 1, "the node reports its sockets: {cap:?}");
+    assert!(
+        !cap.cpu_model.is_empty(),
+        "the node names its CPU model: {cap:?}"
+    );
+    assert!(cap.mem_total > 0, "the node reports total memory: {cap:?}");
+    assert!(
+        cap.mem_used <= cap.mem_total,
+        "memory in use never exceeds total: {cap:?}"
+    );
+    assert!(
+        cap.rootfs_total > 0,
+        "the node reports root storage: {cap:?}"
+    );
+    assert!(
+        cap.rootfs_used <= cap.rootfs_total,
+        "root storage in use never exceeds total: {cap:?}"
+    );
+    assert!(
+        cap.swap_used <= cap.swap_total,
+        "swap in use never exceeds total (both zero when the node has no swap): {cap:?}"
+    );
+}
+
 /// N28 (ADR-0049 slice 3): the cluster probe reads the node's release with
 /// `GET /version` — the route this case adds to the trace — next to the five
 /// discovery reads, all GETs. Asserts the version is the one the node's own

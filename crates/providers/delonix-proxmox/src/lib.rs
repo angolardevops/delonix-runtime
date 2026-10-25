@@ -2121,6 +2121,17 @@ impl Client {
         Ok(parse_storage_status(&w.data))
     }
 
+    /// The node's own capacity, read from `GET /nodes/{node}/status`: how many
+    /// vCPUs, how much memory and root storage the host has, and how much is in
+    /// use (ADR-0049 slice 3). A read-only node-level query — it names no VM and
+    /// writes nothing — that answers `host.capacity`: what a scheduler reads to
+    /// decide whether a VM fits before it asks the node to create one.
+    pub fn host_capacity(&self) -> Result<HostCapacity> {
+        let body = self.get(&format!("/nodes/{}/status", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "node status")?;
+        Ok(parse_host_capacity(&w.data))
+    }
+
     /// The `import` volumes a storage holds (`volid`s), read from the same
     /// `GET …/storage/{storage}/content` route as [`Self::list_backups`]. It
     /// is how the import cache is checked: a read of one missing volume
@@ -5792,6 +5803,69 @@ fn parse_storage_status(v: &serde_json::Value) -> StorageStatus {
     }
 }
 
+/// The node's own capacity, read from `GET /nodes/{node}/status`
+/// ([`Client::host_capacity`]). Every byte count is the node's; this engine
+/// adds nothing to it. The counts a scheduler needs to place a VM — how many
+/// vCPUs the host has, how much memory and root storage it has and how much is
+/// in use — with the CPU model for a human to read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostCapacity {
+    /// Logical CPUs the node reports (`cpuinfo.cpus`): sockets × cores.
+    pub cpus: u64,
+    /// Physical cores (`cpuinfo.cores`).
+    pub cores: u64,
+    /// Sockets (`cpuinfo.sockets`).
+    pub sockets: u64,
+    /// The CPU model string (`cpuinfo.model`), as the node prints it.
+    pub cpu_model: String,
+    /// Total RAM in bytes (`memory.total`).
+    pub mem_total: u64,
+    /// RAM in use in bytes (`memory.used`).
+    pub mem_used: u64,
+    /// Total root filesystem bytes (`rootfs.total`).
+    pub rootfs_total: u64,
+    /// Root filesystem bytes in use (`rootfs.used`).
+    pub rootfs_used: u64,
+    /// Total swap bytes (`swap.total`); zero when the node has no swap.
+    pub swap_total: u64,
+    /// Swap bytes in use (`swap.used`).
+    pub swap_used: u64,
+}
+
+/// `GET /nodes/{node}/status` reduced to the capacity counts. Pure: a missing
+/// field becomes zero (a count) or an empty string (the model), never an error
+/// — the node always sends these on a healthy status, and a partial status is
+/// not worth failing a read-only capacity query over.
+fn parse_host_capacity(v: &serde_json::Value) -> HostCapacity {
+    let u = |path: &[&str]| -> u64 {
+        let mut cur = v;
+        for key in path {
+            match cur.get(key) {
+                Some(next) => cur = next,
+                None => return 0,
+            }
+        }
+        cur.as_u64().unwrap_or(0)
+    };
+    HostCapacity {
+        cpus: u(&["cpuinfo", "cpus"]),
+        cores: u(&["cpuinfo", "cores"]),
+        sockets: u(&["cpuinfo", "sockets"]),
+        cpu_model: v
+            .get("cpuinfo")
+            .and_then(|c| c.get("model"))
+            .and_then(|m| m.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        mem_total: u(&["memory", "total"]),
+        mem_used: u(&["memory", "used"]),
+        rootfs_total: u(&["rootfs", "total"]),
+        rootfs_used: u(&["rootfs", "used"]),
+        swap_total: u(&["swap", "total"]),
+        swap_used: u(&["swap", "used"]),
+    }
+}
+
 /// A local image staged on the node ([`Client::stage_import`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedImport {
@@ -7608,7 +7682,9 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::MetricsPrometheus => S::NotImplemented,
             C::MetricsPerWorkloadNetwork => S::NotImplemented,
             C::HostHealth => S::NotImplemented,
-            C::HostCapacity => S::NotImplemented,
+            C::HostCapacity => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_node_reports_its_cpu_memory_and_disk_capacity",
+            },
             C::TransportVerified => S::Partial {
                 detail: "TLS verified by default (webpki roots, or `ca_cert_pem`/`DELONIX_PROXMOX_CA_FILE` for an internal CA); `insecure_tls` is an explicit opt-out; 16 MiB response bound; `Debug` redacts the credential (ADR-0049 slice 1)",
             },
@@ -7735,6 +7811,33 @@ mod tests {
             hex,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    /// `GET /nodes/{node}/status` (PVE 9.2.2 shape) reduced to the capacity
+    /// counts, and a short body with the nested objects missing becomes zeros
+    /// and an empty model rather than a panic.
+    #[test]
+    fn host_capacity_reads_the_nested_counts_and_tolerates_a_short_body() {
+        let full = serde_json::json!({
+            "cpuinfo": { "cpus": 4, "cores": 4, "sockets": 1, "model": "13th Gen Intel(R) Core(TM) i9-13900H" },
+            "memory": { "total": 16_768_606_208u64, "used": 1_618_038_784u64 },
+            "rootfs": { "total": 19_501_891_584u64, "used": 5_699_842_048u64 },
+            "swap":   { "total": 2_550_132_736u64,  "used": 0 },
+        });
+        let cap = parse_host_capacity(&full);
+        assert_eq!(cap.cpus, 4);
+        assert_eq!(cap.cores, 4);
+        assert_eq!(cap.sockets, 1);
+        assert_eq!(cap.cpu_model, "13th Gen Intel(R) Core(TM) i9-13900H");
+        assert_eq!(cap.mem_total, 16_768_606_208);
+        assert_eq!(cap.mem_used, 1_618_038_784);
+        assert_eq!(cap.rootfs_total, 19_501_891_584);
+        assert_eq!(cap.swap_used, 0);
+
+        let empty = parse_host_capacity(&serde_json::json!({}));
+        assert_eq!(empty.cpus, 0);
+        assert_eq!(empty.mem_total, 0);
+        assert!(empty.cpu_model.is_empty());
     }
 
     fn cfg_com(ssh: &[&str]) -> VmConfig {
