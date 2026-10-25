@@ -637,6 +637,31 @@ fn now_ns() -> i64 {
 fn sb_dir(base: &Path) -> PathBuf {
     base.join("cri").join("sandboxes")
 }
+
+/// `true` if the sandbox uses the node's network (`hostNetwork`), in which case
+/// it has no own infra container or netns. The port-forward handler reads this
+/// to connect in the host netns directly instead of failing with "no live
+/// netns" (a `hostNetwork` pod never had one). Unknown/missing sandbox → `false`,
+/// which keeps the pod-netns path and its real liveness check.
+pub fn sandbox_is_host_network(base: &Path, sandbox_id: &str) -> bool {
+    read_rec::<SandboxRec>(&sb_dir(base), sandbox_id)
+        .map(|r| r.host_network)
+        .unwrap_or(false)
+}
+
+/// ROOT + CNI: the sandbox's named netns path (`/run/netns/cri-<id>`) when it
+/// was networked by the node's CNI chain in the host, else `None`. The
+/// port-forward handler reads this because the root CNI path has NO infra
+/// `pod-cri-<id>` pid to resolve — the pod's containers join this named netns
+/// with `--net host` — so the forward `setns`es into the file directly. Every
+/// other path (native/rootless, host-network) records an empty `cni_netns` and
+/// keeps the infra-pid resolution and its liveness check.
+pub fn sandbox_cni_netns(base: &Path, sandbox_id: &str) -> Option<String> {
+    read_rec::<SandboxRec>(&sb_dir(base), sandbox_id)
+        .ok()
+        .map(|r| r.cni_netns)
+        .filter(|s| !s.is_empty())
+}
 fn ct_dir(base: &Path) -> PathBuf {
     base.join("cri").join("containers")
 }

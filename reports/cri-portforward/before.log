@@ -1,0 +1,118 @@
+time="2026-10-24T12:31:50+01:00" level=warning msg="Config \"/etc/crictl.yaml\" does not exist, trying next: \"/home/walter/workspaces/.worktrees/delonix-runtime/crictl.yaml\""
+critest version: v1.36.0
+Running Suite: CRI validation - /home/walter/workspaces/.worktrees/delonix-runtime/cri-portforward-conformance
+==============================================================================================================
+Random Seed: [1m1792841510[0m
+
+Will run [1m2[0m of [1m122[0m specs
+[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m
+[38;5;243m------------------------------[0m
+[38;5;9m• [FAILED] [86.423 seconds][0m
+[0m[k8s.io] Streaming [38;5;243mruntime should support streaming interfaces [38;5;9m[1m[It] runtime should support portforward [Conformance][0m
+[38;5;243m/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:130[0m
+
+  [38;5;243mTimeline >>[0m
+  [1mSTEP:[0m create a PodSandbox with container port mapping [38;5;243m@ 10/24/26 12:31:50.063[0m
+  [1mSTEP:[0m create a web server container [38;5;243m@ 10/24/26 12:31:50.353[0m
+  [1mSTEP:[0m Get image status for image: registry.k8s.io/e2e-test-images/nginx:1.14-2 [38;5;243m@ 10/24/26 12:31:50.353[0m
+  [1mSTEP:[0m Pull image : registry.k8s.io/e2e-test-images/nginx:1.14-2 [38;5;243m@ 10/24/26 12:31:50.354[0m
+  [1mSTEP:[0m Create container. [38;5;243m@ 10/24/26 12:31:59.093[0m
+  Oct 24 12:31:59.096: INFO: Created container "851434a89f367107"
+
+  [1mSTEP:[0m start the web server container [38;5;243m@ 10/24/26 12:31:59.096[0m
+  [1mSTEP:[0m Start container for containerID: 851434a89f367107 [38;5;243m@ 10/24/26 12:31:59.096[0m
+  Oct 24 12:31:59.601: INFO: Started container "851434a89f367107"
+
+  [1mSTEP:[0m ensure the web server container is serving [38;5;243m@ 10/24/26 12:31:59.602[0m
+  [1mSTEP:[0m get the IP:port needed to be checked [38;5;243m@ 10/24/26 12:31:59.602[0m
+  [1mSTEP:[0m Get PodSandbox status for podID: a838c8d8d398a6c7 [38;5;243m@ 10/24/26 12:31:59.602[0m
+  Oct 24 12:31:59.603: INFO: the IP:port is http://10.200.0.2:80
+  [1mSTEP:[0m check the content of http://10.200.0.2:80 [38;5;243m@ 10/24/26 12:31:59.603[0m
+  [38;5;9m[FAILED][0m in [It] - /home/runner/work/cri-tools/cri-tools/pkg/validate/networking.go:305 [38;5;243m@ 10/24/26 12:33:15.842[0m
+  [1mSTEP:[0m stop PodSandbox [38;5;243m@ 10/24/26 12:33:15.843[0m
+  [1mSTEP:[0m delete PodSandbox [38;5;243m@ 10/24/26 12:33:16.274[0m
+  [38;5;243m<< Timeline[0m
+
+  [38;5;9m[FAILED] Timed out after 76.239s.
+  Expected success, but got an error:
+      <*url.Error | 0x17f7f3e28750>: 
+      Get "http://10.200.0.2:80": dial tcp 10.200.0.2:80: i/o timeout
+      {
+          Op: "Get",
+          URL: "http://10.200.0.2:80",
+          Err: <*net.OpError | 0x17f7f3a99860>{
+              Op: "dial",
+              Net: "tcp",
+              Source: nil,
+              Addr: <*net.TCPAddr | 0x17f7f3e286f0>{
+                  IP: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 10, 200, 0, 2],
+                  Port: 80,
+                  Zone: "",
+              },
+              Err: <*poll.DeadlineExceededError | 0x1f24920>{},
+          },
+      }[0m
+  [38;5;9mIn [1m[It][0m[38;5;9m at: [1m/home/runner/work/cri-tools/cri-tools/pkg/validate/networking.go:305[0m [38;5;243m@ 10/24/26 12:33:15.842[0m
+[38;5;243m------------------------------[0m
+[38;5;14mS[0m[38;5;14mS[0m
+[38;5;243m------------------------------[0m
+[38;5;9m• [FAILED] [82.700 seconds][0m
+[0m[k8s.io] Streaming [38;5;243mruntime should support streaming interfaces [38;5;9m[1m[It] runtime should support portforward in host network[0m
+[38;5;243m/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming_linux.go:51[0m
+
+  [38;5;243mTimeline >>[0m
+  [1mSTEP:[0m create a PodSandbox with container port mapping in host network [38;5;243m@ 10/24/26 12:33:16.485[0m
+  [1mSTEP:[0m create a web server container [38;5;243m@ 10/24/26 12:33:16.487[0m
+  Oct 24 12:33:16.487: INFO: Use latest as default image tag.
+  [1mSTEP:[0m Get image status for image: gcr.io/k8s-staging-cri-tools/hostnet-nginx-amd64:latest [38;5;243m@ 10/24/26 12:33:16.487[0m
+  [1mSTEP:[0m Pull image : gcr.io/k8s-staging-cri-tools/hostnet-nginx-amd64:latest [38;5;243m@ 10/24/26 12:33:16.488[0m
+  [1mSTEP:[0m Create container. [38;5;243m@ 10/24/26 12:33:36.007[0m
+  Oct 24 12:33:36.008: INFO: Created container "c2054171a96b5725"
+
+  [1mSTEP:[0m start the web server container [38;5;243m@ 10/24/26 12:33:36.008[0m
+  [1mSTEP:[0m Start container for containerID: c2054171a96b5725 [38;5;243m@ 10/24/26 12:33:36.008[0m
+  Oct 24 12:33:37.691: INFO: Started container "c2054171a96b5725"
+
+  [1mSTEP:[0m ensure the web server container is serving [38;5;243m@ 10/24/26 12:33:37.691[0m
+  [1mSTEP:[0m get the IP:port needed to be checked [38;5;243m@ 10/24/26 12:33:37.691[0m
+  Oct 24 12:33:37.691: INFO: the IP:port is http://127.0.0.1:12003
+  [1mSTEP:[0m check the content of http://127.0.0.1:12003 [38;5;243m@ 10/24/26 12:33:37.691[0m
+  Oct 24 12:33:38.693: INFO: check port mapping succeed
+  [1mSTEP:[0m port forward PodSandbox: 39c885a0e89531c0 [38;5;243m@ 10/24/26 12:33:38.693[0m
+  Oct 24 12:33:38.694: INFO: Get port forward URL: http://127.0.0.1:27203/portforward/1b7ece11aafc4b828032f10167e925e2
+  [1mSTEP:[0m check the output of portforward [38;5;243m@ 10/24/26 12:33:38.694[0m
+  Oct 24 12:33:38.694: INFO: Parse URL "http://127.0.0.1:27203/portforward/1b7ece11aafc4b828032f10167e925e2" succeed
+  [1mSTEP:[0m check if we can get nginx main page via localhost:12002 [38;5;243m@ 10/24/26 12:33:38.694[0m
+  [1mSTEP:[0m get the IP:port needed to be checked [38;5;243m@ 10/24/26 12:33:38.694[0m
+  Oct 24 12:33:38.694: INFO: the IP:port is http://127.0.0.1:12002
+  [1mSTEP:[0m check the content of http://127.0.0.1:12002 [38;5;243m@ 10/24/26 12:33:38.694[0m
+  [1mSTEP:[0m start port forward [38;5;243m@ 10/24/26 12:33:38.694[0m
+  Oct 24 12:33:38.695: INFO: Unexpected error occurred: error upgrading connection: unable to upgrade connection: pod sandbox has no live netns
+  [38;5;9m[FAILED][0m in [It] - /home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:391 [38;5;243m@ 10/24/26 12:34:38.695[0m
+  [1mSTEP:[0m stop PodSandbox [38;5;243m@ 10/24/26 12:34:38.695[0m
+  [1mSTEP:[0m delete PodSandbox [38;5;243m@ 10/24/26 12:34:39.13[0m
+  [38;5;243m<< Timeline[0m
+
+  [38;5;9m[FAILED] failed to start port forward for "http://127.0.0.1:27203/portforward/1b7ece11aafc4b828032f10167e925e2", stdout: , stderr: 
+  Unexpected error:
+      <*errors.errorString | 0x17f7f3d36e70>: 
+      error upgrading connection: unable to upgrade connection: pod sandbox has no live netns
+      {
+          s: "error upgrading connection: unable to upgrade connection: pod sandbox has no live netns",
+      }
+  occurred[0m
+  [38;5;9mIn [1m[It][0m[38;5;9m at: [1m/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:391[0m [38;5;243m@ 10/24/26 12:34:38.695[0m
+[38;5;243m------------------------------[0m
+[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m
+
+[38;5;9m[1mSummarizing 2 Failures:[0m
+  [38;5;9m[FAIL][0m [0m[k8s.io] Streaming [38;5;243mruntime should support streaming interfaces [38;5;9m[1m[It] runtime should support portforward [Conformance][0m
+  [38;5;243m/home/runner/work/cri-tools/cri-tools/pkg/validate/networking.go:305[0m
+  [38;5;9m[FAIL][0m [0m[k8s.io] Streaming [38;5;243mruntime should support streaming interfaces [38;5;9m[1m[It] runtime should support portforward in host network[0m
+  [38;5;243m/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:391[0m
+
+[38;5;9m[1mRan 2 of 122 Specs in 169.125 seconds[0m
+[38;5;9m[1mFAIL![0m -- [38;5;10m[1m0 Passed[0m | [38;5;9m[1m2 Failed[0m | [38;5;11m[1m0 Pending[0m | [38;5;14m[1m120 Skipped[0m
+--- FAIL: TestCRISuite (169.13s)
+FAIL
+RC=1

@@ -804,15 +804,17 @@ where
 // both directions.
 // ===========================================================================
 
-/// Connects a TCP to `127.0.0.1:<port>` INSIDE the netns of process `pid`. Does
+/// Connects a TCP to `127.0.0.1:<port>` INSIDE the netns identified by the file
+/// at `ns_path` — `/proc/<pid>/ns/net` for a live infra process, or a named
+/// netns such as `/run/netns/cri-<id>` on the root CNI path. Does
 /// `setns(CLONE_NEWNET)` on a throwaway thread (only that thread changes netns)
 /// and returns the already-connected socket (valid across the whole process).
-fn connect_in_netns(pid: i32, port: u16) -> std::io::Result<std::net::TcpStream> {
+fn connect_in_netns(ns_path: PathBuf, port: u16) -> std::io::Result<std::net::TcpStream> {
     use std::os::fd::AsRawFd;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let res = (|| -> std::io::Result<std::net::TcpStream> {
-            let f = std::fs::File::open(format!("/proc/{pid}/ns/net"))?;
+            let f = std::fs::File::open(&ns_path)?;
             // SAFETY: valid fd; setns changes only THIS thread's netns.
             if unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET) } != 0 {
                 return Err(std::io::Error::last_os_error());
@@ -825,13 +827,37 @@ fn connect_in_netns(pid: i32, port: u16) -> std::io::Result<std::net::TcpStream>
         .unwrap_or_else(|_| Err(std::io::Error::other("netns connect thread died")))
 }
 
-pub fn handle_port_forward(mut req: axum::extract::Request, pid: i32) -> Response {
+/// Where the port-forward's TCP connection is made. A normal (native/rootless)
+/// pod forwards INTO the infra container's netns via its pid (`setns` on
+/// `/proc/<pid>/ns/net`); the root CNI pod has no infra pid — its containers
+/// join a NAMED netns with `--net host` — so the forward `setns`es into that
+/// netns file (`/run/netns/cri-<id>`); a `hostNetwork` sandbox has no own netns
+/// at all, so the forward connects directly in `delonix-cri`'s own (host) netns.
+#[derive(Clone)]
+pub enum PfNetns {
+    Pid(i32),
+    NsPath(PathBuf),
+    Host,
+}
+
+/// Connects a TCP to `127.0.0.1:<port>` where [`PfNetns`] says: inside the pod's
+/// netns via [`connect_in_netns`] (by infra pid or by named netns file), or
+/// directly in the host netns for `hostNetwork` pods.
+fn connect_pf(netns: &PfNetns, port: u16) -> std::io::Result<std::net::TcpStream> {
+    match netns {
+        PfNetns::Host => std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)),
+        PfNetns::Pid(pid) => connect_in_netns(PathBuf::from(format!("/proc/{pid}/ns/net")), port),
+        PfNetns::NsPath(p) => connect_in_netns(p.clone(), port),
+    }
+}
+
+pub fn handle_port_forward(mut req: axum::extract::Request, netns: PfNetns) -> Response {
     let Some(on_upgrade) = req.extensions_mut().remove::<OnUpgrade>() else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     tokio::spawn(async move {
         if let Ok(upgraded) = on_upgrade.await {
-            run_port_forward(TokioIo::new(upgraded), pid).await;
+            run_port_forward(TokioIo::new(upgraded), netns).await;
         }
     });
     Response::builder()
@@ -843,7 +869,7 @@ pub fn handle_port_forward(mut req: axum::extract::Request, pid: i32) -> Respons
         .unwrap()
 }
 
-async fn run_port_forward<S>(io: S, pid: i32)
+async fn run_port_forward<S>(io: S, netns: PfNetns)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -882,7 +908,7 @@ where
                     let port: u16 = get("port").and_then(|p| p.trim().parse().ok()).unwrap_or(0);
                     let _ = out_tx.send(Out::SynReply(sid));
                     if stype == "data" && port != 0 {
-                        match connect_in_netns(pid, port) {
+                        match connect_pf(&netns, port) {
                             Ok(std_sock) => {
                                 let _ = std_sock.set_nonblocking(true);
                                 if let Ok(sock) = tokio::net::TcpStream::from_std(std_sock) {
