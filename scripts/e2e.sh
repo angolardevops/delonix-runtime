@@ -5168,6 +5168,121 @@ else
 fi
 
 ########################################
+section "vm: um disco a QUENTE e detectado e fica R/W DENTRO do guest (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.hotplug.disk.add` do provider libvirt estava `partial`
+# («attaches the same <disk>… never run against a guest»). Anexar um `<disk>` ao
+# vivo e o `domblklist` passar a listá-lo prova que o HIPERVISOR aceitou (níveis
+# 1-2), mas NÃO prova que o convidado vê o disco nem que ele serve para alguma
+# coisa — era exactamente o buraco que mantinha a capacidade a meio. Aqui
+# fecham-se os QUATRO níveis, ao vivo, contra um guest REAL:
+#   1. PEDIDO ACEITE — `vm update --disk-add` passa pelo provider e o
+#      `attach-device --live` devolve ok (o 124 `DX-8504` que a CLI imprime é só
+#      o canal do guest-agent a dizer «não confirmo» — o disco É anexado, e os
+#      níveis 3-4 abaixo provam-no por um caminho independente do agente);
+#   2. APLICADO AO DISPOSITIVO VIRTUAL — o `domblklist` do domínio passa a listar
+#      o disco quente num alvo novo (`vdc`);
+#   3. DETECTADO PELO GUEST — dentro do convidado aparece um bloco novo em
+#      `/sys/block` e no `lsblk` (um poller plantado por cloud-init regista-o);
+#   4. UTILIZÁVEL — o guest ESCREVE um marcador conhecido no disco quente e
+#      RELÊ-O igual (write+read reais ao bloco); o veredicto fica num ficheiro na
+#      raiz, lido depois com guestfish (a VM parada, que o QEMU larga o qcow2).
+# A detecção e o R/W NÃO passam pelo guest-agent: o poller corre dentro do guest
+# e grava a prova no disco de arranque, por isso esta secção vale mesmo num guest
+# sem agente — é o teste do RECURSO, não do canal de confirmação.
+#
+# Precisa de uma imagem cloud com cloud-init a bordo (E2E_CLOUDINIT_IMAGE, ou uma
+# descoberta em $SROOT/vm-images/_base), guestfish e cloud-localds. Sem isso,
+# SKIP honesto — a bateria em CI não transporta uma imagem de arranque.
+HPIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$HPIMG" ]]; then
+  HPIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$HPIMG" && -r "$HPIMG" ]]; then
+  HPVM="hpadd-$PFX"; HPBASE="$OUT/$HPVM-base.qcow2"; HPHOT="$OUT/$HPVM-hot.qcow2"
+  HPUD="$OUT/$HPVM-user-data.yaml"; HPPOLL="$OUT/$HPVM-poll.sh"
+  cp "$HPIMG" "$HPBASE" && qemu-img resize "$HPBASE" 5G >/dev/null 2>&1
+  qemu-img create -f qcow2 "$HPHOT" 128M >/dev/null 2>&1
+  # O poller in-guest: espera por um disco que apareça DEPOIS do arranque (os de
+  # boot/seed são a baseline), prova-o com um write+read ao bloco cru e grava o
+  # veredicto na raiz, para o guestfish ler com a VM parada.
+  cat > "$HPPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-hotplug-RESULT; L=/var/lib/delonix-hotplug-LSBLK
+exec >>/var/lib/delonix-hotplug-LOG 2>&1
+blocks() { lsblk -dn -o NAME,TYPE | awk '$2=="disk"{print $1}' | sort; }
+baseline="$(blocks)"
+for _ in $(seq 1 600); do
+  new="$(comm -13 <(echo "$baseline") <(blocks))"
+  if [ -n "$new" ]; then
+    dev="$(echo "$new" | head -1)"
+    { echo "== lsblk =="; lsblk; echo "== /sys/block =="; ls -l /sys/block; } > "$L" 2>&1
+    pat="HOTPLUG-RW-PROOF-v1"
+    printf '%s\n' "$pat" | dd of="/dev/$dev" bs=512 seek=0 conv=notrunc 2>/dev/null
+    blockdev --flushbufs "/dev/$dev" 2>/dev/null || true; sync
+    rb="$(dd if=/dev/$dev bs=512 count=1 2>/dev/null | tr -d '\0' | head -c 32)"
+    if [ "$rb" = "$pat" ]; then echo "DETECT=$dev WRITE=ok READ=ok MATCH=ok" > "$R"
+    else echo "DETECT=$dev WRITE=sent READ=[$rb] MATCH=no" > "$R"; fi
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"
+    echo "hostname: dlx-hotplug-proof"
+    echo "package_update: false"
+    echo "package_upgrade: false"
+    echo "write_files:"
+    echo "  - path: /usr/local/bin/hotplug-poll.sh"
+    echo "    permissions: '0755'"
+    echo "    encoding: b64"
+    echo "    content: $(base64 -w0 "$HPPOLL")"
+    echo "runcmd:"
+    echo "  - [ sh, -c, \"setsid bash /usr/local/bin/hotplug-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$HPUD"
+  if check_then "vm create libvirt (hotplug-disk guest)" ok \
+       "$BIN" vm create "$HPVM" --disk "$HPBASE" --backend libvirt --memory 1G --vcpus 2 --user-data "$HPUD"; then
+    HPOVL="$SROOT/vms/$HPVM.qcow2"
+    # Dar tempo ao guest de arrancar e o cloud-init plantar o poller.
+    sleep 100
+    # NÍVEL 1: o provider aceita o pedido. A CLI sai 124 (`partial`) porque este
+    # guest não tem agente para confirmar o nível 4 PELO canal do agente — mas o
+    # attach-device ok imprime «attached», e os níveis 3-4 provam-no à parte.
+    # Por isso aqui não se exige o rc 0; exige-se a MENSAGEM de attach do provider.
+    check "nivel 1: o provider ACEITA o disco a quente (attach-device ok)" ok bash -c \
+      "'$BIN' vm update '$HPVM' --disk-add '$HPHOT,bus=virtio,format=qcow2' --wait-secs 15 2>&1 | grep -q 'attached'"
+    # NÍVEL 2: o disco quente está no domínio vivo, num alvo novo.
+    check "nivel 2: o disco quente aparece no domblklist do dominio" ok bash -c \
+      "virsh -c qemu:///system domblklist '$HPVM' | grep -q '$HPVM-hot.qcow2'"
+    # Dar tempo ao poller in-guest de detectar + R/W.
+    sleep 40
+    # Parar a VM: só com o qcow2 livre é que o guestfish lê o disco de arranque.
+    "$BIN" vm stop "$HPVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$HPVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$HPVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 3: o guest DETECTOU o bloco novo (o poller gravou lsblk + /sys/block
+    # e nomeou o dispositivo quente).
+    check "nivel 3: o guest DETECTA o disco quente (lsblk/sys-block)" ok bash -c \
+      "guestfish --ro -a '$HPOVL' -i cat /var/lib/delonix-hotplug-LSBLK | grep -Eq 'vd[c-z] +[0-9].* disk'"
+    # NÍVEL 4: escrita E leitura reais ao disco quente DENTRO do guest bateram.
+    check "nivel 4: o disco quente e R/W DENTRO do guest (write+read batem)" ok bash -c \
+      "guestfish --ro -a '$HPOVL' -i cat /var/lib/delonix-hotplug-RESULT | grep -q 'WRITE=ok READ=ok MATCH=ok'"
+    "$BIN" delete vm "$HPVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$HPVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$HPBASE" "$HPHOT" "$HPUD" "$HPPOLL"
+else
+  skip "vm: um disco a quente e detectado e fica R/W dentro do guest" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, ou sem imagem cloud (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
