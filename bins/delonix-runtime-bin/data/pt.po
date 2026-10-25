@@ -9789,8 +9789,20 @@ msgstr "nenhum recurso corresponde ao filtro"
 msgid "(Enter: apply · Esc: clear)"
 msgstr "(Enter: aplica · Esc: limpa)"
 
-msgid "q/Esc: quit · ↑↓: select · Tab/1-6: scope · /: search · s: sort ({sort}) · refresh 1s"
-msgstr "q/Esc: sair · ↑↓: seleccionar · Tab/1-6: âmbito · /: procurar · s: ordenar ({sort}) · refresh 1s"
+msgid "q: quit · ↑↓: select · Enter: details · Tab/1-6: scope · /: search · Ctrl+K: filter · s: sort ({sort})"
+msgstr "q: sair · ↑↓: seleccionar · Enter: detalhe · Tab/1-6: âmbito · /: procurar · Ctrl+K: filtrar · s: ordenar ({sort})"
+
+msgid "unknown filter key '{key}:'"
+msgstr "chave de filtro desconhecida '{key}:'"
+
+msgid "empty value for '{key}:'"
+msgstr "valor vazio para '{key}:'"
+
+msgid "DETAILS (Esc: back)"
+msgstr "DETALHE (Esc: voltar)"
+
+msgid "resource no longer present"
+msgstr "recurso já não existe"
 
 # net l4guard (CLI wiring for the ingress-wide L4 DDoS guard)
 msgid "Ingress-wide L4 DDoS guard (per-source connection rate + concurrent cap)."
