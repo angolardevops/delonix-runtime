@@ -43,6 +43,21 @@ pub fn refuse_undeclared_network(net: Option<&dyn VmNetwork>, network: &str) -> 
     )))
 }
 
+/// Refuses to boot a VM marked as a template (`vm template`). A template is a
+/// frozen clone source: letting it run would drift it from the base every
+/// `vm clone` is meant to reproduce exactly. The error points at the way out
+/// (clone it, or un-template it by a fresh create), rather than a silent no-op
+/// that would leave the caller thinking the VM is up.
+fn refuse_template_start(vm: &Vm) -> Result<()> {
+    if vm.template {
+        return Err(Error::UnsupportedByBackend(format!(
+            "VM '{}' is a template and does not run — clone it with `delonix vm clone {} <new-name>`",
+            vm.name, vm.name
+        )));
+    }
+    Ok(())
+}
+
 /// The runtime files a backend leaves next to the overlay, as
 /// `vms/<name>.<ext>`: Cloud Hypervisor's api socket (and the lock it takes on
 /// it), the serial capture, the VMM log and pidfile, libvirt's domain XML. ONE
@@ -1221,6 +1236,7 @@ where
                 Error::from(e)
             }
         })?;
+        refuse_template_start(&vm)?;
         self.create(&self.restart_config(&vm))
     }
     /// The config a `start`/`restart` boots from: [`config_from`] the record,
@@ -1248,10 +1264,119 @@ where
                 Error::from(e)
             }
         })?;
+        refuse_template_start(&vm)?;
         if self.backends.for_vm(&vm)?.is_running(&vm) {
             self.stop(name)?;
         }
         self.create(&self.restart_config(&vm))
+    }
+
+    /// Marks VM `name` as a TEMPLATE: a frozen base `clone_vm` copies from,
+    /// which `start`/`restart` then refuse to boot (see [`refuse_template_start`]).
+    /// Running templates would drift from the base, so the mark STOPS a running
+    /// VM first — the same shape Proxmox's `POST …/template` has, which refuses
+    /// a running VM; here we make it stop instead, so one call does the job.
+    ///
+    /// Implemented for the `libvirt` backend, whose disk is a local qcow2 this
+    /// node owns and can copy. A backend that keeps its storage elsewhere needs
+    /// its own template verb (Proxmox has one) and is refused rather than
+    /// marked in a way nothing here could honour.
+    pub fn mark_template(&self, name: &str) -> Result<Vm> {
+        let mut vm = self.load_vm(name)?;
+        let backend = self.backends.for_vm(&vm)?;
+        if backend.manages_own_storage() {
+            return Err(Error::UnsupportedByBackend(format!(
+                "`vm template` marks a VM whose disk this node owns; VM '{name}' is on the '{}' backend, which keeps its storage on the remote node — use that provider's own template",
+                vm.backend
+            )));
+        }
+        if backend.is_running(&vm) {
+            self.stop(name)?;
+            vm = self.load_vm(name)?;
+        }
+        vm.template = true;
+        vm.status = Status::Stopped;
+        self.repo.set(name, &vm).map_err(Error::from)?;
+        Ok(vm)
+    }
+
+    /// Clones VM `source` into a brand-new VM `new_name`: an INDEPENDENT copy of
+    /// the source's disk (see [`LocalDiskImages::clone_disk`]) booted as its own
+    /// domain. Because the libvirt backend derives the MAC from the name and
+    /// lets libvirt assign the UUID at define time, a clone under a different
+    /// name is a DISTINCT identity (own MAC, own UUID, own disk) for free — the
+    /// one thing a clone must never share with its source.
+    ///
+    /// The clone is a running VM, not a template, even when `source` is a
+    /// template (the usual case): `config_from` does not carry the mark, and
+    /// the new record is born runnable. Its cloud-init identity is its own
+    /// (fresh hostname, a seed built for it), and it never inherits the
+    /// source's static IP — two VMs cannot hold one address.
+    pub fn clone_vm(&self, source: &str, new_name: &str) -> Result<Vm> {
+        self.clone_with(source, new_name, &|_| {})
+    }
+
+    /// [`clone_vm`] with the per-stage progress callback `create_with` uses.
+    pub fn clone_with(
+        &self,
+        source: &str,
+        new_name: &str,
+        on: &dyn Fn(CreateStage),
+    ) -> Result<Vm> {
+        if !valid_vm_name(new_name) {
+            return Err(Error::InvalidName(format!(
+                "invalid VM name '{new_name}' — use letters, digits, '.', '_' or '-' (no '/', '..', or leading '-')"
+            )));
+        }
+        let src = self.load_vm(source)?;
+        if self.backends.for_vm(&src)?.manages_own_storage() {
+            return Err(Error::UnsupportedByBackend(format!(
+                "`vm clone` copies a local disk; VM '{source}' is on the '{}' backend, which keeps its storage on the remote node — use that provider's own clone",
+                src.backend
+            )));
+        }
+        if self.repo.get(new_name).is_ok() {
+            return Err(Error::RecordConflict(format!(
+                "a VM '{new_name}' already exists — choose another name for the clone"
+            )));
+        }
+        let vmdir = self.vmdir();
+        std::fs::create_dir_all(&vmdir)?;
+        let dest = vmdir.join(format!("{new_name}.qcow2"));
+        if dest.exists() {
+            return Err(Error::RecordConflict(format!(
+                "a disk for '{new_name}' already exists at {} — remove it or choose another name",
+                dest.display()
+            )));
+        }
+        // The independent copy FIRST: a failure here leaves nothing behind (no
+        // record, no half-made domain), the same contract `create` keeps for a
+        // fresh VM.
+        self.disks
+            .clone_disk(std::path::Path::new(&src.overlay), &dest)?;
+
+        // Re-point the source's own config at the copied disk. `create_with`
+        // overlays `cfg.disk` into `vmdir/<name>.qcow2` only when that file is
+        // absent; here it already IS `dest`, so the overlay step is skipped and
+        // the clone boots straight off its independent copy.
+        let mut cfg = config_from(&src);
+        cfg.name = new_name.to_string();
+        cfg.disk = dest.to_string_lossy().into_owned();
+        cfg.disk_size_gib = None;
+        cfg.seed = None;
+        cfg.hostname = Some(new_name.to_string());
+        cfg.static_ip = None;
+        cfg.required_capabilities = Vec::new();
+
+        let created = self.create_with(&cfg, on);
+        if created.is_err() {
+            // `create_with`'s own undo removes the overlay only once it has
+            // built it; a failure BEFORE that (admission, a network it refuses)
+            // returns with `dest` — which this call made — still on disk, so
+            // take it back here too.
+            let _ = std::fs::remove_file(&dest);
+        }
+        created
     }
     /// Current state of a VM, with `status`/`ip` reconciled by its backend.
     pub fn status(&self, name: &str) -> Result<Vm> {
@@ -2281,6 +2406,17 @@ mod tests {
             }
             Ok((PathBuf::from(base), overlay))
         }
+
+        fn clone_disk(&self, src: &Path, dest: &Path) -> delonix_model::Result<()> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("clone_disk {} -> {}", src.display(), dest.display()));
+            if self.0.writes_files {
+                std::fs::write(dest, b"qcow2").unwrap();
+            }
+            Ok(())
+        }
     }
 
     struct FakeSeed(Rc<Seen>);
@@ -2630,6 +2766,97 @@ mod tests {
         }
         assert!(e.repo.get("web").is_err());
         assert_eq!(e.remove("web").unwrap_err().number(), 4501);
+    }
+
+    /// `clone_vm` copies the source's disk into the clone's own file and boots
+    /// a SECOND, independent record — the source is untouched, and the clone is
+    /// never born a template even if asked to clone one.
+    #[test]
+    fn clone_vm_copies_the_disk_and_boots_a_second_independent_record() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("src")).expect("source create");
+
+        let clone = e.clone_vm("src", "copy").expect("clone");
+        assert_eq!(clone.name, "copy");
+        assert!(!clone.template, "a clone must never be born a template");
+
+        // Both records exist and are distinct files.
+        assert!(e.repo.get("src").is_ok(), "source gone after clone");
+        assert!(e.repo.get("copy").is_ok(), "clone not recorded");
+        let vms = root.path().join("vms");
+        assert!(vms.join("src.qcow2").exists());
+        assert!(vms.join("copy.qcow2").exists());
+
+        // The disk copy ran, from the source's overlay into the clone's file.
+        assert!(
+            calls(&seen)
+                .iter()
+                .any(|c| c.starts_with("clone_disk") && c.contains("copy.qcow2")),
+            "clone_disk was not called into the clone's own file: {:?}",
+            calls(&seen)
+        );
+    }
+
+    /// Cloning onto a name that already exists is refused — it would otherwise
+    /// clobber another VM's record and disk.
+    #[test]
+    fn clone_vm_refuses_a_name_already_taken() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen);
+        e.create(&cfg("src")).expect("source create");
+        e.create(&cfg("taken")).expect("other create");
+        let err = e.clone_vm("src", "taken").expect_err("name is taken");
+        assert_eq!(err.number(), 5501, "expected a RecordConflict");
+    }
+
+    /// `vm clone` of a VM on a backend that keeps its storage on the remote
+    /// node is refused: this path copies a LOCAL disk, which such a backend has
+    /// none of here.
+    #[test]
+    fn clone_vm_refuses_a_remote_storage_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            own_storage: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen);
+        e.create(&cfg("src")).expect("source create");
+        let err = e.clone_vm("src", "copy").expect_err("remote storage");
+        assert_eq!(err.number(), 1501, "expected UnsupportedByBackend");
+    }
+
+    /// `mark_template` freezes a VM into a clone source: it stops it, stamps the
+    /// record, and `start` then refuses to boot it (pointing at `vm clone`).
+    #[test]
+    fn mark_template_freezes_the_vm_and_start_refuses_it() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            writes_files: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen);
+        e.create(&cfg("base")).expect("create");
+
+        let tmpl = e.mark_template("base").expect("mark template");
+        assert!(tmpl.template, "record not marked a template");
+        assert_eq!(tmpl.status, Status::Stopped, "template left running");
+
+        let err = e.start("base").expect_err("a template does not boot");
+        assert_eq!(err.number(), 1501, "expected UnsupportedByBackend");
+
+        // But it is still a valid clone source.
+        let clone = e.clone_vm("base", "from-template").expect("clone a template");
+        assert!(!clone.template);
     }
 
     /// A runtime file that was there BEFORE the create — the log of an earlier

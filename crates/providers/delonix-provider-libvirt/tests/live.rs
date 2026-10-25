@@ -214,3 +214,150 @@ fn libvirt_guest_agent_answers_on_a_real_cloud_init_boot() {
 
     drop(cleanup);
 }
+
+/// `vm clone` at the backend level: a clone boots as a DISTINCT, INDEPENDENT
+/// domain off a flattened copy of the source's disk. The engine's `clone_vm`
+/// is what the CLI drives (the live independence proof — a marker written to
+/// the source that the clone never gains — is in the session report); this
+/// test pins the two invariants a clone must hold whatever the caller: a
+/// different identity (the MAC, which libvirt derives from the name), and a
+/// disk that shares NO backing file with the source, so one cannot write
+/// through to the other.
+#[test]
+#[ignore = "needs DELONIX_LIBVIRT_LIVE_DISK (a cloud-init qcow2), qemu-img, cloud-localds and a usable qemu:///system: cargo test -p delonix-provider-libvirt --test live -- --ignored"]
+fn vm_clone_boots_an_independent_domain_from_a_copied_disk() {
+    let disk = std::env::var("DELONIX_LIBVIRT_LIVE_DISK")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .expect("DELONIX_LIBVIRT_LIVE_DISK must name a real cloud-init base qcow2 to run this --ignored test");
+    for tool in ["qemu-img", "cloud-localds"] {
+        assert!(
+            !tool_missing(tool),
+            "{tool} must be on PATH to run this --ignored test"
+        );
+    }
+    assert!(
+        system_libvirt_usable(),
+        "qemu:///system must be usable to run this --ignored test (join the `libvirt` group?)"
+    );
+
+    let src_name = format!("dlx-live-clone-src-{}", std::process::id());
+    let clone_name = format!("dlx-live-clone-dst-{}", std::process::id());
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dir_path = dir.path().to_path_buf();
+
+    // The source: an overlay over the base, booted as a normal VM.
+    let src_overlay = dir_path.join(format!("{src_name}.qcow2"));
+    let status = Command::new("qemu-img")
+        .args(["create", "-f", "qcow2", "-b"])
+        .arg(&disk)
+        .args(["-F", "qcow2"])
+        .arg(&src_overlay)
+        .status()
+        .expect("spawn qemu-img create");
+    assert!(status.success(), "qemu-img create -b failed");
+    let src_seed = write_seed(&dir_path, &src_name);
+
+    let _src_cleanup = Cleanup {
+        name: src_name.clone(),
+        _dir: tempfile::tempdir().expect("tempdir"),
+    };
+    let _clone_cleanup = Cleanup {
+        name: clone_name.clone(),
+        _dir: tempfile::tempdir().expect("tempdir"),
+    };
+
+    let backend = LibvirtBackend;
+    let src_cfg = VmConfig {
+        name: src_name.clone(),
+        disk: disk.clone(),
+        vcpus: 1,
+        memory: "1G".into(),
+        network: "ingress".into(),
+        seed: Some(src_seed.to_string_lossy().into_owned()),
+        cloud_init: Some(true),
+        ..Default::default()
+    };
+    let noop = |_s: CreateStage| {};
+    let src_boot = backend
+        .boot(&dir_path, &src_cfg, &src_overlay.to_string_lossy(), &noop)
+        .expect("source boot failed");
+
+    // The clone's disk: `qemu-img convert` flattens the whole chain into a
+    // STANDALONE qcow2 — the same primitive `LocalDiskImages::clone_disk` runs.
+    let clone_disk = dir_path.join(format!("{clone_name}.qcow2"));
+    let status = Command::new("qemu-img")
+        .args(["convert", "-U", "-O", "qcow2"])
+        .arg(&src_overlay)
+        .arg(&clone_disk)
+        .status()
+        .expect("spawn qemu-img convert");
+    assert!(status.success(), "qemu-img convert failed");
+
+    // Independence of the disk: the copy must carry no backing file at all.
+    let info = Command::new("qemu-img")
+        .args(["info", "--output=json"])
+        .arg(&clone_disk)
+        .output()
+        .expect("spawn qemu-img info");
+    let info = String::from_utf8_lossy(&info.stdout);
+    assert!(
+        !info.contains("backing-filename"),
+        "clone disk still has a backing file — not independent:\n{info}"
+    );
+
+    // The clone boots as its own domain. A fresh seed gives it its own
+    // cloud-init identity; the different NAME is what makes its MAC differ.
+    let clone_seed = write_seed(&dir_path, &clone_name);
+    let clone_cfg = VmConfig {
+        name: clone_name.clone(),
+        disk: clone_disk.to_string_lossy().into_owned(),
+        vcpus: 1,
+        memory: "1G".into(),
+        network: "ingress".into(),
+        seed: Some(clone_seed.to_string_lossy().into_owned()),
+        cloud_init: Some(true),
+        ..Default::default()
+    };
+    let clone_boot = backend
+        .boot(&dir_path, &clone_cfg, &clone_disk.to_string_lossy(), &noop)
+        .expect("clone boot failed");
+
+    assert_ne!(
+        src_boot.mac, clone_boot.mac,
+        "clone shares the source's MAC — not a distinct identity"
+    );
+    assert_eq!(
+        clone_boot.mac,
+        mac_for(&clone_name),
+        "clone MAC is not the one derived from its name"
+    );
+
+    let mut src_vm = Vm::new(
+        src_name.clone(),
+        disk.clone(),
+        src_overlay.to_string_lossy().into_owned(),
+        1,
+        "1G".into(),
+        "ingress".into(),
+        src_boot.tap.clone(),
+        src_boot.mac.clone(),
+        src_boot.api_socket.clone(),
+    );
+    src_vm.backend = "libvirt".into();
+    let mut clone_vm = Vm::new(
+        clone_name.clone(),
+        clone_disk.to_string_lossy().into_owned(),
+        clone_disk.to_string_lossy().into_owned(),
+        1,
+        "1G".into(),
+        "ingress".into(),
+        clone_boot.tap.clone(),
+        clone_boot.mac.clone(),
+        clone_boot.api_socket.clone(),
+    );
+    clone_vm.backend = "libvirt".into();
+
+    assert!(backend.is_running(&src_vm), "source did not stay running");
+    assert!(backend.is_running(&clone_vm), "clone did not start running");
+}

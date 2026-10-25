@@ -896,6 +896,28 @@ pub fn restart(base: &Path, name: &str) -> Result<Vm> {
     engine(base)?.restart(name)
 }
 
+/// Clones `source` into a brand-new, INDEPENDENT VM `new_name` and boots it —
+/// see [`delonix_compute::vm::VmEngine::clone_vm`]. libvirt only for now.
+pub fn clone_vm(base: &Path, source: &str, new_name: &str) -> Result<Vm> {
+    engine(base)?.clone_vm(source, new_name)
+}
+
+/// [`clone_vm`] with the create progress callback.
+pub fn clone_with(
+    base: &Path,
+    source: &str,
+    new_name: &str,
+    on: &dyn Fn(CreateStage),
+) -> Result<Vm> {
+    engine(base)?.clone_with(source, new_name, on)
+}
+
+/// Marks `name` as a template (a frozen clone source that will not boot) —
+/// see [`delonix_compute::vm::VmEngine::mark_template`]. libvirt only for now.
+pub fn mark_template(base: &Path, name: &str) -> Result<Vm> {
+    engine(base)?.mark_template(name)
+}
+
 /// Current state of a VM, with `status`/`ip` reconciled by its backend.
 /// Current state of a VM, with `status`/`ip` reconciled by its backend.
 pub fn status(base: &Path, name: &str) -> Result<Vm> {

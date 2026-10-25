@@ -91,6 +91,10 @@ classify() {
       else if (c ~ /^container /)                                 cls = "="
       else if (c ~ /^vm (start|stop|restart|console|ssh)$/)       cls = "="
       else if (c ~ /^vm snapshot /)                               cls = "="
+      # `vm clone`/`vm template` (§7): new VM verbs for the libvirt
+      # clone/template path, born at their destination with no rename behind
+      # them — same reason as `vm update`/`api-resources`.
+      else if (c == "vm clone" || c == "vm template")             cls = "="
       # `vm update` (ADR-0068 D1): new verb for live hotplug add, no rename
       # behind it — same reason as `api-resources` above.
       else if (c == "vm update")                                  cls = "="
