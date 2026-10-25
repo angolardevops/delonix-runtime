@@ -5283,6 +5283,142 @@ else
 fi
 
 ########################################
+section "vm: uma NIC a QUENTE e detectada e passa TRAFEGO REAL DENTRO do guest (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.hotplug.nic.add` do provider libvirt estava `partial`
+# («attaches the same <interface>… never run against a guest»). Anexar uma
+# `<interface>` ao vivo e o `domiflist` passar a listá-la prova que o HIPERVISOR
+# aceitou (níveis 1-2), mas NÃO prova que o convidado vê a NIC nem que ela serve
+# para passar tráfego — era exactamente o buraco que mantinha a capacidade a
+# meio (o mesmo buraco que a frente irmã do DISCO fechou). Aqui fecham-se os
+# QUATRO níveis, ao vivo, contra um guest REAL:
+#   1. PEDIDO ACEITE — `vm update --nic-add` passa pelo provider e o
+#      `attach-device --live` devolve ok (o 124 `DX-8504` que a CLI imprime é só
+#      o canal do guest-agent a dizer «não confirmo» — a NIC É anexada, e os
+#      níveis 3-4 abaixo provam-no por um caminho independente do agente);
+#   2. APLICADO AO DISPOSITIVO VIRTUAL — o `domiflist` do domínio passa a listar
+#      a interface quente na rede nova (`ingress`);
+#   3. DETECTADA PELO GUEST — dentro do convidado aparece uma NIC nova em
+#      `/sys/class/net` e no `ip link` (um poller plantado por cloud-init
+#      baseline-a as NICs de arranque e regista a que aparece DEPOIS);
+#   4. TRAFEGO REAL — o guest CONFIGURA a NIC quente (IP estático na sub-rede da
+#      rede `ingress`) e GERA tráfego para o gateway (`ping` a 192.168.199.1); o
+#      veredicto grava o nº de respostas recebidas e os deltas rx/tx dos
+#      contadores da interface, prova de que a NIC é UTILIZÁVEL — não só presente
+#      — e fica num ficheiro na raiz, lido depois com guestfish (a VM parada, que
+#      o QEMU larga o qcow2).
+# A detecção e o tráfego NÃO passam pelo guest-agent: o poller corre dentro do
+# guest e grava a prova no disco de arranque, por isso esta secção vale mesmo num
+# guest sem agente — é o teste do RECURSO, não do canal de confirmação. O ping
+# ao gateway da rede `ingress` (NAT, com gateway 192.168.199.1 na bridge do
+# host) é um alvo alcançável rootless: o host responde ao ICMP na sua ponta da
+# bridge, por isso o nível 4 é um ping end-to-end REAL, com fallback escrito para
+# os contadores rx/tx caso o ICMP ao gateway esteja filtrado.
+#
+# Precisa de uma imagem cloud com cloud-init a bordo (E2E_CLOUDINIT_IMAGE, ou uma
+# descoberta em $SROOT/vm-images/_base), guestfish, cloud-localds e a rede
+# libvirt `ingress`. Sem isso, SKIP honesto — a bateria em CI não transporta uma
+# imagem de arranque nem a rede NAT.
+NICIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$NICIMG" ]]; then
+  NICIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$NICIMG" && -r "$NICIMG" ]] \
+     && virsh -c qemu:///system net-info ingress >/dev/null 2>&1; then
+  NICVM="nicadd-$PFX"; NICBASE="$OUT/$NICVM-base.qcow2"
+  NICUD="$OUT/$NICVM-user-data.yaml"; NICPOLL="$OUT/$NICVM-poll.sh"
+  cp "$NICIMG" "$NICBASE" && qemu-img resize "$NICBASE" 5G >/dev/null 2>&1
+  # O poller in-guest: baseline-a as NICs físicas de arranque, espera por uma que
+  # apareça DEPOIS (a hot-added), configura-a com IP estático na sub-rede da rede
+  # `ingress`, faz ping ao gateway e grava o veredicto (respostas + deltas rx/tx)
+  # na raiz, para o guestfish ler com a VM parada.
+  cat > "$NICPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-nic-RESULT; L=/var/lib/delonix-nic-IPLINK
+exec >>/var/lib/delonix-nic-LOG 2>&1
+nics() { for d in /sys/class/net/*; do n=$(basename "$d"); [ "$n" = lo ] && continue; [ -e "$d/device" ] || continue; echo "$n"; done | sort; }
+baseline="$(nics)"
+for _ in $(seq 1 600); do
+  new="$(comm -13 <(echo "$baseline") <(nics))"
+  if [ -n "$new" ]; then
+    dev="$(echo "$new" | head -1)"
+    { echo "== ip link =="; ip link; echo "== all nics =="; nics; } > "$L" 2>&1
+    ip link set "$dev" up
+    ip addr add 192.168.199.200/24 dev "$dev"
+    sleep 3
+    rxb=$(cat "/sys/class/net/$dev/statistics/rx_packets")
+    txb=$(cat "/sys/class/net/$dev/statistics/tx_packets")
+    ping -c 4 -W 2 -I "$dev" 192.168.199.1 > /var/lib/delonix-nic-PING 2>&1
+    rcv=$(grep -oE '[0-9]+ received' /var/lib/delonix-nic-PING | grep -oE '^[0-9]+')
+    rxa=$(cat "/sys/class/net/$dev/statistics/rx_packets")
+    txa=$(cat "/sys/class/net/$dev/statistics/tx_packets")
+    rxd=$((rxa-rxb)); txd=$((txa-txb))
+    if [ "${rcv:-0}" -ge 1 ]; then traf=ok-ping
+    elif [ "$txd" -gt 0 ] && [ "$rxd" -gt 0 ]; then traf=ok-counters
+    else traf=no; fi
+    echo "DETECT=$dev PING_RECV=${rcv:-0} RX_DELTA=$rxd TX_DELTA=$txd TRAFFIC=$traf" > "$R"
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"
+    echo "hostname: dlx-nic-proof"
+    echo "package_update: false"
+    echo "package_upgrade: false"
+    echo "write_files:"
+    echo "  - path: /usr/local/bin/nic-poll.sh"
+    echo "    permissions: '0755'"
+    echo "    encoding: b64"
+    echo "    content: $(base64 -w0 "$NICPOLL")"
+    echo "runcmd:"
+    echo "  - [ sh, -c, \"setsid bash /usr/local/bin/nic-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$NICUD"
+  if check_then "vm create libvirt (hotplug-nic guest)" ok \
+       "$BIN" vm create "$NICVM" --disk "$NICBASE" --backend libvirt --memory 1G --vcpus 2 --user-data "$NICUD"; then
+    NICOVL="$SROOT/vms/$NICVM.qcow2"
+    # Dar tempo ao guest de arrancar e o cloud-init plantar o poller.
+    sleep 100
+    # NÍVEL 1: o provider aceita o pedido. A CLI sai 124 (`partial`) porque este
+    # guest não tem agente para confirmar o nível 4 PELO canal do agente — mas o
+    # attach-device ok imprime «NIC on ingress attached», e os níveis 3-4
+    # provam-no à parte. Por isso aqui não se exige o rc 0; exige-se a MENSAGEM
+    # de attach do provider.
+    check "nivel 1: o provider ACEITA a NIC a quente (attach-device ok)" ok bash -c \
+      "'$BIN' vm update '$NICVM' --nic-add 'network:ingress' --wait-secs 15 2>&1 | grep -q 'NIC on ingress attached'"
+    # NÍVEL 2: a interface quente está no domínio vivo, na rede nova.
+    check "nivel 2: a NIC quente aparece no domiflist do dominio (rede ingress)" ok bash -c \
+      "virsh -c qemu:///system domiflist '$NICVM' | grep -qw ingress"
+    # Dar tempo ao poller in-guest de detectar + configurar + gerar tráfego.
+    sleep 40
+    # Parar a VM: só com o qcow2 livre é que o guestfish lê o disco de arranque.
+    "$BIN" vm stop "$NICVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$NICVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$NICVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 3: o guest DETECTOU a NIC nova (o poller gravou ip link + a lista de
+    # NICs e nomeou a que apareceu depois do baseline de arranque).
+    check "nivel 3: o guest DETECTA a NIC quente (ip link/sys-class-net)" ok bash -c \
+      "guestfish --ro -a '$NICOVL' -i cat /var/lib/delonix-nic-RESULT | grep -Eq 'DETECT=[a-z0-9]+ '"
+    # NÍVEL 4: a NIC quente PASSOU TRÁFEGO REAL de dentro do guest — ping ao
+    # gateway recebido (end-to-end) OU contadores rx/tx a subir (fallback).
+    check "nivel 4: a NIC quente PASSA TRAFEGO REAL DENTRO do guest (ping/contadores)" ok bash -c \
+      "guestfish --ro -a '$NICOVL' -i cat /var/lib/delonix-nic-RESULT | grep -Eq 'TRAFFIC=ok-(ping|counters)'"
+    "$BIN" delete vm "$NICVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$NICVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$NICBASE" "$NICUD" "$NICPOLL"
+else
+  skip "vm: uma NIC a quente e detectada e passa trafego real dentro do guest" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, sem imagem cloud (E2E_CLOUDINIT_IMAGE), ou sem a rede libvirt ingress"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
