@@ -3202,6 +3202,26 @@ impl Client {
             .collect())
     }
 
+    /// The VM configuration frozen into a snapshot, as the node kept it
+    /// (`GET …/snapshot/{snapname}/config`). A plain read, never a write.
+    ///
+    /// The one field this read exists to expose is `vmstate`: when a snapshot
+    /// of a RUNNING VM is taken with `vmstate=1` (what [`Self::snapshot`]
+    /// always sends), the node saves the guest's RAM to a state volume and
+    /// records that volume here as `vmstate: <storage>:vm-<vmid>-state-<name>`.
+    /// Its presence is the node's own word that the snapshot carries memory,
+    /// not only the disk — the difference between a snapshot you roll back to a
+    /// RUNNING guest and one that only preserves the filesystem.
+    pub fn snapshot_config(&self, vmid: u32, name: &str) -> Result<serde_json::Value> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/snapshot/{}/config",
+            self.node,
+            urlencode(name)
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "snapshot config")?;
+        Ok(w.data)
+    }
+
     /// The members of the cluster this client's API entry point belongs to
     /// (`GET /nodes`), with whether each is online. A standalone node lists
     /// only itself.
@@ -7544,8 +7564,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::VmSnapshotDisk => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real",
             },
-            C::VmSnapshotMemory => S::Partial {
-                detail: "`vmstate=1` on every snapshot of a running VM; the live case snapshots once, state not asserted",
+            C::VmSnapshotMemory => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_snapshot_of_a_running_vm_captures_its_ram_state",
             },
             C::VmSnapshotRestore => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real",
