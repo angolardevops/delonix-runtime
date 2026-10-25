@@ -1327,6 +1327,181 @@ EOF2
   dlx network rm chaoscidr >/dev/null 2>&1
 }
 
+# The firewall matches a SPECIFIC ICMP type, and the match decides the packet —
+# proven in PACKETS, both ways. The holder used to refuse every ICMP rule at the
+# lowering (`policy_nft`); now `firewall.icmp-type` lowers to `meta l4proto icmp
+# icmp type <n>`, so a rule can allow `echo-request` (type 8) and nothing else.
+#
+#   permitted: policyIn deny + allow icmp type 8 → ping gets through, and the
+#              `icmp type 8 ... accept` counter of B's chain moves.
+#   denied:    policyIn deny + allow icmp type 13 (timestamp, NOT echo) → the
+#              very same ping is dropped, the `type 8` accept never counts it,
+#              and B's default `drop` catches it.
+#
+# Same sender, same target, same packet — only the TYPE the rule names changes.
+# The rules are sent RAW to the holder's control socket (the CLI has no surface
+# for an ICMP type yet), the authoritative path right before `nft -f`.
+scen_firewall_icmp_type() {
+  head_ "firewall-icmp-type — a regra casa um tipo ICMP e decide o pacote"
+  dlx net netns up >/dev/null 2>&1
+  nft_() { nsenter -t "$(holder_pid)" -U -m -n -- nft "$@"; }
+  ipof() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF2'
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")==sys.argv[1]: print(d.get("ip") or ""); break
+EOF2
+  }
+  fwcount() {
+    local ch n
+    ch=$(nft_ list map ip dlxing fwmap 2>/dev/null | grep -oP "$1 : jump \Kfw[0-9a-f]+")
+    [ -n "$ch" ] || { echo -; return; }
+    n=$(nft_ list chain ip dlxing "$ch" 2>/dev/null | grep -F -- "$2" | grep -oP 'packets \K[0-9]+' | head -1)
+    echo "${n:--}"
+  }
+  recv() {
+    local n
+    n=$(dlx container exec "$1" ping -c"$3" -W2 "$2" 2>/dev/null | grep -oP '[0-9]+(?= packets received)')
+    echo "${n:-0}"
+  }
+  # Send a firewall spec (JSON) to the holder's control socket for <ip>'s chain.
+  fw_raw() { local ip="$1" spec="$2" hex
+    hex=$(printf '%s' "$spec" | od -An -v -tx1 | tr -d ' \n')
+    python3 - "$SANDBOX/run/control.sock" "firewall icmpns $ip $hex" <<'EOF2'
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(30); s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + "\n").encode()); s.shutdown(socket.SHUT_WR)
+print(s.makefile().read().strip())
+EOF2
+  }
+  local c
+  for c in ita itb; do
+    dlx container run -d --name "$c" --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  done
+  sleep 3
+  local A B; A=$(ipof ita); B=$(ipof itb)
+  if [ -z "$A" ] || [ -z "$B" ] || [ -z "$(holder_pid)" ] || [ "$(recv ita "$B" 1)" != 1 ]; then
+    skip "firewall-icmp-type" "containers sem IP ou sem ping antes de qualquer regra"
+    dlx container rm -f ita itb >/dev/null 2>&1; return
+  fi
+
+  # permitted — allow ONLY echo-request (type 8) inbound to B.
+  local r0 r1 got a0 a1
+  fw_raw "$B" "{\"enabled\":true,\"policyIn\":\"deny\",\"policyOut\":\"\",\"namespace\":\"default\",\"rules\":[{\"dir\":\"in\",\"proto\":\"icmp\",\"icmpType\":\"8\",\"action\":\"allow\"}]}" >/dev/null 2>&1
+  # nft lists `icmp type 8` as `echo-request`, and a counter as `counter packets N
+  # bytes M <verdict>`, so the lookup key ends at `counter`.
+  a0=$(fwcount "$B" "icmp type echo-request counter")
+  got=$(recv ita "$B" 3)
+  a1=$(fwcount "$B" "icmp type echo-request counter")
+  log "allow icmp type 8: ita→itb $got/3 · accept(type 8) $a0→$a1"
+  if [ "$got" = 3 ] && [ "$a0" != - ] && [ "$a1" != - ] && [ $((a1 - a0)) -ge 1 ]; then
+    ok "firewall-icmp-type/permitido (echo-request passa, a regra do tipo 8 contou $((a1 - a0)))"
+  else
+    bad "firewall-icmp-type/permitido" "ping $got/3 com allow icmp type 8; accept $a0→$a1 — a regra do tipo não deixou passar o echo"
+  fi
+
+  # denied — allow a DIFFERENT type (13, timestamp); the same ping is dropped.
+  fw_raw "$B" "{\"enabled\":true,\"policyIn\":\"deny\",\"policyOut\":\"\",\"namespace\":\"default\",\"rules\":[{\"dir\":\"in\",\"proto\":\"icmp\",\"icmpType\":\"13\",\"action\":\"allow\"}]}" >/dev/null 2>&1
+  # `icmp type 13` lists as `timestamp-request`; the default `deny` is the bare
+  # `ip daddr <B> counter … drop`.
+  r0=$(fwcount "$B" "ip daddr $B counter")
+  a0=$(fwcount "$B" "icmp type timestamp-request counter")
+  got=$(recv ita "$B" 3)
+  r1=$(fwcount "$B" "ip daddr $B counter")
+  a1=$(fwcount "$B" "icmp type timestamp-request counter")
+  log "allow icmp type 13: ita→itb $got/3 · accept(type 13) $a0→$a1 · drop $r0→$r1"
+  if [ "$got" = 0 ] && [ "$a0" != - ] && [ "$a0" = "$a1" ] && [ "$r0" != - ] && [ "$r1" != - ] && [ $((r1 - r0)) -ge 1 ]; then
+    ok "firewall-icmp-type/negado (o mesmo echo-request é cortado quando a regra só nomeia o tipo 13; drop contou $((r1 - r0)))"
+  else
+    bad "firewall-icmp-type/negado" "ping $got/3 com allow icmp type 13; accept(13) $a0→$a1, drop $r0→$r1 — o tipo errado passou"
+  fi
+  dlx container rm -f ita itb >/dev/null 2>&1
+}
+
+# The firewall LOGS matching packets, and the log is RATE-LIMITED (§10: a log
+# without a limit lets a flood exhaust disk and CPU through the kernel log). The
+# lowering puts the log on its own line, `… limit rate 10/second counter log
+# prefix "dlx-fw "`, with the counter AFTER the limit — so the counter reads back
+# exactly how many packets were logged, and the cap is observable without reading
+# the kernel log.
+#
+# A burst of NEW ICMP flows (separate `ping -c1`, so conntrack does not fast-path
+# them past the rule) is fired at once. The ACCEPT counter sees them all; the LOG
+# counter sees fewer — the rate limit clipped the rest. Logging happened (log
+# counter > 0) AND it was bounded (log counter < matched).
+scen_firewall_logging() {
+  head_ "firewall-logging — loga pacotes que casam, COM limite de taxa"
+  dlx net netns up >/dev/null 2>&1
+  nft_() { nsenter -t "$(holder_pid)" -U -m -n -- nft "$@"; }
+  ipof() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF2'
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")==sys.argv[1]: print(d.get("ip") or ""); break
+EOF2
+  }
+  fwcount() {
+    local ch n
+    ch=$(nft_ list map ip dlxing fwmap 2>/dev/null | grep -oP "$1 : jump \Kfw[0-9a-f]+")
+    [ -n "$ch" ] || { echo -; return; }
+    n=$(nft_ list chain ip dlxing "$ch" 2>/dev/null | grep -F -- "$2" | grep -oP 'packets \K[0-9]+' | head -1)
+    echo "${n:--}"
+  }
+  fw_raw() { local ip="$1" spec="$2" hex
+    hex=$(printf '%s' "$spec" | od -An -v -tx1 | tr -d ' \n')
+    python3 - "$SANDBOX/run/control.sock" "firewall logns $ip $hex" <<'EOF2'
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(30); s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + "\n").encode()); s.shutdown(socket.SHUT_WR)
+print(s.makefile().read().strip())
+EOF2
+  }
+  local c
+  for c in lga lgb; do
+    dlx container run -d --name "$c" --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  done
+  sleep 3
+  local A B; A=$(ipof lga); B=$(ipof lgb)
+  if [ -z "$A" ] || [ -z "$B" ] || [ -z "$(holder_pid)" ] \
+     || [ "$(dlx container exec lga ping -c1 -W2 "$B" 2>/dev/null | grep -c 'packets received')" = 0 ]; then
+    skip "firewall-logging" "containers sem IP ou sem ping antes de qualquer regra"
+    dlx container rm -f lga lgb >/dev/null 2>&1; return
+  fi
+
+  # allow ICMP inbound to B and LOG it (rate-limited).
+  fw_raw "$B" "{\"enabled\":true,\"policyIn\":\"allow\",\"policyOut\":\"\",\"namespace\":\"default\",\"rules\":[{\"dir\":\"in\",\"proto\":\"icmp\",\"action\":\"allow\",\"log\":true}]}" >/dev/null 2>&1
+  # The rate-limited log line and the verdict line share the match; they differ by
+  # `limit rate … log` vs `accept`, so each counter is read on its own text.
+  # The log line lists as `… limit rate 10/second burst 5 packets counter … log
+  # prefix "dlx-fw "`; the verdict line is `meta l4proto icmp counter … accept`.
+  # Each counter is read on the text unique to its line, ending at `counter`.
+  if [ "$(fwcount "$B" 'limit rate 10/second')" = - ]; then
+    bad "firewall-logging" "a regra com log não foi aplicada (sem linha de log na chain de B)"
+    dlx container rm -f lga lgb >/dev/null 2>&1; return
+  fi
+  local lg0 ac0 lg1 ac1
+  lg0=$(fwcount "$B" "limit rate 10/second")
+  ac0=$(fwcount "$B" "meta l4proto icmp counter")
+  # 40 NEW echo flows at once: fast enough to exceed 10/second.
+  dlx container exec lga sh -c 'for i in $(seq 40); do ping -c1 -W1 '"$B"' >/dev/null 2>&1 & done; wait' >/dev/null 2>&1
+  sleep 1
+  lg1=$(fwcount "$B" "limit rate 10/second")
+  ac1=$(fwcount "$B" "meta l4proto icmp counter")
+  local matched logged
+  matched=$((ac1 - ac0)); logged=$((lg1 - lg0))
+  # Opportunistic: the kernel log itself, if this host lets a rootless reader see
+  # it. Rootless it usually does not — the rate-limit proof is the counter above,
+  # not this; so a 0 here is honest, not a failure.
+  local dmesg_hit; dmesg_hit=$(nsenter -t "$(holder_pid)" -U -m -n -- dmesg 2>/dev/null | grep -c 'dlx-fw'); dmesg_hit=${dmesg_hit:-0}
+  log "rajada ICMP: casados(accept) $matched · logados(após limite) $logged · dmesg 'dlx-fw' $dmesg_hit"
+  if [ "$ac0" != - ] && [ "$lg0" != - ] && [ "$matched" -ge 20 ] && [ "$logged" -ge 1 ] && [ "$logged" -lt "$matched" ]; then
+    ok "firewall-logging (logou $logged de $matched pacotes casados — o limite de taxa cortou o resto)"
+  else
+    bad "firewall-logging" "casados $matched, logados $logged — o log não ficou abaixo dos casados (limite não observável nesta rajada)"
+  fi
+  dlx container rm -f lga lgb >/dev/null 2>&1
+}
+
 # A holder respawn with a POD alive. The container case is `holder_kill` above;
 # this is the same failure for the workload the recovery did not know about.
 #
@@ -2458,7 +2633,7 @@ voltou ABERTO depois do respawn do holder"
   rm -rf "$dir"
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed firewall_icmp_type firewall_logging pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

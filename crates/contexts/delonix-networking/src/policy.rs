@@ -123,15 +123,32 @@ pub fn rule_of(r: &FwRule) -> Result<Rule, String> {
         "" | "any" => Proto::Any,
         "tcp" => Proto::Tcp,
         "udp" => Proto::Udp,
-        other => return Err(format!("proto {other:?} is not tcp, udp or any")),
+        "icmp" => Proto::Icmp,
+        other => return Err(format!("proto {other:?} is not tcp, udp, icmp or any")),
     };
     let ports = match r.port.as_str() {
         "" | "*" => None,
         p => Some(port_range(p).ok_or_else(|| format!("port {p:?} is not a port or a range"))?),
     };
+    if proto == Proto::Icmp && ports.is_some() {
+        return Err("an ICMP rule carries a port; ICMP has no transport ports".into());
+    }
+    // An ICMP type only has meaning on an ICMP rule; it is a number 0..=255.
+    let icmp_type = match r.icmp_type.as_str() {
+        "" => None,
+        s if proto != Proto::Icmp => {
+            return Err(format!("ICMP type {s:?} is set on a {proto:?} rule, not an ICMP one"));
+        }
+        s => Some(
+            s.parse::<u8>()
+                .map_err(|_| format!("ICMP type {s:?} is not a number 0..=255"))?,
+        ),
+    };
     let peer = peer_of(&r.src)?;
     Ok(Rule {
         ports,
+        icmp_type,
+        log: r.log,
         origin: r.origin.clone(),
         ..Rule::new(action, proto, peer)
     })

@@ -384,6 +384,13 @@ fn policy_rules(p: &GatewayPolicySpec) -> Result<Vec<GatewayRule>> {
                 if dir == "in" { "from" } else { "to" }
             )));
         }
+        // The container holder gained ICMP matching; the gateway appliance has not
+        // been measured against it, so an `icmp` rule is refused here and not sent.
+        if r.proto.as_deref() == Some("icmp") {
+            return Err(invalid(format!(
+                "rule #{n}: an `icmp` rule has no measured form on the gateway appliance yet"
+            )));
+        }
         let stored = delonix_model::records::FwRule {
             dir: dir.to_string(),
             proto: r.proto.clone().unwrap_or_else(|| "any".into()),

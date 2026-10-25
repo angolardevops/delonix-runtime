@@ -5469,7 +5469,16 @@ pub fn fw_rule_tail(r: &delonix_model::records::FwRule) -> Option<String> {
     // no L4 proto selected, so `any` + port becomes `meta l4proto { tcp, udp } th
     // dport <port>` (`th` = transport header, valid for both, ranges included).
     let has_port = !r.port.is_empty() && r.port != "*";
-    if !r.proto.is_empty() && r.proto != "any" {
+    if r.proto == "icmp" {
+        // ICMP matches on its own protocol keyword (never a dport — ICMP has no
+        // transport ports), with an optional specific type. Same text the IR
+        // lowering (`policy_nft::chain_body`) renders, so the counter reader
+        // matches it back.
+        tail.push_str("meta l4proto icmp ");
+        if !r.icmp_type.is_empty() {
+            tail.push_str(&format!("icmp type {} ", r.icmp_type));
+        }
+    } else if !r.proto.is_empty() && r.proto != "any" {
         tail.push_str(&r.proto);
         if has_port {
             tail.push_str(&format!(" dport {}", r.port));
@@ -10587,6 +10596,7 @@ Inter-|   Receive                                                |  Transmit
                     action: "allow".into(),
                     note: String::new(),
                     origin: None,
+                    ..Default::default()
                 },
                 delonix_model::records::FwRule {
                     dir: "out".into(),
@@ -10596,6 +10606,7 @@ Inter-|   Receive                                                |  Transmit
                     action: "deny".into(),
                     note: String::new(),
                     origin: None,
+                    ..Default::default()
                 },
             ],
             namespace: "default".into(),
@@ -10647,6 +10658,7 @@ Inter-|   Receive                                                |  Transmit
             action: action.into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         };
         let fw = delonix_model::records::ContainerFw {
             enabled: true,
@@ -10782,6 +10794,7 @@ Inter-|   Receive                                                |  Transmit
             action: action.into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         };
         let fw = delonix_model::records::ContainerFw {
             enabled: true,
@@ -10865,6 +10878,7 @@ Inter-|   Receive                                                |  Transmit
             action: "allow".into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         };
         let tail = fw_rule_tail(&r).expect("safe rule");
         // A single-host source must NOT carry `/32`: the kernel prints it as a bare
@@ -11418,6 +11432,7 @@ Inter-|   Receive                                                |  Transmit
             action: action.into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         }
     }
 
@@ -11447,7 +11462,7 @@ Inter-|   Receive                                                |  Transmit
 
         let bad_cases = [
             fw_rule("out", "tcp", "80; flush ruleset", "", "deny"), // injection attempt
-            fw_rule("out", "icmp", "", "", "deny"),                 // proto nft_safe refuses
+            fw_rule("out", "icmp", "80", "", "deny"),               // ICMP carries no port
             fw_rule("out", "tcp", "80", "2001:db8::/32", "deny"),   // v6 peer
             fw_rule("Out", "tcp", "80", "", "deny"),                // read as `in` before
             fw_rule("", "tcp", "80", "", "deny"),

@@ -149,6 +149,7 @@ fn apply_one(store: &Store, doc: &ManifestDoc) -> Result<()> {
         action,
         note: String::new(),
         origin: Some(name.clone()),
+        ..Default::default()
     };
     set_rule_by_origin(store, &spec.target, name, rule)?;
     println!(
