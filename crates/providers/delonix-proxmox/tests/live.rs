@@ -499,6 +499,100 @@ fn a_snapshot_survives_a_stop_and_a_start() {
     );
 }
 
+/// A snapshot of a RUNNING VM captures its RAM, not only its disk. The
+/// backend's `snapshot` always sends `vmstate=1`, so the node saves the
+/// guest's memory to a state volume; this reads the snapshot's own config back
+/// from the node (`snapshot_config`) and asserts the `vmstate` entry is there
+/// and names a volume — the node's own word that memory was saved. Rolling back
+/// then leaves the guest RUNNING, the behavioural half of the same claim: a
+/// disk-only snapshot has no RAM to resume into. Nothing global is touched; the
+/// VM it creates is destroyed, leaving the node as it was found.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn a_snapshot_of_a_running_vm_captures_its_ram_state() {
+    let t = target().expect(NEEDS_TARGET);
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+
+    let name = format!("dlxram{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+
+    let boot = b
+        .boot(vmdir, &cfg, &cfg.disk, &|s: CreateStage| {
+            eprintln!("  stage: {s:?}")
+        })
+        .expect("boot");
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    assert!(b.is_running(&vm), "the VM must be running after boot");
+
+    // Snapshot while the VM is RUNNING: the backend sends `vmstate=1`, so the
+    // node has to save RAM. The list confirms it exists at all.
+    b.snapshot(vmdir, &vm, "ram1").expect("snapshot");
+    let listed = b.snapshots(vmdir, &vm).expect("snapshots");
+    assert!(
+        listed.iter().any(|s| s == "ram1"),
+        "the snapshot is not in the node's list: {listed:?}"
+    );
+
+    // The node's own record of the snapshot: `vmstate` names the state volume
+    // where the guest's memory was saved. Its presence — read back from the
+    // node, never inferred from the call — is the proof the snapshot carries
+    // RAM and not only the disk.
+    let snap_cfg = b
+        .client()
+        .snapshot_config(vmid, "ram1")
+        .expect("read the snapshot config back");
+    let vmstate = snap_cfg
+        .get("vmstate")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        !vmstate.is_empty(),
+        "the snapshot of a running VM carries no `vmstate`, so no RAM was saved: {snap_cfg}"
+    );
+    eprintln!("snapshot ram1 vmstate = {vmstate}");
+
+    // The behavioural half: a rollback to a RAM snapshot resumes the guest, so
+    // `is_running` is true after it — a disk-only snapshot would have no memory
+    // to resume into.
+    b.restore(vmdir, &vm, "ram1").expect("rollback");
+    assert!(
+        b.is_running(&vm),
+        "after a rollback to a RAM snapshot the VM must be running again"
+    );
+
+    // Clean up: delete the snapshot (disk state and the saved RAM with it),
+    // stop and destroy — leaving nothing on the node.
+    b.delete_snapshot(vmdir, &vm, "ram1")
+        .expect("delete snapshot");
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        b.client().config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — it is an orphan"
+    );
+}
+
 /// A backup lands on the storage as a crash-consistent archive, and comes
 /// OFF it: `backup_vm` (`POST …/vzdump`) never stops the VM, `list_backups`
 /// reads back what the node actually has (never what the call said), and
