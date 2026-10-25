@@ -382,8 +382,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 detail: "`vm update --memory` plugs a DIMM (`attach-device --live`) into the `<maxMemory>` slots fixed at create (ADR-0068 D3), read back with `dominfo`; the agent's memory blocks decide complete or partial (D4/D8); unit-tested, never run against a guest",
             }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
-            C::VmHotplugDiskAdd => bin(S::Partial {
-                detail: "`vm update --disk-add` attaches the same `<disk>` the boot XML writes at a target free in the live domain, pinned in the record (ADR-0068 D6/D7), through a spare PCIe port reserved with a hotplug ceiling (D3); read back with `domblklist`, complete when the guest agent lists one more disk; unit-tested, never run against a guest",
+            C::VmHotplugDiskAdd => sys(S::Supported {
+                evidence: "e2e:vm: um disco a QUENTE e detectado e fica R/W DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmHotplugDiskRemove => S::NotImplemented,
             C::VmHotplugNicAdd => bin(S::Partial {
