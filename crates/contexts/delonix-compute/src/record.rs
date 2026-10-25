@@ -1484,6 +1484,7 @@ mod tests {
             action: "allow".into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         };
         assert!(good.nft_safe());
     }

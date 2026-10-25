@@ -24,6 +24,15 @@ pub struct FwRule {
     /// `allow` (accept) or `deny` (drop).
     #[serde(default)]
     pub action: String,
+    /// ICMP type to match, as a number `0..=255` (ICMP rules only); empty = every
+    /// type. `echo-request` is `8`. Interpolated into the `nft` script, so only
+    /// digits are accepted (`fw_icmp_type_ok`).
+    #[serde(default, rename = "icmpType", skip_serializing_if = "String::is_empty")]
+    pub icmp_type: String,
+    /// Log a packet that matches this rule. The log is RATE-LIMITED in the
+    /// lowering so a flood cannot exhaust disk or CPU through the kernel log.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub log: bool,
     /// Free-form UI note (cosmetic; preserved in the persistence round-trip).
     #[serde(default)]
     pub note: String,
@@ -84,9 +93,17 @@ impl Default for ContainerFw {
     }
 }
 
-/// `proto` accepted in a firewall rule (interpolated into nft): empty, any, tcp, udp.
+/// `proto` accepted in a firewall rule (interpolated into nft): empty, any, tcp,
+/// udp, icmp. `icmp` is IPv4 ICMP (the dataplane is a `table ip`); ICMPv6 has no
+/// form here and is refused at the parse (`rule_of`).
 pub fn fw_proto_ok(p: &str) -> bool {
-    matches!(p, "" | "any" | "tcp" | "udp")
+    matches!(p, "" | "any" | "tcp" | "udp" | "icmp")
+}
+
+/// safe `icmpType`: empty, or a number `0..=255`. Interpolated into nft, so it is
+/// held to digits only — nothing that could inject a statement.
+pub fn fw_icmp_type_ok(t: &str) -> bool {
+    t.is_empty() || t.parse::<u8>().is_ok()
 }
 
 /// safe `port`: empty, `*`, number 1..=65535, or range `n-m`.
@@ -144,7 +161,10 @@ impl FwRule {
     /// Are the fields interpolated into the `nft` script (`src`/`proto`/`port`) SAFE?
     /// Defense against nftables injection: builders MUST skip unsafe rules.
     pub fn nft_safe(&self) -> bool {
-        fw_proto_ok(&self.proto) && fw_port_ok(&self.port) && fw_src_ok(&self.src)
+        fw_proto_ok(&self.proto)
+            && fw_port_ok(&self.port)
+            && fw_src_ok(&self.src)
+            && fw_icmp_type_ok(&self.icmp_type)
     }
 }
 

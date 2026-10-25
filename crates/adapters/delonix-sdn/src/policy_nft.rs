@@ -50,6 +50,16 @@ pub fn chain_body(
     Ok(body)
 }
 
+/// The rate cap on firewall logging (§10: a log without a limit lets a flood
+/// exhaust disk and CPU through the kernel log). nft's `limit` statement with
+/// its default burst gates the `log`, so at most this many matches a second are
+/// logged; the rest are silently not logged and the verdict is unaffected.
+const FW_LOG_RATE: &str = "10/second";
+
+/// The prefix every firewall log line carries, so an operator can grep for it.
+/// A trailing space keeps it readable against the packet fields nft appends.
+const FW_LOG_PREFIX: &str = "dlx-fw ";
+
 fn verdict(a: Action) -> &'static str {
     match a {
         Action::Allow => "counter accept",
@@ -65,22 +75,23 @@ fn ports(p: PortRange) -> String {
     }
 }
 
-/// One user rule: the own-address anchor, the peer, the L4 match, the verdict.
+/// One user rule: the own-address anchor, the peer and the L4 match, then the
+/// verdict — preceded, when the rule logs, by a rate-limited `log` line that
+/// shares the same match and renders NO verdict (it falls through to the verdict
+/// line either way, because a `limit` that stops matching ends the rule, it does
+/// not decide the packet).
 fn user_line(ip: &str, dir: Direction, r: &Rule) -> Result<String, String> {
     if !r.stateful {
         return Err("a stateless rule (the holder chain is stateful)".into());
-    }
-    if r.log {
-        return Err("a logged rule".into());
-    }
-    if r.icmp_type.is_some() || r.proto == Proto::Icmp {
-        return Err("an ICMP rule".into());
     }
     let (self_dir, peer_dir) = match dir {
         Direction::Ingress => ("daddr", "saddr"),
         Direction::Egress => ("saddr", "daddr"),
     };
-    let mut line = format!("\t\tip {self_dir} {ip} ");
+    // The match portion up to (but not including) the verdict — shared verbatim
+    // by the optional log line and the verdict line so they govern the same
+    // packets. Keeps a trailing space, like the per-match pieces below.
+    let mut m = format!("ip {self_dir} {ip} ");
     match &r.peer {
         Peer::Any => {}
         Peer::Cidr(c) => {
@@ -88,7 +99,7 @@ fn user_line(ip: &str, dir: Direction, r: &Rule) -> Result<String, String> {
             // A single host renders as a bare address, as the kernel lists it —
             // the counter reader matches on the listed text.
             let text = text.strip_suffix("/32").unwrap_or(&text);
-            line.push_str(&format!("ip {peer_dir} {text} "));
+            m.push_str(&format!("ip {peer_dir} {text} "));
         }
         Peer::Namespace(_) | Peer::OtherNamespaces(_) | Peer::Selector(_) => {
             return Err("a namespace or selector peer on a user rule".into());
@@ -96,23 +107,37 @@ fn user_line(ip: &str, dir: Direction, r: &Rule) -> Result<String, String> {
     }
     match (r.proto, r.ports) {
         (Proto::Tcp | Proto::Udp, p) => {
-            line.push_str(if r.proto == Proto::Tcp { "tcp" } else { "udp" });
+            m.push_str(if r.proto == Proto::Tcp { "tcp" } else { "udp" });
             if let Some(p) = p {
-                line.push_str(&format!(" dport {}", ports(p)));
+                m.push_str(&format!(" dport {}", ports(p)));
             }
-            line.push(' ');
+            m.push(' ');
         }
         (Proto::Any, Some(p)) => {
-            line.push_str(&format!(
-                "meta l4proto {{ tcp, udp }} th dport {} ",
-                ports(p)
-            ));
+            m.push_str(&format!("meta l4proto {{ tcp, udp }} th dport {} ", ports(p)));
         }
         (Proto::Any, None) => {}
-        (Proto::Icmp, _) => unreachable!("refused above"),
+        (Proto::Icmp, icmp_ports) => {
+            // ICMP has no transport ports; a port on an ICMP rule is refused at
+            // the parse (`rule_of`), so reaching here with one is a bug.
+            debug_assert!(icmp_ports.is_none(), "an ICMP rule reached the lowering with a port");
+            m.push_str("meta l4proto icmp ");
+            if let Some(t) = r.icmp_type {
+                m.push_str(&format!("icmp type {t} "));
+            }
+        }
     }
-    line.push_str(verdict(r.action));
-    line.push('\n');
+    let mut line = String::new();
+    if r.log {
+        // `limit rate <R>` passes only the first R matches a second; the counter
+        // AFTER it reads back how many were logged, so the cap is observable
+        // without reading the kernel log. No verdict: evaluation continues to
+        // the verdict line below.
+        line.push_str(&format!(
+            "\t\t{m}limit rate {FW_LOG_RATE} counter log prefix \"{FW_LOG_PREFIX}\"\n"
+        ));
+    }
+    line.push_str(&format!("\t\t{m}{}\n", verdict(r.action)));
     Ok(line)
 }
 
@@ -429,21 +454,124 @@ mod tests {
         }
     }
 
+    /// An ICMP rule lowers to `meta l4proto icmp`, with the specific type when
+    /// one is set — the match the holder chain used to refuse.
+    #[test]
+    fn an_icmp_rule_lowers_to_the_protocol_and_the_optional_type() {
+        let mut t = from_container_fw(&golden::fw("deny", "", &[])).unwrap();
+        t.ingress.rules.insert(
+            0,
+            Rule {
+                icmp_type: Some(8),
+                ..Rule::new(Action::Allow, Proto::Icmp, Peer::Any)
+            },
+        );
+        let body = chain_body(IP, &t, &ns_set).unwrap();
+        assert!(
+            body.contains(&format!(
+                "ip daddr {IP} meta l4proto icmp icmp type 8 counter accept"
+            )),
+            "{body}"
+        );
+        // No type: only the protocol is matched, never a bare `icmp type`.
+        t.ingress.rules[0].icmp_type = None;
+        let body = chain_body(IP, &t, &ns_set).unwrap();
+        assert!(
+            body.contains(&format!("ip daddr {IP} meta l4proto icmp counter accept")),
+            "{body}"
+        );
+        assert!(!body.contains("icmp type"), "{body}");
+    }
+
+    /// A logged rule renders a rate-limited `log` line that shares the verdict
+    /// line's match and carries no verdict of its own, so logging cannot change
+    /// what the rule does, and cannot flood the kernel log.
+    #[test]
+    fn a_logged_rule_renders_a_rate_limited_log_line_before_the_verdict() {
+        let mut t = from_container_fw(&golden::fw("deny", "", &[])).unwrap();
+        t.ingress.rules.insert(
+            0,
+            Rule {
+                log: true,
+                ports: Some(PortRange::one(22)),
+                ..Rule::new(Action::Allow, Proto::Tcp, Peer::Any)
+            },
+        );
+        let body = chain_body(IP, &t, &ns_set).unwrap();
+        let log = body
+            .lines()
+            .find(|l| l.contains("log prefix"))
+            .unwrap_or_else(|| panic!("a log line in {body}"));
+        assert!(
+            log.contains("limit rate"),
+            "the log must be rate-limited: {log}"
+        );
+        assert!(log.contains("tcp dport 22"), "the log shares the match: {log}");
+        assert!(
+            !log.contains("accept") && !log.contains("drop"),
+            "the log line carries no verdict: {log}"
+        );
+        assert!(
+            body.contains(&format!("ip daddr {IP} tcp dport 22 counter accept")),
+            "the verdict is a separate line: {body}"
+        );
+    }
+
+    /// nft accepts an ICMP-type chain and a logged chain. Needs `nft` and an
+    /// unprivileged user namespace; where the runner blocks that, it returns
+    /// without checking (the render tests above do not depend on it).
+    #[test]
+    fn nft_accepts_an_icmp_and_a_logged_chain() {
+        let probe = std::process::Command::new("unshare")
+            .args(["-rn", "nft", "--version"])
+            .output();
+        if !matches!(probe, Ok(ref o) if o.status.success()) {
+            return;
+        }
+        let mut t = from_container_fw(&golden::fw("deny", "deny", &[])).unwrap();
+        t.ingress.rules.insert(
+            0,
+            Rule {
+                icmp_type: Some(8),
+                log: true,
+                ..Rule::new(Action::Allow, Proto::Icmp, Peer::Any)
+            },
+        );
+        let body = chain_body(IP, &t, &ns_set).unwrap();
+        let script = format!(
+            "table ip t {{\n\tset {DLXALL_SET} {{ type ipv4_addr; }}\n\tset {} {{ type ipv4_addr; }}\n\tchain c {{\n{body}\t}}\n}}\n",
+            ns_set("team-a")
+        );
+        let mut child = std::process::Command::new("unshare")
+            .args(["-rn", "nft", "--check", "-f", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "nft refused\n{script}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     #[test]
     fn what_the_holder_chain_cannot_hold_is_refused_by_name() {
         let mut t =
             from_container_fw(&golden::fw("", "", &[("in", "tcp", "22", "", "deny")])).unwrap();
-        t.ingress.rules[0].log = true;
-        assert!(chain_body(IP, &t, &ns_set).unwrap_err().contains("logged"));
-        t.ingress.rules[0].log = false;
         t.ingress.rules[0].stateful = false;
         assert!(chain_body(IP, &t, &ns_set)
             .unwrap_err()
             .contains("stateless"));
         t.ingress.rules[0].stateful = true;
-        t.ingress.rules[0].proto = Proto::Icmp;
-        assert!(chain_body(IP, &t, &ns_set).unwrap_err().contains("ICMP"));
-        t.ingress.rules[0].proto = Proto::Tcp;
         t.ingress.rules[0].peer = Peer::Selector(vec![("app".into(), "web".into())]);
         assert!(chain_body(IP, &t, &ns_set)
             .unwrap_err()

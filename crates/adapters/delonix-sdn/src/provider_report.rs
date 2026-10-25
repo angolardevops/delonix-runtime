@@ -221,7 +221,12 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::FirewallStateless => S::UnsupportedByProvider {
                     reason: "every rule rides the conntrack prologue; a stateless rule is refused, never approximated",
                 },
-                C::FirewallLogging | C::FirewallIcmpType => S::NotImplemented,
+                C::FirewallIcmpType => filt(S::Supported {
+                    evidence: "chaos:scen_firewall_icmp_type",
+                }),
+                C::FirewallLogging => filt(S::Supported {
+                    evidence: "chaos:scen_firewall_logging",
+                }),
                 C::FirewallWorkloadPeer => filt(S::Partial {
                     detail: "namespace peers (`@dlxns_<ns>`) are enforced; label selectors (ADR-0024) are not implemented",
                 }),

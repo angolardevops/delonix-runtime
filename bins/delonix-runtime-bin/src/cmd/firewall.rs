@@ -660,6 +660,7 @@ fn add_rule(
             action: action.as_str().to_string(),
             note: note.clone().unwrap_or_default(),
             origin: Some(origin.clone()),
+            ..Default::default()
         });
         // Shadow: an EARLIER overlapping rule (e.g. `deny any/8069` vs
         // `allow tcp/8069`) with the opposite action still matches first — the new
@@ -2261,6 +2262,7 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             // `kind: FirewallPolicy` — never owned by a `NetworkAccessRule`
             // document (see `apply_fw_doc`'s origin-aware `retain`, above).
             origin: None,
+            ..Default::default()
         });
     }
     let mut n = 0usize;
@@ -2868,6 +2870,7 @@ spec: { target: web, direction: ingress, defaultPolicy: deny, rules: [] }
             action: action.into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         }
     }
 
@@ -3005,6 +3008,7 @@ spec: { target: web, direction: ingress, defaultPolicy: deny, rules: [] }
             action: action.into(),
             note: String::new(),
             origin: None,
+            ..Default::default()
         };
         let fw = |policy: &str, rules: Vec<FwRule>| delonix_model::records::ContainerFw {
             enabled: true,
