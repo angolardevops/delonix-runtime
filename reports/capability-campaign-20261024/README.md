@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **119** |
-| partial | 93 | 86 | 84 |
+| supported | 103 | 112 | **121** |
+| partial | 93 | 86 | 82 |
 | not-implemented | 74 | 72 | 68 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **119/274 (43.4%)** |
+| proved/applicable (N2) | — | 112/273 | **121/274 (44.2%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -63,6 +63,10 @@ Integração: as duas frentes paralelas correram cada uma na sua worktree off de
 Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada build release custa ~2–3G de churn; o próximo trabalho build-pesado tem risco de ENOSPC. Mitigado removendo worktrees concluídas; a resolução de fundo é do dono (libertar disco).
 
 - `5519a696`+`1b337766`+`9b00e60d` feat+merge — **`metrics.network.per-workload` partial→supported (§14)**: `/metrics` passa a exportar `workload_network_receive_bytes_total`/`workload_network_transmit_bytes_total` por-container (lidos na netns), cache populada pelo refresh de fundo (reads de netns fora do scrape inline). Scrape live: rx=2306/tx=524 batem com `/proc/net/dev`. Código em inglês (lição lang_ratchet); lang verde. supported 118→119.
+
+- `23984c3f`+merge — **libvirt `vm.hotplug.disk.add` partial→supported (§7 flagship)**: 4 níveis provados ao vivo num guest Ubuntu 24.04 cloud-init — aceite → `domblklist` (vdc) → detectado no guest (`lsblk vdc`) → **R/W real** (`HOTPLUG-RW-PROOF-v1` escrito+relido, lido por guestfish). Poller in-guest plantado por cloud-init (sem agente/rede). supported→+1.
+- `6e206c14`+merge — **proxmox `vm.snapshot.persistent` partial→supported (§7)**: provado ao vivo contra o nó pve real (PVE 9.2.2, 192.168.30.117) — snapshot sobrevive a stop/start; VM efémera destruída, zero mudanças globais/destrutivas (§11). supported→+1.
+- `cc28a39f` docs — regenera matriz (121/274, 44.2%).
 
 ## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
 
