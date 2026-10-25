@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **121** |
-| partial | 93 | 86 | 82 |
+| supported | 103 | 112 | **123** |
+| partial | 93 | 86 | 80 |
 | not-implemented | 74 | 72 | 68 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **121/274 (44.2%)** |
+| proved/applicable (N2) | — | 112/273 | **123/274 (44.9%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -67,6 +67,10 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 - `23984c3f`+merge — **libvirt `vm.hotplug.disk.add` partial→supported (§7 flagship)**: 4 níveis provados ao vivo num guest Ubuntu 24.04 cloud-init — aceite → `domblklist` (vdc) → detectado no guest (`lsblk vdc`) → **R/W real** (`HOTPLUG-RW-PROOF-v1` escrito+relido, lido por guestfish). Poller in-guest plantado por cloud-init (sem agente/rede). supported→+1.
 - `6e206c14`+merge — **proxmox `vm.snapshot.persistent` partial→supported (§7)**: provado ao vivo contra o nó pve real (PVE 9.2.2, 192.168.30.117) — snapshot sobrevive a stop/start; VM efémera destruída, zero mudanças globais/destrutivas (§11). supported→+1.
 - `cc28a39f` docs — regenera matriz (121/274, 44.2%).
+
+- `bfd626e1`+merge — **libvirt `vm.hotplug.nic.add` partial→supported (§7)**: 4 níveis ao vivo — aceite → `domiflist` (vnet na rede nova) → detectado (`enp7s0` no guest) → **tráfego real** (ping 4/4 ao gateway pela NIC nova, rx/tx a subir). supported→+1.
+- `448ddfb9`+merge — **proxmox `vm.snapshot.memory` partial→supported (§7)**: live contra o nó pve — o nó confirma `vmstate = local-lvm:vm-100-state-ram1` (RAM guardada). VM efémera destruída, §11 ok. supported→+1.
+- `a42af347` docs — regenera matriz (123/274, 44.9%).
 
 ## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
 
