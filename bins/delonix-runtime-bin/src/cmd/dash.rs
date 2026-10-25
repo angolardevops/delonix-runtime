@@ -981,6 +981,85 @@ mod tui {
         }
     }
 
+    /// Which text field, if any, is currently capturing keystrokes. `Search`
+    /// (opened with `/`) and `Palette` (opened with `Ctrl+K`) edit the SAME
+    /// raw query string — they differ only in the footer chrome; both feed
+    /// `parse_filter`. `None` means the key stream drives navigation.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Input {
+        None,
+        Search,
+        Palette,
+    }
+
+    /// A parsed filter query: a free-text name substring plus optional
+    /// `kind:`/`state:` predicates. Built by `parse_filter` from the raw
+    /// search/palette text and applied by `matches`.
+    #[derive(Debug, Default, Clone, PartialEq, Eq)]
+    struct Filter {
+        /// Case-folded substring matched against the resource `name` ("" = any).
+        name: String,
+        /// Case-folded exact match against the resource `kind` (`None` = any).
+        kind: Option<String>,
+        /// Case-folded substring matched against the resource `status`
+        /// (`None` = any) — substring, not exact, so `state:failed` still
+        /// matches a rendered "failed (code 2)".
+        state: Option<String>,
+    }
+
+    impl Filter {
+        fn matches(&self, r: &Row) -> bool {
+            if !self.name.is_empty() && !r.name.to_lowercase().contains(&self.name) {
+                return false;
+            }
+            if let Some(k) = &self.kind {
+                if r.kind.to_lowercase() != *k {
+                    return false;
+                }
+            }
+            if let Some(s) = &self.state {
+                if !r.status.to_lowercase().contains(s) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    /// Parses a palette/search query into a [`Filter`], or returns a human
+    /// message naming the problem. A `key:value` token with an UNKNOWN key, or
+    /// ANY token with an empty value, is an ERROR — never silently demoted to
+    /// free text: a typo like `kidn:web` must read as "unknown filter key",
+    /// not as a name search for "kidn:web" that quietly matches nothing.
+    /// Bare tokens (no `:`) accumulate into the name substring. Keys and values
+    /// are case-folded, so `Kind:Container` and `kind:container` are the same.
+    fn parse_filter(q: &str) -> std::result::Result<Filter, String> {
+        let mut f = Filter::default();
+        let mut names: Vec<String> = Vec::new();
+        for tok in q.split_whitespace() {
+            match tok.split_once(':') {
+                Some((key, val)) => {
+                    let key = key.to_lowercase();
+                    let val = val.to_lowercase();
+                    if val.is_empty() {
+                        return Err(po::tf("empty value for '{key}:'", &[("key", &key)]));
+                    }
+                    match key.as_str() {
+                        "kind" => f.kind = Some(val),
+                        "state" | "status" => f.state = Some(val),
+                        "name" => names.push(val),
+                        _ => {
+                            return Err(po::tf("unknown filter key '{key}:'", &[("key", &key)]));
+                        }
+                    }
+                }
+                None => names.push(tok.to_lowercase()),
+            }
+        }
+        f.name = names.join(" ");
+        Ok(f)
+    }
+
     /// Up/down/flat comparison of a metric against its previous tick's value
     /// — the tiles' trend arrow. `Unknown` on the very first tick, when
     /// there is no previous value to compare against yet.
@@ -1103,8 +1182,16 @@ mod tui {
 
         let mut table_state = TableState::default();
         let mut sort_key = SortKey::Name;
-        let mut filter = String::new();
-        let mut searching = false;
+        // The raw filter text (shared by `/` search and Ctrl+K palette) and
+        // which field, if any, is currently capturing keystrokes.
+        let mut query = String::new();
+        let mut input = Input::None;
+        // Selection is tracked by stable resource `id`, NEVER by table index:
+        // a sort or a refresh reorders rows, so the index is not an identity
+        // (same reasoning as the CPU-rate anchor — see `Row::id`).
+        let mut selected_id: Option<String> = None;
+        // Whether the full-screen detail overlay is open over the list.
+        let mut detail = false;
         // CPU% is derived from the monotonic `cpu.stat` counter, anchored to
         // the COLLECTION TICK (not the draw frame) and keyed by stable id —
         // see `CpuRateTracker` for why both matter. One tracker for the
@@ -1178,19 +1265,29 @@ mod tui {
                 None => Trends::unknown(),
             };
 
-            let needle = filter.to_lowercase();
-            let mut visible: Vec<&Row> = data
-                .rows
-                .iter()
-                .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(&needle))
-                .collect();
+            // Parse the query every frame. A SYNTAX error (unknown key / empty
+            // value) is surfaced in the footer and the list falls back to
+            // unfiltered — so the user keeps seeing their resources while
+            // fixing a typo, and the mistake is never silently swallowed into a
+            // name search that matches nothing.
+            let (filter, filter_err) = match parse_filter(&query) {
+                Ok(f) => (f, None),
+                Err(e) => (Filter::default(), Some(e)),
+            };
+            let mut visible: Vec<&Row> = data.rows.iter().filter(|r| filter.matches(r)).collect();
             sort_rows(&mut visible, sort_key, cpu_pct);
-            if visible.is_empty() {
-                table_state.select(None);
+            // Resolve the id-keyed selection to its current index (keeps the
+            // highlight on the same resource across sort/refresh/filter).
+            table_state.select(resolve_selection(&visible, &mut selected_id));
+            // The detail overlay reads the live row by id every frame, so it
+            // tracks refreshed metrics; `None` if that resource has vanished.
+            let detail_row: Option<&Row> = if detail {
+                selected_id
+                    .as_deref()
+                    .and_then(|id| data.rows.iter().find(|r| r.id == id))
             } else {
-                let sel = table_state.selected().unwrap_or(0).min(visible.len() - 1);
-                table_state.select(Some(sel));
-            }
+                None
+            };
 
             let spinner = if collecting.load(Ordering::Relaxed) {
                 const FRAMES: [&str; 4] = ["\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}"];
@@ -1207,8 +1304,11 @@ mod tui {
                     &visible,
                     &mut table_state,
                     sort_key,
-                    &filter,
-                    searching,
+                    &query,
+                    input,
+                    filter_err.as_deref(),
+                    detail,
+                    detail_row,
                     cpu_pct,
                     cpu_tile_pct,
                     &trends,
@@ -1228,62 +1328,83 @@ mod tui {
                         if k.kind != KeyEventKind::Press {
                             continue;
                         }
-                        if searching {
+                        // Ctrl+C quits from ANY mode (even mid-typing).
+                        let ctrl_c = k.code == KeyCode::Char('c')
+                            && k.modifiers.contains(KeyModifiers::CONTROL);
+                        if ctrl_c {
+                            break Ok(());
+                        }
+
+                        // Text-input modes (`/` search, Ctrl+K palette) capture
+                        // typing; both edit the same `query`.
+                        if input != Input::None {
                             match k.code {
                                 KeyCode::Esc => {
-                                    filter.clear();
-                                    searching = false;
+                                    query.clear();
+                                    input = Input::None;
                                 }
-                                KeyCode::Enter => searching = false,
+                                KeyCode::Enter => input = Input::None,
                                 KeyCode::Backspace => {
-                                    filter.pop();
+                                    query.pop();
                                 }
-                                KeyCode::Char(c) => filter.push(c),
+                                KeyCode::Char(c) => query.push(c),
                                 _ => {}
                             }
                             continue;
                         }
-                        let quit = matches!(k.code, KeyCode::Char('q') | KeyCode::Esc)
-                            || (k.code == KeyCode::Char('c')
-                                && k.modifiers.contains(KeyModifiers::CONTROL));
-                        if quit {
+
+                        // `q` quits; Esc now means "close the detail overlay /
+                        // go back", NOT quit — in the list root it is a no-op.
+                        if k.code == KeyCode::Char('q') {
                             break Ok(());
                         }
+                        if k.code == KeyCode::Esc {
+                            detail = false;
+                            continue;
+                        }
+                        // While the detail overlay is open, swallow every other
+                        // key so stray input can't reorder the list behind it.
+                        if detail {
+                            continue;
+                        }
+
                         match k.code {
-                            KeyCode::Char('/') => searching = true,
+                            KeyCode::Enter => {
+                                if selected_id.is_some() {
+                                    detail = true;
+                                }
+                            }
+                            KeyCode::Char('/') => input = Input::Search,
+                            KeyCode::Char('k')
+                                if k.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
+                                input = Input::Palette;
+                            }
                             KeyCode::Char('s') => sort_key = sort_key.next(),
                             KeyCode::Tab => {
                                 scope = scope.next();
-                                table_state.select(None);
+                                selected_id = None;
                                 last = Instant::now() - Duration::from_secs(2); // force an immediate re-collect for the new scope
                             }
                             KeyCode::BackTab => {
                                 scope = scope.prev();
-                                table_state.select(None);
+                                selected_id = None;
                                 last = Instant::now() - Duration::from_secs(2);
                             }
                             KeyCode::Char(c) if c.is_ascii_digit() => {
                                 if let Some(s) = DashScope::from_digit(c) {
                                     scope = s;
-                                    table_state.select(None);
+                                    selected_id = None;
                                     last = Instant::now() - Duration::from_secs(2);
                                 }
                             }
-                            KeyCode::Down => {
-                                if !visible.is_empty() {
-                                    let n = table_state.selected().unwrap_or(0);
-                                    table_state.select(Some((n + 1).min(visible.len() - 1)));
-                                }
-                            }
-                            KeyCode::Up => {
-                                let n = table_state.selected().unwrap_or(0);
-                                table_state.select(Some(n.saturating_sub(1)));
-                            }
+                            KeyCode::Down => move_selection(&visible, &mut selected_id, 1),
+                            KeyCode::Up => move_selection(&visible, &mut selected_id, -1),
                             KeyCode::Home => {
-                                table_state.select(if visible.is_empty() { None } else { Some(0) })
+                                selected_id = visible.first().map(|r| r.id.clone());
                             }
-                            KeyCode::End if !visible.is_empty() => {
-                                table_state.select(Some(visible.len() - 1));
+                            KeyCode::End => {
+                                selected_id = visible.last().map(|r| r.id.clone());
                             }
                             _ => {}
                         }
@@ -1317,6 +1438,46 @@ mod tui {
         });
     }
 
+    /// Resolves the remembered selection (`selected_id`, a stable resource
+    /// `id`) to its CURRENT index in `visible`, keeping the highlight on the
+    /// SAME resource across a sort, a refresh, or a filter change — never on a
+    /// fixed table position, which a reorder would silently move to a different
+    /// row. Side-effects on `selected_id`:
+    /// - empty list → cleared, returns `None`;
+    /// - remembered id still visible → returns its index, id unchanged;
+    /// - remembered id gone (filtered out / resource vanished) or unset → snaps
+    ///   to the first row AND adopts its id, so navigation continues from there.
+    fn resolve_selection(visible: &[&Row], selected_id: &mut Option<String>) -> Option<usize> {
+        if visible.is_empty() {
+            *selected_id = None;
+            return None;
+        }
+        if let Some(id) = selected_id.as_deref() {
+            if let Some(i) = visible.iter().position(|r| r.id == id) {
+                return Some(i);
+            }
+        }
+        *selected_id = Some(visible[0].id.clone());
+        Some(0)
+    }
+
+    /// Moves the selection by `delta` rows within `visible` and records the new
+    /// row's `id` as the remembered selection — the cursor is identity, not an
+    /// index, so the next tick tracks the row it landed on even after a sort.
+    /// Clamps at both ends (no wrap); a no-op on an empty list.
+    fn move_selection(visible: &[&Row], selected_id: &mut Option<String>, delta: i32) {
+        if visible.is_empty() {
+            *selected_id = None;
+            return;
+        }
+        let cur = selected_id
+            .as_deref()
+            .and_then(|id| visible.iter().position(|r| r.id == id))
+            .unwrap_or(0) as i32;
+        let next = (cur + delta).clamp(0, visible.len() as i32 - 1) as usize;
+        *selected_id = Some(visible[next].id.clone());
+    }
+
     fn io_err(e: std::io::Error) -> delonix_model::Error {
         delonix_model::Error::Invalid(format!("dash TUI: {e}"))
     }
@@ -1334,8 +1495,11 @@ mod tui {
         visible: &[&Row],
         table_state: &mut TableState,
         sort_key: SortKey,
-        filter: &str,
-        searching: bool,
+        query: &str,
+        input: Input,
+        filter_err: Option<&str>,
+        detail: bool,
+        detail_row: Option<&Row>,
         cpu_pct: &HashMap<String, f64>,
         cpu_tile_pct: Option<f64>,
         trends: &Trends,
@@ -1387,27 +1551,132 @@ mod tui {
 
         draw_sparklines(f, root[4], activity_hist, mem_hist);
 
-        let footer = if searching {
-            format!(
-                "  /{filter}\u{2588}   {}",
-                po::t("(Enter: apply · Esc: clear)")
-            )
+        // Footer: while typing (`/` or Ctrl+K) show the editable query with a
+        // caret and either the apply/clear hint or — if the query is currently
+        // invalid — the parse error, in red. A parse error also shows in the
+        // list root (a stale invalid query the user stepped away from). Both
+        // paths render the error: it is SIGNALED, never silently ignored.
+        let footer_line = if input != Input::None {
+            let prefix = if input == Input::Palette { "\u{25B8} " } else { "/" };
+            let (hint, hint_color) = match filter_err {
+                Some(e) => (format!("\u{26A0} {e}"), REDC),
+                None => (po::t("(Enter: apply · Esc: clear)").to_string(), Color::DarkGray),
+            };
+            Line::from(vec![
+                Span::raw(format!("  {prefix}{query}\u{2588}   ")),
+                Span::styled(hint, Style::default().fg(hint_color)),
+            ])
+        } else if let Some(e) = filter_err {
+            Line::from(Span::styled(
+                format!("  \u{26A0} {e}"),
+                Style::default().fg(REDC),
+            ))
         } else {
-            format!(
-                "  {}",
-                po::tf(
-                    "q/Esc: quit · \u{2191}\u{2193}: select · Tab/1-6: scope · /: search · s: sort ({sort}) · refresh 1s",
-                    &[("sort", sort_key.label())],
-                )
-            )
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                footer,
+            Line::from(Span::styled(
+                format!(
+                    "  {}",
+                    po::tf(
+                        "q: quit · \u{2191}\u{2193}: select · Enter: details · Tab/1-6: scope · /: search · Ctrl+K: filter · s: sort ({sort})",
+                        &[("sort", sort_key.label())],
+                    )
+                ),
                 Style::default().fg(Color::DarkGray),
-            ))),
-            root[5],
-        );
+            ))
+        };
+        f.render_widget(Paragraph::new(footer_line), root[5]);
+
+        // The detail overlay paints LAST, over everything, so it is modal.
+        if detail {
+            draw_detail(f, area, detail_row, cpu_pct);
+        }
+    }
+
+    /// A horizontally+vertically centered sub-rectangle covering `pct_x`×`pct_y`
+    /// percent of `area` — the frame for the detail overlay.
+    fn centered_rect(pct_x: u16, pct_y: u16, area: Rect) -> Rect {
+        let v = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage((100 - pct_y) / 2),
+                Constraint::Percentage(pct_y),
+                Constraint::Percentage((100 - pct_y) / 2),
+            ])
+            .split(area);
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage((100 - pct_x) / 2),
+                Constraint::Percentage(pct_x),
+                Constraint::Percentage((100 - pct_x) / 2),
+            ])
+            .split(v[1])[1]
+    }
+
+    /// The modal detail overlay for the selected resource. `row` is `None` when
+    /// the selected resource has vanished between the keypress and this frame
+    /// (it was deleted/stopped) — the overlay still opens, saying so, so Esc
+    /// has something to close instead of leaving the user stuck.
+    fn draw_detail(
+        f: &mut ratatui::Frame,
+        full: Rect,
+        row: Option<&Row>,
+        cpu_pct: &HashMap<String, f64>,
+    ) {
+        let area = centered_rect(60, 60, full);
+        f.render_widget(ratatui::widgets::Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(ORANGE))
+            .title(Span::styled(
+                format!(" {} ", po::t("DETAILS (Esc: back)")),
+                Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
+            ));
+        let lines: Vec<Line> = match row {
+            None => vec![Line::from(Span::styled(
+                po::t("resource no longer present"),
+                Style::default().fg(Color::DarkGray),
+            ))],
+            Some(r) => {
+                let kv = |label: &str, value: String| {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{label:>12}  "),
+                            Style::default().fg(Color::Gray),
+                        ),
+                        Span::raw(value),
+                    ])
+                };
+                let cpu = match cpu_pct.get(&r.id) {
+                    Some(p) => format!("{p:.1}%"),
+                    None => "-".to_string(),
+                };
+                let mem = r
+                    .mem_bytes
+                    .map(super::super::output::fmt_size)
+                    .unwrap_or_else(|| "-".to_string());
+                // Field labels stay in English, like the table COLUMN HEADERS
+                // (`draw_table`) — neither is `po::t`-wrapped, on purpose.
+                vec![
+                    kv("NAME", r.name.clone()),
+                    kv("KIND", r.kind.clone()),
+                    kv("ID", r.id.clone()),
+                    Line::from(vec![
+                        Span::styled("      STATUS  ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            r.status.clone(),
+                            Style::default().fg(if r.ok { GREENC } else { REDC }),
+                        ),
+                    ]),
+                    kv("UP", r.up.clone()),
+                    kv("CPU", cpu),
+                    kv("MEM", mem),
+                    kv("I/O R/W", fmt_io_pair(r.io_read_bytes, r.io_write_bytes)),
+                    kv("NET DOWN/UP", fmt_net_pair(r.net_rx_bytes, r.net_tx_bytes)),
+                    kv("INFO", r.extra.clone()),
+                ]
+            }
+        };
+        f.render_widget(Paragraph::new(lines).block(block), area);
     }
 
     fn draw_tabs(f: &mut ratatui::Frame, area: Rect, scope: DashScope) {
@@ -1915,6 +2184,129 @@ mod tui {
             t.observe(t0 + Duration::from_secs(2), std::iter::empty::<(&str, u64)>());
             assert_eq!(t.pct_of("c"), None);
             assert!(t.anchor.is_empty());
+        }
+
+        // ---- filter parser (Ctrl+K palette) ----
+
+        fn row_k(id: &str, name: &str, kind: &str, status: &str) -> Row {
+            Row {
+                id: id.into(),
+                kind: kind.into(),
+                name: name.into(),
+                status: status.into(),
+                up: "-".into(),
+                extra: String::new(),
+                ok: status == "running",
+                cpu_usage_usec: None,
+                mem_bytes: None,
+                io_read_bytes: None,
+                io_write_bytes: None,
+                net_rx_bytes: None,
+                net_tx_bytes: None,
+            }
+        }
+
+        #[test]
+        fn parse_filter_bare_text_is_a_name_substring() {
+            let f = parse_filter("web").unwrap();
+            assert_eq!(f.name, "web");
+            assert_eq!(f.kind, None);
+            assert_eq!(f.state, None);
+        }
+
+        #[test]
+        fn parse_filter_kind_and_state_predicates() {
+            let f = parse_filter("kind:container state:running").unwrap();
+            assert_eq!(f.kind.as_deref(), Some("container"));
+            assert_eq!(f.state.as_deref(), Some("running"));
+            assert_eq!(f.name, "");
+        }
+
+        #[test]
+        fn parse_filter_is_case_insensitive_on_keys_and_values() {
+            let f = parse_filter("Kind:Container STATUS:Running").unwrap();
+            assert_eq!(f.kind.as_deref(), Some("container"));
+            // `status:` is an accepted alias of `state:`.
+            assert_eq!(f.state.as_deref(), Some("running"));
+        }
+
+        #[test]
+        fn parse_filter_unknown_key_is_an_error_not_free_text() {
+            // A mistyped key must be REJECTED, never demoted to a name search
+            // for "kidn:web" that silently matches nothing.
+            let e = parse_filter("kidn:web").unwrap_err();
+            assert!(e.contains("kidn"), "error should name the bad key: {e}");
+        }
+
+        #[test]
+        fn parse_filter_empty_value_is_an_error() {
+            assert!(parse_filter("kind:").is_err());
+        }
+
+        #[test]
+        fn filter_matches_requires_every_predicate() {
+            let f = parse_filter("kind:container state:running").unwrap();
+            assert!(f.matches(&row_k("a", "web", "Container", "running")));
+            // Wrong kind, wrong state — each independently excludes the row.
+            assert!(!f.matches(&row_k("b", "web", "VM", "running")));
+            assert!(!f.matches(&row_k("c", "web", "Container", "crashed")));
+            // state: is a substring, so a decorated status still matches.
+            let f2 = parse_filter("state:failed").unwrap();
+            assert!(f2.matches(&row_k("d", "job", "Container", "failed (code 2)")));
+        }
+
+        // ---- selection by stable id (not index) ----
+
+        #[test]
+        fn resolve_selection_follows_the_same_id_across_a_reorder() {
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let b = row_k("id-b", "beta", "Container", "running");
+            // Selection points at "beta"; it sits at index 1 in name order.
+            let name_order = vec![&a, &b];
+            let mut sel = Some("id-b".to_string());
+            assert_eq!(resolve_selection(&name_order, &mut sel), Some(1));
+            // After a reorder (now beta first) the SAME id resolves to its new
+            // index — the highlight tracks the resource, not position 1.
+            let reordered = vec![&b, &a];
+            assert_eq!(resolve_selection(&reordered, &mut sel), Some(0));
+            assert_eq!(sel.as_deref(), Some("id-b"));
+        }
+
+        #[test]
+        fn resolve_selection_falls_back_to_first_when_the_id_is_gone() {
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let visible = vec![&a];
+            // Remembered id filtered out / vanished → snap to the first row and
+            // adopt its id so navigation continues from there.
+            let mut sel = Some("id-missing".to_string());
+            assert_eq!(resolve_selection(&visible, &mut sel), Some(0));
+            assert_eq!(sel.as_deref(), Some("id-a"));
+        }
+
+        #[test]
+        fn resolve_selection_clears_on_an_empty_list() {
+            let empty: Vec<&Row> = Vec::new();
+            let mut sel = Some("id-a".to_string());
+            assert_eq!(resolve_selection(&empty, &mut sel), None);
+            assert_eq!(sel, None);
+        }
+
+        #[test]
+        fn move_selection_tracks_by_id_and_clamps_at_the_ends() {
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let b = row_k("id-b", "beta", "Container", "running");
+            let visible = vec![&a, &b];
+            let mut sel = Some("id-a".to_string());
+            move_selection(&visible, &mut sel, 1);
+            assert_eq!(sel.as_deref(), Some("id-b"));
+            // Down at the bottom clamps (no wrap).
+            move_selection(&visible, &mut sel, 1);
+            assert_eq!(sel.as_deref(), Some("id-b"));
+            // Up from the bottom moves back; up at the top clamps.
+            move_selection(&visible, &mut sel, -1);
+            assert_eq!(sel.as_deref(), Some("id-a"));
+            move_selection(&visible, &mut sel, -1);
+            assert_eq!(sel.as_deref(), Some("id-a"));
         }
     }
 }
