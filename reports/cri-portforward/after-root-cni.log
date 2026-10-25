@@ -1,0 +1,67 @@
+==> critest focus='portforward \[Conformance\]'
+time="2026-10-24T13:15:11Z" level=warning msg="Config \"/etc/crictl.yaml\" does not exist, trying next: \"/crictl.yaml\""
+critest version: v1.36.0
+Running Suite: CRI validation - /
+=================================
+Random Seed: 1792847711
+
+Will run 1 of 122 specs
+------------------------------
+[BeforeSuite] 
+/home/runner/work/cri-tools/cri-tools/pkg/framework/util.go:98
+  Oct 24 13:15:11.027: INFO: Testing context container image list: {DefaultTestContainerImage:registry.k8s.io/e2e-test-images/busybox:1.29-2 WebServerTestImage:}
+  Oct 24 13:15:11.027: INFO: Testing context benchmarking params: {ContainersNumber:0 ContainersNumberParallel:0 ContainerBenchmarkTimeoutSeconds:0 PodsNumber:0 PodsNumberParallel:0 PodBenchmarkTimeoutSeconds:0 ImagesNumber:0 ImagesNumberParallel:0 ImageBenchmarkTimeoutSeconds:0 ImagePullingBenchmarkImage: ImageListingBenchmarkImages:[] PodContainerStartBenchmarkTimeoutSeconds:0}
+[BeforeSuite] PASSED [0.000 seconds]
+------------------------------
+SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS
+------------------------------
+[k8s.io] Streaming runtime should support streaming interfaces runtime should support portforward [Conformance]
+/home/runner/work/cri-tools/cri-tools/pkg/validate/streaming.go:130
+  STEP: create a PodSandbox with container port mapping @ 10/24/26 13:15:11.034
+  STEP: create a web server container @ 10/24/26 13:15:11.207
+  STEP: Get image status for image: registry.k8s.io/e2e-test-images/nginx:1.14-2 @ 10/24/26 13:15:11.207
+  STEP: Pull image : registry.k8s.io/e2e-test-images/nginx:1.14-2 @ 10/24/26 13:15:11.209
+  STEP: Create container. @ 10/24/26 13:15:32.312
+  Oct 24 13:15:32.313: INFO: Created container "9673bf5286fabb38"
+
+  STEP: start the web server container @ 10/24/26 13:15:32.313
+  STEP: Start container for containerID: 9673bf5286fabb38 @ 10/24/26 13:15:32.313
+  Oct 24 13:15:32.617: INFO: Started container "9673bf5286fabb38"
+
+  STEP: ensure the web server container is serving @ 10/24/26 13:15:32.617
+  STEP: get the IP:port needed to be checked @ 10/24/26 13:15:32.617
+  STEP: Get PodSandbox status for podID: b5573d981b48657d @ 10/24/26 13:15:32.617
+  Oct 24 13:15:32.618: INFO: the IP:port is http://10.88.0.2:80
+  STEP: check the content of http://10.88.0.2:80 @ 10/24/26 13:15:32.618
+  Oct 24 13:15:32.619: INFO: check port mapping succeed
+  STEP: port forward PodSandbox: b5573d981b48657d @ 10/24/26 13:15:32.619
+  Oct 24 13:15:32.620: INFO: Get port forward URL: http://127.0.0.1:43065/portforward/ea40a48ff8952c14b1081e9a72b96a6d
+  STEP: check the output of portforward @ 10/24/26 13:15:32.62
+  Oct 24 13:15:32.621: INFO: Parse URL "http://127.0.0.1:43065/portforward/ea40a48ff8952c14b1081e9a72b96a6d" succeed
+  STEP: check if we can get nginx main page via localhost:12001 @ 10/24/26 13:15:32.621
+  STEP: get the IP:port needed to be checked @ 10/24/26 13:15:32.621
+  Oct 24 13:15:32.621: INFO: the IP:port is http://127.0.0.1:12001
+  STEP: check the content of http://127.0.0.1:12001 @ 10/24/26 13:15:32.621
+  STEP: start port forward @ 10/24/26 13:15:32.621
+  Oct 24 13:15:33.665: INFO: check port mapping succeed
+  Oct 24 13:15:33.665: INFO: Check port forward URL "http://127.0.0.1:43065/portforward/ea40a48ff8952c14b1081e9a72b96a6d" succeed
+  STEP: stop PodSandbox @ 10/24/26 13:15:33.665
+  STEP: delete PodSandbox @ 10/24/26 13:15:33.805
+• [23.240 seconds]
+------------------------------
+SSSSSSSSSSSSSS
+
+Ran 1 of 122 Specs in 23.243 seconds
+SUCCESS! -- 1 Passed | 0 Failed | 0 Pending | 121 Skipped
+PASS
+RC=0
+=== delonix-cri server log (tail) ===
+[2m2026-10-24T13:15:10.669850Z[0m [32m INFO[0m [2mdelonix_cri[0m[2m:[0m delonix-cri starting [3maddr[0m[2m=[0munix:///run/cri.sock [3mroot[0m[2m=[0m/run/dlx
+delonix-cri (CRI v1) listening on unix:///run/cri.sock
+delonix-cri: streaming (exec/attach) at http://127.0.0.1:43065
+delonix-cri: WARNING: no capability ceiling (DELONIX_CRI_CAP_CEILING=all) — a privileged pod gets all capabilities; unset it, or set 'default' or a list of names, to bound it
+[2m2026-10-24T13:15:10.670675Z[0m [33m WARN[0m [2mdelonix_cri[0m[2m:[0m delonix-cri: WARNING: no capability ceiling (DELONIX_CRI_CAP_CEILING=all) — a privileged pod gets all capabilities; unset it, or set 'default' or a list of names, to bound it
+[2m2026-10-24T13:15:11.210743Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling e2e-test-images/nginx:1.14-2 from registry.k8s.io [3mrepo[0m[2m=[0me2e-test-images/nginx [3mreference[0m[2m=[0m1.14-2 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-24T13:15:22.897089Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+[2m2026-10-24T13:15:33.666520Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI StopPodSandbox [3msandbox[0m[2m=[0mb5573d981b48657d
+[2m2026-10-24T13:15:33.805874Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI RemovePodSandbox [3msandbox[0m[2m=[0mb5573d981b48657d

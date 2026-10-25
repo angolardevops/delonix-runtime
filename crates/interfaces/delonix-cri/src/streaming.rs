@@ -205,14 +205,38 @@ async fn portforward_upgrade(
     let Some(p) = pending else {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     };
-    let Some(pid) = pod_sandbox_pid(&st.base, &p.pod_sandbox_id) else {
-        return (
-            axum::http::StatusCode::CONFLICT,
-            "pod sandbox has no live netns",
-        )
-            .into_response();
-    };
-    crate::spdy::handle_port_forward(req, pid)
+    // Where to forward, by network mode:
+    // * `hostNetwork` — no own infra/netns (its containers run in the node's
+    //   network), so connect directly in the host netns rather than `setns`-ing
+    //   into a pod netns that was never created.
+    // * root CNI — no infra `pod-cri-<id>` pid either (the pod's containers join
+    //   a NAMED netns `/run/netns/cri-<id>` with `--net host`), so `setns` into
+    //   that recorded netns FILE. Without this, the infra-pid lookup below finds
+    //   nothing and reports "no live netns" for a perfectly live pod — the
+    //   critest `portforward [Conformance]` failure on a root/CNI node.
+    // * otherwise (native/rootless) — the target is the infra container's netns,
+    //   and a missing/dead pid there is still the real "no live netns" (not a
+    //   reason to reach the host).
+    let netns =
+        if crate::runtime_svc::lifecycle::sandbox_is_host_network(&st.base, &p.pod_sandbox_id) {
+            crate::spdy::PfNetns::Host
+        } else if let Some(ns) =
+            crate::runtime_svc::lifecycle::sandbox_cni_netns(&st.base, &p.pod_sandbox_id)
+        {
+            crate::spdy::PfNetns::NsPath(ns.into())
+        } else {
+            match pod_sandbox_pid(&st.base, &p.pod_sandbox_id) {
+                Some(pid) => crate::spdy::PfNetns::Pid(pid),
+                None => {
+                    return (
+                        axum::http::StatusCode::CONFLICT,
+                        "pod sandbox has no live netns",
+                    )
+                        .into_response();
+                }
+            }
+        };
+    crate::spdy::handle_port_forward(req, netns)
 }
 
 /// Builds the `delonix` argv to launch to serve this stream: `logs -f`
