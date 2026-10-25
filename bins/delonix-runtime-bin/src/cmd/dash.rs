@@ -120,6 +120,13 @@ pub struct Tile {
 /// A row of the resource table.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Row {
+    /// Stable resource identity — a container's `id`, a VM's `name`, or the
+    /// name for kinds without their own uid. The TUI keys per-row state
+    /// (the CPU-rate anchor; later, selection preservation) on THIS, never on
+    /// the display `name` or the table position: a reused/duplicate name
+    /// collides the previous CPU sample and yields a wrong delta, and a sort or
+    /// refresh reorders rows so the index is not an identity either.
+    pub id: String,
     pub kind: String,
     pub name: String,
     pub status: String,
@@ -131,9 +138,9 @@ pub struct Row {
     /// `true` = healthy state (Running/present); painted green vs red.
     pub ok: bool,
     /// Raw monotonic `cpu.stat` counter (microseconds), for a Container only.
-    /// NOT a percentage — the TUI keeps the previous sample per row and
-    /// divides the delta by elapsed wall time (see `tui::render`'s
-    /// `cpu_prev`). `None` for non-container kinds and for a stopped
+    /// NOT a percentage — the TUI keeps the previous sample per id and divides
+    /// the delta by elapsed wall time, anchored to the collection tick (see
+    /// `tui::CpuRateTracker`). `None` for non-container kinds and for a stopped
     /// container (no live cgroup to read).
     pub cpu_usage_usec: Option<u64>,
     /// `memory.current` of the container's live cgroup, in bytes.
@@ -409,12 +416,13 @@ impl DashData {
         let want_n = matches!(scope, DashScope::Global | DashScope::Networks);
         let want_s = matches!(scope, DashScope::Global | DashScope::Storage);
         if want_c {
-            for (name, st, img, starttime, _id, usage, net) in &containers {
+            for (name, st, img, starttime, id, usage, net) in &containers {
                 let up = starttime
                     .and_then(super::output::uptime_from_starttime)
                     .map(super::output::fmt_duration_secs)
                     .unwrap_or_else(|| "-".to_string());
                 rows.push(Row {
+                    id: id.clone(),
                     kind: k::CONTAINER.into(),
                     name: name.clone(),
                     status: st.to_string(),
@@ -433,6 +441,7 @@ impl DashData {
         if want_v {
             for v in &vms {
                 rows.push(Row {
+                    id: v.name.clone(),
                     kind: k::VM.into(),
                     name: v.name.clone(),
                     status: v.status.to_string(),
@@ -451,6 +460,7 @@ impl DashData {
         if want_n {
             for n in &networks {
                 rows.push(Row {
+                    id: n.name.clone(),
                     kind: k::NETWORK.into(),
                     name: n.name.clone(),
                     status: n.driver.clone(),
@@ -469,6 +479,7 @@ impl DashData {
         if want_s {
             for vol in &volumes {
                 rows.push(Row {
+                    id: vol.name.clone(),
                     kind: k::VOLUME.into(),
                     name: vol.name.clone(),
                     status: vol.driver.clone(),
@@ -492,6 +503,7 @@ impl DashData {
                     .cloned()
                     .unwrap_or_else(|| img.short_id());
                 rows.push(Row {
+                    id: img.short_id(),
                     kind: k::IMAGE.into(),
                     name,
                     status: img.short_id(),
@@ -790,6 +802,67 @@ mod tui {
         last_updated: Instant,
     }
 
+    /// Turns a monotonic CPU-time counter (`cpu.stat` `usage_usec`,
+    /// microseconds) into a live percentage of one core, keyed by STABLE id.
+    /// Fixes the two things the old inline per-frame code got wrong (audit
+    /// G3/G4):
+    ///
+    ///  * **A rate needs two samples from two DIFFERENT collections.** The
+    ///    counter only advances once per ~1s collection tick, but the draw loop
+    ///    runs every ~200ms frame. The anchor is advanced ONLY in
+    ///    [`Self::observe`] — called exactly once per tick — never per frame.
+    ///    The old code rewrote the anchor every frame, so most frames diffed
+    ///    the counter against itself (→ a flickering 0%) and the first frame
+    ///    after a tick diffed a ~1s delta over ~200ms of wall time (→ a ~5×
+    ///    inflated spike). Between ticks, [`Self::pct_of`] returns the last
+    ///    computed value, held stable.
+    ///  * **Identity is the id, not the display name.** Two resources with the
+    ///    same name (or a name reused after re-creation) would otherwise share
+    ///    one anchor and produce a nonsense delta.
+    ///
+    /// A counter that moves backwards (cgroup recreated / container restarted)
+    /// is a reset, not a spike: the stale percentage is dropped and the next
+    /// tick re-establishes the anchor. Ids absent from a tick are forgotten, so
+    /// a restarted resource never inherits an old anchor.
+    #[derive(Default)]
+    struct CpuRateTracker {
+        anchor: HashMap<String, (Instant, u64)>,
+        pct: HashMap<String, f64>,
+    }
+
+    impl CpuRateTracker {
+        /// Advance the anchors with the fresh `(id, counter)` samples taken at
+        /// `now`. Call EXACTLY once per collection tick.
+        fn observe<'a>(&mut self, now: Instant, samples: impl IntoIterator<Item = (&'a str, u64)>) {
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for (id, cur) in samples {
+                seen.insert(id.to_string());
+                if let Some((t0, u0)) = self.anchor.get(id).copied() {
+                    let micros = now.duration_since(t0).as_micros();
+                    if cur < u0 {
+                        // Counter went backwards → reset. Drop the stale % and
+                        // wait for the next tick to re-anchor (no false spike).
+                        self.pct.remove(id);
+                    } else if micros > 0 {
+                        self.pct
+                            .insert(id.to_string(), (cur - u0) as f64 / micros as f64 * 100.0);
+                    }
+                    // micros == 0 (two samples same instant): keep the previous
+                    // %, do not divide by zero.
+                }
+                self.anchor.insert(id.to_string(), (now, cur));
+            }
+            self.anchor.retain(|k, _| seen.contains(k));
+            self.pct.retain(|k, _| seen.contains(k));
+        }
+
+        /// Last computed percentage of one core for `id`, or `None` until two
+        /// samples exist. May exceed 100% (multi-core). Stable between ticks.
+        fn pct_of(&self, id: &str) -> Option<f64> {
+            self.pct.get(id).copied()
+        }
+    }
+
     pub fn run_interactive(scope: DashScope) -> Result<()> {
         let root = state_root();
         // Cheap-only FIRST snapshot (counts + cgroup memory, no netns reads,
@@ -1032,13 +1105,12 @@ mod tui {
         let mut sort_key = SortKey::Name;
         let mut filter = String::new();
         let mut searching = false;
-        // Raw `cpu.stat` counters, one previous sample per row (keyed by
-        // "KIND:NAME" — unique because container/VM names are already
-        // unique within their own store) and one for the whole-slice CPU
-        // tile — see `Row::cpu_usage_usec`'s doc comment for why a rate
-        // needs two samples and cannot come out of a single collection.
-        let mut cpu_prev: HashMap<String, (Instant, u64)> = HashMap::new();
-        let mut slice_cpu_prev: Option<(Instant, u64)> = None;
+        // CPU% is derived from the monotonic `cpu.stat` counter, anchored to
+        // the COLLECTION TICK (not the draw frame) and keyed by stable id —
+        // see `CpuRateTracker` for why both matter. One tracker for the
+        // per-row table, one single-entry tracker for the whole-slice CPU tile.
+        let mut cpu_tracker = CpuRateTracker::default();
+        let mut slice_tracker = CpuRateTracker::default();
         let mut cur_summary: Option<delonix_mgmt::dashstats::DashSummary> = None;
         let mut prev_summary: Option<delonix_mgmt::dashstats::DashSummary> = None;
         let mut slow_age = Duration::from_secs(0);
@@ -1073,40 +1145,27 @@ mod tui {
                 if mem_hist.len() > 120 {
                     mem_hist.pop_front();
                 }
+                // Advance the CPU-rate anchors ONCE per tick (the counters only
+                // changed here), keyed by stable id — never per frame below.
+                let tick_now = Instant::now();
+                cpu_tracker.observe(
+                    tick_now,
+                    data.rows
+                        .iter()
+                        .filter_map(|r| r.cpu_usage_usec.map(|c| (r.id.as_str(), c))),
+                );
+                slice_tracker.observe(tick_now, data.cpu_usage_usec.map(|c| ("slice", c)));
                 last = Instant::now();
             }
 
-            // CPU% is TUI-owned state (see `cpu_prev`'s doc comment) —
-            // recomputed every FRAME (not just every tick) so a fast poll
-            // loop doesn't visibly stall the percentage between ticks; the
-            // underlying counters only actually change once per tick.
+            // Read the tick-anchored CPU rates (keyed by stable id, held stable
+            // between ticks). The anchors were advanced ONCE in the tick block
+            // above — never here per frame, which is exactly the bug this
+            // replaces (see `CpuRateTracker`). `now` is still needed below for
+            // the spinner animation.
             let now = Instant::now();
-            let mut cpu_pct: HashMap<String, f64> = HashMap::new();
-            for r in &data.rows {
-                if let Some(cur) = r.cpu_usage_usec {
-                    let key = format!("{}:{}", r.kind, r.name);
-                    if let Some((t0, u0)) = cpu_prev.get(&key).copied() {
-                        let elapsed = now.duration_since(t0);
-                        if elapsed.as_millis() > 0 && cur >= u0 {
-                            let pct = (cur - u0) as f64 / elapsed.as_micros() as f64 * 100.0;
-                            cpu_pct.insert(key.clone(), pct);
-                        }
-                    }
-                    cpu_prev.insert(key, (now, cur));
-                }
-            }
-            let cpu_tile_pct = data.cpu_usage_usec.and_then(|cur| {
-                let pct = slice_cpu_prev.and_then(|(t0, u0)| {
-                    let elapsed = now.duration_since(t0);
-                    if elapsed.as_millis() > 0 && cur >= u0 {
-                        Some((cur - u0) as f64 / elapsed.as_micros() as f64 * 100.0)
-                    } else {
-                        None
-                    }
-                });
-                slice_cpu_prev = Some((now, cur));
-                pct
-            });
+            let cpu_pct: &HashMap<String, f64> = &cpu_tracker.pct;
+            let cpu_tile_pct = slice_tracker.pct_of("slice");
 
             // `cur_summary` is `None` only before the very first tick has
             // run — which cannot happen here (`last` starts 2s in the past,
@@ -1125,7 +1184,7 @@ mod tui {
                 .iter()
                 .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(&needle))
                 .collect();
-            sort_rows(&mut visible, sort_key, &cpu_pct);
+            sort_rows(&mut visible, sort_key, cpu_pct);
             if visible.is_empty() {
                 table_state.select(None);
             } else {
@@ -1150,7 +1209,7 @@ mod tui {
                     sort_key,
                     &filter,
                     searching,
-                    &cpu_pct,
+                    cpu_pct,
                     cpu_tile_pct,
                     &trends,
                     slow_age,
@@ -1238,16 +1297,14 @@ mod tui {
 
     /// Sorts the VISIBLE rows in place — always by a stable secondary key
     /// (name) so equal-metric rows don't jitter position between ticks.
-    /// `cpu_pct` is keyed the same way as `render`'s `cpu_prev` (`"KIND:NAME"`).
+    /// `cpu_pct` is keyed by stable resource `id` (same as `CpuRateTracker`).
     fn sort_rows(rows: &mut [&Row], key: SortKey, cpu_pct: &HashMap<String, f64>) {
         rows.sort_by(|a, b| match key {
             SortKey::Name => a.name.cmp(&b.name),
             SortKey::Status => a.status.cmp(&b.status).then_with(|| a.name.cmp(&b.name)),
             SortKey::Cpu => {
-                let ka = format!("{}:{}", a.kind, a.name);
-                let kb = format!("{}:{}", b.kind, b.name);
-                let pa = cpu_pct.get(&ka).copied().unwrap_or(-1.0);
-                let pb = cpu_pct.get(&kb).copied().unwrap_or(-1.0);
+                let pa = cpu_pct.get(&a.id).copied().unwrap_or(-1.0);
+                let pb = cpu_pct.get(&b.id).copied().unwrap_or(-1.0);
                 pb.partial_cmp(&pa)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then_with(|| a.name.cmp(&b.name))
@@ -1399,11 +1456,26 @@ mod tui {
         for t in tiles {
             all_tiles.push(t.clone());
             if t.label == "MEMORY" {
-                let value = match cpu_tile_pct {
-                    Some(pct) => format!("{pct:.1}%"),
-                    None => "…".to_string(),
+                // Two explicit denominators (audit G5): the primary figure is
+                // "% of one core" (may exceed 100% on a multi-core workload —
+                // never clamped), and the subtitle adds "% of the whole host"
+                // (primary ÷ host cores) when the core count is determinable.
+                // We do NOT invent a cpu.max/quota denominator here.
+                let ncpu = delonix_linux::host_ncpu().max(1);
+                let (value, sub) = match cpu_tile_pct {
+                    Some(pct) => (
+                        format!("{pct:.1}%"),
+                        po::tf(
+                            "of 1 core · {hostpct}% of {n} host cores",
+                            &[
+                                ("hostpct", &format!("{:.1}", pct / ncpu as f64)),
+                                ("n", &ncpu.to_string()),
+                            ],
+                        ),
+                    ),
+                    None => ("…".to_string(), po::t("of 1 core (collecting)").to_string()),
                 };
-                all_tiles.push(tile("CPU", value, "of 1 core (may exceed 100%)"));
+                all_tiles.push(tile("CPU", value, &sub));
             }
         }
 
@@ -1521,8 +1593,7 @@ mod tui {
             .iter()
             .map(|r| {
                 let sc = if r.ok { GREENC } else { REDC };
-                let key = format!("{}:{}", r.kind, r.name);
-                let cpu_cell = match cpu_pct.get(&key) {
+                let cpu_cell = match cpu_pct.get(&r.id) {
                     Some(pct) => {
                         let color = if *pct > 90.0 {
                             REDC
@@ -1698,6 +1769,7 @@ mod tui {
 
         fn row(name: &str, status: &str, mem: Option<u64>) -> Row {
             Row {
+                id: name.into(),
                 kind: k::CONTAINER.into(),
                 name: name.into(),
                 status: status.into(),
@@ -1760,6 +1832,90 @@ mod tui {
             }
             assert!(matches!(k, SortKey::Name));
         }
+
+        // ---- CpuRateTracker (audit G3/G4) ----
+
+        #[test]
+        fn cpu_rate_needs_two_samples() {
+            let mut t = CpuRateTracker::default();
+            t.observe(Instant::now(), [("c1", 1_000_000u64)]);
+            // First collection: an anchor exists but no rate can be computed
+            // yet — never a fabricated 0%.
+            assert_eq!(t.pct_of("c1"), None);
+        }
+
+        #[test]
+        fn cpu_rate_uses_the_tick_interval_not_a_frame() {
+            // THE regression guard for G3: the delta is divided by the interval
+            // between the two COLLECTIONS (1s here), not by a ~200ms draw
+            // frame. 500_000 usec of CPU time over 1_000_000 usec of wall time
+            // is 50%. The old per-frame code divided the same 1s delta by one
+            // frame (~200ms) → ~250%, and showed 0% on the frames in between.
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("c1", 1_000_000u64)]);
+            t.observe(t0 + Duration::from_secs(1), [("c1", 1_500_000u64)]);
+            let p = t.pct_of("c1").expect("rate after two samples");
+            assert!((p - 50.0).abs() < 0.01, "expected ~50%, got {p}");
+        }
+
+        #[test]
+        fn cpu_rate_is_held_stable_between_ticks() {
+            // Re-observing at the SAME instant (what a redundant call within one
+            // tick would look like) must not divide by zero nor change the held
+            // value — the percentage is stable until the next real tick.
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(1);
+            t.observe(t0, [("c1", 0u64)]);
+            t.observe(t1, [("c1", 1_000_000u64)]);
+            let p = t.pct_of("c1");
+            assert!(p.is_some());
+            t.observe(t1, [("c1", 9_000_000u64)]);
+            assert_eq!(t.pct_of("c1"), p, "zero interval must keep the prior %");
+        }
+
+        #[test]
+        fn cpu_rate_keyed_by_id_not_name() {
+            // G4: two resources that could share a display name but have
+            // distinct ids get independent rates — no shared anchor.
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("idA", 0u64), ("idB", 0u64)]);
+            t.observe(
+                t0 + Duration::from_secs(1),
+                [("idA", 1_000_000u64), ("idB", 200_000u64)],
+            );
+            assert!((t.pct_of("idA").unwrap() - 100.0).abs() < 0.01);
+            assert!((t.pct_of("idB").unwrap() - 20.0).abs() < 0.01);
+        }
+
+        #[test]
+        fn cpu_rate_counter_reset_drops_not_spikes() {
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("c", 5_000_000u64)]);
+            t.observe(t0 + Duration::from_secs(1), [("c", 6_000_000u64)]);
+            assert!(t.pct_of("c").is_some());
+            // Counter went backwards (cgroup recreated / restart): drop the
+            // stale %, do not emit a spike.
+            t.observe(t0 + Duration::from_secs(2), [("c", 10_000u64)]);
+            assert_eq!(t.pct_of("c"), None);
+        }
+
+        #[test]
+        fn cpu_rate_forgets_absent_ids() {
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("c", 1_000_000u64)]);
+            t.observe(t0 + Duration::from_secs(1), [("c", 2_000_000u64)]);
+            assert!(t.pct_of("c").is_some());
+            // Resource gone from this tick → its anchor and % are forgotten, so
+            // a restarted resource cannot inherit a stale anchor.
+            t.observe(t0 + Duration::from_secs(2), std::iter::empty::<(&str, u64)>());
+            assert_eq!(t.pct_of("c"), None);
+            assert!(t.anchor.is_empty());
+        }
     }
 }
 
@@ -1773,6 +1929,7 @@ mod tests {
             tiles: vec![tile("CONTAINERS", "2/3", "running / total")],
             rows: vec![
                 Row {
+                    id: "web".into(),
                     kind: "Container".into(),
                     name: "web".into(),
                     status: "running".into(),
@@ -1787,6 +1944,7 @@ mod tests {
                     net_tx_bytes: Some(8192),
                 },
                 Row {
+                    id: "db".into(),
                     kind: "Container".into(),
                     name: "db".into(),
                     status: "crashed".into(),
