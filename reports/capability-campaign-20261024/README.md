@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **152** |
-| partial | 93 | 86 | 64 |
-| not-implemented | 74 | 72 | 55 |
-| unsupported-by-provider | 230 | 230 | 229 |
+| supported | 103 | 112 | **154** |
+| partial | 93 | 86 | 62 |
+| not-implemented | 74 | 72 | 54 |
+| unsupported-by-provider | 230 | 230 | 230 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **152/274 (55.5%)** |
+| proved/applicable (N2) | — | 112/273 | **154/273 (56.4%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -90,10 +90,12 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 
 | provider | supported/aplicável | % |
 |---|---|---|
-| cloud-hypervisor | 23/36 | 63.9 % |
+| cloud-hypervisor | 25/35 | 71.4 % |
 | libvirt | 32/45 | 71.1 % |
 | proxmox | 30/37 | 81.1 % |
-| **TOTAL VM** | **85/118** | **72.0 %** |
+| **TOTAL VM** | **87/117** | **74.4 %** |
+
+Par `193f9461`: CH `vm.backup.disk/restore` →supported (ciclo de recuperação de dados ORIGINAL→CHANGED→ORIGINAL, guestfish); libvirt `vm.guest-agent` re-confirmado supported (agent 8.2.2 live); CH `vm.guest-agent` not-impl→unsupported-by-provider (CH v52 sem virtio-serial `org.qemu.guest_agent.0` — sai do denominador, daí 274→273).
 
 Par `18fdf6fd`: CH `vm.hotplug.cpu/memory.add` →supported (nproc 1→2, MemTotal +512M no guest; removes ficam not-impl honestos por risco §7); proxmox `vm.console.serial/vnc` →supported (handshake websocket 101 completo via termproxy/vncproxy).
 
