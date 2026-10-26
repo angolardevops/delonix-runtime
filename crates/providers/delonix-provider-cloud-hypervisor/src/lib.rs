@@ -380,19 +380,24 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 evidence: "check:CH: o overlay cresceu para exactamente 1 GiB",
             }),
             C::VmPciPassthrough => bin(S::Partial {
-                detail: "`--device path=<sysfs>` per validated address; no IOMMU host in the battery",
+                detail: "each `cfg.devices` path becomes `--device path=<sysfs>` (VFIO); not proved live — binding a device to vfio-pci needs root and a host device spare to detach, and none is on the test host",
             }),
-            C::VmTpm => S::UnsupportedByProvider {
-                reason: "no vTPM device is emitted for Cloud Hypervisor",
-            },
+            // Cloud Hypervisor DOES carry a vTPM: `--tpm socket=<swtpm socket>`
+            // (confirmed on v52 `--help`), backed by an external `swtpm` the VMM
+            // connects to over a UNIX socket. It is NOT unsupported-by-provider —
+            // the backend can express it — it is simply not wired: `boot_ch`
+            // emits no `--tpm` and nothing spawns or reaps a per-VM `swtpm`
+            // (socket, state dir, pidfile, teardown on stop/destroy), so the arm
+            // stays honest at `not-implemented` until that lifecycle exists.
+            C::VmTpm => S::NotImplemented,
             C::VmCpuModel => S::UnsupportedByProvider {
                 reason: "CH exposes the host CPU; no model selection is passed",
             },
             C::VmCpuPinning => bin(S::Supported {
                 evidence: "live:scripts/vm-native-ch-vm-partials.sh",
             }),
-            C::VmHugepages => bin(S::Partial {
-                detail: "`--memory hugepages=on`; unit-tested argument, pool not probed",
+            C::VmHugepages => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-hugepages.sh",
             }),
             C::VmCloudInit => bin(S::Supported {
                 evidence: "live:scripts/vm-native-ch-lifecycle.sh",
