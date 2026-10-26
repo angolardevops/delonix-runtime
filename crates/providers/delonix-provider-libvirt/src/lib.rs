@@ -357,8 +357,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmDestroy => bin(S::Partial {
                 detail: "`vm destroy` undefines the domain, releases the DHCP reservation and removes the overlay; the battery tears down without a named check",
             }),
-            C::VmRestart => bin(S::Partial {
-                detail: "stop-then-start, always a real reboot; no battery check names it",
+            C::VmRestart => bin(S::Supported {
+                evidence: "e2e:vm: stop-then-start is a real reboot — the guest boot id changes (libvirt, cloud-init, guestfish)",
             }),
             C::VmPause => bin(S::Supported {
                 evidence: "check:vm pause",
@@ -394,11 +394,11 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 evidence: "e2e:vm: uma NIC a QUENTE e detectada e passa TRAFEGO REAL DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmHotplugNicRemove => S::NotImplemented,
-            C::VmExtraDisks => bin(S::Partial {
-                detail: "`extraDisks` reach the domain XML (unit-tested target letters); never booted in the battery",
+            C::VmExtraDisks => bin(S::Supported {
+                evidence: "e2e:vm: an extra disk declared at create is seen and R/W inside the guest (libvirt, cloud-init, guestfish)",
             }),
-            C::VmExtraNics => bin(S::Partial {
-                detail: "`extraNics` (network/bridge/user) reach the domain XML; never booted in the battery",
+            C::VmExtraNics => bin(S::Supported {
+                evidence: "e2e:vm: an extra NIC declared at create is seen and passes real traffic inside the guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmDiskResize => bin(S::Supported {
                 evidence: "check:o overlay cresceu para exactamente 1 GiB",
@@ -409,8 +409,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmTpm => bin(S::Partial {
                 detail: "`<tpm model='tpm-crb'>` emulator; swtpm presence is not probed",
             }),
-            C::VmCpuModel => bin(S::Partial {
-                detail: "`cpuModel`/`cpuTopology` in the XML, default host-passthrough; not booted in the battery",
+            C::VmCpuModel => bin(S::Supported {
+                evidence: "e2e:vm: the requested CPU topology is seen inside the guest (libvirt, cloud-init, guestfish)",
             }),
             C::VmCpuPinning => bin(S::Partial {
                 detail: "`<cputune>` quota + `<vcpupin>`; unit-tested XML, dropped on qemu:///session",
@@ -422,7 +422,7 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 evidence: "e2e:vm: o cloud-init do guest CONSOME o seed NoCloud (libvirt, guestfish)",
             }),
             C::VmRestartPolicyNative => bin(S::Partial {
-                detail: "`on_crash=restart` for always/on-failure; unit-tested, no guest crashed on purpose",
+                detail: "`on_crash=restart` for always/on-failure reaches the LIVE domain XML (validated against a booted guest); the crash→restart EFFECT stays unproven because the domain carries no `<panic>` device, so a guest kernel panic is not reported to libvirt and on_crash never fires — honest until a pvpanic path exists",
             }),
             C::VmNamespaceIsolation => S::UnsupportedByProvider {
                 reason: "a libvirt VM lives on virbr0 in the host netns, a different L2 the engine does not program; `--namespace` is refused by name",
@@ -513,8 +513,14 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmBackupRestore => bin(S::Partial {
                 detail: "`backup restore` re-imports the disk; battery covers the container kind only",
             }),
-            C::VmMigrationCold => bin(S::Partial {
-                detail: "`vm migrate`: stop, flatten, copy over SSH, import, start; no battery",
+            C::VmMigrationCold => bin(S::Supported {
+                // The battery proves the mechanism live on one host — the
+                // substantive steps (stop, `qemu-img convert` flatten to a
+                // standalone disk, `--appliance` import without a seed reset,
+                // create+boot on the target) with the guest's baked state
+                // crossing intact. Only the generic scp transport between two
+                // hosts is left to the cross-host run (not a provider capability).
+                evidence: "e2e:vm: a stopped VM cold-migrates — flatten, import, boot on the target with state intact (libvirt, guestfish)",
             }),
             // libvirt/QEMU supports live migration without shared storage via
             // `--copy-storage-all` (libvirt >= 1.0.3); the capability is the

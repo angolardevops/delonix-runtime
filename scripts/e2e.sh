@@ -5657,6 +5657,441 @@ else
 fi
 
 ########################################
+section "vm: an extra disk declared at create is seen and R/W inside the guest (libvirt, cloud-init, guestfish)"
+########################################
+# `vm.disks.extra` on the libvirt provider was `partial` («`extraDisks` reach
+# the domain XML (unit-tested target letters); never booted in the battery»).
+# Reaching the XML proves the hypervisor accepts it; it does NOT prove the guest
+# sees the disk nor that it is usable. This closes the gap live, against a real
+# guest, for a disk declared AT CREATE (not hotplug — that is a sibling section):
+#   1. APPLIED — the domain's `domblklist` lists the extra disk on a new target;
+#   2. DETECTED — inside the guest a new block appears in `lsblk`/`/sys/block`;
+#   3. USABLE — the guest WRITES a known marker to the raw block and READS it
+#      back equal; the verdict lands in a file on root, read afterwards with
+#      guestfish (the VM stopped, so QEMU releases the qcow2).
+# The disk is declared through the engine's own declarative path (`vm apply` of
+# a `kind: VirtualMachine` with `extraDisks:`), never hand-written XML. The extra
+# disk is identified in-guest by its unique 128MiB size (root is 5G, the seed a
+# few MB). Needs a cloud image (E2E_CLOUDINIT_IMAGE or one under
+# $SROOT/vm-images/_base) and guestfish; without them, an honest SKIP.
+XDIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$XDIMG" ]]; then
+  XDIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 && [[ -n "$XDIMG" && -r "$XDIMG" ]]; then
+  XDVM="xdisk-$PFX"; XDBASE="$OUT/$XDVM-base.qcow2"; XDEXTRA="$OUT/$XDVM-extra.qcow2"
+  XDUD="$OUT/$XDVM-user-data.yaml"; XDPOLL="$OUT/$XDVM-poll.sh"; XDMAN="$OUT/$XDVM.yaml"
+  cp "$XDIMG" "$XDBASE" && qemu-img resize "$XDBASE" 5G >/dev/null 2>&1
+  qemu-img create -f qcow2 "$XDEXTRA" 128M >/dev/null 2>&1
+  cat > "$XDPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-xdisk-RESULT; L=/var/lib/delonix-xdisk-LSBLK
+exec >>/var/lib/delonix-xdisk-LOG 2>&1
+for _ in $(seq 1 120); do
+  dev=""
+  while read -r name size; do [ "$size" = 134217728 ] && dev="$name" && break; done < <(lsblk -bdn -o NAME,SIZE)
+  if [ -n "$dev" ]; then
+    { echo "== lsblk =="; lsblk; echo "== /sys/block =="; ls -l /sys/block; } > "$L" 2>&1
+    pat="EXTRADISK-BOOT-PROOF-v1"
+    printf '%s\n' "$pat" | dd of="/dev/$dev" bs=512 seek=0 conv=notrunc 2>/dev/null
+    blockdev --flushbufs "/dev/$dev" 2>/dev/null || true; sync
+    rb="$(dd if=/dev/$dev bs=512 count=1 2>/dev/null | tr -d '\0' | head -c 32)"
+    if [ "$rb" = "$pat" ]; then echo "DETECT=$dev WRITE=ok READ=ok MATCH=ok" > "$R"
+    else echo "DETECT=$dev WRITE=sent READ=[$rb] MATCH=no" > "$R"; fi
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"; echo "hostname: dlx-xdisk-proof"; echo "package_update: false"
+    echo "write_files:"; echo "  - path: /usr/local/bin/xdisk-poll.sh"; echo "    permissions: '0755'"
+    echo "    encoding: b64"; echo "    content: $(base64 -w0 "$XDPOLL")"
+    echo "runcmd:"; echo "  - [ sh, -c, \"setsid bash /usr/local/bin/xdisk-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$XDUD"
+  cat > "$XDMAN" <<YAML
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: $XDVM }
+spec:
+  disk: $XDBASE
+  backend: libvirt
+  memory: 1G
+  vcpus: 2
+  userData: $XDUD
+  extraDisks:
+    - source: $XDEXTRA
+      bus: virtio
+      format: qcow2
+YAML
+  if check_then "vm apply libvirt (extra-disk guest)" ok "$BIN" vm apply -f "$XDMAN"; then
+    XDOVL="$SROOT/vms/$XDVM.qcow2"
+    sleep 100
+    # APPLIED: the extra disk is on the live domain, on a new target.
+    check "the extra disk is in the domain's domblklist" ok bash -c \
+      "virsh -c qemu:///system domblklist '$XDVM' | grep -q '$XDVM-extra.qcow2'"
+    "$BIN" vm stop "$XDVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$XDVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$XDVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # DETECTED: the guest saw the new 128MiB block (the poller recorded lsblk).
+    check "the guest DETECTS the extra disk (lsblk/sys-block)" ok bash -c \
+      "guestfish --ro -a '$XDOVL' -i cat /var/lib/delonix-xdisk-LSBLK | grep -Eq 'vd[b-z] +[0-9].* 128M'"
+    # USABLE: a real write AND read to the extra disk inside the guest matched.
+    check "the extra disk is R/W inside the guest (write+read match)" ok bash -c \
+      "guestfish --ro -a '$XDOVL' -i cat /var/lib/delonix-xdisk-RESULT | grep -q 'WRITE=ok READ=ok MATCH=ok'"
+    "$BIN" delete vm "$XDVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$XDVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$XDBASE" "$XDEXTRA" "$XDUD" "$XDPOLL" "$XDMAN"
+else
+  skip "vm: an extra disk declared at create is seen and R/W inside the guest" \
+    "no usable libvirt, no guestfish, or no cloud image (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
+section "vm: an extra NIC declared at create is seen and passes real traffic inside the guest (libvirt, cloud-init, guestfish)"
+########################################
+# `vm.nics.extra` on the libvirt provider was `partial` («`extraNics`
+# (network/bridge/user) reach the domain XML; never booted in the battery»).
+# This closes it live, against a real guest, for a NIC declared AT CREATE (not
+# hotplug — that is a sibling section):
+#   1. APPLIED — the domain's `domiflist` lists the extra interface on `ingress`;
+#   2. DETECTED — inside the guest a NIC appears in `/sys/class/net`;
+#   3. REAL TRAFFIC — the guest configures the extra NIC (a static IP on the
+#      `ingress` subnet) and pings the gateway (192.168.199.1); the verdict
+#      records replies received and the rx/tx counter deltas, proof the NIC is
+#      USABLE, not just present. Read afterwards with guestfish (VM stopped).
+# The extra NIC is the physical interface WITHOUT a DHCP-assigned IPv4 (the
+# primary gets one; the extra does not). Declared through `vm apply` of a
+# `kind: VirtualMachine` with `extraNics:`. Needs a cloud image, guestfish and
+# the libvirt `ingress` network; without them, an honest SKIP.
+XNIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$XNIMG" ]]; then
+  XNIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 && [[ -n "$XNIMG" && -r "$XNIMG" ]] \
+     && virsh -c qemu:///system net-info ingress >/dev/null 2>&1; then
+  XNVM="xnic-$PFX"; XNBASE="$OUT/$XNVM-base.qcow2"
+  XNUD="$OUT/$XNVM-user-data.yaml"; XNPOLL="$OUT/$XNVM-poll.sh"; XNMAN="$OUT/$XNVM.yaml"
+  cp "$XNIMG" "$XNBASE" && qemu-img resize "$XNBASE" 5G >/dev/null 2>&1
+  cat > "$XNPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-xnic-RESULT; L=/var/lib/delonix-xnic-IPLINK
+exec >>/var/lib/delonix-xnic-LOG 2>&1
+for _ in $(seq 1 180); do
+  dev=""
+  for d in /sys/class/net/*; do
+    n=$(basename "$d"); [ "$n" = lo ] && continue; [ -e "$d/device" ] || continue
+    ip -4 addr show dev "$n" | grep -q 'inet ' && continue
+    dev="$n"; break
+  done
+  if [ -n "$dev" ]; then
+    { echo "== ip link =="; ip link; echo "== ip -4 addr =="; ip -4 addr; } > "$L" 2>&1
+    ip link set "$dev" up; ip addr add 192.168.199.201/24 dev "$dev" 2>/dev/null; sleep 3
+    rxb=$(cat "/sys/class/net/$dev/statistics/rx_packets"); txb=$(cat "/sys/class/net/$dev/statistics/tx_packets")
+    ping -c 4 -W 2 -I "$dev" 192.168.199.1 > /var/lib/delonix-xnic-PING 2>&1
+    rcv=$(grep -oE '[0-9]+ received' /var/lib/delonix-xnic-PING | grep -oE '^[0-9]+')
+    rxa=$(cat "/sys/class/net/$dev/statistics/rx_packets"); txa=$(cat "/sys/class/net/$dev/statistics/tx_packets")
+    rxd=$((rxa-rxb)); txd=$((txa-txb))
+    if [ "${rcv:-0}" -ge 1 ]; then traf=ok-ping
+    elif [ "$txd" -gt 0 ] && [ "$rxd" -gt 0 ]; then traf=ok-counters; else traf=no; fi
+    echo "DETECT=$dev PING_RECV=${rcv:-0} RX_DELTA=$rxd TX_DELTA=$txd TRAFFIC=$traf" > "$R"
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"; echo "hostname: dlx-xnic-proof"; echo "package_update: false"
+    echo "write_files:"; echo "  - path: /usr/local/bin/xnic-poll.sh"; echo "    permissions: '0755'"
+    echo "    encoding: b64"; echo "    content: $(base64 -w0 "$XNPOLL")"
+    echo "runcmd:"; echo "  - [ sh, -c, \"setsid bash /usr/local/bin/xnic-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$XNUD"
+  cat > "$XNMAN" <<YAML
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: $XNVM }
+spec:
+  disk: $XNBASE
+  backend: libvirt
+  memory: 1G
+  vcpus: 2
+  network: ingress
+  userData: $XNUD
+  extraNics:
+    - type: network
+      source: ingress
+      model: virtio
+YAML
+  if check_then "vm apply libvirt (extra-nic guest)" ok "$BIN" vm apply -f "$XNMAN"; then
+    XNOVL="$SROOT/vms/$XNVM.qcow2"
+    sleep 100
+    # APPLIED: the extra interface is on the live domain, on the ingress network.
+    check "the extra NIC is in the domain's domiflist (ingress network)" ok bash -c \
+      "virsh -c qemu:///system domiflist '$XNVM' | grep -qw ingress"
+    "$BIN" vm stop "$XNVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$XNVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$XNVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # DETECTED: the guest saw the extra NIC.
+    check "the guest DETECTS the extra NIC (ip link/sys-class-net)" ok bash -c \
+      "guestfish --ro -a '$XNOVL' -i cat /var/lib/delonix-xnic-RESULT | grep -Eq 'DETECT=[a-z0-9]+ '"
+    # REAL TRAFFIC: ping to the gateway received end-to-end (or counters rose).
+    check "the extra NIC passes real traffic inside the guest (ping/counters)" ok bash -c \
+      "guestfish --ro -a '$XNOVL' -i cat /var/lib/delonix-xnic-RESULT | grep -Eq 'TRAFFIC=ok-(ping|counters)'"
+    "$BIN" delete vm "$XNVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$XNVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$XNBASE" "$XNUD" "$XNPOLL" "$XNMAN"
+else
+  skip "vm: an extra NIC declared at create is seen and passes real traffic inside the guest" \
+    "no usable libvirt, no guestfish, no cloud image (E2E_CLOUDINIT_IMAGE), or no libvirt ingress network"
+fi
+
+########################################
+section "vm: the requested CPU topology is seen inside the guest (libvirt, cloud-init, guestfish)"
+########################################
+# `vm.cpu.model` on the libvirt provider was `partial` («`cpuModel`/`cpuTopology`
+# in the XML, default host-passthrough; not booted in the battery»). Reaching
+# the XML proves nothing about what the GUEST sees. This boots a VM with a
+# declared topology (sockets:2 cores:2 threads:1 = 4 vCPUs) and reads `lscpu`
+# inside the guest: the guest must report EXACTLY the requested sockets/cores/
+# threads. Declared through `vm apply` of a `kind: VirtualMachine` with
+# `cpuModel:`/`cpuTopology:`. Needs a cloud image and guestfish; else SKIP.
+XCIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$XCIMG" ]]; then
+  XCIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 && [[ -n "$XCIMG" && -r "$XCIMG" ]]; then
+  XCVM="xcpu-$PFX"; XCBASE="$OUT/$XCVM-base.qcow2"
+  XCUD="$OUT/$XCVM-user-data.yaml"; XCPOLL="$OUT/$XCVM-poll.sh"; XCMAN="$OUT/$XCVM.yaml"
+  cp "$XCIMG" "$XCBASE" && qemu-img resize "$XCBASE" 5G >/dev/null 2>&1
+  cat > "$XCPOLL" <<'POLL'
+#!/bin/bash
+R=/var/lib/delonix-xcpu-RESULT
+exec >>/var/lib/delonix-xcpu-LOG 2>&1
+for _ in $(seq 1 60); do
+  sockets=$(lscpu | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2);print $2}')
+  cores=$(lscpu | awk -F: '/Core\(s\) per socket/{gsub(/ /,"",$2);print $2}')
+  threads=$(lscpu | awk -F: '/Thread\(s\) per core/{gsub(/ /,"",$2);print $2}')
+  np=$(nproc)
+  if [ -n "$sockets" ] && [ "$np" -ge 1 ]; then
+    lscpu > /var/lib/delonix-xcpu-LSCPU 2>&1
+    echo "SOCKETS=$sockets CORES_PER_SOCKET=$cores THREADS_PER_CORE=$threads NPROC=$np" > "$R"
+    sync; break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"; echo "hostname: dlx-xcpu-proof"; echo "package_update: false"
+    echo "write_files:"; echo "  - path: /usr/local/bin/xcpu-poll.sh"; echo "    permissions: '0755'"
+    echo "    encoding: b64"; echo "    content: $(base64 -w0 "$XCPOLL")"
+    echo "runcmd:"; echo "  - [ sh, -c, \"setsid bash /usr/local/bin/xcpu-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$XCUD"
+  cat > "$XCMAN" <<YAML
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: $XCVM }
+spec:
+  disk: $XCBASE
+  backend: libvirt
+  memory: 1G
+  vcpus: 4
+  userData: $XCUD
+  cpuModel: host-passthrough
+  cpuTopology:
+    sockets: 2
+    cores: 2
+    threads: 1
+YAML
+  if check_then "vm apply libvirt (cpu-topology guest)" ok "$BIN" vm apply -f "$XCMAN"; then
+    XCOVL="$SROOT/vms/$XCVM.qcow2"
+    sleep 100
+    # APPLIED: the live domain counts 4 active vCPUs.
+    check "the domain counts 4 live vCPUs (vcpucount)" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system vcpucount '$XCVM' --live --active 2>/dev/null | tr -d '[:space:]')\" = 4 ]"
+    "$BIN" vm stop "$XCVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$XCVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$XCVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # SEEN: the guest's lscpu reports EXACTLY the requested topology.
+    check "the guest sees the requested topology (2 sockets, 2 cores, 1 thread)" ok bash -c \
+      "guestfish --ro -a '$XCOVL' -i cat /var/lib/delonix-xcpu-RESULT | grep -q 'SOCKETS=2 CORES_PER_SOCKET=2 THREADS_PER_CORE=1 NPROC=4'"
+    "$BIN" delete vm "$XCVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$XCVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$XCBASE" "$XCUD" "$XCPOLL" "$XCMAN"
+else
+  skip "vm: the requested CPU topology is seen inside the guest" \
+    "no usable libvirt, no guestfish, or no cloud image (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
+section "vm: stop-then-start is a real reboot — the guest boot id changes (libvirt, cloud-init, guestfish)"
+########################################
+# `vm.restart` on the libvirt provider was `partial` («stop-then-start, always a
+# real reboot; no battery check names it»). This names it: `vm restart` must be
+# a REAL kernel reboot, not a resume. A cloud-init `bootcmd` (runs on EVERY boot)
+# appends the kernel boot_id to a log; after `vm restart` the log holds TWO
+# DISTINCT boot_ids — the kernel re-initialized, which is what a reboot is and a
+# pause/resume is not. Needs a cloud image and guestfish; else an honest SKIP.
+XRIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$XRIMG" ]]; then
+  XRIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 && [[ -n "$XRIMG" && -r "$XRIMG" ]]; then
+  XRVM="xrst-$PFX"; XRBASE="$OUT/$XRVM-base.qcow2"; XRUD="$OUT/$XRVM-user-data.yaml"; XRMAN="$OUT/$XRVM.yaml"
+  cp "$XRIMG" "$XRBASE" && qemu-img resize "$XRBASE" 5G >/dev/null 2>&1
+  {
+    echo "#cloud-config"; echo "hostname: dlx-xrst-proof"; echo "package_update: false"
+    echo "bootcmd:"
+    echo "  - [ sh, -c, \"cat /proc/sys/kernel/random/boot_id >> /var/lib/delonix-xrst-BOOTLOG\" ]"
+  } > "$XRUD"
+  cat > "$XRMAN" <<YAML
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: $XRVM }
+spec:
+  disk: $XRBASE
+  backend: libvirt
+  memory: 1G
+  vcpus: 2
+  userData: $XRUD
+YAML
+  if check_then "vm apply libvirt (restart guest)" ok "$BIN" vm apply -f "$XRMAN"; then
+    XROVL="$SROOT/vms/$XRVM.qcow2"
+    sleep 100
+    # The real reboot under test.
+    check "vm restart returns ok" ok "$BIN" vm restart "$XRVM"
+    sleep 70
+    "$BIN" vm stop "$XRVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$XRVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$XRVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # PROOF: two DISTINCT boot_ids in the log — the kernel re-initialized.
+    check "the guest boot id changed across the restart (two distinct ids)" ok bash -c \
+      "[ \"\$(guestfish --ro -a '$XROVL' -i cat /var/lib/delonix-xrst-BOOTLOG 2>/dev/null | grep -c '[0-9a-f]')\" -ge 2 ] && [ \"\$(guestfish --ro -a '$XROVL' -i cat /var/lib/delonix-xrst-BOOTLOG 2>/dev/null | sort -u | grep -c '[0-9a-f]')\" -ge 2 ]"
+    "$BIN" delete vm "$XRVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$XRVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$XRBASE" "$XRUD" "$XRMAN"
+else
+  skip "vm: stop-then-start is a real reboot — the guest boot id changes" \
+    "no usable libvirt, no guestfish, or no cloud image (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
+section "vm: a stopped VM cold-migrates — flatten, import, boot on the target with state intact (libvirt, guestfish)"
+########################################
+# `vm.migration.cold` on the libvirt provider was `partial` («`vm migrate`: stop,
+# flatten, copy over SSH, import, start; no battery»). This proves the mechanism
+# live on ONE host — the substantive, risky steps of cold migration, minus only
+# the generic scp transport between two hosts (not a VM-provider capability):
+#   1. STOP + FLATTEN — `qemu-img convert -O qcow2` produces a STANDALONE disk
+#      with no backing-file dependency to carry across hosts;
+#   2. IMPORT --appliance — the carried disk is registered WITHOUT a fresh seed,
+#      so the guest's baked state is not reset (ADR: an appliance keeps its own);
+#   3. CREATE on the "target" (a second name here = the other host) and BOOT it.
+# A BAKED systemd unit (installed once by cloud-init, then the guest's own, so it
+# survives the seedless appliance import) appends the boot_id on every boot.
+# Proof: the target's log holds the source's first-boot id (state crossed intact)
+# AND a second, distinct id (the target actually booted the migrated disk). Needs
+# a cloud image and guestfish; else an honest SKIP.
+XMIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$XMIMG" ]]; then
+  XMIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 && [[ -n "$XMIMG" && -r "$XMIMG" ]]; then
+  XMSRC="mgsrc-$PFX"; XMDST="mgdst-$PFX"; XMTAG="migrated-$XMSRC"
+  XMBASE="$OUT/$XMSRC-base.qcow2"; XMFLAT="$OUT/$XMSRC-flat.qcow2"; XMUD="$OUT/$XMSRC-user-data.yaml"; XMMAN="$OUT/$XMSRC.yaml"
+  cp "$XMIMG" "$XMBASE" && qemu-img resize "$XMBASE" 5G >/dev/null 2>&1
+  {
+    echo "#cloud-config"; echo "hostname: dlx-mig-proof"; echo "package_update: false"
+    echo "write_files:"
+    echo "  - path: /etc/systemd/system/dlx-bootlog.service"
+    echo "    permissions: '0644'"
+    echo "    content: |"
+    echo "      [Unit]"
+    echo "      Description=delonix migration boot logger"
+    echo "      After=local-fs.target"
+    echo "      [Service]"
+    echo "      Type=oneshot"
+    echo "      ExecStart=/bin/sh -c 'cat /proc/sys/kernel/random/boot_id >> /var/lib/delonix-mig-BOOTLOG'"
+    echo "      [Install]"
+    echo "      WantedBy=multi-user.target"
+    echo "runcmd:"
+    echo "  - [ systemctl, enable, dlx-bootlog.service ]"
+    echo "  - [ systemctl, start, dlx-bootlog.service ]"
+  } > "$XMUD"
+  cat > "$XMMAN" <<YAML
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: $XMSRC }
+spec:
+  disk: $XMBASE
+  backend: libvirt
+  memory: 1G
+  vcpus: 2
+  userData: $XMUD
+YAML
+  if check_then "vm apply libvirt (cold-migrate source)" ok "$BIN" vm apply -f "$XMMAN"; then
+    XMSOVL="$SROOT/vms/$XMSRC.qcow2"
+    sleep 100
+    "$BIN" vm stop "$XMSRC" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$XMSRC" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$XMSRC" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # STEP 1: flatten — the standalone disk carries no backing dependency.
+    check "cold-migrate: the flattened disk is standalone (no backing file)" ok bash -c \
+      "qemu-img convert -O qcow2 -- '$XMSOVL' '$XMFLAT' && ! qemu-img info '$XMFLAT' | grep -qi 'backing file'"
+    # STEP 2+3: import --appliance, then create+boot on the 'target'.
+    check "cold-migrate: the carried disk imports as an appliance" ok \
+      "$BIN" vm image import "$XMFLAT" --tag "$XMTAG" --appliance --force
+    check "cold-migrate: the target VM creates+boots from the migrated disk" ok \
+      "$BIN" vm create "$XMDST" --disk "$XMTAG" --vcpus 2 --memory 1G --network ingress --backend libvirt
+    sleep 100
+    XMDOVL="$SROOT/vms/$XMDST.qcow2"
+    "$BIN" vm stop "$XMDST" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$XMDST" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$XMDST" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # PROOF: the target's bootlog carries the source's first-boot id AND a second,
+    # distinct one — state crossed intact and the target booted the migrated disk.
+    check "cold-migrate: the target booted the migrated disk with state intact (two distinct boot ids)" ok bash -c \
+      "[ \"\$(guestfish --ro -a '$XMDOVL' -i cat /var/lib/delonix-mig-BOOTLOG 2>/dev/null | sort -u | grep -c '[0-9a-f]')\" -ge 2 ]"
+    check "cold-migrate: the target kept the source's baked hostname" ok bash -c \
+      "guestfish --ro -a '$XMDOVL' -i cat /etc/hostname | grep -qx dlx-mig-proof"
+    "$BIN" delete vm "$XMDST" -f >/dev/null 2>&1
+    "$BIN" vm image rm "$XMTAG" -f >/dev/null 2>&1 || "$BIN" vm image rm "$XMTAG" >/dev/null 2>&1
+    "$BIN" delete vm "$XMSRC" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$XMSRC" -f >/dev/null 2>&1
+  fi
+  rm -f "$XMBASE" "$XMFLAT" "$XMUD" "$XMMAN"
+else
+  skip "vm: a stopped VM cold-migrates — flatten, import, boot on the target with state intact" \
+    "no usable libvirt, no guestfish, or no cloud image (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
