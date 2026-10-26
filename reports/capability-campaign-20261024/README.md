@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **144** |
+| supported | 103 | 112 | **148** |
 | partial | 93 | 86 | 66 |
-| not-implemented | 74 | 72 | 61 |
+| not-implemented | 74 | 72 | 57 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **144/274 (52.6%)** |
+| proved/applicable (N2) | — | 112/273 | **148/274 (54.0%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -91,9 +91,11 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 | provider | supported/aplicável | % |
 |---|---|---|
 | cloud-hypervisor | 21/36 | 58.3 % |
-| libvirt | 30/45 | 66.7 % |
-| proxmox | 26/37 | 70.3 % |
-| **TOTAL VM** | **77/118** | **65.3 %** |
+| libvirt | 32/45 | 71.1 % |
+| proxmox | 28/37 | 75.7 % |
+| **TOTAL VM** | **81/118** | **68.6 %** |
+
+Par `993c7ae0`: proxmox `vm.hotplug.disk/nic.add` (anexo a quente a VM a correr, `refuse_pending`) + libvirt `vm.hotplug.disk/nic.remove` (remoção cooperativa segura — disco em uso não sai; registo só perde o device após o guest o largar) →supported.
 
 Último par (`2622eb07`): CH `vm.cpu.pinning` (bug de affinity do CH v52 corrigido), `vm.antispoof`, `vm.console.serial` →supported; libvirt `vm.console.serial`/`vnc` (RFB handshake), `vm.backup.disk`/`restore` (recuperação de dados) →supported. CH `vm.ip.observed` e `vm.migration.cold`, libvirt `vm.backup.quiesced` e `vm.raw-definition` ficam partial honestos (IP computado≠observado; cold-migrate precisa 2º host; quiesce precisa guest-agent; raw-def é fronteira de segurança).
 
