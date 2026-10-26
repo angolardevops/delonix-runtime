@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **130** |
-| partial | 93 | 86 | 78 |
-| not-implemented | 74 | 72 | 63 |
+| supported | 103 | 112 | **137** |
+| partial | 93 | 86 | 73 |
+| not-implemented | 74 | 72 | 61 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **130/274 (47.4%)** |
+| proved/applicable (N2) | — | 112/273 | **137/274 (50.0%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -79,6 +79,23 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 - `d915b2ea`+merge — **linux `firewall.icmp-type` + `firewall.logging` not-impl→supported (§10)**: lowering nftables de `meta l4proto icmp [icmp type N]` + `log prefix ... limit rate 10/s`. Live: icmp type 8 permitido 3/3, type 13 bloqueado 0/3 (contadores); logging 40→5 logados (rate-limit observável). supported→+2.
 - `2b4d4494`+merge — **libvirt `vm.clone` + `vm.template` not-impl→supported (§7)**: clone independente (`qemu-img convert -U`, disco standalone, UUID/MAC/seed próprios; corrigido bug `<backingStore>` auto-referente que impedia o arranque); template marca VM congelada (start recusa DX-1501, instancia por clone). CLI `vm clone`/`vm template` nova com todos os gates CLI/docs/folhas/pt.po atualizados. supported→+2.
 - `73650bd2` docs — regenera matriz (130/274, 47.4%).
+
+- `d915b2ea`+merge — **linux `firewall.icmp-type`+`firewall.logging` not-impl→supported (§10)**: nftables `icmp type N` + `log prefix limit rate`; tráfego permitido 3/3 / negado 0/3, logging 40→5 (rate-limit observável por contador). supported→+2.
+- `2b4d4494`+merge — **libvirt `vm.clone`+`vm.template` not-impl→supported (§7)**: clone independente (disco standalone, UUID/MAC próprios; corrigido bug `<backingStore>`); template recusa start (DX-1501). CLI nova + gates CLI/docs/folhas/pt.po atualizados. supported→+2.
+- `53c2bdee`+merge — **CH `vm.hotplug.disk.add`+`vm.hotplug.nic.add` not-impl→supported (§7)**: API `/vm.add-disk`/`/vm.add-net`, provado no guest (vdc mkfs+R/W; ens6 DHCP+ping, 8/8). Corrigiu raw-ReadOnly + alias default→ingress; fecha taps no stop. supported→+2.
+- `8b6048e1`+merge — **libvirt 5 partials VM→supported (§7)**: `disks.extra`, `nics.extra`, `cpu.model` (topologia exacta no guest), `restart` (boot id muda), `migration.cold` (flatten+import local); `restart-policy.native` fica partial honesto (sem `<panic>`). supported→+5.
+- `17560f3b` docs — regenera matriz (**137/274, 50.0%**).
+
+## Compatibilidade VM (domínios vm-compute/protection/mobility/console)
+
+| provider | supported/aplicável | % |
+|---|---|---|
+| cloud-hypervisor | 18/36 | 50.0 % |
+| libvirt | 26/45 | 57.8 % |
+| proxmox | 26/37 | 70.3 % |
+| **TOTAL VM** | **70/118** | **59.3 %** |
+
+Tecto realista < 100% neste host: ~8-10 células hardware-gated (pci-passthrough/tpm/hugepages/guest-agent) ficam partial honestas até haver hardware. Resto do caminho: mais partials backend-completos (CH antispoof/cpu.pinning/console; libvirt console/backup/raw-definition) + hotplug.remove (com cuidado §7) + proxmox hotplug add/console.
 
 ## Verificado correcto-como-está (NÃO reperseguir — read-only, sem promoção falsa)
 
