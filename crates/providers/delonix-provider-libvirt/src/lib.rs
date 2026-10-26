@@ -431,7 +431,15 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 evidence: "test:crates/providers/delonix-provider-libvirt/src/lib.rs::antispoof_live_defines_and_survives_the_domain",
             }),
             C::VmRawDefinition => bin(S::Partial {
-                detail: "`libvirtXml`/`libvirtXmlOverlay` are UNVALIDATED, trusted manifests only, local CLI only — never reachable from the node contract (ADR-0050)",
+                // DECISION (this front, §7): kept `partial` ON PURPOSE, as a
+                // security boundary, not for want of a battery. `libvirtXml`/
+                // `libvirtXmlOverlay` inject raw, UNVALIDATED domain XML straight
+                // into libvirt — a trusted-manifest, local-CLI escape hatch that is
+                // deliberately never reachable from the node contract (ADR-0050).
+                // Promoting it to `supported` would advertise an unvalidated input
+                // path as a first-class capability; it stays partial so the limit
+                // is stated, not proved away.
+                detail: "`libvirtXml`/`libvirtXmlOverlay` are UNVALIDATED, trusted manifests only, local CLI only — never reachable from the node contract (ADR-0050); kept partial as a security boundary, not for want of a battery",
             }),
             C::SystemContainerLifecycle
             | C::SystemContainerOciImage
@@ -535,11 +543,19 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmHighAvailability => S::RequiresExternalComponent {
                 component: "a cluster manager with quorum and fencing; a single libvirt host has none",
             },
-            C::VmConsoleSerial => bin(S::Partial {
-                detail: "`vm console` runs `virsh console --force`; interactive, no battery",
+            C::VmConsoleSerial => bin(S::Supported {
+                // #16: the battery drives `vm console` non-interactively (under a
+                // pty, with a timeout) against a booted cloud-init guest and reads
+                // back the guest's OWN getty `login:` prompt — bytes crossed the
+                // serial socket, the console FUNCTIONS, not merely exists.
+                evidence: "check:vm console returns the guest's own login prompt over the serial socket",
             }),
-            C::VmConsoleVnc => bin(S::Partial {
-                detail: "`vm vnc` reads `vncdisplay` of a `--vnc` domain; no battery",
+            C::VmConsoleVnc => bin(S::Supported {
+                // #16: `vm vnc` names a VNC endpoint and the battery opens a raw TCP
+                // connection to it that reads back QEMU's `RFB 003.00x` handshake —
+                // the server is listening and speaks the protocol, a client CAN
+                // connect, not just a number got printed.
+                evidence: "check:vm vnc names a VNC endpoint that answers the RFB protocol handshake",
             }),
             C::VmGuestAgent => bin(S::Supported {
                 evidence: "live:crates/providers/delonix-provider-libvirt/tests/live.rs::libvirt_guest_agent_answers_on_a_real_cloud_init_boot",
