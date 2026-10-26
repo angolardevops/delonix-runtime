@@ -7506,19 +7506,33 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             C::NetBridge => S::Partial {
                 detail: "`kind: NetworkZone` creates a simple SDN zone and its VNets on the cluster and reloads the SDN (ADR-0049 addendum); a VNet is the node's bridge, not `network create`",
             },
-            C::NetMacvlanIpvlan
-            | C::NetVlan
-            | C::NetOverlayVxlan
-            | C::NetOverlayEncrypted
-            | C::NetIpam
-            | C::NetDns
-            | C::NetRoutesBetweenNetworks
-            | C::NetRateLimit => S::NotImplemented,
+            // PVE CAN do these (vlan/vxlan zones, EVPN inter-subnet routing, a
+            // VM NIC's `rate=`), the adapter does not wire them yet: a genuine
+            // gap, not a provider limit — `create_sdn_zone` only ever makes a
+            // `simple` zone (`sdn.rs`), and the engine's VM model carries no
+            // per-NIC rate to send.
+            C::NetVlan | C::NetOverlayVxlan | C::NetRoutesBetweenNetworks | C::NetRateLimit => {
+                S::NotImplemented
+            }
+            // Provider limits, not adapter gaps: PVE's SDN zone types are
+            // simple/vlan/qinq/vxlan/evpn over a bridge — there is no
+            // macvlan/ipvlan zone, and none of them carries transport
+            // encryption. No amount of adapter work makes PVE do either.
+            C::NetMacvlanIpvlan | C::NetOverlayEncrypted => S::UnsupportedByProvider {
+                reason: "PVE SDN has no macvlan/ipvlan zone type and no encrypted overlay; its zone types are simple/vlan/qinq/vxlan/evpn over a bridge",
+            },
+            // `net.ipam`/`net.dns` are the ENGINE'S OWN IPAM and resolver
+            // (catalog doc), distinct from the provider's own (`NetIpamProvider`
+            // / `NetDnsRecords`, both Supported here). A VM on a Proxmox node is
+            // not on this engine's host SDN, so neither applies — the same
+            // boundary as `NetStaticIp` and the rest of this arm.
             C::NetStaticIp
             | C::NetPublishPorts
             | C::NetNamespaceIsolation
             | C::NetL7Proxy
-            | C::NetPacketCapture => S::UnsupportedByProvider {
+            | C::NetPacketCapture
+            | C::NetIpam
+            | C::NetDns => S::UnsupportedByProvider {
                 reason: "a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it",
             },
             C::NetTunnelEgress => S::UnsupportedByProvider {
