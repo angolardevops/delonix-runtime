@@ -1215,6 +1215,141 @@ else
 fi
 rm -f "$SPF"
 
+########################################
+section "storage pool: lvm-thin num thin pool real em loopback (ADR-0067 P4)"
+########################################
+# §12: um pool LVM-thin REAL, feito sobre um FICHEIRO loopback dedicado a este
+# teste — NUNCA um disco do host. O motor corre privilegiado (euid 0) com
+# `mode: in-process`: o administrador a dizer «este motor faz as operações
+# privilegiadas ele próprio» (storage_pool.rs::in_process_without_root), que é o
+# único modo em que um motor sem o helper aloca num pool lvm-thin. Sem root não
+# há losetup/vgcreate: o bloco é SALTADO, e a célula `storage.lvm-thin` fica
+# `partial` com esse limite escrito na matriz. O losetup só toca no ficheiro de
+# loopback deste teste; o teardown desfaz VG/PV/loop e apaga o ficheiro.
+if [[ "$(id -u)" != 0 ]]; then
+  skip "storage pool lvm-thin (pool real em loopback)" "precisa de root para losetup/pvcreate/vgcreate/lvcreate sobre o ficheiro de loopback; esta sessão corre sem privilégio"
+elif ! command -v lvm >/dev/null 2>&1 || ! command -v losetup >/dev/null 2>&1; then
+  skip "storage pool lvm-thin (pool real em loopback)" "lvm2/losetup não estão instalados neste nó"
+else
+  LVIMG="$OUT/dlx-lvm-$PFX.img"; LVVG="vgdlx$PFX"; LVSPF="$OUT/sp-lvm-$PFX.yaml"; LVLOOP=""
+  lvm_teardown() {
+    env DELONIX_STORAGE_POOLS_FILE="$LVSPF" "$BIN" delete storagepools "fast-$PFX" >/dev/null 2>&1 || true
+    vgremove -y "$LVVG" >/dev/null 2>&1 || true
+    if [[ -n "$LVLOOP" ]]; then pvremove -y "$LVLOOP" >/dev/null 2>&1 || true; losetup -d "$LVLOOP" >/dev/null 2>&1 || true; fi
+    rm -f "$LVIMG" "$LVSPF"
+  }
+  rm -f "$LVIMG"; truncate -s 1G "$LVIMG"
+  LVLOOP="$(losetup --find --show "$LVIMG" 2>/dev/null || true)"
+  if [[ -z "$LVLOOP" ]]; then
+    skip "storage pool lvm-thin (pool real em loopback)" "losetup recusou criar um dispositivo de loop"
+    rm -f "$LVIMG"
+  elif ! { pvcreate -y "$LVLOOP" && vgcreate "$LVVG" "$LVLOOP" && lvcreate -y --type thin-pool --extents 90%FREE --name tp "$LVVG"; } >/dev/null 2>&1; then
+    skip "storage pool lvm-thin (pool real em loopback)" "não foi possível construir o thin pool no loopback"
+    lvm_teardown
+  else
+    printf 'mode: in-process\npools:\n  fast-%s:\n    driver: lvm-thin\n    vg: %s\n    thinPool: tp\n    maxVolumeBytes: 512M\n' "$PFX" "$LVVG" >"$LVSPF"; chmod 644 "$LVSPF"
+    SPF="$LVSPF"; sp_fns="$(declare -f sp); BIN='$BIN' SPF='$LVSPF'"
+    printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: fast-%s }\nspec: {}\n' "$PFX" >"$OUT/lvm-pool-$PFX.yaml"
+    check "lvm-thin: o StoragePool aplica e o pool real fica AVAILABLE (probe lê o thin pool)" ok bash -c \
+      "$sp_fns; sp stack apply -f '$OUT/lvm-pool-$PFX.yaml' >/dev/null 2>&1 && sp get storagepools | grep -q 'fast-$PFX .*AVAILABLE'"
+    check "lvm-thin: volume create aloca um LV thin dlx-<vol>, mkfs ext4, monta, e carimba a propriedade (tags LVM do motor)" ok bash -c \
+      "$sp_fns; sp volume create 'lvv-$PFX' --pool 'fast-$PFX' --size 128M >/dev/null 2>&1 && lvs --noheadings -o lv_name,lv_tags '$LVVG' | grep 'dlx-lvv-$PFX' | grep -q 'delonix.io_volume=lvv-$PFX'"
+    check "lvm-thin: escrevo dados no volume montado e releio-os iguais (consistência)" ok bash -c \
+      "$sp_fns; d=\$(sp volume inspect 'lvv-$PFX' 2>/dev/null | grep -oE '/[^[:space:]]+/_data' | head -1); [[ -n \"\$d\" && -d \"\$d\" ]] && printf delonix-lvm-$PFX >\"\$d/probe\" && [[ \"\$(cat \"\$d/probe\")\" == delonix-lvm-$PFX ]]"
+    check "lvm-thin: um snapshot thin do LV existe e preserva (CoW do backend; base de futuros snapshots de volume)" ok bash -c \
+      "lvcreate -y -s -n 'snap-$PFX' '$LVVG/dlx-lvv-$PFX' >/dev/null 2>&1 && lvs --noheadings -o lv_name '$LVVG' | grep -q 'snap-$PFX' && lvremove -y '$LVVG/snap-$PFX' >/dev/null 2>&1"
+    check "lvm-thin: volume rm desmonta, remove o LV e o ponto de montagem (limpeza)" ok bash -c \
+      "$sp_fns; sp volume rm 'lvv-$PFX' >/dev/null 2>&1 && ! lvs --noheadings -o lv_name '$LVVG' | grep -q 'dlx-lvv-$PFX'"
+    check "lvm-thin: delete storagepools deixa de usar o pool e NÃO toca no thin pool do administrador" ok bash -c \
+      "$sp_fns; sp delete storagepools 'fast-$PFX' >/dev/null 2>&1; lvs --noheadings -o lv_name '$LVVG' | grep -qw 'tp'"
+    lvm_teardown
+  fi
+fi
+
+########################################
+section "storage pool: btrfs e zfs em filesystems reais em loopback (ADR-0067 P2/P3)"
+########################################
+# §12: pools btrfs e zfs REAIS, cada um sobre um FICHEIRO loopback dedicado.
+# btrfs aloca SEM privilégio (o subvolume é deste processo), mas o pool é um
+# btrfs que só o root monta; zfs aloca pelo helper/motor-root. Ambos exigem root
+# para o setup (losetup/mkfs.btrfs/mount; modprobe zfs/zpool create) — sem ele os
+# blocos SALTAM e a célula `storage.zfs-btrfs` fica `partial` com o limite na
+# matriz. Cada teardown desmonta/destrói só o que este teste criou e larga o loop.
+
+# --- btrfs ---
+if [[ "$(id -u)" != 0 ]]; then
+  skip "storage pool btrfs (pool real em loopback)" "precisa de root para losetup/mkfs.btrfs/mount; esta sessão corre sem privilégio"
+elif ! command -v mkfs.btrfs >/dev/null 2>&1 || ! command -v btrfs >/dev/null 2>&1 || ! command -v losetup >/dev/null 2>&1; then
+  skip "storage pool btrfs (pool real em loopback)" "btrfs-progs/losetup não estão instalados neste nó"
+else
+  BFIMG="$OUT/dlx-btrfs-$PFX.img"; BFMNT="$OUT/btrfs-mnt-$PFX"; BFSPF="$OUT/sp-btrfs-$PFX.yaml"; BFLOOP=""
+  btrfs_teardown() {
+    env DELONIX_STORAGE_POOLS_FILE="$BFSPF" "$BIN" delete storagepools "bees-$PFX" >/dev/null 2>&1 || true
+    if mountpoint -q "$BFMNT" 2>/dev/null; then umount "$BFMNT" >/dev/null 2>&1 || true; fi
+    if [[ -n "$BFLOOP" ]]; then losetup -d "$BFLOOP" >/dev/null 2>&1 || true; fi
+    rm -rf "$BFIMG" "$BFMNT" "$BFSPF"
+  }
+  rm -f "$BFIMG"; truncate -s 400M "$BFIMG"; mkdir -p "$BFMNT"
+  BFLOOP="$(losetup --find --show "$BFIMG" 2>/dev/null || true)"
+  if [[ -z "$BFLOOP" ]]; then
+    skip "storage pool btrfs (pool real em loopback)" "losetup recusou criar um dispositivo de loop"
+    rm -rf "$BFIMG" "$BFMNT"
+  elif ! mkfs.btrfs -q -L "dlx-bees-$PFX" "$BFLOOP" >/dev/null 2>&1 || ! mount -t btrfs -o user_subvol_rm_allowed,nodev,nosuid "$BFLOOP" "$BFMNT" >/dev/null 2>&1; then
+    skip "storage pool btrfs (pool real em loopback)" "não foi possível formatar/montar o btrfs no loopback"
+    btrfs_teardown
+  else
+    printf 'pools:\n  bees-%s:\n    driver: btrfs\n    path: %s\n    maxVolumeBytes: 256M\n' "$PFX" "$BFMNT" >"$BFSPF"; chmod 644 "$BFSPF"
+    SPF="$BFSPF"; sp_fns="$(declare -f sp); BIN='$BIN' SPF='$BFSPF'"
+    printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: bees-%s }\nspec: {}\n' "$PFX" >"$OUT/btrfs-pool-$PFX.yaml"
+    check "btrfs: o StoragePool aplica sobre o btrfs montado e fica AVAILABLE" ok bash -c \
+      "$sp_fns; sp stack apply -f '$OUT/btrfs-pool-$PFX.yaml' >/dev/null 2>&1 && sp get storagepools | grep -q 'bees-$PFX .*AVAILABLE'"
+    check "btrfs: volume create faz um subvolume com a marca do motor (.delonix-volume.json) e o _data" ok bash -c \
+      "$sp_fns; sp volume create 'bfv-$PFX' --pool 'bees-$PFX' --size 64M >/dev/null 2>&1 && [[ -d '$BFMNT/bfv-$PFX/_data' && -f '$BFMNT/bfv-$PFX/.delonix-volume.json' ]]"
+    check "btrfs: escrevo dados no volume e releio-os iguais (consistência)" ok bash -c \
+      "printf delonix-btrfs-$PFX >'$BFMNT/bfv-$PFX/_data/probe' && [[ \"\$(cat '$BFMNT/bfv-$PFX/_data/probe')\" == delonix-btrfs-$PFX ]]"
+    check "btrfs: um snapshot CoW do subvolume preserva os dados (capacidade do backend)" ok bash -c \
+      "btrfs subvolume snapshot '$BFMNT/bfv-$PFX' '$BFMNT/snap-$PFX' >/dev/null 2>&1 && [[ \"\$(cat '$BFMNT/snap-$PFX/_data/probe')\" == delonix-btrfs-$PFX ]] && btrfs subvolume delete '$BFMNT/snap-$PFX' >/dev/null 2>&1"
+    check "btrfs: volume rm remove o subvolume e o pool do administrador fica montado (limpeza)" ok bash -c \
+      "$sp_fns; sp volume rm 'bfv-$PFX' >/dev/null 2>&1 && [[ ! -e '$BFMNT/bfv-$PFX' ]] && mountpoint -q '$BFMNT'"
+    btrfs_teardown
+  fi
+fi
+
+# --- zfs ---
+if [[ "$(id -u)" != 0 ]]; then
+  skip "storage pool zfs (pool real em loopback)" "precisa de root para modprobe zfs/zpool create; esta sessão corre sem privilégio"
+elif ! command -v zpool >/dev/null 2>&1 || ! command -v zfs >/dev/null 2>&1; then
+  skip "storage pool zfs (pool real em loopback)" "zfsutils-linux não está instalado (o módulo do kernel pode existir; o userland zpool/zfs não)"
+else
+  ZIMG="$OUT/dlx-zfs-$PFX.img"; ZPOOL="zdlx$PFX"; ZSPF="$OUT/sp-zfs-$PFX.yaml"
+  zfs_teardown() {
+    env DELONIX_STORAGE_POOLS_FILE="$ZSPF" "$BIN" delete storagepools "tank-$PFX" >/dev/null 2>&1 || true
+    zpool destroy "$ZPOOL" >/dev/null 2>&1 || true
+    rm -f "$ZIMG" "$ZSPF"
+  }
+  modprobe zfs >/dev/null 2>&1 || true
+  rm -f "$ZIMG"; truncate -s 300M "$ZIMG"
+  if ! zpool create -f "$ZPOOL" "$ZIMG" >/dev/null 2>&1 || ! zfs create "$ZPOOL/dlx" >/dev/null 2>&1; then
+    skip "storage pool zfs (pool real em loopback)" "zpool create falhou (módulo zfs ausente/não carregável neste kernel)"
+    zfs_teardown
+  else
+    printf 'mode: in-process\npools:\n  tank-%s:\n    driver: zfs\n    dataset: %s/dlx\n    maxVolumeBytes: 64M\n' "$PFX" "$ZPOOL" >"$ZSPF"; chmod 644 "$ZSPF"
+    SPF="$ZSPF"; sp_fns="$(declare -f sp); BIN='$BIN' SPF='$ZSPF'"
+    printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: tank-%s }\nspec: {}\n' "$PFX" >"$OUT/zfs-pool-$PFX.yaml"
+    check "zfs: o StoragePool aplica sobre o dataset e fica AVAILABLE (probe lê o dataset)" ok bash -c \
+      "$sp_fns; sp stack apply -f '$OUT/zfs-pool-$PFX.yaml' >/dev/null 2>&1 && sp get storagepools | grep -q 'tank-$PFX .*AVAILABLE'"
+    check "zfs: volume create faz um dataset filho com refquota e as user-properties do motor" ok bash -c \
+      "$sp_fns; sp volume create 'zfv-$PFX' --pool 'tank-$PFX' --size 32M >/dev/null 2>&1 && [[ \"\$(zfs get -Hp -o value delonix.io:volume '$ZPOOL/dlx/zfv-$PFX')\" == 'zfv-$PFX' ]]"
+    check "zfs: escrevo dados no volume montado e releio-os iguais (consistência)" ok bash -c \
+      "$sp_fns; d=\$(sp volume inspect 'zfv-$PFX' 2>/dev/null | grep -oE '/[^[:space:]]+/_data' | head -1); [[ -n \"\$d\" && -d \"\$d\" ]] && printf delonix-zfs-$PFX >\"\$d/probe\" && [[ \"\$(cat \"\$d/probe\")\" == delonix-zfs-$PFX ]]"
+    check "zfs: um snapshot do dataset existe e preserva (CoW do backend)" ok bash -c \
+      "zfs snapshot '$ZPOOL/dlx/zfv-$PFX@s1' >/dev/null 2>&1 && zfs list -H -t snapshot -o name '$ZPOOL/dlx/zfv-$PFX@s1' >/dev/null 2>&1 && zfs destroy '$ZPOOL/dlx/zfv-$PFX@s1' >/dev/null 2>&1"
+    check "zfs: volume rm destrói o dataset filho e o dataset do administrador fica (limpeza)" ok bash -c \
+      "$sp_fns; sp volume rm 'zfv-$PFX' >/dev/null 2>&1 && ! zfs list -H -o name '$ZPOOL/dlx/zfv-$PFX' >/dev/null 2>&1 && zfs list -H -o name '$ZPOOL/dlx' >/dev/null 2>&1"
+    zfs_teardown
+  fi
+fi
+
 section "volume create: --driver/--opt (Sprint 6 — fusão do --type/--server/--share)"
 ########################################
 # `storage`/`sharevolume` tinham ZERO checks executados — o balde dos
