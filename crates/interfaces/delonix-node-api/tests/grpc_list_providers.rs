@@ -610,7 +610,6 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         }
     };
     for (method, path) in [
-        ("GET", "/v1/namespaces/default/containers"),
         ("POST", "/v1/namespaces/default/containers/web:start"),
         ("POST", "/v1/namespaces/default/networks/lab:connect"),
         ("POST", "/v1/images:pull"),
@@ -624,6 +623,12 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         assert_eq!(v["grpc_status"], 12, "{v}");
         assert_eq!(v["instance"], path, "{v}");
     }
+    // `ListContainers` is served now: the container read-path answers 200 with
+    // a (possibly empty) list, read from the process's state root — unlike the
+    // routes above, which are still in the contract and not plumbed yet.
+    let (status, _, v) = call("GET", "/v1/namespaces/default/containers", "").await;
+    assert_eq!(status, 200, "ListContainers is served: {v}");
+    assert!(v["containers"].is_array(), "{v}");
     // The network mutations are served. This router answers from the
     // process's state root, so only what they refuse before touching anything
     // is driven here: a network lives in `default`.

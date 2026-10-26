@@ -5,6 +5,7 @@ use std::pin::Pin;
 use axum::response::IntoResponse;
 use tonic::{Request, Response, Status};
 
+use crate::proto::v1::container_service_server::{ContainerService, ContainerServiceServer};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
@@ -37,6 +38,12 @@ use crate::proto::v1::{
 use crate::proto::v1::{
     CreateVolumeRequest, DeleteVolumeRequest, GetVolumeRequest, ListVolumesRequest,
     ListVolumesResponse, Volume,
+};
+use crate::proto::v1::{
+    ContainerStats, CreateContainerRequest, DeleteContainerRequest, ExecRequest, ExecResponse,
+    GetContainerRequest, KillContainerRequest, ListContainersRequest, ListContainersResponse,
+    LogChunk, LogsRequest, StartContainerRequest, StatsRequest, StopContainerRequest,
+    UpdateContainerRequest, WaitContainerRequest, WaitContainerResponse,
 };
 use crate::{node, providers};
 
@@ -501,6 +508,113 @@ impl OperationService for NodeApi {
     }
 }
 
+#[tonic::async_trait]
+impl ContainerService for NodeApi {
+    async fn get_container(
+        &self,
+        req: Request<GetContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        let req = req.into_inner();
+        blocking("container", move || {
+            crate::containers::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_containers(
+        &self,
+        req: Request<ListContainersRequest>,
+    ) -> Result<Response<ListContainersResponse>, Status> {
+        let req = req.into_inner();
+        blocking("containers", move || {
+            crate::containers::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    // ---- lifecycle write-path + stats + logs/exec: next passes of this slice.
+    // The methods exist in the contract; until they are plumbed to the engine
+    // they answer `unserved` (501 / UNIMPLEMENTED), the same as a VM `Console`.
+
+    async fn create_container(
+        &self,
+        _req: Request<CreateContainerRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ContainerService", "CreateContainer"))
+    }
+
+    async fn update_container(
+        &self,
+        _req: Request<UpdateContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        Err(unserved("ContainerService", "UpdateContainer"))
+    }
+
+    async fn delete_container(
+        &self,
+        _req: Request<DeleteContainerRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ContainerService", "DeleteContainer"))
+    }
+
+    async fn start_container(
+        &self,
+        _req: Request<StartContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        Err(unserved("ContainerService", "StartContainer"))
+    }
+
+    async fn stop_container(
+        &self,
+        _req: Request<StopContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        Err(unserved("ContainerService", "StopContainer"))
+    }
+
+    async fn kill_container(
+        &self,
+        _req: Request<KillContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        Err(unserved("ContainerService", "KillContainer"))
+    }
+
+    async fn wait_container(
+        &self,
+        _req: Request<WaitContainerRequest>,
+    ) -> Result<Response<WaitContainerResponse>, Status> {
+        Err(unserved("ContainerService", "WaitContainer"))
+    }
+
+    async fn stats(
+        &self,
+        _req: Request<StatsRequest>,
+    ) -> Result<Response<ContainerStats>, Status> {
+        Err(unserved("ContainerService", "Stats"))
+    }
+
+    type ExecStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<ExecResponse, Status>> + Send + 'static>>;
+
+    async fn exec(
+        &self,
+        _req: Request<tonic::Streaming<ExecRequest>>,
+    ) -> Result<Response<Self::ExecStream>, Status> {
+        Err(unserved("ContainerService", "Exec"))
+    }
+
+    type LogsStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<LogChunk, Status>> + Send + 'static>>;
+
+    async fn logs(
+        &self,
+        _req: Request<LogsRequest>,
+    ) -> Result<Response<Self::LogsStream>, Status> {
+        Err(unserved("ContainerService", "Logs"))
+    }
+}
+
 /// The router both transports share. The contract's REST routes are not
 /// listed here: they are resolved against the table `build.rs` generates from
 /// the `google.api.http` annotations ([`crate::transcode`]), in the fallback —
@@ -532,6 +646,10 @@ pub fn router() -> axum::Router {
         .route_service(
             &format!("/{}/*rest", VolumeServiceServer::<NodeApi>::NAME),
             VolumeServiceServer::new(NodeApi),
+        )
+        .route_service(
+            &format!("/{}/*rest", ContainerServiceServer::<NodeApi>::NAME),
+            ContainerServiceServer::new(NodeApi),
         )
         .route_service(
             &format!("/{}/*rest", OperationServiceServer::<NodeApi>::NAME),
@@ -606,6 +724,9 @@ async fn rest(
                 transcode::dispatch_network_service(&NodeApi, route.rpc, input).await
             }
             "VolumeService" => transcode::dispatch_volume_service(&NodeApi, route.rpc, input).await,
+            "ContainerService" => {
+                transcode::dispatch_container_service(&NodeApi, route.rpc, input).await
+            }
             "OperationService" => {
                 transcode::dispatch_operation_service(&NodeApi, route.rpc, input).await
             }
