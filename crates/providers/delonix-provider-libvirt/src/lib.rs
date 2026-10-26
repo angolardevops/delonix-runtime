@@ -512,14 +512,28 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmSnapshotPersistent => bin(S::Supported {
                 evidence: "check:o libvirt volta a conhecer o snapshot",
             }),
-            C::VmBackupDisk => bin(S::Partial {
-                detail: "`backup create vm` takes a live external snapshot and block-commits it back; the battery backs up a container, not a VM",
+            C::VmBackupDisk => bin(S::Supported {
+                // #16: `backup create vm` runs against a RUNNING cloud-init guest —
+                // libvirt's external-snapshot + `blockcommit --active --pivot`
+                // dance — and the guest survives it (same state, same qemu pid),
+                // with the archived disk proved to carry the guest's own data by
+                // the restore round-trip below.
+                evidence: "check:backup create vm archives a RUNNING guest and it survives (live snapshot + blockcommit)",
             }),
             C::VmBackupQuiesced => bin(S::Partial {
-                detail: "`--quiesce` asks the guest agent to freeze; whether the guest has one is not probed",
+                // `--quiesce` asks the guest's qemu-guest-agent to fsfreeze before
+                // the snapshot; without an agent the backup still succeeds but is
+                // crash-consistent, not quiesced. Promoting this needs a guest with
+                // the agent installed, which the battery cannot do offline — honest
+                // partial until an agent-bearing guest proves the freeze/thaw.
+                detail: "`--quiesce` asks the guest's qemu-guest-agent to freeze the filesystems; a guest WITH the agent is not provided offline, so the freeze/thaw is unproven — the agentless backup is crash-consistent",
             }),
-            C::VmBackupRestore => bin(S::Partial {
-                detail: "`backup restore` re-imports the disk; battery covers the container kind only",
+            C::VmBackupRestore => bin(S::Supported {
+                // #16: the restore is proved by DATA recovery, not an exit code: a
+                // marker is written by the guest, backed up, CORRUPTED on the disk,
+                // restored, and read back as the ORIGINAL (guestfish). See the
+                // cycle ORIGINAL->backup->CORRUPTED->restore->ORIGINAL in e2e.sh.
+                evidence: "check:backup restore RECOVERS the VM disk data (not just an exit code)",
             }),
             C::VmMigrationCold => bin(S::Supported {
                 // The battery proves the mechanism live on one host — the
