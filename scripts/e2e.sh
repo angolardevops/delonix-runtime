@@ -5554,6 +5554,98 @@ else
 fi
 
 ########################################
+section "vm: a booted guest is backed by host hugepages (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.memory.hugepages` do provider libvirt estava `partial` («the
+# host's hugepage pool is not probed»). Declarar `<memoryBacking><hugepages/>` no
+# XML e o `vm create` devolver 0 NÃO prova que a RAM do guest saiu MESMO do pool
+# de hugepages do host — o XML podia ser aceite e a libvirt cair em páginas
+# normais, ou o pool podia nem existir. Aqui prova-se o EFEITO, ao vivo, contra um
+# guest REAL respaldado pelo pool de hugepages do host:
+#   1. PEDIDO ACEITE — `vm create --hugepages` passa pelo provider e devolve 0;
+#   2. DECLARADO NO DOMÍNIO VIVO — o `dumpxml` do domínio a correr tem
+#      `<memoryBacking><hugepages/>`;
+#   3. A PROVA — o `HugePages_Free` do host CAI, enquanto a VM corre, por
+#      exactamente (RAM do guest ÷ Hugepagesize) páginas face à medição de antes
+#      do arranque: a RAM do guest foi SERVIDA pelo pool de hugepages do host, não
+#      por páginas normais — é o efeito mensurável que faltava à capacidade;
+#   4. VM MESMO VIVA — o cloud-init do guest escreveu um marcador no disco de
+#      arranque, lido depois com guestfish (VM parada, QEMU larga o qcow2): não é
+#      um domínio só definido, é um convidado REAL a correr sobre hugepages.
+# O respaldo de hugepages é do lado do HOST (o guest não distingue a página que o
+# serve), por isso a prova é host-side — a queda EXACTA do pool — e não in-guest.
+#
+# Precisa de libvirt utilizável, guestfish, cloud-localds, uma imagem cloud
+# (E2E_CLOUDINIT_IMAGE ou $SROOT/vm-images/_base) E um pool de hugepages com
+# páginas livres que chegue para a RAM do guest. Sem isso, SKIP honesto — a
+# bateria em CI não transporta imagem de arranque nem reserva hugepages.
+HGIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$HGIMG" ]]; then
+  HGIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+# Tamanho da hugepage do host (kB) e páginas livres, de /proc/meminfo.
+HGSIZE_KB="$(awk '/^Hugepagesize:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+HGFREE_PAGES="$(awk '/^HugePages_Free:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+# A RAM do guest desta secção (MiB) e as páginas que ela precisa do pool.
+HG_MEM_MIB=1024
+HG_NEED=0
+if [[ "${HGSIZE_KB:-0}" -gt 0 ]]; then
+  HG_NEED=$(( HG_MEM_MIB * 1024 / HGSIZE_KB ))
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$HGIMG" && -r "$HGIMG" ]] \
+     && [[ "${HGSIZE_KB:-0}" -gt 0 && "$HG_NEED" -gt 0 && "${HGFREE_PAGES:-0}" -ge "$HG_NEED" ]]; then
+  HGVM="hugepg-$PFX"; HGBASE="$OUT/$HGVM-base.qcow2"; HGUD="$OUT/$HGVM-user-data.yaml"
+  cp "$HGIMG" "$HGBASE" && qemu-img resize "$HGBASE" 5G >/dev/null 2>&1
+  cat > "$HGUD" <<'YAML'
+#cloud-config
+hostname: dlx-hugepages-proof
+package_update: false
+package_upgrade: false
+runcmd:
+  - [ sh, -c, "echo HUGEPAGES-GUEST-BOOTED-v1 > /var/lib/delonix-hugepages-OK 2>&1 || true" ]
+YAML
+  # Medição de referência ANTES do arranque: o pool livre neste instante.
+  HG_FREE_BEFORE="$(awk '/^HugePages_Free:/{print $2}' /proc/meminfo)"
+  # NÍVEL 1: o provider aceita `--hugepages` e cria a VM.
+  if check_then "nivel 1: o provider ACEITA --hugepages (vm create ok)" ok \
+       "$BIN" vm create "$HGVM" --disk "$HGBASE" --backend libvirt --memory 1G --vcpus 2 \
+         --hugepages --user-data "$HGUD"; then
+    HGOVL="$SROOT/vms/$HGVM.qcow2"
+    # Dar ao QEMU tempo de mapear a RAM do guest a partir do pool.
+    sleep 10
+    # Medição COM a VM a correr: o pool livre caiu.
+    HG_FREE_DURING="$(awk '/^HugePages_Free:/{print $2}' /proc/meminfo)"
+    HG_DROP=$(( HG_FREE_BEFORE - HG_FREE_DURING ))
+    # NÍVEL 2: o domínio vivo declara o respaldo por hugepages.
+    check "nivel 2: o dominio vivo tem <memoryBacking><hugepages/>" ok bash -c \
+      "virsh -c qemu:///system dumpxml '$HGVM' | tr -d '\n' | grep -q '<memoryBacking>[[:space:]]*<hugepages/>'"
+    # NÍVEL 3 (A PROVA): o pool de hugepages do host caiu pelo nº de páginas da
+    # RAM do guest — a RAM saiu MESMO do pool, não de páginas normais.
+    check "nivel 3: HugePages_Free do host caiu >= $HG_NEED paginas (RAM do guest veio do pool)" ok bash -c \
+      "[ '$HG_DROP' -ge '$HG_NEED' ]"
+    # Dar tempo ao cloud-init do guest e parar a VM para o guestfish ler o disco.
+    sleep 90
+    "$BIN" vm stop "$HGVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$HGVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$HGVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 4: a VM respaldada por hugepages estava MESMO viva (cloud-init correu).
+    check "nivel 4: a VM sobre hugepages estava viva (cloud-init escreveu o marcador)" ok bash -c \
+      "guestfish --ro -a '$HGOVL' -i cat /var/lib/delonix-hugepages-OK | grep -qx HUGEPAGES-GUEST-BOOTED-v1"
+    "$BIN" delete vm "$HGVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$HGVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$HGBASE" "$HGUD"
+else
+  skip "vm: a VM esta mesmo respaldada por hugepages do host" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, sem imagem cloud (E2E_CLOUDINIT_IMAGE), ou sem pool de hugepages livre que chegue"
+fi
+
+########################################
 section "vm: um disco a QUENTE REMOVIDO com seguranca DENTRO do guest (libvirt, cloud-init, guestfish)"
 ########################################
 # §7 do mandato: `vm.hotplug.disk.remove` do provider libvirt estava

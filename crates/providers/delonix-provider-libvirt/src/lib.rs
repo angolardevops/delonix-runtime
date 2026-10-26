@@ -419,8 +419,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmCpuPinning => bin(S::Partial {
                 detail: "`<cputune>` quota + `<vcpupin>`; unit-tested XML, dropped on qemu:///session",
             }),
-            C::VmHugepages => bin(S::Partial {
-                detail: "`<memoryBacking><hugepages/>`; the host's hugepage pool is not probed",
+            C::VmHugepages => bin(S::Supported {
+                evidence: "e2e:vm: a booted guest is backed by host hugepages (libvirt, cloud-init, guestfish)",
             }),
             C::VmCloudInit => sys(S::Supported {
                 evidence: "e2e:vm: o cloud-init do guest CONSOME o seed NoCloud (libvirt, guestfish)",
