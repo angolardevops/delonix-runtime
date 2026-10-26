@@ -23,7 +23,7 @@ use delonix_compute::vm_backend::{
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
-use delonix_compute::Vm;
+use delonix_compute::{ExtraDisk, ExtraNic, Vm};
 use delonix_node::{proc_starttime, safe_to_signal};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -338,9 +338,13 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 detail: "`vm update --memory` via `vm.resize` over a virtio-mem region declared at create (ADR-0068 D3); `memory_actual_size` confirms the guest only with a driver and the onlining policy (D8), no battery check yet",
             }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
-            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskAdd => bin(S::Partial {
+                detail: "`vm update --disk-add` via `vm.add-disk` on the virtio-blk bus, add only; always reports `partial` — no channel to confirm the guest onlined the disk (ADR-0068 D4/Q5), no battery check yet",
+            }),
             C::VmHotplugDiskRemove => S::NotImplemented,
-            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicAdd => bin(S::Partial {
+                detail: "`vm update --nic-add network:<name>` via `vm.add-net` over a fresh SDN tap, add only; always reports `partial` — no channel to confirm the guest onlined the NIC (ADR-0068 D4/Q5), no battery check yet",
+            }),
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => S::UnsupportedByProvider {
                 reason: "the CH command line carries one root disk and the seed; `extraDisks` are refused for this backend",
@@ -939,6 +943,17 @@ impl VmBackend for CloudHypervisorBackend {
         let net = delonix_compute::vm_registry::network()?;
         let ip = vm.ip.clone().or_else(|| net.lease_ip(&vm.network, &vm.mac));
         net.detach_tap(&vm.name, ip.as_deref());
+        // Each hot-added NIC laid its own tap under a per-NIC owner
+        // (`hotplug_add_nic`); tear exactly those down too, recomputed from the
+        // recorded MAC — a tap nobody detaches would outlive the VM.
+        for nic in &vm.boot.extra_nics {
+            if let Some(mac) = &nic.mac {
+                let network = nic.source.as_deref().unwrap_or(&vm.network);
+                let owner = ch_extra_nic_owner(&vm.name, mac);
+                let lease = net.lease_ip(network, mac);
+                net.detach_tap(&owner, lease.as_deref());
+            }
+        }
         Ok(())
     }
 
@@ -1133,6 +1148,170 @@ impl VmBackend for CloudHypervisorBackend {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+    }
+
+    // ---- hotplug disk / NIC add (ADR-0068, Phases 4/5) --------------------
+    //
+    // Cloud Hypervisor's own `PUT /api/v1/vm.add-disk` / `vm.add-net`, over the
+    // same per-VM api-socket the resize/pause verbs already use. Removal is a
+    // separate capability (D10) and is not here.
+    //
+    // Like CPU add (D4/Q5) this backend has no in-band channel to ask the GUEST
+    // whether it onlined the device — Cloud Hypervisor exposes no guest agent —
+    // so the settled outcome is always `Partial`: the VMM accepted the device
+    // (and the record keeps it, D6), but "the guest sees it" is proved out of
+    // band, in the battery (`scripts/vm-native-ch-hotplug.sh`), never in band.
+
+    /// `vm.add-disk {"path":…,"readonly":…}`. Cloud Hypervisor attaches it on
+    /// the virtio-blk bus (no SATA/SCSI/IDE), so a disk asking for another bus
+    /// is refused rather than silently moved. The target letter is the guest's
+    /// to assign (virtio-blk has no stable name the VMM can pin), so it is left
+    /// as given — unlike libvirt, which pins a `vdX`.
+    fn hotplug_add_disk(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        disk: &ExtraDisk,
+        _wait: Duration,
+        attached: &mut dyn FnMut(&ExtraDisk) -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<(ExtraDisk, HotplugOutcome)> {
+        if disk.device == "cdrom" {
+            return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}': Cloud Hypervisor does not hot-plug a cdrom",
+                vm.name
+            ))));
+        }
+        if !disk.bus.is_empty() && disk.bus != "virtio" {
+            return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}': Cloud Hypervisor attaches disks on the virtio bus only, not '{}'",
+                vm.name, disk.bus
+            ))));
+        }
+        if !Path::new(&disk.source).exists() {
+            return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}': the disk to add '{}' is not on this host",
+                vm.name, disk.source
+            ))));
+        }
+        let body = format!(
+            "{{\"path\":{},\"readonly\":{}}}",
+            json_string(&disk.source),
+            disk.read_only
+        );
+        let (status, _) = ch_api_call_with_body(
+            &vm.api_socket,
+            "PUT",
+            "/api/v1/vm.add-disk",
+            Some(&body),
+            Duration::from_secs(10),
+        )?;
+        if !http_status_is_2xx(&status) {
+            return Err(delonix_model::Error::from(Error::CloudHypervisorApi(format!(
+                "cloud-hypervisor vm.add-disk for VM '{}': {}",
+                vm.name,
+                if status.is_empty() {
+                    "no response"
+                } else {
+                    &status
+                }
+            ))));
+        }
+        // Recorded now (D6), before we settle: the VMM has the disk, so a
+        // command killed from here on must not leave the domain with a device
+        // the record does not name.
+        let pinned = disk.clone();
+        attached(&pinned)?;
+        Ok((
+            pinned,
+            HotplugOutcome::Partial {
+                reason: "cloud-hypervisor accepted the disk but has no channel to confirm the \
+                         guest onlined it (ADR-0068 D4/Q5)"
+                    .into(),
+            },
+        ))
+    }
+
+    /// `vm.add-net {"tap":…,"mac":…}` over a fresh tap this backend lays on the
+    /// VM's SDN — one tap per NIC, keyed by a per-NIC owner derived from the
+    /// pinned MAC so `stop` can tear exactly it down. `bridge`/`user` NICs have
+    /// no home on this backend (that is the libvirt shape) and are refused.
+    fn hotplug_add_nic(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        nic: &ExtraNic,
+        _wait: Duration,
+        attached: &mut dyn FnMut(&ExtraNic) -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
+        let network = match nic.kind.as_str() {
+            "" | "network" => nic.source.clone().unwrap_or_else(|| vm.network.clone()),
+            other => {
+                return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                    "VM '{}': Cloud Hypervisor attaches extra NICs on a declared network only, \
+                     not '{other}' — use `--nic-add network:<name>`",
+                    vm.name
+                ))))
+            }
+        };
+        let mac = match &nic.mac {
+            Some(m) => m.clone(),
+            None => ch_extra_nic_mac(vm),
+        };
+        let net = delonix_compute::vm_registry::network()?;
+        if names_a_declared_network(&network) {
+            net.ensure_network(&network)?;
+        }
+        // The tap's own owner (`<vm>~<mac>`): its own DHCP lease and ref marker,
+        // distinct from the primary NIC's `vm-<name>`, so two NICs of one VM are
+        // not one owner's two attaches. `stop` recomputes it from the recorded
+        // MAC to detach.
+        let owner = ch_extra_nic_owner(&vm.name, &mac);
+        let tap = net.attach_tap(&owner, &network, &mac, &vm.namespace)?;
+        let lease = net.lease_ip(&network, &mac);
+        let body = format!(
+            "{{\"tap\":{},\"mac\":{}}}",
+            json_string(&tap),
+            json_string(&mac)
+        );
+        let (status, _) = match ch_api_call_with_body(
+            &vm.api_socket,
+            "PUT",
+            "/api/v1/vm.add-net",
+            Some(&body),
+            Duration::from_secs(10),
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                net.detach_tap(&owner, lease.as_deref());
+                return Err(e.into());
+            }
+        };
+        if !http_status_is_2xx(&status) {
+            net.detach_tap(&owner, lease.as_deref());
+            return Err(delonix_model::Error::from(Error::CloudHypervisorApi(format!(
+                "cloud-hypervisor vm.add-net for VM '{}': {}",
+                vm.name,
+                if status.is_empty() {
+                    "no response"
+                } else {
+                    &status
+                }
+            ))));
+        }
+        let mut pinned = nic.clone();
+        pinned.mac = Some(mac);
+        pinned.kind = "network".into();
+        pinned.source = Some(network);
+        // Recorded now (D6), before we settle.
+        attached(&pinned)?;
+        Ok((
+            pinned,
+            HotplugOutcome::Partial {
+                reason: "cloud-hypervisor accepted the NIC but has no channel to confirm the \
+                         guest onlined it (ADR-0068 D4/Q5)"
+                    .into(),
+            },
+        ))
     }
 
     // ---- snapshots -------------------------------------------------------
@@ -1469,6 +1648,49 @@ fn http_status_is_2xx(status_line: &str) -> bool {
         .nth(1)
         .and_then(|code| code.parse::<u16>().ok())
         .is_some_and(|code| (200..300).contains(&code))
+}
+
+/// A JSON string literal (quoted, with `"` and `\` escaped) for the one-field
+/// bodies `vm.add-disk`/`vm.add-net` send — a host path or a MAC, never a
+/// control character, so this is all the escaping those bodies can need.
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A MAC for an extra NIC, derived from the VM name and distinct from the
+/// primary MAC and every extra NIC already on the record — the same scheme the
+/// libvirt backend uses, so a VM reads the same on both.
+fn ch_extra_nic_mac(vm: &Vm) -> String {
+    let taken = |m: &str| {
+        m.eq_ignore_ascii_case(&vm.mac)
+            || vm
+                .boot
+                .extra_nics
+                .iter()
+                .any(|n| n.mac.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(m)))
+    };
+    (1..)
+        .map(|i| mac_for(&format!("{}#nic{i}", vm.name)))
+        .find(|m| !taken(m))
+        .unwrap_or_default()
+}
+
+/// The SDN owner key of an extra NIC's tap: `<vm>~<mac-without-colons>`. Keyed
+/// on the PINNED MAC (recorded on the NIC) so `stop` recomputes exactly the
+/// owner `hotplug_add_nic` attached, without a tap name of its own on the
+/// record.
+fn ch_extra_nic_owner(vm_name: &str, mac: &str) -> String {
+    format!("{vm_name}~{}", mac.replace(':', ""))
 }
 
 /// Cloud Hypervisor's `--serial` destination: a capture FILE or an interactive
