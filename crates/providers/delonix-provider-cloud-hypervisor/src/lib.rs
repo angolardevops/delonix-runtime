@@ -339,11 +339,11 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
             C::VmHotplugDiskAdd => bin(S::Supported {
-                evidence: "live:scripts/vm-native-ch-hotplug.sh: guest sees the new /dev/vd* and mkfs+mount+R/W it",
+                evidence: "live:scripts/vm-native-ch-hotplug.sh",
             }),
             C::VmHotplugDiskRemove => S::NotImplemented,
             C::VmHotplugNicAdd => bin(S::Supported {
-                evidence: "live:scripts/vm-native-ch-hotplug.sh: guest sees the new NIC and DHCPs+passes traffic on it",
+                evidence: "live:scripts/vm-native-ch-hotplug.sh",
             }),
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => S::UnsupportedByProvider {
