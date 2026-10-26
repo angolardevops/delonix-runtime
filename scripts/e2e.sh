@@ -6092,6 +6092,167 @@ else
 fi
 
 ########################################
+section "vm: the serial console connects and VNC answers RFB, live (libvirt, cloud-init)"
+########################################
+# §7 of the mandate: `vm.console.serial` and `vm.console.vnc` on the libvirt
+# provider were `partial` («runs `virsh console --force`; interactive, no
+# battery» / «reads `vncdisplay`; no battery»). A command that EXISTS is not a
+# console that WORKS: the serial socket could fail to carry a single byte of the
+# guest, and `vm vnc` could print a display nobody is listening on. Both holes
+# are closed here, live, against a REAL cloud-init guest booted through the
+# engine's own declarative path (created with `--vnc`):
+#   VNC   — `vm vnc` names a VNC endpoint, and a raw TCP connection to that port
+#           reads back QEMU's `RFB 003.00x` protocol handshake. The server is
+#           listening and speaks the protocol — a client CAN connect, not just a
+#           number got printed. (`vm vnc` prints the virsh display form
+#           `host:N`; N < 1000 is a VNC display index, so the TCP port is
+#           5900+N — the same resolution any VNC client does.)
+#   SERIAL— `vm console` (which runs `virsh console --force` over the serial
+#           pty) is driven non-interactively under a pseudo-terminal (`script`)
+#           with a timeout, and the capture carries the GUEST'S OWN getty login
+#           prompt — the hostname cloud-init set, followed by `login:`. Bytes
+#           from the guest crossed the serial socket into `vm console`: the
+#           console FUNCTIONS, it is not merely wired.
+# Needs a cloud image (E2E_CLOUDINIT_IMAGE or one under $SROOT/vm-images/_base),
+# `cloud-localds` and `script` (util-linux). Without them, an honest SKIP — the
+# CI battery carries no boot image.
+CVIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$CVIMG" ]]; then
+  CVIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v script >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$CVIMG" && -r "$CVIMG" ]]; then
+  CVVM="convnc-$PFX"; CVBASE="$OUT/$CVVM-base.qcow2"; CVUD="$OUT/$CVVM-user-data.yaml"
+  CVLOG="$OUT/$CVVM-console.log"
+  cp "$CVIMG" "$CVBASE" && qemu-img resize "$CVBASE" 5G >/dev/null 2>&1
+  cat > "$CVUD" <<'YAML'
+#cloud-config
+hostname: dlx-console-proof
+package_update: false
+package_upgrade: false
+YAML
+  if check_then "vm create libvirt (console/vnc guest)" ok \
+       "$BIN" vm create "$CVVM" --disk "$CVBASE" --backend libvirt --memory 1G --vcpus 2 --vnc --user-data "$CVUD"; then
+    # VNC first: QEMU's VNC server listens as soon as the domain starts, so this
+    # needs no boot. Resolve the port from whatever `vm vnc` prints (a `host:N`
+    # display index or a `host:port`), connect, and read the RFB handshake.
+    check "vm vnc names a VNC endpoint that answers the RFB protocol handshake" ok bash -c "
+      for _ in \$(seq 1 15); do
+        addr=\$('$BIN' vm vnc '$CVVM' 2>/dev/null | head -1)
+        [ -n \"\$addr\" ] || { sleep 1; continue; }
+        host=\${addr%:*}; n=\${addr##*:}
+        if [ \"\$n\" -lt 1000 ] 2>/dev/null; then port=\$((5900+n)); else port=\$n; fi
+        hs=\$(timeout 5 bash -c \"exec 3<>/dev/tcp/\$host/\$port; head -c 12 <&3\" 2>/dev/null)
+        case \"\$hs\" in RFB*) exit 0;; esac
+        sleep 1
+      done
+      exit 1"
+    # Give the guest time to reach the serial getty, then drive `vm console`
+    # non-interactively under a pty and read back the guest's OWN login prompt.
+    sleep 95
+    timeout 25 script -q -c "'$BIN' vm console '$CVVM'" "$CVLOG" </dev/null >/dev/null 2>&1 || true
+    check "vm console returns the guest's own login prompt over the serial socket" ok bash -c \
+      "grep -aq 'dlx-console-proof login:' '$CVLOG'"
+    "$BIN" delete vm "$CVVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$CVVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$CVBASE" "$CVUD" "$CVLOG"
+else
+  skip "vm: serial console connects and VNC answers RFB" \
+    "no usable libvirt, no cloud image (E2E_CLOUDINIT_IMAGE), or no script/cloud-localds"
+fi
+
+########################################
+section "vm: backup create archives a live guest and restore RECOVERS disk data (libvirt, guestfish)"
+########################################
+# §7 of the mandate: `vm.backup.disk` and `vm.backup.restore` on the libvirt
+# provider were `partial` («the battery backs up a container, not a VM»). A
+# `backup create` that returns 0 proves nothing — the archive could hold a torn
+# or empty disk, and `restore` could transition state without putting a single
+# byte back. Both holes are closed here, live, against a REAL cloud-init guest,
+# the same DATA-recovery discipline the snapshot section uses (criterion #16):
+#   1. the guest's cloud-init writes a known marker (ORIGINAL) to its own disk;
+#   2. `backup create vm` runs while the guest is RUNNING — exercising libvirt's
+#      external-snapshot + `blockcommit --active --pivot` dance — and the guest
+#      SURVIVES it (same state, same qemu pid): the live backup did not stop it
+#      (= vm.backup.disk);
+#   3. the guest is stopped (the qemu holds the qcow2 while it runs) and the disk
+#      is read with guestfish — the archive carried the guest's OWN data;
+#   4. the marker is CORRUPTED on the disk;
+#   5. `backup restore` re-imports the archived disk;
+#   6. the disk is re-read — the ORIGINAL marker is BACK. Data recovered, not an
+#      exit code (= vm.backup.restore).
+# Quiesce is deliberately NOT promoted here: `--quiesce` needs a qemu-guest-agent
+# running inside the guest, which this battery cannot install offline — it stays
+# an honest `partial`.
+# Needs a cloud image, guestfish and cloud-localds; else an honest SKIP.
+BVIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$BVIMG" ]]; then
+  BVIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$BVIMG" && -r "$BVIMG" ]]; then
+  BVVM="bkvm-$PFX"; BVBASE="$OUT/$BVVM-base.qcow2"; BVUD="$OUT/$BVVM-user-data.yaml"
+  BVDIR="$OUT/vmbackups-$PFX"; rm -rf "$BVDIR"; mkdir -p "$BVDIR"
+  cp "$BVIMG" "$BVBASE" && qemu-img resize "$BVBASE" 5G >/dev/null 2>&1
+  cat > "$BVUD" <<'YAML'
+#cloud-config
+hostname: dlx-vmbackup-proof
+package_update: false
+package_upgrade: false
+write_files:
+  - path: /var/lib/delonix-vmbackup-OK
+    permissions: '0644'
+    content: |
+      VMBACKUP-ORIGINAL-v1
+YAML
+  if check_then "vm create libvirt (vm-backup guest)" ok \
+       "$BIN" vm create "$BVVM" --disk "$BVBASE" --backend libvirt --memory 1G --vcpus 2 --user-data "$BVUD"; then
+    BVOVL="$SROOT/vms/$BVVM.qcow2"
+    # Let cloud-init write the marker (write_files runs early in boot).
+    sleep 100
+    # vm.backup.disk: back up the RUNNING guest and watch it survive. The qemu
+    # pid before == after proves the external-snapshot + blockcommit left the
+    # live guest in place (it was not stopped under the hood).
+    BVPID="$(pgrep -f "guest=$BVVM" | head -1)"
+    check "backup create vm archives a RUNNING guest and it survives (live snapshot + blockcommit)" ok bash -c "
+      '$BIN' backup create vm '$BVVM' --to '$BVDIR' >/dev/null 2>&1 || exit 1
+      ls '$BVDIR'/vm-$BVVM-*.tar.gz >/dev/null 2>&1 || exit 1
+      [ \"\$(virsh -c qemu:///system domstate '$BVVM' 2>/dev/null)\" = running ] || exit 1
+      [ -n '$BVPID' ] && [ \"\$(pgrep -f 'guest=$BVVM' | head -1)\" = '$BVPID' ]"
+    # Stop the guest so the qcow2 is free for guestfish.
+    "$BIN" vm stop "$BVVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$BVVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$BVVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # The archive carried the guest's OWN data (ORIGINAL is on the disk it copied).
+    check "the overlay the live backup copied holds the guest's ORIGINAL data" ok bash -c \
+      "guestfish --ro -a '$BVOVL' -i cat /var/lib/delonix-vmbackup-OK | grep -qx VMBACKUP-ORIGINAL-v1"
+    # Corrupt it on the disk, with the guest stopped (the qcow2 is free).
+    check "corrupt the marker on the VM disk" ok bash -c \
+      "guestfish -a '$BVOVL' -i write /var/lib/delonix-vmbackup-OK VMBACKUP-CORRUPTED-v2"
+    check "the VM disk now reads CORRUPTED" ok bash -c \
+      "guestfish --ro -a '$BVOVL' -i cat /var/lib/delonix-vmbackup-OK | grep -qx VMBACKUP-CORRUPTED-v2"
+    # vm.backup.restore: re-import the archived disk.
+    check "backup restore re-imports the VM disk" ok bash -c \
+      "'$BIN' backup restore \$(ls '$BVDIR'/vm-$BVVM-*.tar.gz | head -1)"
+    # THE PROOF: the ORIGINAL marker is back — data recovered, not an exit code.
+    check "backup restore RECOVERS the VM disk data (not just an exit code)" ok bash -c \
+      "guestfish --ro -a '$BVOVL' -i cat /var/lib/delonix-vmbackup-OK | grep -qx VMBACKUP-ORIGINAL-v1"
+    "$BIN" delete vm "$BVVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$BVVM" -f >/dev/null 2>&1
+  fi
+  rm -rf "$BVDIR"; rm -f "$BVBASE" "$BVUD"
+else
+  skip "vm: backup archives a live guest and restore recovers disk data" \
+    "no usable libvirt, no guestfish/cloud-localds, or no cloud image (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
