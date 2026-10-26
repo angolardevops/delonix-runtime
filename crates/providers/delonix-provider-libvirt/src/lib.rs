@@ -408,10 +408,10 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 evidence: "check:o overlay cresceu para exactamente 1 GiB",
             }),
             C::VmPciPassthrough => bin(S::Partial {
-                detail: "`<hostdev>` per validated PCI address; no IOMMU host in the battery",
+                detail: "`<hostdev>` per validated PCI address; proving the EFFECT live needs a non-critical PCI device in an isolated IOMMU group bound to `vfio-pci`, and that bind needs root the battery does not run as — the host's own GPU/NIC/storage must never be detached to prove it",
             }),
             C::VmTpm => bin(S::Partial {
-                detail: "`<tpm model='tpm-crb'>` emulator; swtpm presence is not probed",
+                detail: "`<tpm model='tpm-crb'>` emulator reaches libvirt, which builds the swtpm chardev wiring; proving in-guest TPM presence needs the host's libvirt-swtpm-qemu socket plumbing to admit the qemu process (group membership on `/run/libvirt/qemu/swtpm`), a host-level fix needing root the battery does not run as",
             }),
             C::VmCpuModel => bin(S::Supported {
                 evidence: "e2e:vm: the requested CPU topology is seen inside the guest (libvirt, cloud-init, guestfish)",
@@ -419,8 +419,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmCpuPinning => bin(S::Partial {
                 detail: "`<cputune>` quota + `<vcpupin>`; unit-tested XML, dropped on qemu:///session",
             }),
-            C::VmHugepages => bin(S::Partial {
-                detail: "`<memoryBacking><hugepages/>`; the host's hugepage pool is not probed",
+            C::VmHugepages => bin(S::Supported {
+                evidence: "e2e:vm: a booted guest is backed by host hugepages (libvirt, cloud-init, guestfish)",
             }),
             C::VmCloudInit => sys(S::Supported {
                 evidence: "e2e:vm: o cloud-init do guest CONSOME o seed NoCloud (libvirt, guestfish)",
