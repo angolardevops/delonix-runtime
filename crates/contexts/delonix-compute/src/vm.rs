@@ -992,10 +992,12 @@ where
     /// one device change. On a RUNNING VM an ADD is hot-plugged — hypervisor
     /// first, read back, record last (D6), with the target/MAC the hypervisor
     /// gave pinned in the record so a restart keeps it where the guest saw it;
-    /// a REMOVAL is refused by name (D10: hot removal needs the guest to
-    /// release the device first, and a lost answer would leave a disk the
-    /// guest still writes to detached). On a STOPPED VM both change the
-    /// record, and the backend is told ([`VmBackend::change_devices_cold`]).
+    /// a REMOVAL is hot-detached on a backend that proves it (D10): the
+    /// removal is cooperative — the backend waits for the domain to actually
+    /// drop the device before the record loses it, and a disk the guest still
+    /// holds never leaves, so a lost answer cannot detach one the guest still
+    /// writes to. On a STOPPED VM both change the record, and the backend is
+    /// told ([`VmBackend::change_devices_cold`]).
     /// A paused VM is refused: unpause or stop it first.
     pub fn change_device(
         &self,
@@ -1051,11 +1053,63 @@ where
                         });
                         o
                     }
-                    DeviceChange::RemoveDisk(_) | DeviceChange::RemoveNic(_) => {
-                        return Err(Error::ResizeNeedsStopped(format!(
-                            "VM '{name}' is running: a disk or NIC is not removed live \
-                             (ADR-0068 D10) — `delonix vm stop {name}`, remove it, and start it"
-                        )))
+                    DeviceChange::RemoveDisk(key) => {
+                        let disk = vm
+                            .boot
+                            .extra_disks
+                            .iter()
+                            .find(|d| d.source == key || d.target.as_deref() == Some(key.as_str()))
+                            .cloned()
+                            .ok_or_else(|| {
+                                Error::InvalidResize(format!(
+                                    "VM '{name}' has no extra disk '{key}' (name its target, \
+                                     e.g. vdc, or its source)"
+                                ))
+                            })?;
+                        let base = vm.clone();
+                        let mut recorded: Option<Vm> = None;
+                        let o =
+                            backend.hotplug_remove_disk(&vmdir, &base, &disk, wait, &mut || {
+                                let mut next = base.clone();
+                                next.boot
+                                    .extra_disks
+                                    .retain(|d| d.source != disk.source || d.target != disk.target);
+                                self.repo.set(name, &next).map_err(Error::from)?;
+                                recorded = Some(next);
+                                Ok(())
+                            })?;
+                        vm = recorded.unwrap_or(base);
+                        o
+                    }
+                    DeviceChange::RemoveNic(mac) => {
+                        let nic = vm
+                            .boot
+                            .extra_nics
+                            .iter()
+                            .find(|n| {
+                                n.mac
+                                    .as_deref()
+                                    .is_some_and(|m| m.eq_ignore_ascii_case(&mac))
+                            })
+                            .cloned()
+                            .ok_or_else(|| {
+                                Error::InvalidResize(format!(
+                                    "VM '{name}' has no extra NIC with MAC {mac} (the primary \
+                                     NIC is not removable)"
+                                ))
+                            })?;
+                        let base = vm.clone();
+                        let mut recorded: Option<Vm> = None;
+                        let o =
+                            backend.hotplug_remove_nic(&vmdir, &base, &nic, wait, &mut || {
+                                let mut next = base.clone();
+                                next.boot.extra_nics.retain(|n| n.mac != nic.mac);
+                                self.repo.set(name, &next).map_err(Error::from)?;
+                                recorded = Some(next);
+                                Ok(())
+                            })?;
+                        vm = recorded.unwrap_or(base);
+                        o
                     }
                 };
                 self.repo.set(name, &vm).map_err(Error::from)?;
@@ -1317,12 +1371,7 @@ where
     }
 
     /// [`clone_vm`] with the per-stage progress callback `create_with` uses.
-    pub fn clone_with(
-        &self,
-        source: &str,
-        new_name: &str,
-        on: &dyn Fn(CreateStage),
-    ) -> Result<Vm> {
+    pub fn clone_with(&self, source: &str, new_name: &str, on: &dyn Fn(CreateStage)) -> Result<Vm> {
         if !valid_vm_name(new_name) {
             return Err(Error::InvalidName(format!(
                 "invalid VM name '{new_name}' — use letters, digits, '.', '_' or '-' (no '/', '..', or leading '-')"
@@ -2294,6 +2343,40 @@ mod tests {
                 },
             ))
         }
+        fn hotplug_remove_disk(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            disk: &crate::ExtraDisk,
+            _wait: Duration,
+            removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+        ) -> delonix_model::Result<HotplugOutcome> {
+            self.0.calls.borrow_mut().push(format!(
+                "hotplug_remove_disk {} {}",
+                vm.name,
+                disk.target.as_deref().unwrap_or(&disk.source)
+            ));
+            removed()?;
+            Ok(HotplugOutcome::Complete)
+        }
+        fn hotplug_remove_nic(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            nic: &crate::ExtraNic,
+            _wait: Duration,
+            removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+        ) -> delonix_model::Result<HotplugOutcome> {
+            self.0.calls.borrow_mut().push(format!(
+                "hotplug_remove_nic {} {}",
+                vm.name,
+                nic.mac.as_deref().unwrap_or("")
+            ));
+            removed()?;
+            Ok(HotplugOutcome::Partial {
+                reason: "no agent".into(),
+            })
+        }
         fn change_devices_cold(
             &self,
             _vmdir: &Path,
@@ -2408,10 +2491,11 @@ mod tests {
         }
 
         fn clone_disk(&self, src: &Path, dest: &Path) -> delonix_model::Result<()> {
-            self.0
-                .calls
-                .borrow_mut()
-                .push(format!("clone_disk {} -> {}", src.display(), dest.display()));
+            self.0.calls.borrow_mut().push(format!(
+                "clone_disk {} -> {}",
+                src.display(),
+                dest.display()
+            ));
             if self.0.writes_files {
                 std::fs::write(dest, b"qcow2").unwrap();
             }
@@ -2855,7 +2939,9 @@ mod tests {
         assert_eq!(err.number(), 1501, "expected UnsupportedByBackend");
 
         // But it is still a valid clone source.
-        let clone = e.clone_vm("base", "from-template").expect("clone a template");
+        let clone = e
+            .clone_vm("base", "from-template")
+            .expect("clone a template");
         assert!(!clone.template);
     }
 
@@ -3389,10 +3475,11 @@ mod tests {
         assert_eq!(rec.boot.extra_disks[0].target.as_deref(), Some("vdz"));
     }
 
-    /// D10: nothing is removed live; the refusal names `vm stop`, and the
-    /// record keeps the disk.
+    /// D10: a disk is removed LIVE on a backend that proves it (the record
+    /// loses it only once the backend confirms the domain dropped it), and the
+    /// same change on a STOPPED VM goes through the cold path.
     #[test]
-    fn a_device_is_not_removed_live_and_is_removed_cold() {
+    fn a_device_is_removed_live_and_cold() {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
         let e = engine(root.path(), seen.clone());
@@ -3403,6 +3490,26 @@ mod tests {
         };
         e.change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
             .unwrap();
+        // Live removal: the backend detaches, the record drops the disk, and
+        // the outcome is reported (not refused).
+        let (vm, o) = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveDisk("vdz".into()),
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert!(matches!(o, Some(HotplugOutcome::Complete)), "{o:?}");
+        assert!(vm.boot.extra_disks.is_empty(), "record dropped the disk");
+        assert!(
+            calls(&seen)
+                .iter()
+                .any(|c| c == "hotplug_remove_disk app vdz"),
+            "{:?}",
+            calls(&seen)
+        );
+        // A key the VM does not have is refused live, by name, before the backend.
+        let before = calls(&seen).len();
         let err = e
             .change_device(
                 "app",
@@ -3410,11 +3517,19 @@ mod tests {
                 Duration::ZERO,
             )
             .unwrap_err();
-        assert!(
-            err.to_string().contains("D10") && err.to_string().contains("vm stop"),
-            "{err}"
+        assert!(err.to_string().contains("vdz"), "{err}");
+        assert_eq!(
+            calls(&seen).len(),
+            before,
+            "backend not called for a missing disk"
         );
-        assert_eq!(e.load_vm("app").unwrap().boot.extra_disks.len(), 1);
+        // Cold path: a stopped VM removes through `change_devices_cold`.
+        let disk2 = crate::ExtraDisk {
+            source: "/data/e.qcow2".into(),
+            ..Default::default()
+        };
+        e.change_device("app", DeviceChange::AddDisk(disk2), Duration::ZERO)
+            .unwrap();
         e.stop("app").unwrap();
         let (vm, o) = e
             .change_device(
@@ -3432,7 +3547,7 @@ mod tests {
             "{:?}",
             calls(&seen)
         );
-        // A key the VM does not have is refused, by name.
+        // A NIC the VM does not have is refused, by name.
         let err = e
             .change_device(
                 "app",

@@ -746,6 +746,49 @@ pub trait VmBackend {
         Err(unsupported_pause(self.id(), "hotplug NIC add"))
     }
 
+    /// Detaches an extra disk from a RUNNING VM (ADR-0068 D10, Phase 6). `disk`
+    /// is the record's extra disk to remove, with its pinned target. The
+    /// removal is COOPERATIVE: the hypervisor asks the guest to release the
+    /// device and the backend waits for the domain to actually drop it before
+    /// it reports done — a disk the guest still holds (mounted, in use) never
+    /// leaves the domain and the backend returns `Partial` without forcing it,
+    /// so no in-flight write is torn out from under the guest.
+    ///
+    /// `removed` is called ONLY once the domain has confirmed the device is
+    /// gone (the reverse of [`VmBackend::hotplug_add_disk`]'s D6): a command
+    /// killed before that leaves the record naming a disk the domain still has
+    /// (the next boot keeps it), never dropping a disk the guest still writes
+    /// to. An error from it is returned as the call's error. When the device
+    /// never leaves the domain, `removed` is NOT called and the record stands.
+    ///
+    /// Default: unsupported (fail closed) — hot-remove is proven per backend
+    /// (D10), never assumed from hot-add.
+    fn hotplug_remove_disk(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _disk: &ExtraDisk,
+        _wait: Duration,
+        _removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<HotplugOutcome> {
+        Err(unsupported_pause(self.id(), "hotplug disk remove"))
+    }
+
+    /// Detaches an extra NIC from a RUNNING VM (ADR-0068 D10, Phase 6). `nic`
+    /// is the record's extra NIC to remove, with its pinned MAC. Same
+    /// cooperative contract and `removed` ordering as
+    /// [`VmBackend::hotplug_remove_disk`]. Default: unsupported (fail closed).
+    fn hotplug_remove_nic(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _nic: &ExtraNic,
+        _wait: Duration,
+        _removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<HotplugOutcome> {
+        Err(unsupported_pause(self.id(), "hotplug NIC remove"))
+    }
+
     /// A STOPPED VM's extra disks or NICs changed (`vm update --disk-add`,
     /// `--disk-rm`, …): `vm` is the record as it will be written. A backend
     /// whose record IS the whole definition (the next boot rebuilds from it)

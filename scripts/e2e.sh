@@ -5419,6 +5419,250 @@ else
 fi
 
 ########################################
+section "vm: um disco a QUENTE REMOVIDO com seguranca DENTRO do guest (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.hotplug.disk.remove` do provider libvirt estava
+# `not-implemented` (D10 — hot-remove não se assume do hot-add). A remoção tem
+# de ser SEGURA: o `detach-device --live` é COOPERATIVO — a libvirt pede ao
+# guest que largue o dispositivo e o domínio só o solta quando o guest o faz;
+# um disco que o guest ainda segura (montado, em uso) NUNCA sai, e o provider
+# devolve `partial` com o registo intacto (nada é arrancado de baixo do guest).
+# Aqui provam-se os QUATRO níveis, ao vivo, contra um guest REAL, e a SEGURANÇA:
+#   0. PREPARAÇÃO SEGURA — o disco extra é anexado a quente, o poller formata-o,
+#      MONTA-o, escreve nele e DESMONTA-o (larga-o) ANTES de qualquer remoção;
+#   1. PEDIDO ACEITE — `vm update --disk-rm` passa pelo provider e o
+#      `detach-device --live` devolve ok (a CLI imprime «removed»; o 124
+#      `DX-8504` é só o canal do guest-agent a não confirmar — os níveis 3-4
+#      provam-no por um caminho independente do agente);
+#   2. SAIU DO DISPOSITIVO VIRTUAL — o `domblklist` do domínio DEIXA de o listar
+#      (o guest largou-o; sem guest-agent, é o kernel do guest a cooperar);
+#   3. O GUEST DEIXA DE O VER — o bloco some de `/sys/block` dentro do guest (o
+#      poller regista a sua ausência);
+#   4. O GUEST CONTINUA SÃO — não entrou em pânico, o disco de arranque (raiz)
+#      continua R/W (write+read reais à raiz depois da remoção); o veredicto fica
+#      na raiz, lido com guestfish (VM parada, QEMU larga o qcow2).
+#
+# Precisa de uma imagem cloud (E2E_CLOUDINIT_IMAGE ou $SROOT/vm-images/_base),
+# guestfish e cloud-localds. Sem isso, SKIP honesto.
+HRIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$HRIMG" ]]; then
+  HRIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$HRIMG" && -r "$HRIMG" ]]; then
+  HRVM="hprm-$PFX"; HRBASE="$OUT/$HRVM-base.qcow2"; HRHOT="$OUT/$HRVM-hot.qcow2"
+  HRUD="$OUT/$HRVM-user-data.yaml"; HRPOLL="$OUT/$HRVM-poll.sh"
+  cp "$HRIMG" "$HRBASE" && qemu-img resize "$HRBASE" 5G >/dev/null 2>&1
+  qemu-img create -f qcow2 "$HRHOT" 128M >/dev/null 2>&1
+  # O poller in-guest: FASE A espera o disco quente aparecer, formata-o, monta-o,
+  # escreve, DESMONTA-o (larga-o em segurança) e regista PREP. FASE B espera-o
+  # DESAPARECER (a remoção), confirma que some de /sys/block e que a RAIZ continua
+  # R/W (guest são), e grava RESULT na raiz.
+  cat > "$HRPOLL" <<'POLL'
+#!/bin/bash
+P=/var/lib/delonix-diskrm-PREP; R=/var/lib/delonix-diskrm-RESULT
+exec >>/var/lib/delonix-diskrm-LOG 2>&1
+blocks() { lsblk -dn -o NAME,TYPE | awk '$2=="disk"{print $1}' | sort; }
+baseline="$(blocks)"
+dev=""
+for _ in $(seq 1 600); do
+  new="$(comm -13 <(echo "$baseline") <(blocks))"
+  if [ -n "$new" ]; then
+    dev="$(echo "$new" | head -1)"
+    mkfs.ext4 -F "/dev/$dev" >/dev/null 2>&1
+    mkdir -p /mnt/hot && mount "/dev/$dev" /mnt/hot
+    echo DISK-IN-USE-v1 > /mnt/hot/marker; sync
+    umount /mnt/hot
+    echo "HOTDEV=$dev MOUNTED=ok UNMOUNTED=ok" > "$P"; sync
+    break
+  fi
+  sleep 1
+done
+[ -z "$dev" ] && { echo "HOTDEV=none" > "$P"; sync; exit 0; }
+for _ in $(seq 1 600); do
+  if ! blocks | grep -qx "$dev"; then
+    gone=0; [ -e "/sys/block/$dev" ] && gone=1
+    echo alive-$(date +%s) > /root/diskrm-alive; sync
+    rb="$(cat /root/diskrm-alive 2>/dev/null)"
+    [ -n "$rb" ] && rw=ok || rw=no
+    echo "REMOVED=$dev SYS_PRESENT=$gone ROOT_RW=$rw GUEST=alive" > "$R"; sync
+    break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"
+    echo "hostname: dlx-diskrm-proof"
+    echo "package_update: false"
+    echo "package_upgrade: false"
+    echo "write_files:"
+    echo "  - path: /usr/local/bin/diskrm-poll.sh"
+    echo "    permissions: '0755'"
+    echo "    encoding: b64"
+    echo "    content: $(base64 -w0 "$HRPOLL")"
+    echo "runcmd:"
+    echo "  - [ sh, -c, \"setsid bash /usr/local/bin/diskrm-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$HRUD"
+  if check_then "vm create libvirt (hotplug-disk-remove guest)" ok \
+       "$BIN" vm create "$HRVM" --disk "$HRBASE" --backend libvirt --memory 1G --vcpus 2 --user-data "$HRUD"; then
+    HROVL="$SROOT/vms/$HRVM.qcow2"
+    # Dar tempo ao guest de arrancar e o cloud-init plantar o poller.
+    sleep 100
+    # ADD do disco extra (caminho já provado) — o ALVO vivo que o provider dá.
+    "$BIN" vm update "$HRVM" --disk-add "$HRHOT,bus=virtio,format=qcow2" --wait-secs 15 >/dev/null 2>&1 || true
+    # NÍVEL 0 (preparação segura): dar tempo ao poller de formatar/montar/escrever
+    # e DESMONTAR o disco quente — larga-o ANTES de qualquer remoção. SEM parar a
+    # VM aqui: um stop mataria o poller (o cloud-init runcmd não re-corre), e a
+    # FASE B dele (detectar a remoção) nunca aconteceria.
+    sleep 45
+    # NÍVEL 1: o provider ACEITA a remoção (detach-device ok; CLI imprime «removed»;
+    # o 124/`partial` é só o guest-agent). A remoção é COOPERATIVA: o disco já foi
+    # desmontado, por isso o guest larga-o.
+    check "nivel 1: o provider ACEITA a remocao a quente (detach-device ok)" ok bash -c \
+      "'$BIN' vm update '$HRVM' --disk-rm '$HRHOT' --wait-secs 30 2>&1 | grep -q 'removed'"
+    # NÍVEL 2: o disco quente SAIU do domínio (o guest cooperou e largou-o).
+    check "nivel 2: o disco quente SAI do domblklist do dominio" ok bash -c \
+      "! virsh -c qemu:///system domblklist '$HRVM' | grep -q '$HRVM-hot.qcow2'"
+    # Dar tempo ao poller (FASE B) de ver o bloco desaparecer e gravar RESULT.
+    sleep 25
+    # Parar a VM: só com o qcow2 livre é que o guestfish lê o disco de arranque.
+    "$BIN" vm stop "$HRVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$HRVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$HRVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 0 (lido no fim, do mesmo arranque): montado e DESMONTADO em segurança.
+    check "nivel 0: o disco quente foi MONTADO e DESMONTADO (uso + libertacao segura)" ok bash -c \
+      "guestfish --ro -a '$HROVL' -i cat /var/lib/delonix-diskrm-PREP | grep -q 'MOUNTED=ok UNMOUNTED=ok'"
+    # NÍVEL 3: o guest DEIXOU de ver o bloco (some de /sys/block).
+    check "nivel 3: o guest DEIXA de ver o disco quente (ausente de /sys/block)" ok bash -c \
+      "guestfish --ro -a '$HROVL' -i cat /var/lib/delonix-diskrm-RESULT | grep -q 'SYS_PRESENT=0'"
+    # NÍVEL 4: o guest continua SÃO — raiz R/W depois da remoção, sem pânico.
+    check "nivel 4: o guest continua SAO (raiz R/W apos a remocao)" ok bash -c \
+      "guestfish --ro -a '$HROVL' -i cat /var/lib/delonix-diskrm-RESULT | grep -q 'ROOT_RW=ok GUEST=alive'"
+    "$BIN" delete vm "$HRVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$HRVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$HRBASE" "$HRHOT" "$HRUD" "$HRPOLL"
+else
+  skip "vm: um disco a quente removido com seguranca dentro do guest" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, ou sem imagem cloud (E2E_CLOUDINIT_IMAGE)"
+fi
+
+########################################
+section "vm: uma NIC a QUENTE REMOVIDA DENTRO do guest sem derrubar a primaria (libvirt, cloud-init, guestfish)"
+########################################
+# §7 do mandato: `vm.hotplug.nic.remove` do provider libvirt estava
+# `not-implemented` (D10). O `detach-device --live` matcha a interface pelo seu
+# `<mac address>` e é cooperativo; a SEGURANÇA aqui é NÃO derrubar a NIC
+# primária (o motor só remove NICs EXTRA, por MAC — a primária nunca está nos
+# extra_nics) e provar que o guest continua com rede depois. Quatro níveis:
+#   1. PEDIDO ACEITE — `vm update --nic-rm <mac>` e o `detach-device --live` ok
+#      (CLI imprime «removed»; 124 `DX-8504` é só o guest-agent);
+#   2. SAIU DO DISPOSITIVO VIRTUAL — o `domiflist` DEIXA de listar aquele MAC;
+#   3. O GUEST DEIXA DE A VER — a NIC some de `/sys/class/net` dentro do guest;
+#   4. O GUEST CONTINUA SÃO — a NIC PRIMÁRIA continua UP e com portadora (o guest
+#      não perdeu a rede); veredicto na raiz, lido com guestfish (VM parada).
+#
+# Precisa de imagem cloud, guestfish, cloud-localds e a rede libvirt `ingress`.
+NRIMG="${E2E_CLOUDINIT_IMAGE:-}"
+if [[ -z "$NRIMG" ]]; then
+  NRIMG="$(ls -1 "$SROOT"/vm-images/_base/*cloudimg*.img 2>/dev/null | head -1 || true)"
+fi
+if libvirt_system_usable && command -v guestfish >/dev/null 2>&1 \
+     && command -v cloud-localds >/dev/null 2>&1 && [[ -n "$NRIMG" && -r "$NRIMG" ]] \
+     && virsh -c qemu:///system net-info ingress >/dev/null 2>&1; then
+  NRVM="nicrm-$PFX"; NRBASE="$OUT/$NRVM-base.qcow2"
+  NRUD="$OUT/$NRVM-user-data.yaml"; NRPOLL="$OUT/$NRVM-poll.sh"
+  cp "$NRIMG" "$NRBASE" && qemu-img resize "$NRBASE" 5G >/dev/null 2>&1
+  # O poller: baseline das NICs de arranque (uma delas é a PRIMÁRIA), espera a
+  # hot-added aparecer (FASE A, regista PREP), depois espera-a DESAPARECER
+  # (FASE B) e confirma que a PRIMÁRIA continua UP com portadora (guest com rede).
+  cat > "$NRPOLL" <<'POLL'
+#!/bin/bash
+P=/var/lib/delonix-nicrm-PREP; R=/var/lib/delonix-nicrm-RESULT
+exec >>/var/lib/delonix-nicrm-LOG 2>&1
+nics() { for d in /sys/class/net/*; do n=$(basename "$d"); [ "$n" = lo ] && continue; [ -e "$d/device" ] || continue; echo "$n"; done | sort; }
+primary="$(nics | head -1)"
+baseline="$(nics)"
+dev=""
+for _ in $(seq 1 600); do
+  new="$(comm -13 <(echo "$baseline") <(nics))"
+  if [ -n "$new" ]; then
+    dev="$(echo "$new" | head -1)"
+    echo "HOTNIC=$dev PRIMARY=$primary" > "$P"; sync
+    break
+  fi
+  sleep 1
+done
+[ -z "$dev" ] && { echo "HOTNIC=none" > "$P"; sync; exit 0; }
+for _ in $(seq 1 600); do
+  if ! nics | grep -qx "$dev"; then
+    gone=0; [ -e "/sys/class/net/$dev" ] && gone=1
+    op="$(cat /sys/class/net/$primary/operstate 2>/dev/null)"
+    car="$(cat /sys/class/net/$primary/carrier 2>/dev/null)"
+    [ "$car" = 1 ] && prim=up || prim="$op"
+    echo "REMOVED=$dev SYS_PRESENT=$gone PRIMARY=$primary PRIMARY_STATE=$prim GUEST=alive" > "$R"; sync
+    break
+  fi
+  sleep 1
+done
+POLL
+  {
+    echo "#cloud-config"
+    echo "hostname: dlx-nicrm-proof"
+    echo "package_update: false"
+    echo "package_upgrade: false"
+    echo "write_files:"
+    echo "  - path: /usr/local/bin/nicrm-poll.sh"
+    echo "    permissions: '0755'"
+    echo "    encoding: b64"
+    echo "    content: $(base64 -w0 "$NRPOLL")"
+    echo "runcmd:"
+    echo "  - [ sh, -c, \"setsid bash /usr/local/bin/nicrm-poll.sh < /dev/null >/dev/null 2>&1 &\" ]"
+  } > "$NRUD"
+  if check_then "vm create libvirt (hotplug-nic-remove guest)" ok \
+       "$BIN" vm create "$NRVM" --disk "$NRBASE" --backend libvirt --memory 1G --vcpus 2 --user-data "$NRUD"; then
+    NROVL="$SROOT/vms/$NRVM.qcow2"
+    sleep 100
+    # ADD da NIC extra (caminho já provado) na rede `ingress`.
+    "$BIN" vm update "$NRVM" --nic-add 'network:ingress' --wait-secs 15 >/dev/null 2>&1 || true
+    sleep 15
+    # O MAC da NIC quente — o que está na rede `ingress` no domiflist.
+    NRMAC="$(virsh -c qemu:///system domiflist "$NRVM" 2>/dev/null | awk '$3=="ingress"{print $NF}' | head -1)"
+    # NÍVEL 1: o provider ACEITA a remoção (detach-device ok; CLI imprime «removed»).
+    check "nivel 1: o provider ACEITA a remocao da NIC a quente (detach-device ok)" ok bash -c \
+      "[ -n '$NRMAC' ] && '$BIN' vm update '$NRVM' --nic-rm '$NRMAC' --wait-secs 30 2>&1 | grep -q 'removed'"
+    # NÍVEL 2: a NIC quente SAIU do domínio (o MAC deixa o domiflist).
+    check "nivel 2: a NIC quente SAI do domiflist do dominio" ok bash -c \
+      "[ -n '$NRMAC' ] && ! virsh -c qemu:///system domiflist '$NRVM' | grep -qiw '$NRMAC'"
+    sleep 20
+    "$BIN" vm stop "$NRVM" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      virsh -c qemu:///system domstate "$NRVM" 2>/dev/null | grep -q 'shut off' && break
+      [[ -z "$(virsh -c qemu:///system domstate "$NRVM" 2>/dev/null)" ]] && break
+      sleep 2
+    done
+    # NÍVEL 3: o guest DEIXOU de ver a NIC (some de /sys/class/net).
+    check "nivel 3: o guest DEIXA de ver a NIC quente (ausente de /sys/class/net)" ok bash -c \
+      "guestfish --ro -a '$NROVL' -i cat /var/lib/delonix-nicrm-RESULT | grep -q 'SYS_PRESENT=0'"
+    # NÍVEL 4: o guest continua SÃO — a NIC PRIMÁRIA continua UP (rede intacta).
+    check "nivel 4: o guest continua SAO (NIC primaria UP apos a remocao)" ok bash -c \
+      "guestfish --ro -a '$NROVL' -i cat /var/lib/delonix-nicrm-RESULT | grep -Eq 'PRIMARY_STATE=up .*GUEST=alive'"
+    "$BIN" delete vm "$NRVM" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$NRVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$NRBASE" "$NRUD" "$NRPOLL"
+else
+  skip "vm: uma NIC a quente removida dentro do guest sem derrubar a primaria" \
+    "sem libvirt utilizável, sem guestfish/cloud-localds, sem imagem cloud (E2E_CLOUDINIT_IMAGE), ou sem a rede libvirt ingress"
+fi
+
+########################################
 section "vm: um vCPU a QUENTE e ONLINE DENTRO do guest (libvirt, cloud-init, guestfish)"
 ########################################
 # §7 do mandato: `vm.hotplug.cpu.add` do provider libvirt estava `partial`
