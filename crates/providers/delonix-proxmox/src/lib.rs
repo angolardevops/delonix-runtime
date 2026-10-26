@@ -1964,6 +1964,88 @@ impl Client {
         })
     }
 
+    /// Attaches a fresh disk to a RUNNING VM (`vm.hotplug.disk.add`): the node
+    /// allocates `<storage>:<gib>` and plugs it into the live QEMU, as long as
+    /// the VM was booted with `disk` in its `hotplug` list — it is by default
+    /// (`HOTPLUG_LIST`, ADR-0068 D3). `key` is a free bus slot (`scsiN`,
+    /// `virtioN`, …) and `spec` the same `<storage>:<gib>[,format=…]` shape an
+    /// extra disk takes at create. Read back from the config, never assumed; a
+    /// change the node could only PARK in `pending` was not plugged, so it is
+    /// reverted and refused by name — the same discipline as a CPU or memory
+    /// hotplug. The disk's volid, as the node recorded it, is returned.
+    pub fn hotplug_disk_add(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        key: &str,
+        spec: &str,
+    ) -> Result<String> {
+        let form: Vec<(&str, &str)> = vec![(key, spec)];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.refuse_pending(ledger, vmid, key)?;
+        let cfg = self.config(vmid)?;
+        cfg.get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: VM {vmid} config carries no `{key}` after a disk hotplug"
+                ))
+            })
+    }
+
+    /// Attaches a NIC to a RUNNING VM (`vm.hotplug.nic.add`): the node adds
+    /// `netN=<model>[=<mac>],bridge=<bridge>` to the live QEMU, as long as the
+    /// VM was booted with `network` in its `hotplug` list — it is by default
+    /// (`HOTPLUG_LIST`, ADR-0068 D3). `key` is a free `netN` slot and `spec` the
+    /// same shape an extra NIC takes at create. Read back from the config, and a
+    /// change the node could only PARK in `pending` is reverted and refused by
+    /// name. The NIC property, as the node recorded it, is returned.
+    pub fn hotplug_nic_add(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        key: &str,
+        spec: &str,
+    ) -> Result<String> {
+        let form: Vec<(&str, &str)> = vec![(key, spec)];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.refuse_pending(ledger, vmid, key)?;
+        let cfg = self.config(vmid)?;
+        cfg.get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: VM {vmid} config carries no `{key}` after a NIC hotplug"
+                ))
+            })
+    }
+
     /// A hot change the node put in `pending` instead of applying: reverted,
     /// then refused by name.
     fn refuse_pending(&self, ledger: &Ledger, vmid: u32, key: &str) -> Result<()> {
@@ -7522,9 +7604,13 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
                 detail: "`vm update --memory` sets `memory` live (the node plugs DIMMs; `memory` in `hotplug`, `numa: 1`, ADR-0068 D3), read back from `config?current=1`; pending is reverted and refused; the agent's memory blocks decide complete or partial (D4/D8). The memory CEILING is the engine's record: the node has no maximum to set. Mock-tested, never run against a guest",
             },
             C::VmHotplugMemoryRemove => S::NotImplemented,
-            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskAdd => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_gets_a_disk_and_a_nic_hotplugged",
+            },
             C::VmHotplugDiskRemove => S::NotImplemented,
-            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicAdd => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_gets_a_disk_and_a_nic_hotplugged",
+            },
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it",
