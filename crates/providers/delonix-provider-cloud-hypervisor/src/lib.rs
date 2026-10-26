@@ -468,14 +468,27 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmSnapshotPersistent => bin(S::Supported {
                 evidence: "check:CH: ls nomeia-o",
             }),
-            C::VmBackupDisk => bin(S::Partial {
-                detail: "`backup create vm` copies the overlay of a STOPPED VM; a running CH VM holds the qcow2 exclusively",
+            C::VmBackupDisk => bin(S::Supported {
+                // #16: proved by DATA recovery, not an exit code. `backup create
+                // vm` archives the overlay of a STOPPED CH VM (a running one holds
+                // the qcow2 exclusively, so `backup_disk_live` refuses by name,
+                // DX-1514); the live battery writes a known marker into the guest,
+                // stops, archives, and then reads that marker back OUT of the
+                // archived overlay OFFLINE with guestfish — so the archive is shown
+                // to carry the guest's own data, not merely a file that exists.
+                evidence: "live:scripts/vm-native-ch-backup.sh",
             }),
             C::VmBackupQuiesced => S::UnsupportedByProvider {
                 reason: "no guest agent channel; only an offline copy is consistent",
             },
-            C::VmBackupRestore => bin(S::Partial {
-                detail: "`backup restore` re-imports the disk; battery covers the container kind only",
+            C::VmBackupRestore => bin(S::Supported {
+                // #16: the restore is proved by DATA recovery on a live CH guest.
+                // The battery runs the full cycle ORIGINAL -> backup -> CHANGED ->
+                // restore -> ORIGINAL: it writes a marker, backs up, boots the VM
+                // and OVERWRITES the marker, then `backup restore`s and boots again
+                // — and the guest reads back the ORIGINAL value, so the change was
+                // actually undone. See scripts/vm-native-ch-backup.sh.
+                evidence: "live:scripts/vm-native-ch-backup.sh",
             }),
             C::VmMigrationCold => bin(S::Partial {
                 detail: "`vm migrate`: stop, copy over SSH, import, start; no battery",
