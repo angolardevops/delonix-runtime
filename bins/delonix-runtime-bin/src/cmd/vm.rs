@@ -5336,6 +5336,19 @@ fn cmd_migrate(
     Ok(())
 }
 
+/// Pull the remote `$HOME` back out of the sentinel-tagged line
+/// `migrate_transfer_and_create` asks the target to print. The input is the
+/// COMBINED stdout+stderr of the SSH session (see the note at the call site),
+/// so this returns the value of the FIRST `__DLX_HOME__=` line and ignores a
+/// host-key warning or a login banner on any other line.
+fn parse_remote_home(combined: &str) -> Option<&str> {
+    combined
+        .lines()
+        .find_map(|l| l.strip_prefix("__DLX_HOME__="))
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+}
+
 /// The over-SSH half of `cmd_migrate` — kept separate so the caller can clean
 /// up the local flattened copy on every exit path (`?` inside this function
 /// would skip that cleanup).
@@ -5364,12 +5377,21 @@ fn migrate_transfer_and_create(
     // break a guessed path) — the SAME lesson `k8s_repo_version`/`family_of`
     // already paid for in this codebase: derive from the real host, never
     // from a naming convention.
-    let home = remote::ssh_run_as_user(&target, "echo -n \"$HOME\"").map_err(|e| {
-        Error::Invalid(format!(
-            "[{host}] resolving the target's home directory: {e}"
-        ))
-    })?;
-    let home = home.trim();
+    //
+    // The value is fenced with a sentinel because `ssh_run_as_user` folds the
+    // session's STDERR into its return (right for an error message, wrong for a
+    // value): on FIRST contact `ssh` prints `Warning: Permanently added '<host>'
+    // ... to the list of known hosts.` to stderr, which a bare `echo "$HOME"`
+    // would concatenate straight onto the path (`/home/walterWarning: ...`) and
+    // scp would then fail on a destination directory that does not exist. Parsing
+    // the one line we tagged is robust against that warning and any login banner.
+    let home_out = remote::ssh_run_as_user(&target, "printf '__DLX_HOME__=%s\\n' \"$HOME\"")
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "[{host}] resolving the target's home directory: {e}"
+            ))
+        })?;
+    let home = parse_remote_home(&home_out).unwrap_or("");
     if home.is_empty() {
         return Err(Error::Invalid(format!(
             "[{host}] the target reported an empty $HOME — cannot place the transferred disk"
@@ -6388,7 +6410,27 @@ mod tests {
         );
     }
 
-    use super::{valid_migrate_memory_spec, valid_migrate_network_name};
+    use super::{parse_remote_home, valid_migrate_memory_spec, valid_migrate_network_name};
+
+    /// The target's `$HOME` is read from a COMBINED stdout+stderr stream, so a
+    /// first-contact `ssh` host-key warning (or a login banner) on another line
+    /// must NOT bleed into the path — otherwise scp would target
+    /// `/home/userWarning: Permanently added ...` and fail. Regression for the
+    /// bug the cross-host migration harness caught.
+    #[test]
+    fn parse_remote_home_ignores_the_ssh_host_key_warning() {
+        let combined = "__DLX_HOME__=/home/walter\n\
+             Warning: Permanently added '[127.0.0.1]:2222' (ED25519) to the list of known hosts.\n";
+        assert_eq!(parse_remote_home(combined), Some("/home/walter"));
+        // A banner BEFORE the tagged line is ignored too.
+        assert_eq!(
+            parse_remote_home("Last login: today\n__DLX_HOME__=/root\n"),
+            Some("/root")
+        );
+        // No tag, or an empty home, yields nothing (the caller then errors out).
+        assert_eq!(parse_remote_home("some noise only\n"), None);
+        assert_eq!(parse_remote_home("__DLX_HOME__=\n"), None);
+    }
 
     #[test]
     fn migrate_network_rejects_shell_injection() {

@@ -544,8 +544,14 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 // substantive steps (stop, `qemu-img convert` flatten to a
                 // standalone disk, `--appliance` import without a seed reset,
                 // create+boot on the target) with the guest's baked state
-                // crossing intact. Only the generic scp transport between two
-                // hosts is left to the cross-host run (not a provider capability).
+                // crossing intact. The generic scp transport between two hosts
+                // is additionally proved END-TO-END by the cross-host harness
+                // `scripts/vm-migration-cross-host.sh`, which stands up a second
+                // delonix node (its own DELONIX_ROOT, reached over a real sshd)
+                // and drives `vm migrate` A -> B, reading back a guestfish marker
+                // from the target's own overlay. (`--remove-source` is a two-host
+                // step: on ONE shared `qemu:///system` it would undefine the
+                // target's identically-named domain — see the harness header.)
                 evidence: "e2e:vm: a stopped VM cold-migrates — flatten, import, boot on the target with state intact (libvirt, guestfish)",
             }),
             // libvirt/QEMU supports live migration without shared storage via
