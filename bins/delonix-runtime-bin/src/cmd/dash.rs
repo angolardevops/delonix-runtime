@@ -1197,6 +1197,18 @@ mod tui {
         // (e.g. "already running") is never silently swallowed. Cleared when a
         // new action starts.
         let mut action_err: Option<String> = None;
+        // A `stop` launched from the overlay runs on a background thread (see
+        // `spawn_stop`); this holds the receiver while it is in flight, with the
+        // action it represents so its `outcome_of` can be applied on completion.
+        // `None` means no action is running off-loop. While it is `Some`, new
+        // action keys are swallowed so a second `stop` can't race the first.
+        let mut pending: Option<(std::sync::mpsc::Receiver<std::result::Result<(), String>>, Action)> =
+            None;
+        // A monotonic frame counter (one per loop iteration, ~5/s at the poll
+        // timeout) driving the in-flight spinner — a wall-clock-independent
+        // animation that keeps changing every redraw, which is exactly what
+        // proves the loop is alive while a `stop` blocks on its SIGKILL budget.
+        let mut frame: u64 = 0;
         // CPU% is derived from the monotonic `cpu.stat` counter, anchored to
         // the COLLECTION TICK (not the draw frame) and keyed by stable id —
         // see `CpuRateTracker` for why both matter. One tracker for the
@@ -1208,6 +1220,35 @@ mod tui {
         let mut slow_age = Duration::from_secs(0);
 
         loop {
+            frame = frame.wrapping_add(1);
+
+            // A background `stop` (if one is running) reports back here without
+            // ever blocking the loop: `try_recv` returns immediately whether or
+            // not the thread has finished. On completion apply the action's
+            // `outcome_of` — close the overlay if the resource is gone, force an
+            // immediate re-collect so the new status shows on the next tick, and
+            // surface any error exactly like the synchronous path does.
+            if let Some((rx, action)) = pending.as_ref() {
+                match rx.try_recv() {
+                    Ok(res) => {
+                        action_err = res.err();
+                        let out = outcome_of(*action);
+                        if !out.keep_detail {
+                            detail = false;
+                        }
+                        if out.recollect {
+                            last = Instant::now() - Duration::from_secs(2);
+                        }
+                        pending = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        action_err = Some(po::t("stop thread exited unexpectedly").to_string());
+                        pending = None;
+                    }
+                }
+            }
+
             // Collect every ~1s (not every frame).
             if last.elapsed() >= Duration::from_secs(1) {
                 let mut summary = delonix_mgmt::dashstats::collect(&root, false, false);
@@ -1301,6 +1342,16 @@ mod tui {
                 ""
             };
 
+            // When a background `stop` is in flight, the overlay shows an
+            // animated "stopping…" line instead of nothing — the frame-driven
+            // spinner changes every redraw, so the user sees the UI is alive and
+            // working through the kill-timeout, not frozen.
+            let busy: Option<String> = pending.as_ref().map(|_| {
+                const FRAMES: [&str; 4] = ["\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}"];
+                let g = FRAMES[(frame % FRAMES.len() as u64) as usize];
+                format!("{g} {}", po::t("stopping… (Ctrl+C to quit)"))
+            });
+
             if let Err(e) = term.draw(|f| {
                 draw(
                     f,
@@ -1315,6 +1366,7 @@ mod tui {
                     detail,
                     detail_row,
                     action_err.as_deref(),
+                    busy.as_deref(),
                     cpu_pct,
                     cpu_tile_pct,
                     &trends,
@@ -1374,9 +1426,26 @@ mod tui {
                         // row) or swallowed so stray input can't reorder the
                         // list behind the overlay.
                         if detail {
+                            // A background action already in flight owns the
+                            // overlay: swallow every key (except the global
+                            // Ctrl+C / Esc handled above) so a second `stop`
+                            // can't race the first.
+                            if pending.is_some() {
+                                continue;
+                            }
                             if let (KeyCode::Char(c), Some(r)) = (k.code, detail_row) {
                                 if let Some(action) = action_for(c, &r.kind) {
                                     let (id, kind) = (r.id.clone(), r.kind.clone());
+                                    if action.runs_in_background() {
+                                        // Hand the slow `stop` to a thread and
+                                        // keep looping — the result is applied
+                                        // by the `try_recv` poll at the top of
+                                        // the loop. Clear any stale error so the
+                                        // "stopping…" line shows cleanly.
+                                        action_err = None;
+                                        pending = Some((spawn_stop(&root, id, kind), action));
+                                        continue;
+                                    }
                                     action_err = run_action(&mut term, &root, &id, &kind, action)
                                         .err()
                                         .map(|e| e.to_string());
@@ -1520,13 +1589,31 @@ mod tui {
         Start,
         /// Remove the resource (force).
         Remove,
+        /// Attach to a VM's serial console (suspends the TUI). VM-only — a
+        /// container has no serial port; `exec` is its interactive entry.
+        Console,
+    }
+
+    impl Action {
+        /// Whether this action runs on a background thread (silent, possibly
+        /// slow) instead of on the event-loop thread. Only `Stop` qualifies:
+        /// its SIGKILL budget is seconds of real latency, it touches no
+        /// terminal and prints nothing, so it can run off-loop while the TUI
+        /// keeps drawing. Everything else is either instant (`Start`/`Remove`)
+        /// or owns the terminal (`Logs`/`Exec`/`Console`) and must stay on the
+        /// main thread.
+        fn runs_in_background(self) -> bool {
+            matches!(self, Action::Stop)
+        }
     }
 
     /// Maps a keypress to the action it triggers in the detail overlay FOR A
     /// RESOURCE OF `kind`, or `None` when the key is unbound there. `l`/`x`
     /// (logs/exec) are container-only — a VM has no log file or `exec`
     /// namespace to join here; `s`/`S` (start/stop) apply to the two kinds that
-    /// own a lifecycle service; `d` (remove) applies to both. Kinds without a
+    /// own a lifecycle service; `d` (remove) applies to both. `c` (console)
+    /// attaches to the VM serial port — VM-only, since a container has no
+    /// serial console (`x`/exec is its interactive entry). Kinds without a
     /// live service in scope here (Network/Volume/Image) get no action — the
     /// overlay stays a read-only view for them.
     fn action_for(key: char, kind: &str) -> Option<Action> {
@@ -1538,6 +1625,7 @@ mod tui {
             'S' if has_lifecycle => Some(Action::Stop),
             's' if has_lifecycle => Some(Action::Start),
             'd' if has_lifecycle => Some(Action::Remove),
+            'c' if kind == k::VM => Some(Action::Console),
             _ => None,
         }
     }
@@ -1564,7 +1652,7 @@ mod tui {
                 keep_detail: true,
                 recollect: true,
             },
-            Action::Logs | Action::Exec => ActionOutcome {
+            Action::Logs | Action::Exec | Action::Console => ActionOutcome {
                 keep_detail: true,
                 recollect: false,
             },
@@ -1626,16 +1714,18 @@ mod tui {
                 Ok(())
             }),
             Action::Exec => with_suspended(term, || exec_shell(root, id)),
-            Action::Stop => {
-                if kind == k::VM {
-                    delonix_vm::stop(root, id)?;
-                } else {
-                    let (_images, store) = super::super::util::open_stores()?;
-                    let mut c = super::super::util::find(&store, id)?;
-                    delonix_linux::stop(&store, &mut c, STOP_TIMEOUT_SECS)?;
-                }
-                Ok(())
-            }
+            // `Console` attaches to the VM serial port via the SAME code path as
+            // the `vm console` CLI verb (socket bridge for Cloud Hypervisor,
+            // `virsh console` for libvirt), so the overlay and the CLI behave
+            // identically — escape key, stale-session takeover, the boot-log
+            // nudge, all of it. VM-only by construction (`action_for`).
+            Action::Console => with_suspended(term, || {
+                super::super::vm::cmd_console(root, id, None)
+            }),
+            // `Stop` is dispatched off-loop (`spawn_stop`), never here — but the
+            // body lives in `do_stop` so the arm stays exhaustive and the two
+            // callers share one implementation.
+            Action::Stop => do_stop(root, id, kind),
             Action::Start => with_suspended(term, || {
                 if kind == k::VM {
                     delonix_vm::start(root, id)?;
@@ -1656,6 +1746,43 @@ mod tui {
                 }
             }),
         }
+    }
+
+    /// The silent `stop` of a container or VM, shared by the synchronous
+    /// `run_action` arm and the off-loop `spawn_stop`. Touches no terminal and
+    /// prints nothing — the ONLY reason it is safe to run on a background
+    /// thread while the TUI keeps owning the real terminal.
+    fn do_stop(root: &std::path::Path, id: &str, kind: &str) -> Result<()> {
+        if kind == k::VM {
+            delonix_vm::stop(root, id)?;
+        } else {
+            let (_images, store) = super::super::util::open_stores()?;
+            let mut c = super::super::util::find(&store, id)?;
+            delonix_linux::stop(&store, &mut c, STOP_TIMEOUT_SECS)?;
+        }
+        Ok(())
+    }
+
+    /// Launches `do_stop` on a detached thread and returns the receiver the
+    /// event loop polls (non-blocking) for its result. This is the whole point
+    /// of the async path: a container whose PID1 ignores SIGTERM only dies at
+    /// the `STOP_TIMEOUT_SECS` SIGKILL, and running that inline would freeze the
+    /// TUI for ten seconds — no frames, no spinner, looks hung. Off-loop, the
+    /// loop keeps drawing and the status flips to `stopped` the moment the
+    /// thread reports back. The result carries only a `String` error (the
+    /// `delonix_model::Error` is rendered to text in the thread) so nothing
+    /// non-`Send` has to cross the channel.
+    fn spawn_stop(
+        root: &std::path::Path,
+        id: String,
+        kind: String,
+    ) -> std::sync::mpsc::Receiver<std::result::Result<(), String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let root = root.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = tx.send(do_stop(&root, &id, &kind).map_err(|e| e.to_string()));
+        });
+        rx
     }
 
     /// An interactive shell in a running container — `container exec` with no
@@ -1708,6 +1835,7 @@ mod tui {
         detail: bool,
         detail_row: Option<&Row>,
         action_err: Option<&str>,
+        action_busy: Option<&str>,
         cpu_pct: &HashMap<String, f64>,
         cpu_tile_pct: Option<f64>,
         trends: &Trends,
@@ -1802,7 +1930,7 @@ mod tui {
 
         // The detail overlay paints LAST, over everything, so it is modal.
         if detail {
-            draw_detail(f, area, detail_row, action_err, cpu_pct);
+            draw_detail(f, area, detail_row, action_err, action_busy, cpu_pct);
         }
     }
 
@@ -1839,7 +1967,7 @@ mod tui {
         if kind == k::CONTAINER {
             "l: logs · x: exec · s: start · S: stop · d: remove"
         } else if kind == k::VM {
-            "s: start · S: stop · d: remove"
+            "c: console · s: start · S: stop · d: remove"
         } else {
             ""
         }
@@ -1850,6 +1978,7 @@ mod tui {
         full: Rect,
         row: Option<&Row>,
         action_err: Option<&str>,
+        action_busy: Option<&str>,
         cpu_pct: &HashMap<String, f64>,
     ) {
         let area = centered_rect(60, 60, full);
@@ -1916,7 +2045,16 @@ mod tui {
                 )));
             }
         }
-        if let Some(err) = action_err {
+        // A background action in flight takes precedence over a stale error:
+        // show the animated "stopping…" line (yellow) while it runs; the error
+        // line only appears once no action is pending.
+        if let Some(busy) = action_busy {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                busy.to_string(),
+                Style::default().fg(YELLOWC).add_modifier(Modifier::BOLD),
+            )));
+        } else if let Some(err) = action_err {
             lines.push(Line::from(Span::styled(
                 err.to_string(),
                 Style::default().fg(REDC),
@@ -2569,12 +2707,15 @@ mod tui {
             assert_eq!(action_for('s', c), Some(Start));
             assert_eq!(action_for('S', c), Some(Stop));
             assert_eq!(action_for('d', c), Some(Remove));
+            // A container has no serial console (`exec` is its interactive
+            // entry) — `c` is VM-only.
+            assert_eq!(action_for('c', c), None);
             // Unbound key → no action (swallowed by the overlay).
             assert_eq!(action_for('z', c), None);
         }
 
         #[test]
-        fn action_for_restricts_vm_to_lifecycle_and_remove() {
+        fn action_for_restricts_vm_to_lifecycle_remove_and_console() {
             use Action::*;
             let v = k::VM;
             // A VM has no in-overlay log file or exec namespace.
@@ -2584,6 +2725,21 @@ mod tui {
             assert_eq!(action_for('s', v), Some(Start));
             assert_eq!(action_for('S', v), Some(Stop));
             assert_eq!(action_for('d', v), Some(Remove));
+            // ...and a serial console — VM-only, the one interactive action a
+            // VM has in the overlay.
+            assert_eq!(action_for('c', v), Some(Console));
+        }
+
+        #[test]
+        fn only_stop_runs_in_the_background() {
+            use Action::*;
+            // `Stop` is the lone off-loop action: slow (SIGKILL budget), silent,
+            // no terminal. Everything else is instant or owns the terminal, so
+            // it must stay on the event-loop thread.
+            assert!(Stop.runs_in_background());
+            for a in [Logs, Exec, Start, Remove, Console] {
+                assert!(!a.runs_in_background(), "{a:?} must not run off-loop");
+            }
         }
 
         #[test]
@@ -2591,7 +2747,7 @@ mod tui {
             // Network/Volume/Image have no live service wired here: every key
             // is unbound, so the overlay stays a pure read-only view.
             for kind in [k::NETWORK, k::VOLUME, k::IMAGE] {
-                for key in ['l', 'x', 's', 'S', 'd'] {
+                for key in ['l', 'x', 's', 'S', 'd', 'c'] {
                     assert_eq!(action_for(key, kind), None, "{kind}/{key}");
                 }
             }
@@ -2603,7 +2759,7 @@ mod tui {
             // key `action_for` rejects, nor hide one it accepts.
             for kind in [k::CONTAINER, k::VM, k::NETWORK, k::VOLUME, k::IMAGE] {
                 let hint = actions_hint(kind);
-                for key in ['l', 'x', 's', 'S', 'd'] {
+                for key in ['l', 'x', 's', 'S', 'd', 'c'] {
                     let in_hint = hint.contains(&format!("{key}:"));
                     let bound = action_for(key, kind).is_some();
                     assert_eq!(in_hint, bound, "{kind}/{key}: hint={hint:?}");
@@ -2626,8 +2782,9 @@ mod tui {
                 assert!(o.recollect);
             }
             // Interactive: we only borrowed the terminal, changed no store → no
-            // forced re-collect, overlay stays.
-            for a in [Action::Logs, Action::Exec] {
+            // forced re-collect, overlay stays. The VM console is interactive
+            // too — same contract.
+            for a in [Action::Logs, Action::Exec, Action::Console] {
                 let o = outcome_of(a);
                 assert!(o.keep_detail);
                 assert!(!o.recollect);
