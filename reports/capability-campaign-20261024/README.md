@@ -17,13 +17,15 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **160** |
-| partial | 93 | 86 | 56 |
-| not-implemented | 74 | 72 | 54 |
-| unsupported-by-provider | 230 | 230 | 230 |
+| supported | 103 | 112 | **162** |
+| partial | 93 | 86 | 54 |
+| not-implemented | 74 | 72 | 50 |
+| unsupported-by-provider | 230 | 230 | 234 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **160/273 (58.6%)** |
+| proved/applicable (N2) | — | 112/273 | **162/269 (60.2%)** |
+
+Par `4e769bf0`: rede linux `net.nat.snat` (SNAT observado no fio: origem=uplink, 0 com IP interno) + `net.l7-proxy` (HTTP encaminhado pelo proxy, 404 sem rota) →supported. Proxmox rede §11: **0 promoções** (toda a prova exige switch GLOBAL do datacenter — firewall OFF, SDN é `PUT /cluster/sdn` global; §11 proíbe), **4 reclass honestas** (macvlan/encrypted-overlay/ipam/dns do engine → unsupported-by-provider; vlan/vxlan/routes/rate-limit ficam not-impl = lacuna do adapter) → applicable 273→269.
 
 Trio paralelo (b/c/d, `9bc5e13e`): **rede §10** — 6 promoções (net.static-ip, net.dns, firewall.default-deny/source-filtering/egress-policy, net.packet-capture) provadas com tráfego permitido+negado e contadores nft; net.verify.dataplane fica not-impl honesto (feature ADR-0059). **storage §12** — sem root nesta sessão → arnês e2e root-gated pronto + detalhes honestos; lvm/zfs/btrfs ficam partial (falta privilégio, não implementação). **migração VM §7** — 2.º nó montado (sshd userspace, DELONIX_ROOT separado), cold A→B provado cross-host + bug ssh `$HOME` corrigido; live fica not-impl honesto (precisa 2 libvirtd + copy-storage-all).
 
