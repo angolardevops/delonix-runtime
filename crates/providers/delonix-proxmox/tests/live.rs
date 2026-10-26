@@ -3556,6 +3556,248 @@ fn a_running_vm_gets_a_disk_and_a_nic_hotplugged() {
     );
 }
 
+/// `vm.console.serial` and `vm.console.vnc` on a RUNNING Proxmox VM, proved
+/// against the node and — the gold standard — by OPENING the console's
+/// websocket, not merely by the call's answer:
+///
+/// - the VM is created and left RUNNING (a stopped VM has no console);
+/// - `termproxy` answers a serial console: a non-empty `ticket`, a `port` in
+///   the node's range, and the `user` the node recorded the session against;
+/// - `vncproxy` answers a VNC console: the same plus the node's PEM `cert`;
+/// - for EACH ticket, the `/vncwebsocket` upgrade the node authorises is opened
+///   over TLS and answers `101 Switching Protocols` with the `Sec-WebSocket-`
+///   `Accept` the client's own key computes — the console transport connects,
+///   end to end, not just a ticket handed out.
+///
+/// The ticket is single-use and short-lived: each is spent on exactly one
+/// handshake here, in the same run that minted it.
+///
+/// NOT asserted: that a STOPPED VM has no console. Measured on PVE 9.2.2, the
+/// node mints a `termproxy` ticket for a stopped VM too — the helper forks and
+/// the console simply shows nothing, it is not refused — so a "stopped ⇒ error"
+/// assumption would be wrong, and the proof stays on the running path.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn a_running_vm_opens_a_serial_and_a_vnc_console_and_the_websocket_connects() {
+    let t = target().expect(NEEDS_TARGET);
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxcons{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = record_of(&name, &cfg, &boot);
+    let client = b.client();
+
+    // A console is a property of a RUNNING QEMU; the VM is up and stays up.
+    assert!(b.is_running(&vm), "the VM must be running to have a console");
+
+    // SERIAL (`vm.console.serial`): the node forks `termproxy` and answers the
+    // ticket/port/user inline. The port is a listener the node opened in its
+    // console range (> 1024); the user is the account the session is recorded
+    // against. The ticket is a credential, so it is only checked non-empty.
+    let serial = client.termproxy(vmid).expect("open a serial console");
+    assert!(!serial.ticket.is_empty(), "the serial console carried no ticket");
+    assert!(serial.port > 1024, "the serial console port is not a listener: {}", serial.port);
+    assert!(!serial.user.is_empty(), "the serial console carried no user");
+
+    // VNC (`vm.console.vnc`): like the serial plus the node's own PEM cert for
+    // the websocket's TLS.
+    let vnc = client.vncproxy(vmid).expect("open a VNC console");
+    assert!(!vnc.ticket.is_empty(), "the VNC console carried no ticket");
+    assert!(vnc.port > 1024, "the VNC console port is not a listener: {}", vnc.port);
+    assert!(!vnc.user.is_empty(), "the VNC console carried no user");
+    assert!(
+        vnc.cert.contains("BEGIN CERTIFICATE"),
+        "the VNC console carried no PEM cert: {}",
+        &vnc.cert.chars().take(40).collect::<String>()
+    );
+
+    // The gold standard: OPEN each console's websocket. The node authorises the
+    // `/vncwebsocket` upgrade on the port+ticket in the query, and the HTTP
+    // request carries this client's own credential (`auth_header`). A console
+    // that only handed out a ticket but could not be connected would fail here.
+    let (name_h, value_h) = client.auth_header().expect("a credential after a VM call");
+    for (label, port, ticket) in [
+        ("serial", serial.port, serial.ticket.as_str()),
+        ("vnc", vnc.port, vnc.ticket.as_str()),
+    ] {
+        let url = client.vncwebsocket_url(vmid, port, ticket);
+        let accept = open_console_websocket(&url, (name_h, &value_h))
+            .unwrap_or_else(|e| panic!("the {label} console websocket did not connect: {e}"));
+        // The handshake is complete only if the node echoed the key our request
+        // sent, hashed the RFC 6455 way — proof the far end is a real websocket
+        // peer and not a plain 200 that happened to carry 101 in the body.
+        assert_eq!(
+            accept, EXPECTED_WS_ACCEPT,
+            "the {label} console returned a wrong Sec-WebSocket-Accept"
+        );
+    }
+
+    // Clean up: stop, then destroy — nothing of this VM is left on the node or
+    // its storage.
+    b.stop(vmdir, &vm).expect("stop");
+    assert!(!b.is_running(&vm));
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+    let left = client.list_images(&storage, vmid).expect("storage content");
+    assert!(left.is_empty(), "a destroy left disks on the storage: {left:?}");
+}
+
+/// The fixed `Sec-WebSocket-Key` [`open_console_websocket`] sends, and the
+/// `Sec-WebSocket-Accept` a correct RFC 6455 peer must answer with: the
+/// base64 of `sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")`. Fixed, not
+/// random, so the expected accept is a constant a test can assert against.
+const WS_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
+const EXPECTED_WS_ACCEPT: &str = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
+
+/// Opens the Proxmox console websocket at `url` over TLS, sends the RFC 6455
+/// upgrade with the one `auth` header the node needs, and returns the
+/// `Sec-WebSocket-Accept` the node answered — or an error describing where the
+/// handshake broke. Insecure TLS on purpose: the lab node serves a self-signed
+/// certificate (the live `Target` sets `insecure_tls`), so the same trust is
+/// used here. Hand-rolled rather than pulling a websocket crate: only the
+/// handshake matters for the proof, and `rustls` is already a dev-dependency.
+fn open_console_websocket(url: &str, auth: (&str, &str)) -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+
+    // Split `https://host:port/path?query` into the pieces the request needs.
+    let rest = url.strip_prefix("https://").ok_or("url is not https")?;
+    let (authority, path_query) = rest.split_once('/').ok_or("url has no path")?;
+    let path_query = format!("/{path_query}");
+    let (host, port) = authority
+        .rsplit_once(':')
+        .ok_or("authority has no port")?;
+    let port: u16 = port.parse().map_err(|_| "port is not a number")?;
+
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| format!("tls config: {e}"))?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertVerify(provider)))
+        .with_no_client_auth();
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .map_err(|e| format!("server name {host}: {e}"))?;
+    let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name)
+        .map_err(|e| format!("tls connect: {e}"))?;
+    let mut sock = std::net::TcpStream::connect((host, port))
+        .map_err(|e| format!("tcp connect {host}:{port}: {e}"))?;
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(15)))
+        .map_err(|e| format!("read timeout: {e}"))?;
+    let mut tls = rustls::Stream::new(&mut conn, &mut sock);
+
+    let (auth_name, auth_value) = auth;
+    let request = format!(
+        "GET {path_query} HTTP/1.1\r\n\
+         Host: {host}:{port}\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Protocol: binary\r\n\
+         Sec-WebSocket-Key: {WS_KEY}\r\n\
+         {auth_name}: {auth_value}\r\n\
+         \r\n"
+    );
+    tls.write_all(request.as_bytes())
+        .map_err(|e| format!("send upgrade: {e}"))?;
+    tls.flush().map_err(|e| format!("flush: {e}"))?;
+
+    // Read until the header terminator; a 101 has no body, so this is the whole
+    // answer. A short read loop, bounded by the socket's read timeout.
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        let n = tls.read(&mut chunk).map_err(|e| format!("read response: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 16 * 1024 {
+            return Err("response headers did not end".into());
+        }
+    }
+    let head = String::from_utf8_lossy(&buf);
+    let status = head.lines().next().unwrap_or_default();
+    if !status.starts_with("HTTP/1.1 101") {
+        return Err(format!("not an upgrade — status line was `{status}`"));
+    }
+    head.lines()
+        .find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim()
+                .eq_ignore_ascii_case("sec-websocket-accept")
+                .then(|| v.trim().to_string())
+        })
+        .ok_or_else(|| "101 without a Sec-WebSocket-Accept header".into())
+}
+
+/// A `rustls` server-certificate verifier that accepts anything, for the lab
+/// node's self-signed certificate (`insecure_tls` in the live `Target`). Test
+/// only — never built into the crate.
+#[derive(Debug)]
+struct NoCertVerify(std::sync::Arc<rustls::crypto::CryptoProvider>);
+
+impl rustls::client::danger::ServerCertVerifier for NoCertVerify {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
 /// `vm cloud-init` on Proxmox (`vm.cloud-init`), asserted from the node's
 /// OWN rendering of the drive (`…/cloudinit/dump?type=user`), never from the
 /// call's answer:

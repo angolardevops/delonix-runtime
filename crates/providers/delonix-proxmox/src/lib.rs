@@ -1087,6 +1087,39 @@ fn agent_exec_status_of(body: AgentExecStatusBody) -> AgentExecStatus {
     }
 }
 
+/// A serial console the node just opened for a VM (`POST …/termproxy`).
+///
+/// `ticket` is the single-use secret the `/vncwebsocket` upgrade carries as
+/// its `vncticket`, `port` the TCP port on the node the websocket relays, and
+/// `user` the account the node recorded the session against. The console is
+/// LIVE the moment this returns: the node forked `termproxy` and is waiting on
+/// that port — opening the websocket is the transport over it (a browser, or a
+/// local relay), not a second step the node blocks on here. The ticket is
+/// short-lived (the node expires it in minutes) and is a credential, so this
+/// type does not derive `Debug`: a log line must not carry it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SerialConsole {
+    pub ticket: String,
+    pub port: u32,
+    pub user: String,
+}
+
+/// A VNC console the node just opened for a VM (`POST …/vncproxy` with
+/// `websocket=1`).
+///
+/// Like [`SerialConsole`] plus `cert`: the node's own PEM certificate for the
+/// websocket's TLS, so a relay can pin it. Opened with `websocket=1` because
+/// the only transport this backend offers is the `/vncwebsocket` upgrade, not
+/// the raw VNC TCP a native client would take. `ticket` is a credential, so
+/// this type does not derive `Debug` either.
+#[derive(Clone, PartialEq, Eq)]
+pub struct VncConsole {
+    pub ticket: String,
+    pub port: u32,
+    pub cert: String,
+    pub user: String,
+}
+
 /// The backend is a thin handle over a SHARED client.
 ///
 /// `Arc` and not an owned `Client` because the engine builds a backend per
@@ -2614,6 +2647,90 @@ impl Client {
             }
             Err(e) if is_agent_not_running(&e) => Ok(None),
             Err(e) => Err(e),
+        }
+    }
+
+    /// Opens a SERIAL console on a VM (`vm.console.serial`) through
+    /// `POST …/termproxy`.
+    ///
+    /// The node forks a `termproxy` helper, binds it to a local port, and
+    /// answers inline with the `{ticket, port, user}` the `/vncwebsocket`
+    /// upgrade needs — there is no node task to wait on (the UPID the answer
+    /// also carries is the helper's own, not a queued job). The console is
+    /// live the moment this returns; see [`SerialConsole`]. The `port` the node
+    /// reports may be a number or a string across PVE builds, so it is read
+    /// permissively and normalised to a `u32` here.
+    ///
+    /// A VM the node is not running has no console: the node answers 500, which
+    /// classifies as a node error naming the VM — not something this masks.
+    pub fn termproxy(&self, vmid: u32) -> Result<SerialConsole> {
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/termproxy", self.node),
+            &[],
+            true,
+        )?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "termproxy")?;
+        Ok(SerialConsole {
+            ticket: console_str(&w.data, "ticket", vmid, "termproxy")?,
+            port: console_port(&w.data, vmid, "termproxy")?,
+            user: console_str(&w.data, "user", vmid, "termproxy")?,
+        })
+    }
+
+    /// Opens a VNC console on a VM (`vm.console.vnc`) through `POST …/vncproxy`
+    /// with `websocket=1`.
+    ///
+    /// Same shape as [`Self::termproxy`] plus the node's `cert`, and the
+    /// `websocket=1` the answer's ticket is only valid for the `/vncwebsocket`
+    /// upgrade with. Inline, no node task. See [`VncConsole`].
+    pub fn vncproxy(&self, vmid: u32) -> Result<VncConsole> {
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/vncproxy", self.node),
+            &[("websocket", "1")],
+            true,
+        )?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "vncproxy")?;
+        Ok(VncConsole {
+            ticket: console_str(&w.data, "ticket", vmid, "vncproxy")?,
+            port: console_port(&w.data, vmid, "vncproxy")?,
+            cert: console_str(&w.data, "cert", vmid, "vncproxy")?,
+            user: console_str(&w.data, "user", vmid, "vncproxy")?,
+        })
+    }
+
+    /// The websocket URL a relay opens to carry the console a [`Self::termproxy`]
+    /// or [`Self::vncproxy`] call just opened (`GET …/vncwebsocket`).
+    ///
+    /// The node authorises the upgrade on the `port` and `ticket` in the query;
+    /// the HTTP request itself still needs this client's credential, which
+    /// [`Self::auth_header`] gives. Pure string-building — contacts nothing —
+    /// so the route is a fact a test can check without a node. The `vncticket`
+    /// value is URL-encoded: a Proxmox ticket carries `:`, `/` and `=`.
+    pub fn vncwebsocket_url(&self, vmid: u32, port: u32, ticket: &str) -> String {
+        format!(
+            "{}/api2/json/nodes/{}/qemu/{vmid}/vncwebsocket?port={port}&vncticket={}",
+            self.base,
+            self.node,
+            url_encode(ticket),
+        )
+    }
+
+    /// The HTTP header a request to this node must carry to authenticate — the
+    /// API-token `Authorization`, or the `PVEAuthCookie` of a password login —
+    /// as `(name, value)`. A websocket relay cannot reuse this client's
+    /// `reqwest` connection (the upgrade is not a request/response), so it
+    /// builds its own and needs the credential; this is the one seam that hands
+    /// it over without reaching into the client. The value is a secret and is
+    /// never logged. `None` for a password client that has not logged in yet
+    /// (no VM call has happened), which cannot occur after a console was opened.
+    pub fn auth_header(&self) -> Option<(&'static str, String)> {
+        let ticket = self.ticket.read().unwrap_or_else(|e| e.into_inner());
+        match (&self.auth, ticket.as_ref()) {
+            (Auth::ApiToken { id, secret }, _) => {
+                Some(("Authorization", format!("PVEAPIToken={id}={secret}")))
+            }
+            (_, Some(t)) => Some(("Cookie", format!("PVEAuthCookie={}", t.ticket))),
+            (_, None) => None,
         }
     }
 
@@ -4683,6 +4800,55 @@ fn taken_snapshot(vmid: u32, name: &str) -> Error {
     Error::SnapshotTaken(format!(
         "Proxmox VM {vmid} already has a snapshot named '{name}'"
     ))
+}
+
+/// A required string field of a console answer, or an [`Error::UnexpectedAnswer`]
+/// naming the VM and the route. Keeps [`Client::termproxy`]/[`Client::vncproxy`]
+/// from carrying the same three-line extraction each.
+fn console_str(data: &serde_json::Value, key: &str, vmid: u32, route: &str) -> Result<String> {
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: {route} for VM {vmid} carried no `{key}`"
+            ))
+        })
+}
+
+/// The `port` of a console answer as a `u32`. The node reports it as a JSON
+/// number on some PVE builds and a string on others (the API schema types it
+/// as a string), so both are accepted; anything else, or a value that is not a
+/// port, is an [`Error::UnexpectedAnswer`].
+fn console_port(data: &serde_json::Value, vmid: u32, route: &str) -> Result<u32> {
+    let port = data.get("port");
+    let parsed = match port {
+        Some(serde_json::Value::Number(n)) => n.as_u64().and_then(|p| u32::try_from(p).ok()),
+        Some(serde_json::Value::String(s)) => s.parse::<u32>().ok(),
+        _ => None,
+    };
+    parsed.ok_or_else(|| {
+        Error::UnexpectedAnswer(format!(
+            "proxmox: {route} for VM {vmid} carried no usable `port`: {port:?}"
+        ))
+    })
+}
+
+/// Percent-encodes the characters a Proxmox console ticket carries that are not
+/// query-safe (`:`, `/`, `+`, `=`, and space). Not a general URL encoder — just
+/// enough for a `vncticket=` value, and self-contained so the crate keeps its
+/// dependency set (no `urlencoding`).
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(body: &str, what: &str) -> Result<T> {
@@ -7757,8 +7923,12 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::VmHighAvailability => S::RequiresExternalComponent {
                 component: "cluster HA policy (ADR-0049 D3: excluded as administration)",
             },
-            C::VmConsoleSerial => S::NotImplemented,
-            C::VmConsoleVnc => S::NotImplemented,
+            C::VmConsoleSerial => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_opens_a_serial_and_a_vnc_console_and_the_websocket_connects",
+            },
+            C::VmConsoleVnc => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_opens_a_serial_and_a_vnc_console_and_the_websocket_connects",
+            },
             C::VmGuestAgent => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_guest_agent_reports_the_os_hostname_and_filesystems",
             },
@@ -7856,6 +8026,30 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_console_port_is_read_whether_the_node_sends_a_number_or_a_string() {
+        // PVE 9.2.2 answers `termproxy` with a numeric port and `vncproxy` with
+        // a string one; both have to normalise to the same `u32`.
+        let numeric = serde_json::json!({"port": 5900});
+        let stringy = serde_json::json!({"port": "5901"});
+        assert_eq!(console_port(&numeric, 100, "termproxy").unwrap(), 5900);
+        assert_eq!(console_port(&stringy, 100, "vncproxy").unwrap(), 5901);
+        // A missing or unusable port is an UnexpectedAnswer, not a 0.
+        assert!(console_port(&serde_json::json!({}), 100, "termproxy").is_err());
+        assert!(console_port(&serde_json::json!({"port": "nope"}), 100, "vncproxy").is_err());
+        assert!(console_str(&serde_json::json!({}), "ticket", 100, "termproxy").is_err());
+    }
+
+    #[test]
+    fn a_vnc_ticket_is_url_encoded_into_the_websocket_query() {
+        // A real Proxmox ticket is PVEVNC:<hex> and carries ':'; the query value
+        // must escape it (and '/', '+', '=', space) so the node reads the whole
+        // ticket, not a truncated one.
+        assert_eq!(url_encode("PVEVNC:63Ab/c+d=1 2"), "PVEVNC%3A63Ab%2Fc%2Bd%3D1%202");
+        // Unreserved characters are left as-is.
+        assert_eq!(url_encode("aZ09-_.~"), "aZ09-_.~");
+    }
 
     #[test]
     fn a_template_is_named_by_its_manifest_digest_and_nothing_else() {
@@ -8896,6 +9090,16 @@ mod tests {
                 "agent_exec",
                 "starts a process inside the guest and answers its pid inline; the pid is \
                  polled by agent_exec_status, which is a plain read and not a write at all",
+            ),
+            (
+                "termproxy",
+                "opens a serial console: the node forks a termproxy helper and answers its \
+                 ticket/port inline — the UPID is the helper's own, not a queued job to wait on",
+            ),
+            (
+                "vncproxy",
+                "opens a VNC console: like termproxy, the node answers the ticket/port/cert \
+                 inline and there is no node task to wait on",
             ),
         ];
         let mut checked = 0;

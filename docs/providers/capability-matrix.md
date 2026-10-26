@@ -17,7 +17,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 | protection | 19 | 23 | 82.6 |
 | mobility | 3 | 5 | 60.0 |
 | firewall | 5 | 16 | 31.3 |
-| console | 6 | 11 | 54.5 |
+| console | 8 | 11 | 72.7 |
 | metrics | 7 | 16 | 43.8 |
 | access | 0 | 6 | 0.0 |
 | **all** | **150** | **274** | **54.7** |
@@ -26,7 +26,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 
 - **cloud-hypervisor**: N2 26 of 47 applicable (55.3 %) — 26 supported, 10 partial, 41 unsupported-by-provider, 2 requires-external-component, 11 not-implemented
 - **libvirt**: N2 35 of 58 applicable (60.3 %) — 35 supported, 15 partial, 30 unsupported-by-provider, 2 requires-external-component, 8 not-implemented
-- **proxmox**: N2 38 of 61 applicable (62.3 %) — 38 supported, 12 partial, 26 unsupported-by-provider, 3 requires-external-component, 11 not-implemented
+- **proxmox**: N2 40 of 61 applicable (65.6 %) — 40 supported, 12 partial, 26 unsupported-by-provider, 3 requires-external-component, 9 not-implemented
 - **linux**: N2 18 of 23 applicable (78.3 %) — 18 supported, 4 partial, 67 unsupported-by-provider, 1 not-implemented
 
 | domain | capability | cloud-hypervisor | libvirt | proxmox | linux |
@@ -111,8 +111,8 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 |  | `vm.migration.live` | unsupported-by-provider — ADR-0031: CH migrates memory only, never the disk | not-implemented | supported — live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_moves_live_on_shared_storage_and_keeps_running | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.replication` | requires-external-component — shared or replicated VM storage outside the engine (ADR-0031) | requires-external-component — shared or replicated VM storage outside the engine (ADR-0031) | requires-external-component — cluster replication jobs (ADR-0049 D3: excluded as administration) | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.high-availability` | requires-external-component — a cluster manager with quorum and fencing | requires-external-component — a cluster manager with quorum and fencing; a single libvirt host has none | requires-external-component — cluster HA policy (ADR-0049 D3: excluded as administration) | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
-| console | `vm.console.serial` | supported — live:scripts/vm-native-ch-vm-partials.sh | supported — check:vm console returns the guest's own login prompt over the serial socket | not-implemented | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
-|  | `vm.console.vnc` | unsupported-by-provider — no VNC device on the CH command line | supported — check:vm vnc names a VNC endpoint that answers the RFB protocol handshake | not-implemented | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
+| console | `vm.console.serial` | supported — live:scripts/vm-native-ch-vm-partials.sh | supported — check:vm console returns the guest's own login prompt over the serial socket | supported — live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_opens_a_serial_and_a_vnc_console_and_the_websocket_connects | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
+|  | `vm.console.vnc` | unsupported-by-provider — no VNC device on the CH command line | supported — check:vm vnc names a VNC endpoint that answers the RFB protocol handshake | supported — live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_opens_a_serial_and_a_vnc_console_and_the_websocket_connects | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.guest-agent` | not-implemented | supported — live:crates/providers/delonix-provider-libvirt/tests/live.rs::libvirt_guest_agent_answers_on_a_real_cloud_init_boot | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_guest_agent_reports_the_os_hostname_and_filesystems | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.ip.observed` | partial — stays PARTIAL by provenance, not for lack of a proof: the reported address is COMPUTED from the MAC (`dhcp_lease_ip`, deterministic; `ip_is_predicted` -> `Predicted`), never read back from a lease file or a guest agent, which is what `vm.ip.observed` asks for. `vm create --wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), and `scripts/vm-native-ch-vm-partials.sh` confirms live that the reported address equals the guest's OWN address — but confirming a computed address is reachable is not observing it, so it is not promoted | partial — DHCP lease with a lease floor, then `domifaddr`; pure test only, the battery does not read the IP | supported — live:crates/providers/delonix-proxmox/tests/live.rs::o_ip_vem_do_agente_de_um_convidado_a_serio | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 | metrics | `metrics.prometheus` | partial — `delonix_vms_running/total` only | partial — `delonix_vms_running/total` only; no per-domain stats | not-implemented | supported — e2e:métricas: /metrics expõe gauges por container (cpu/mem) |
