@@ -495,7 +495,22 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmConsoleVnc => S::UnsupportedByProvider {
                 reason: "no VNC device on the CH command line",
             },
-            C::VmGuestAgent => S::NotImplemented,
+            C::VmGuestAgent => S::UnsupportedByProvider {
+                // The qemu-guest-agent the catalog models speaks over a
+                // virtio-serial channel named `org.qemu.guest_agent.0` (the
+                // exact device libvirt puts on every domain and reads with
+                // `virsh qemu-agent-command`). Cloud Hypervisor exposes no
+                // virtio-serial device at all: its command line carries only a
+                // single `--console` (one virtio-console), a legacy `--serial`,
+                // and `--vsock` — there is no port to run the agent on and no
+                // host transport to query it, so the engine cannot build the
+                // channel even in principle. A vsock-based agent
+                // (`qemu-ga -m vsock-listen` over CH `--vsock`) is a different,
+                // non-adopted mechanism: it is unwired here and no guest image
+                // ships or configures it, so it is not a claim this provider can
+                // make. Verified against cloud-hypervisor v52.0 `--help`.
+                reason: "Cloud Hypervisor exposes no virtio-serial channel (org.qemu.guest_agent.0) for the qemu-guest-agent — only a single virtio-console, legacy serial and vsock; a vsock-based agent is a different, unadopted mechanism",
+            },
             C::VmIpObserved => bin(S::Partial {
                 detail: "stays PARTIAL by provenance, not for lack of a proof: the reported address is COMPUTED from the MAC (`dhcp_lease_ip`, deterministic; `ip_is_predicted` -> `Predicted`), never read back from a lease file or a guest agent, which is what `vm.ip.observed` asks for. `vm create --wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), and `scripts/vm-native-ch-vm-partials.sh` confirms live that the reported address equals the guest's OWN address — but confirming a computed address is reachable is not observing it, so it is not promoted",
             }),
