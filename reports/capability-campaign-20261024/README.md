@@ -17,13 +17,15 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **162** |
-| partial | 93 | 86 | 54 |
-| not-implemented | 74 | 72 | 50 |
-| unsupported-by-provider | 230 | 230 | 234 |
+| supported | 103 | 112 | **164** |
+| partial | 93 | 86 | 52 |
+| not-implemented | 74 | 72 | 51 |
+| unsupported-by-provider | 230 | 230 | 233 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **162/269 (60.2%)** |
+| proved/applicable (N2) | — | 112/273 | **164/270 (60.7%)** |
+
+Frente de hardware (`c29dd401`): este host TEM o hardware (IOMMU 17 grupos+vfio, swtpm+/dev/tpm0, pool hugepages 4096×2M, RTX 2000 Ada+nvidia-ctk). **`vm.memory.hugepages` libvirt+CH →supported** (HugePages_Free desce exatamente a RAM do guest, provado live). Mas **tpm/pci-passthrough/gpu-cdi ficam partial honestos — bloqueio mudou de "sem hardware" para "precisa de ROOT"**: modprobe nvidia (gpu), pertença de grupo swtpm (tpm), vfio-bind (pci) — todos exigem root que a sandbox nega; CH tpm reclassificado unsupported→not-impl (CH v52 tem `--tpm` mas o lifecycle do swtpm não está ligado).
 
 Par `4e769bf0`: rede linux `net.nat.snat` (SNAT observado no fio: origem=uplink, 0 com IP interno) + `net.l7-proxy` (HTTP encaminhado pelo proxy, 404 sem rota) →supported. Proxmox rede §11: **0 promoções** (toda a prova exige switch GLOBAL do datacenter — firewall OFF, SDN é `PUT /cluster/sdn` global; §11 proíbe), **4 reclass honestas** (macvlan/encrypted-overlay/ipam/dns do engine → unsupported-by-provider; vlan/vxlan/routes/rate-limit ficam not-impl = lacuna do adapter) → applicable 273→269.
 
@@ -94,10 +96,10 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 
 | provider | supported/aplicável | % |
 |---|---|---|
-| cloud-hypervisor | 25/35 | 71.4 % |
-| libvirt | 32/45 | 71.1 % |
+| cloud-hypervisor | 26/36 | 72.2 % |
+| libvirt | 33/45 | 73.3 % |
 | proxmox | 30/37 | 81.1 % |
-| **TOTAL VM** | **87/117** | **74.4 %** |
+| **TOTAL VM** | **89/118** | **75.4 %** |
 
 Par `193f9461`: CH `vm.backup.disk/restore` →supported (ciclo de recuperação de dados ORIGINAL→CHANGED→ORIGINAL, guestfish); libvirt `vm.guest-agent` re-confirmado supported (agent 8.2.2 live); CH `vm.guest-agent` not-impl→unsupported-by-provider (CH v52 sem virtio-serial `org.qemu.guest_agent.0` — sai do denominador, daí 274→273).
 
