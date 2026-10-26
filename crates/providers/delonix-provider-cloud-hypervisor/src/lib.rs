@@ -364,8 +364,8 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmCpuModel => S::UnsupportedByProvider {
                 reason: "CH exposes the host CPU; no model selection is passed",
             },
-            C::VmCpuPinning => bin(S::Partial {
-                detail: "`cpuAffinity` becomes `--cpus affinity=`; not booted in the battery",
+            C::VmCpuPinning => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-vm-partials.sh",
             }),
             C::VmHugepages => bin(S::Partial {
                 detail: "`--memory hugepages=on`; unit-tested argument, pool not probed",
@@ -379,8 +379,8 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmNamespaceIsolation => bin(S::Supported {
                 evidence: "chaos:scen_namespace_isolation",
             }),
-            C::VmAntispoof => bin(S::Partial {
-                detail: "the tap is pinned to its DHCP lease and the guest MAC in the bridge anti-spoofing table (`dlxspoof`, 2026-10-02; the old `ip` rule never matched); a booted guest got its lease and answered ARP through it, but no battery check forges from a guest yet",
+            C::VmAntispoof => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-vm-partials.sh",
             }),
             C::VmRawDefinition => S::UnsupportedByProvider {
                 reason: "no raw definition format exists for the CH command line",
@@ -465,15 +465,15 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmHighAvailability => S::RequiresExternalComponent {
                 component: "a cluster manager with quorum and fencing",
             },
-            C::VmConsoleSerial => bin(S::Partial {
-                detail: "`vm console` bridges the tty to the VMM's serial socket; no battery",
+            C::VmConsoleSerial => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-vm-partials.sh",
             }),
             C::VmConsoleVnc => S::UnsupportedByProvider {
                 reason: "no VNC device on the CH command line",
             },
             C::VmGuestAgent => S::NotImplemented,
             C::VmIpObserved => bin(S::Partial {
-                detail: "the reported address is COMPUTED from the MAC (`ip_is_predicted`), never read from a lease or agent, so confidence stays `Predicted` and `vm show`/`vm ls` never promote it to observed; but `--wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), confirming the guest answers at that address (a booted guest answered live, 2026-10-24); no battery check reads the IP yet",
+                detail: "stays PARTIAL by provenance, not for lack of a proof: the reported address is COMPUTED from the MAC (`dhcp_lease_ip`, deterministic; `ip_is_predicted` -> `Predicted`), never read back from a lease file or a guest agent, which is what `vm.ip.observed` asks for. `vm create --wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), and `scripts/vm-native-ch-vm-partials.sh` confirms live that the reported address equals the guest's OWN address — but confirming a computed address is reachable is not observing it, so it is not promoted",
             }),
             C::MetricsPrometheus => S::Partial {
                 detail: "`delonix_vms_running/total` only",
@@ -611,8 +611,14 @@ fn cpus_arg(cfg: &VmConfig) -> String {
         }
     }
     if let Some(list) = &cfg.cpu_affinity {
+        // Cloud Hypervisor wants the WHOLE affinity value as one bracketed list,
+        // its per-vCPU elements separated by commas — `affinity=[0@[list],1@[list],…]`
+        // (measured against cloud-hypervisor v52: the older `0@[list]:1@[list]`
+        // colon form is rejected as `ParseCpus(Conversion("affinity", …))`, so a
+        // pinned VM never booted). The outer brackets also shield the inner commas
+        // from the `--cpus` key=value splitter.
         let aff: Vec<String> = (0..n).map(|v| format!("{v}@[{list}]")).collect();
-        a.push_str(&format!(",affinity={}", aff.join(":")));
+        a.push_str(&format!(",affinity=[{}]", aff.join(",")));
     }
     a
 }
@@ -2487,10 +2493,11 @@ Format specific information:
         let mut c = hpc_cfg();
         assert_eq!(cpus_arg(&c), "boot=4");
         c.cpu_affinity = Some("8-15".into());
-        // each of the 4 vCPUs pinned to the host's 8-15 list.
+        // each of the 4 vCPUs pinned to the host's 8-15 list, as the one
+        // bracketed, comma-separated list Cloud Hypervisor v52 accepts.
         assert_eq!(
             cpus_arg(&c),
-            "boot=4,affinity=0@[8-15]:1@[8-15]:2@[8-15]:3@[8-15]"
+            "boot=4,affinity=[0@[8-15],1@[8-15],2@[8-15],3@[8-15]]"
         );
     }
 
