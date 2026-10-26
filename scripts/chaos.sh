@@ -2945,7 +2945,123 @@ scen_packet_capture() {
   dlx container rm -f pcsrv pccli >/dev/null 2>&1
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed firewall_icmp_type firewall_logging pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy static_ip dns firewall_default_deny firewall_source_filter firewall_egress_policy packet_capture)
+# Every delonix network masquerades its containers' egress out through the
+# holder's uplink (`oifname "tap0" masquerade`): a packet a container sends to a
+# destination BEYOND the SDN leaves `tap0` with the UPLINK's source address, never
+# the container's internal 172.x — that is SNAT, and it is proven by OBSERVING the
+# translated source on the wire, not by reading the rule. We capture on `tap0`
+# inside the holder while a container pings the uplink gateway: the echo requests
+# on `tap0` carry the uplink's src, and NONE carries the container's internal src
+# (which is what a sibling on the bridge would have seen). The partial named
+# exactly this gap — "no battery check names outbound traffic".
+scen_nat_snat() {
+  head_ "nat-snat — a saida de um container sai pela uplink com o IP da uplink (SNAT), observado no fio"
+  _np_helpers
+  command -v tcpdump >/dev/null 2>&1 || { skip "nat-snat" "tcpdump nao esta instalado no host"; return; }
+  # The holder is daemonless — it only runs while a workload references it, so we
+  # start the container FIRST and read `tap0`/the gateway off the holder it brings
+  # up, not before.
+  dlx container run -d --name snatc --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local pin; pin=$(holder_pid)
+  local cip; cip=$(ipof snatc)
+  if [ -z "$pin" ] || [ -z "$cip" ]; then
+    skip "nat-snat" "o container nao arrancou com IP ou o holder nao esta de pe"
+    dlx container rm -f snatc >/dev/null 2>&1; return
+  fi
+  local tapip gw
+  tapip=$(nsenter -t "$pin" -U -m -n -- ip -4 -o addr show tap0 2>/dev/null | grep -oP 'inet \K[0-9.]+')
+  gw=$(nsenter -t "$pin" -U -m -n -- ip -4 route show default 2>/dev/null | grep -oP 'via \K[0-9.]+')
+  if [ -z "$tapip" ] || [ -z "$gw" ] || [ "$(recv snatc "$gw" 1)" != 1 ]; then
+    skip "nat-snat" "sem uplink tap0/gateway no holder ou sem saida para $gw antes da captura (tapip='${tapip:-—}' gw='${gw:-—}')"
+    dlx container rm -f snatc >/dev/null 2>&1; return
+  fi
+  # Over-fire against a small `-c`, as scen_packet_capture does: 8 echoes always
+  # fill 8 frames even if every reply were lost, so tcpdump's cap is always reached
+  # and `wait` never hangs on a frame that never comes.
+  local cap="$SANDBOX/snat.txt"; rm -f "$cap"
+  nsenter -t "$pin" -U -m -n -- tcpdump -n -i tap0 -c 8 "icmp and host $gw" > "$cap" 2>/dev/null &
+  local td=$!
+  sleep 1
+  dlx container exec snatc ping -c8 -W2 "$gw" >/dev/null 2>&1
+  wait "$td" 2>/dev/null
+  local from_tap from_cip
+  from_tap=$(grep -c "IP $tapip > $gw: ICMP echo request" "$cap"); from_tap=${from_tap:-0}
+  from_cip=$(grep -c "IP $cip > $gw: ICMP echo request" "$cap"); from_cip=${from_cip:-0}
+  log "captura em tap0: echo requests para $gw com origem uplink $tapip=$from_tap · com origem interna $cip=$from_cip"
+  if [ "$from_tap" -ge 1 ] && [ "$from_cip" -eq 0 ]; then
+    ok "nat-snat (a saida de $cip saiu por tap0 como $tapip — $from_tap pacotes, zero com o IP interno)"
+  else
+    bad "nat-snat" "tap0: $from_tap com origem $tapip, $from_cip com origem interna $cip — a saida nao foi mascarada"
+  fi
+  rm -f "$cap"
+  dlx container rm -f snatc >/dev/null 2>&1
+}
+
+# The L7 reverse proxy in the holder forwards HTTP to a backend container by
+# Host/path (`kind: HTTPRoute`), and the delivery is proven by the RESPONSE: a
+# request through the published listener returns the backend's OWN body. The L7
+# decision is proven both ways — a request whose `Host:` matches the route is
+# relayed to the backend; one that matches no route is answered 404 by the proxy
+# itself (it did not blindly forward). The backend is a one-shot HTTP responder
+# (busybox `nc`) so the test needs no second image. The partial said the battery
+# "only lists routes"; this drives TRAFFIC through it.
+scen_l7_proxy() {
+  head_ "l7-proxy — o proxy encaminha HTTP para o backend pelo Host certo, e nega a rota inexistente (404)"
+  _np_helpers
+  command -v curl >/dev/null 2>&1 || { skip "l7-proxy" "curl nao esta instalado no host"; return; }
+  local port=18092
+  if ss -ltn 2>/dev/null | grep -qE "[:.]$port\b"; then
+    skip "l7-proxy" "porta $port ocupada no host — um cenario que chumba por isso nao diz nada do motor"; return
+  fi
+  # One-shot HTTP backend: a known body once per connection, forever. `${#body}`
+  # and `$body` are expanded by the harness's bash before the string reaches the
+  # container's `sh`; the `\r\n` escapes stay literal for busybox `printf`.
+  local body=DELONIX-L7-OK
+  dlx container run -d --name l7be --net chaosnet "$IMAGE" sh -c "
+    while true; do
+      printf 'HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${#body}\r\nConnection: close\r\n\r\n$body' | nc -l -p 80
+    done" >/dev/null 2>&1
+  sleep 3
+  local beip; beip=$(ipof l7be)
+  if [ -z "$beip" ] || [ -z "$(holder_pid)" ]; then
+    skip "l7-proxy" "o backend nao arrancou com IP ou o holder nao esta de pe"; dlx container rm -f l7be >/dev/null 2>&1; return
+  fi
+  local hr="$SANDBOX/l7-route.yaml"
+  cat > "$hr" <<YAML
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: l7r }
+spec:
+  entrypoints: [{ port: $port }]
+  rules:
+    - host: shop.test
+      paths:
+        - path: /
+          backend: { service: l7be, port: 80 }
+YAML
+  dlx net httproute apply -f "$hr" >/dev/null 2>&1
+  sleep 2
+  if [ -z "$(cat "$SANDBOX/root/httproute/proxy.pid" 2>/dev/null)" ]; then
+    skip "l7-proxy" "o proxy nao subiu"
+    dlx net httproute rm >/dev/null 2>&1; dlx container rm -f l7be >/dev/null 2>&1; rm -f "$hr"; return
+  fi
+  # matching Host → relayed to the backend, the body comes back.
+  local got; got=$(curl -s --max-time 5 -H 'Host: shop.test' "http://127.0.0.1:$port/" 2>/dev/null)
+  # non-matching Host → the proxy itself answers 404, the backend is never reached.
+  local code; code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' -H 'Host: nao.existe' "http://127.0.0.1:$port/" 2>/dev/null)
+  log "proxy :$port -> l7be:80 · Host shop.test -> '${got:-—}' · Host nao.existe -> HTTP $code"
+  if [ "$got" = "$body" ] && [ "$code" = 404 ]; then
+    ok "l7-proxy (o pedido com Host certo chegou ao backend [$got], o sem rota foi negado pelo proxy [$code])"
+  else
+    bad "l7-proxy" "Host certo devolveu '$got' (esperado $body), sem rota HTTP $code (esperado 404) — o proxy nao encaminhou/roteou por L7"
+  fi
+  dlx net httproute rm >/dev/null 2>&1
+  dlx container rm -f l7be >/dev/null 2>&1
+  rm -f "$hr"
+}
+
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed firewall_icmp_type firewall_logging pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy static_ip dns firewall_default_deny firewall_source_filter firewall_egress_policy packet_capture nat_snat l7_proxy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
