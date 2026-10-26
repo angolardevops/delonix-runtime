@@ -627,11 +627,15 @@ impl ContainerService for NodeApi {
     type LogsStream =
         Pin<Box<dyn tokio_stream::Stream<Item = Result<LogChunk, Status>> + Send + 'static>>;
 
-    async fn logs(
-        &self,
-        _req: Request<LogsRequest>,
-    ) -> Result<Response<Self::LogsStream>, Status> {
-        Err(unserved("ContainerService", "Logs"))
+    async fn logs(&self, req: Request<LogsRequest>) -> Result<Response<Self::LogsStream>, Status> {
+        let req = req.into_inner();
+        // The backlog read is file I/O; the follow task it spawns lands on the
+        // runtime (a blocking-pool thread per poll), as `WatchEvents` does.
+        let stream = blocking("container logs", move || {
+            crate::container_logs::stream(node::state_root(), req, crate::container_logs::POLL)
+        })
+        .await??;
+        Ok(Response::new(Box::pin(stream)))
     }
 }
 
