@@ -80,6 +80,7 @@ pub mod proto {
 }
 
 pub mod activation;
+pub mod container_ops;
 pub mod containers;
 pub mod docs;
 pub mod events;

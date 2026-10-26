@@ -554,9 +554,14 @@ impl ContainerService for NodeApi {
 
     async fn delete_container(
         &self,
-        _req: Request<DeleteContainerRequest>,
+        req: Request<DeleteContainerRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ContainerService", "DeleteContainer"))
+        let req = req.into_inner();
+        blocking("container delete", move || {
+            crate::container_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn start_container(
@@ -568,16 +573,26 @@ impl ContainerService for NodeApi {
 
     async fn stop_container(
         &self,
-        _req: Request<StopContainerRequest>,
+        req: Request<StopContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("ContainerService", "StopContainer"))
+        let req = req.into_inner();
+        blocking("container stop", move || {
+            crate::container_ops::stop_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn kill_container(
         &self,
-        _req: Request<KillContainerRequest>,
+        req: Request<KillContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("ContainerService", "KillContainer"))
+        let req = req.into_inner();
+        blocking("container kill", move || {
+            crate::container_ops::kill_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn wait_container(
@@ -759,6 +774,7 @@ const MUTATIONS: &[&str] = &[
     "CreateSnapshot",
     "RestoreSnapshot",
     "DeleteSnapshot",
+    "DeleteContainer",
 ];
 
 /// Puts a header's value in the request field it stands for. The same value
