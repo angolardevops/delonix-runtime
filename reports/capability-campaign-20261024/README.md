@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **137** |
-| partial | 93 | 86 | 73 |
+| supported | 103 | 112 | **144** |
+| partial | 93 | 86 | 66 |
 | not-implemented | 74 | 72 | 61 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **137/274 (50.0%)** |
+| proved/applicable (N2) | — | 112/273 | **144/274 (52.6%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -90,10 +90,12 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 
 | provider | supported/aplicável | % |
 |---|---|---|
-| cloud-hypervisor | 18/36 | 50.0 % |
-| libvirt | 26/45 | 57.8 % |
+| cloud-hypervisor | 21/36 | 58.3 % |
+| libvirt | 30/45 | 66.7 % |
 | proxmox | 26/37 | 70.3 % |
-| **TOTAL VM** | **70/118** | **59.3 %** |
+| **TOTAL VM** | **77/118** | **65.3 %** |
+
+Último par (`2622eb07`): CH `vm.cpu.pinning` (bug de affinity do CH v52 corrigido), `vm.antispoof`, `vm.console.serial` →supported; libvirt `vm.console.serial`/`vnc` (RFB handshake), `vm.backup.disk`/`restore` (recuperação de dados) →supported. CH `vm.ip.observed` e `vm.migration.cold`, libvirt `vm.backup.quiesced` e `vm.raw-definition` ficam partial honestos (IP computado≠observado; cold-migrate precisa 2º host; quiesce precisa guest-agent; raw-def é fronteira de segurança).
 
 Tecto realista < 100% neste host: ~8-10 células hardware-gated (pci-passthrough/tpm/hugepages/guest-agent) ficam partial honestas até haver hardware. Resto do caminho: mais partials backend-completos (CH antispoof/cpu.pinning/console; libvirt console/backup/raw-definition) + hotplug.remove (com cuidado §7) + proxmox hotplug add/console.
 
