@@ -17,7 +17,8 @@ use tonic::Status;
 use crate::network_ops::{stale_etag, status_of};
 use crate::operations::{self, Begun};
 use crate::proto::v1::{
-    Container, DeleteContainerRequest, KillContainerRequest, Operation, StopContainerRequest,
+    Container, ContainerStats, DeleteContainerRequest, KillContainerRequest, Operation,
+    StatsRequest, StopContainerRequest,
 };
 
 /// The engine's persisted container record (not the proto message).
@@ -148,6 +149,52 @@ pub fn delete_in(root: &Path, req: &DeleteContainerRequest) -> Result<Operation,
     Ok(operations::message(&operations::finish(root, rec, outcome)?))
 }
 
+/// `Stats`: the container's live cgroup counters as the contract's
+/// `ContainerStats`. CPU and working-set come from `delonix_linux::container_usage`
+/// (best-effort — a stopped container reads back all-`None`, reported in
+/// `unmeasured`, never a fabricated zero). The configured memory limit, pids,
+/// network and writable-layer are not wired in this pass and are named in
+/// `unmeasured` so a client distinguishes "zero" from "not measured". The
+/// counters are cumulative: the client computes the rate across two reads.
+pub fn stats_in(root: &Path, req: &StatsRequest) -> Result<ContainerStats, Status> {
+    let (_s, c) = load(root, &req.name, &req.namespace)?;
+    let usage = delonix_linux::container_usage(&c);
+    let mut unmeasured = Vec::new();
+    let cpu_usage_nanos = match usage.cpu_usage_usec {
+        Some(us) => (us as i64).saturating_mul(1000),
+        None => {
+            unmeasured.push("cpu_usage".to_string());
+            0
+        }
+    };
+    let memory_working_set_bytes = match usage.mem_bytes {
+        Some(b) => b as i64,
+        None => {
+            unmeasured.push("memory_working_set".to_string());
+            0
+        }
+    };
+    for f in [
+        "memory_limit",
+        "pids",
+        "network_rx",
+        "network_tx",
+        "writable_layer",
+    ] {
+        unmeasured.push(f.to_string());
+    }
+    Ok(ContainerStats {
+        cpu_usage_nanos,
+        memory_working_set_bytes,
+        memory_limit_bytes: 0,
+        pids: 0,
+        network_rx_bytes: 0,
+        network_tx_bytes: 0,
+        writable_layer_bytes: 0,
+        unmeasured,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +279,27 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[test]
+    fn stats_of_a_never_run_container_reports_everything_unmeasured() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        seed(root, "0123456789abcdef", "idle", "default");
+        let s = stats_in(
+            root,
+            &StatsRequest {
+                name: "idle".into(),
+                namespace: "default".into(),
+            },
+        )
+        .unwrap();
+        // A Created container has no live cgroup: cpu and working-set read back
+        // unmeasured, and the fields this pass does not wire are named too.
+        assert!(s.unmeasured.contains(&"cpu_usage".to_string()));
+        assert!(s.unmeasured.contains(&"memory_working_set".to_string()));
+        assert!(s.unmeasured.contains(&"pids".to_string()));
+        assert_eq!(s.cpu_usage_nanos, 0);
     }
 
     #[test]

@@ -604,9 +604,14 @@ impl ContainerService for NodeApi {
 
     async fn stats(
         &self,
-        _req: Request<StatsRequest>,
+        req: Request<StatsRequest>,
     ) -> Result<Response<ContainerStats>, Status> {
-        Err(unserved("ContainerService", "Stats"))
+        let req = req.into_inner();
+        blocking("container stats", move || {
+            crate::container_ops::stats_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     type ExecStream =
