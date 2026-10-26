@@ -338,12 +338,12 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 detail: "`vm update --memory` via `vm.resize` over a virtio-mem region declared at create (ADR-0068 D3); `memory_actual_size` confirms the guest only with a driver and the onlining policy (D8), no battery check yet",
             }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
-            C::VmHotplugDiskAdd => bin(S::Partial {
-                detail: "`vm update --disk-add` via `vm.add-disk` on the virtio-blk bus, add only; always reports `partial` — no channel to confirm the guest onlined the disk (ADR-0068 D4/Q5), no battery check yet",
+            C::VmHotplugDiskAdd => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-hotplug.sh: guest sees the new /dev/vd* and mkfs+mount+R/W it",
             }),
             C::VmHotplugDiskRemove => S::NotImplemented,
-            C::VmHotplugNicAdd => bin(S::Partial {
-                detail: "`vm update --nic-add network:<name>` via `vm.add-net` over a fresh SDN tap, add only; always reports `partial` — no channel to confirm the guest onlined the NIC (ADR-0068 D4/Q5), no battery check yet",
+            C::VmHotplugNicAdd => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-hotplug.sh: guest sees the new NIC and DHCPs+passes traffic on it",
             }),
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => S::UnsupportedByProvider {
@@ -1193,8 +1193,23 @@ impl VmBackend for CloudHypervisorBackend {
                 vm.name, disk.source
             ))));
         }
+        // `image_type` is MANDATORY, exactly as at boot (`boot_ch`): Cloud
+        // Hypervisor's autodetect, when it guesses RAW, DISABLES sector-0 writes
+        // as a safety opt-in — so `mkfs` on the fresh disk fails `ReadOnly` at
+        // the guest (measured live, CH v52). The JSON enum is PascalCase
+        // (`Raw`/`Qcow2`), unlike the `--disk image_type=` command line.
+        let image_type = match disk.format.as_str() {
+            "" | "qcow2" => "Qcow2",
+            "raw" => "Raw",
+            other => {
+                return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                    "VM '{}': Cloud Hypervisor hot-adds a qcow2 or raw disk, not format '{other}'",
+                    vm.name
+                ))))
+            }
+        };
         let body = format!(
-            "{{\"path\":{},\"readonly\":{}}}",
+            "{{\"path\":{},\"readonly\":{},\"image_type\":\"{image_type}\"}}",
             json_string(&disk.source),
             disk.read_only
         );
@@ -1243,7 +1258,7 @@ impl VmBackend for CloudHypervisorBackend {
         _wait: Duration,
         attached: &mut dyn FnMut(&ExtraNic) -> delonix_model::Result<()>,
     ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
-        let network = match nic.kind.as_str() {
+        let named = match nic.kind.as_str() {
             "" | "network" => nic.source.clone().unwrap_or_else(|| vm.network.clone()),
             other => {
                 return Err(delonix_model::Error::from(Error::InvalidResize(format!(
@@ -1252,6 +1267,16 @@ impl VmBackend for CloudHypervisorBackend {
                     vm.name
                 ))))
             }
+        };
+        // The ingress aliases (`""`/`ingress`/`bridge`/`default`) all name the
+        // shared ingress the primary NIC sits on; resolve them to its canonical
+        // empty name, so the attach resolves that network (`resolve_net` only
+        // knows `""`/`ingress`) instead of hunting for a declared one that is
+        // not there. A genuinely declared network keeps its name.
+        let network = if names_a_declared_network(&named) {
+            named
+        } else {
+            String::new()
         };
         let mac = match &nic.mac {
             Some(m) => m.clone(),
