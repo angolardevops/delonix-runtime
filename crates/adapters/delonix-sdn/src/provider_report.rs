@@ -134,8 +134,8 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::NetNamespaceIsolation => filt(S::Supported {
                     evidence: "chaos:scen_namespace_isolation",
                 }),
-                C::NetL7Proxy => base(S::Partial {
-                    detail: "hyper reverse proxy in the holder, TLS termination, SIGHUP reload; proven E2E in-session, battery only lists routes",
+                C::NetL7Proxy => base(S::Supported {
+                    evidence: "chaos:scen_l7_proxy",
                 }),
                 C::NetTunnelEgress => S::RequiresExternalComponent {
                     component: "a tunnel provider (pinggy, ngrok, cloudflared) and its binary/account",
@@ -170,8 +170,8 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 | C::NetGatewayVpn => S::UnsupportedByProvider {
                     reason: "a perimeter appliance's role (ADR-0051, ADR-0059); the node's own rules are the firewall.* rows",
                 },
-                C::NetNatSnat => base(S::Partial {
-                    detail: "every network masquerades its traffic out through the holder's uplink; no battery check names outbound traffic",
+                C::NetNatSnat => base(S::Supported {
+                    evidence: "chaos:scen_nat_snat",
                 }),
                 C::NetNatDnat => base(S::Supported {
                     evidence: "check:update: publish-add a quente",
