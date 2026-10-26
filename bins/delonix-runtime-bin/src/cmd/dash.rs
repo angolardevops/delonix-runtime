@@ -1192,6 +1192,11 @@ mod tui {
         let mut selected_id: Option<String> = None;
         // Whether the full-screen detail overlay is open over the list.
         let mut detail = false;
+        // The result of the last action launched from the overlay, shown as a
+        // line in it until the next keypress — so a failed `stop`/`start`
+        // (e.g. "already running") is never silently swallowed. Cleared when a
+        // new action starts.
+        let mut action_err: Option<String> = None;
         // CPU% is derived from the monotonic `cpu.stat` counter, anchored to
         // the COLLECTION TICK (not the draw frame) and keyed by stable id —
         // see `CpuRateTracker` for why both matter. One tracker for the
@@ -1309,6 +1314,7 @@ mod tui {
                     filter_err.as_deref(),
                     detail,
                     detail_row,
+                    action_err.as_deref(),
                     cpu_pct,
                     cpu_tile_pct,
                     &trends,
@@ -1360,11 +1366,32 @@ mod tui {
                         }
                         if k.code == KeyCode::Esc {
                             detail = false;
+                            action_err = None;
                             continue;
                         }
-                        // While the detail overlay is open, swallow every other
-                        // key so stray input can't reorder the list behind it.
+                        // While the detail overlay is open, a key is either a
+                        // bound per-resource action (run it against the live
+                        // row) or swallowed so stray input can't reorder the
+                        // list behind the overlay.
                         if detail {
+                            if let (KeyCode::Char(c), Some(r)) = (k.code, detail_row) {
+                                if let Some(action) = action_for(c, &r.kind) {
+                                    let (id, kind) = (r.id.clone(), r.kind.clone());
+                                    action_err = run_action(&mut term, &root, &id, &kind, action)
+                                        .err()
+                                        .map(|e| e.to_string());
+                                    let out = outcome_of(action);
+                                    if !out.keep_detail {
+                                        detail = false;
+                                    }
+                                    if out.recollect {
+                                        // Force the tick block to re-collect on
+                                        // the next iteration so the change shows
+                                        // immediately, not up to a second later.
+                                        last = Instant::now() - Duration::from_secs(2);
+                                    }
+                                }
+                            }
                             continue;
                         }
 
@@ -1372,12 +1399,11 @@ mod tui {
                             KeyCode::Enter => {
                                 if selected_id.is_some() {
                                     detail = true;
+                                    action_err = None;
                                 }
                             }
                             KeyCode::Char('/') => input = Input::Search,
-                            KeyCode::Char('k')
-                                if k.modifiers.contains(KeyModifiers::CONTROL) =>
-                            {
+                            KeyCode::Char('k') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                                 input = Input::Palette;
                             }
                             KeyCode::Char('s') => sort_key = sort_key.next(),
@@ -1478,6 +1504,187 @@ mod tui {
         *selected_id = Some(visible[next].id.clone());
     }
 
+    /// A per-resource operation the detail overlay can launch against the real
+    /// `delonix_linux`/`delonix_vm` services. Pure data — the key→action
+    /// mapping (`action_for`) and the post-action UI decision (`outcome_of`)
+    /// are tested without a live engine; only `run_action` touches the host.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Action {
+        /// Tail the container log once, then pause (suspends the TUI).
+        Logs,
+        /// Open an interactive shell inside the container (suspends the TUI).
+        Exec,
+        /// Stop a running container/VM.
+        Stop,
+        /// Start a stopped container/VM.
+        Start,
+        /// Remove the resource (force).
+        Remove,
+    }
+
+    /// Maps a keypress to the action it triggers in the detail overlay FOR A
+    /// RESOURCE OF `kind`, or `None` when the key is unbound there. `l`/`x`
+    /// (logs/exec) are container-only — a VM has no log file or `exec`
+    /// namespace to join here; `s`/`S` (start/stop) apply to the two kinds that
+    /// own a lifecycle service; `d` (remove) applies to both. Kinds without a
+    /// live service in scope here (Network/Volume/Image) get no action — the
+    /// overlay stays a read-only view for them.
+    fn action_for(key: char, kind: &str) -> Option<Action> {
+        let is_container = kind == k::CONTAINER;
+        let has_lifecycle = is_container || kind == k::VM;
+        match key {
+            'l' if is_container => Some(Action::Logs),
+            'x' if is_container => Some(Action::Exec),
+            'S' if has_lifecycle => Some(Action::Stop),
+            's' if has_lifecycle => Some(Action::Start),
+            'd' if has_lifecycle => Some(Action::Remove),
+            _ => None,
+        }
+    }
+
+    /// What the overlay does once an action has run. Removal leaves nothing to
+    /// show, so the overlay closes; a lifecycle change keeps it open (it
+    /// re-reads the live row by id every frame, so the new status appears in
+    /// place). Both force an immediate re-collect so the change is reflected on
+    /// the very next tick rather than up to a second later. The interactive
+    /// actions (logs/exec) only borrowed the terminal — nothing we did changed
+    /// the stores, so no forced re-collect.
+    struct ActionOutcome {
+        keep_detail: bool,
+        recollect: bool,
+    }
+
+    fn outcome_of(action: Action) -> ActionOutcome {
+        match action {
+            Action::Remove => ActionOutcome {
+                keep_detail: false,
+                recollect: true,
+            },
+            Action::Stop | Action::Start => ActionOutcome {
+                keep_detail: true,
+                recollect: true,
+            },
+            Action::Logs | Action::Exec => ActionOutcome {
+                keep_detail: true,
+                recollect: false,
+            },
+        }
+    }
+
+    /// Final kill budget for a container `stop` launched from the overlay.
+    const STOP_TIMEOUT_SECS: u64 = 10;
+
+    /// Runs `body` with the ratatui TUI suspended — raw mode off and back on the
+    /// NORMAL screen — so a child process (an `exec` shell, the log output)
+    /// owns the real terminal and its own `set_raw_mode`/restore does not fight
+    /// ours (see `exec_with`). Always restores the TUI afterwards, even if
+    /// `body` errored, and clears so the next `draw` repaints a clean frame.
+    fn with_suspended<F>(
+        term: &mut Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+        body: F,
+    ) -> Result<()>
+    where
+        F: FnOnce() -> Result<()>,
+    {
+        terminal::disable_raw_mode().ok();
+        execute!(
+            stdout(),
+            terminal::LeaveAlternateScreen,
+            ratatui::crossterm::cursor::Show
+        )
+        .ok();
+        let r = body();
+        terminal::enable_raw_mode().ok();
+        execute!(stdout(), terminal::EnterAlternateScreen).ok();
+        let _ = term.clear();
+        r
+    }
+
+    /// Executes `action` against the resource identified by (`id`, `kind`),
+    /// suspending/resuming the TUI around the ones that own the terminal
+    /// (logs/exec) or print (remove). Lifecycle ops go straight to the silent
+    /// services. Mirrors the CLI verbs' store/secret handling, but NEVER
+    /// `process::exit`s the way `container exec` does — it returns so the TUI
+    /// resumes.
+    fn run_action(
+        term: &mut Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+        root: &std::path::Path,
+        id: &str,
+        kind: &str,
+        action: Action,
+    ) -> Result<()> {
+        match action {
+            Action::Logs => with_suspended(term, || {
+                let (images, store) = super::super::util::open_stores()?;
+                super::super::container::cmd_logs(&images, &store, id, false, None, None, false)?;
+                // Hold the output until the user acknowledges — the resume on
+                // the way out wipes the normal screen on the next frame.
+                use std::io::Write;
+                print!("\n-- end of logs · Enter to return --");
+                stdout().flush().ok();
+                std::io::stdin().read_line(&mut String::new()).ok();
+                Ok(())
+            }),
+            Action::Exec => with_suspended(term, || exec_shell(root, id)),
+            Action::Stop => {
+                if kind == k::VM {
+                    delonix_vm::stop(root, id)?;
+                } else {
+                    let (_images, store) = super::super::util::open_stores()?;
+                    let mut c = super::super::util::find(&store, id)?;
+                    delonix_linux::stop(&store, &mut c, STOP_TIMEOUT_SECS)?;
+                }
+                Ok(())
+            }
+            Action::Start => with_suspended(term, || {
+                if kind == k::VM {
+                    delonix_vm::start(root, id)?;
+                } else {
+                    let (images, store) = super::super::util::open_stores()?;
+                    super::super::container::cmd_start(&images, &store, id)?;
+                }
+                Ok(())
+            }),
+            Action::Remove => with_suspended(term, || {
+                if kind == k::VM {
+                    delonix_vm::remove_force(root, id)?;
+                    println!("{id}");
+                    Ok(())
+                } else {
+                    let (images, store) = super::super::util::open_stores()?;
+                    super::super::container::cmd_rm(&images, &store, id, true)
+                }
+            }),
+        }
+    }
+
+    /// An interactive shell in a running container — `container exec` with no
+    /// command, but RETURNS to the caller instead of `process::exit`ing the way
+    /// the CLI verb does. Resolves vault secrets into the shell's environment
+    /// (same as the CLI path) so the debug shell sees the container's real env.
+    fn exec_shell(root: &std::path::Path, id: &str) -> Result<()> {
+        let (_images, store) = super::super::util::open_stores()?;
+        let c = super::super::util::find(&store, id)?;
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "command -v bash >/dev/null 2>&1 && exec bash || exec sh".to_string(),
+        ];
+        let mut extra_env: Vec<String> = Vec::new();
+        if !c.secret_files && !c.secrets.is_empty() {
+            if let Ok(ss) = delonix_state::SecretStore::open(root) {
+                extra_env.extend(ss.resolve_env(&c.secrets));
+            }
+        }
+        let overrides = delonix_linux::ExecOverrides {
+            extra_env: &extra_env,
+            workdir: None,
+            user: None,
+        };
+        let _code = delonix_linux::exec_with(&c, &command, true, &overrides)?;
+        Ok(())
+    }
+
     fn io_err(e: std::io::Error) -> delonix_model::Error {
         delonix_model::Error::Invalid(format!("dash TUI: {e}"))
     }
@@ -1500,6 +1707,7 @@ mod tui {
         filter_err: Option<&str>,
         detail: bool,
         detail_row: Option<&Row>,
+        action_err: Option<&str>,
         cpu_pct: &HashMap<String, f64>,
         cpu_tile_pct: Option<f64>,
         trends: &Trends,
@@ -1557,10 +1765,17 @@ mod tui {
         // list root (a stale invalid query the user stepped away from). Both
         // paths render the error: it is SIGNALED, never silently ignored.
         let footer_line = if input != Input::None {
-            let prefix = if input == Input::Palette { "\u{25B8} " } else { "/" };
+            let prefix = if input == Input::Palette {
+                "\u{25B8} "
+            } else {
+                "/"
+            };
             let (hint, hint_color) = match filter_err {
                 Some(e) => (format!("\u{26A0} {e}"), REDC),
-                None => (po::t("(Enter: apply · Esc: clear)").to_string(), Color::DarkGray),
+                None => (
+                    po::t("(Enter: apply · Esc: clear)").to_string(),
+                    Color::DarkGray,
+                ),
             };
             Line::from(vec![
                 Span::raw(format!("  {prefix}{query}\u{2588}   ")),
@@ -1587,7 +1802,7 @@ mod tui {
 
         // The detail overlay paints LAST, over everything, so it is modal.
         if detail {
-            draw_detail(f, area, detail_row, cpu_pct);
+            draw_detail(f, area, detail_row, action_err, cpu_pct);
         }
     }
 
@@ -1616,10 +1831,25 @@ mod tui {
     /// the selected resource has vanished between the keypress and this frame
     /// (it was deleted/stopped) — the overlay still opens, saying so, so Esc
     /// has something to close instead of leaving the user stuck.
+    /// The keys the overlay binds for a resource of `kind` — the hint line at
+    /// the foot of the overlay, and the authority on what `action_for` accepts
+    /// (kept in lockstep with it by the `action_for` tests). Empty for kinds
+    /// with no in-scope service (Network/Volume/Image).
+    fn actions_hint(kind: &str) -> &'static str {
+        if kind == k::CONTAINER {
+            "l: logs · x: exec · s: start · S: stop · d: remove"
+        } else if kind == k::VM {
+            "s: start · S: stop · d: remove"
+        } else {
+            ""
+        }
+    }
+
     fn draw_detail(
         f: &mut ratatui::Frame,
         full: Rect,
         row: Option<&Row>,
+        action_err: Option<&str>,
         cpu_pct: &HashMap<String, f64>,
     ) {
         let area = centered_rect(60, 60, full);
@@ -1631,7 +1861,7 @@ mod tui {
                 format!(" {} ", po::t("DETAILS (Esc: back)")),
                 Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
             ));
-        let lines: Vec<Line> = match row {
+        let mut lines: Vec<Line> = match row {
             None => vec![Line::from(Span::styled(
                 po::t("resource no longer present"),
                 Style::default().fg(Color::DarkGray),
@@ -1639,10 +1869,7 @@ mod tui {
             Some(r) => {
                 let kv = |label: &str, value: String| {
                     Line::from(vec![
-                        Span::styled(
-                            format!("{label:>12}  "),
-                            Style::default().fg(Color::Gray),
-                        ),
+                        Span::styled(format!("{label:>12}  "), Style::default().fg(Color::Gray)),
                         Span::raw(value),
                     ])
                 };
@@ -1676,6 +1903,25 @@ mod tui {
                 ]
             }
         };
+        // Foot of the overlay: the bound actions for this kind (blank line as a
+        // separator), then the last action's error if it failed — surfaced, not
+        // swallowed. `row.kind` drives the hint; a vanished row shows nothing.
+        if let Some(r) = row {
+            let hint = actions_hint(&r.kind);
+            if !hint.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    hint,
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+        if let Some(err) = action_err {
+            lines.push(Line::from(Span::styled(
+                err.to_string(),
+                Style::default().fg(REDC),
+            )));
+        }
         f.render_widget(Paragraph::new(lines).block(block), area);
     }
 
@@ -2181,7 +2427,10 @@ mod tui {
             assert!(t.pct_of("c").is_some());
             // Resource gone from this tick → its anchor and % are forgotten, so
             // a restarted resource cannot inherit a stale anchor.
-            t.observe(t0 + Duration::from_secs(2), std::iter::empty::<(&str, u64)>());
+            t.observe(
+                t0 + Duration::from_secs(2),
+                std::iter::empty::<(&str, u64)>(),
+            );
             assert_eq!(t.pct_of("c"), None);
             assert!(t.anchor.is_empty());
         }
@@ -2307,6 +2556,113 @@ mod tui {
             assert_eq!(sel.as_deref(), Some("id-a"));
             move_selection(&visible, &mut sel, -1);
             assert_eq!(sel.as_deref(), Some("id-a"));
+        }
+
+        // ---- overlay actions: key→action mapping + post-action state ----
+
+        #[test]
+        fn action_for_maps_container_keys() {
+            use Action::*;
+            let c = k::CONTAINER;
+            assert_eq!(action_for('l', c), Some(Logs));
+            assert_eq!(action_for('x', c), Some(Exec));
+            assert_eq!(action_for('s', c), Some(Start));
+            assert_eq!(action_for('S', c), Some(Stop));
+            assert_eq!(action_for('d', c), Some(Remove));
+            // Unbound key → no action (swallowed by the overlay).
+            assert_eq!(action_for('z', c), None);
+        }
+
+        #[test]
+        fn action_for_restricts_vm_to_lifecycle_and_remove() {
+            use Action::*;
+            let v = k::VM;
+            // A VM has no in-overlay log file or exec namespace.
+            assert_eq!(action_for('l', v), None);
+            assert_eq!(action_for('x', v), None);
+            // But it owns a lifecycle service.
+            assert_eq!(action_for('s', v), Some(Start));
+            assert_eq!(action_for('S', v), Some(Stop));
+            assert_eq!(action_for('d', v), Some(Remove));
+        }
+
+        #[test]
+        fn action_for_gives_read_only_kinds_no_actions() {
+            // Network/Volume/Image have no live service wired here: every key
+            // is unbound, so the overlay stays a pure read-only view.
+            for kind in [k::NETWORK, k::VOLUME, k::IMAGE] {
+                for key in ['l', 'x', 's', 'S', 'd'] {
+                    assert_eq!(action_for(key, kind), None, "{kind}/{key}");
+                }
+            }
+        }
+
+        #[test]
+        fn actions_hint_matches_what_action_for_accepts() {
+            // The hint line is the documented surface; it must not promise a
+            // key `action_for` rejects, nor hide one it accepts.
+            for kind in [k::CONTAINER, k::VM, k::NETWORK, k::VOLUME, k::IMAGE] {
+                let hint = actions_hint(kind);
+                for key in ['l', 'x', 's', 'S', 'd'] {
+                    let in_hint = hint.contains(&format!("{key}:"));
+                    let bound = action_for(key, kind).is_some();
+                    assert_eq!(in_hint, bound, "{kind}/{key}: hint={hint:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn outcome_closes_only_on_removal_and_recollects_on_state_change() {
+            // Removal: nothing left to show → close, and re-collect so the row
+            // disappears next tick.
+            let o = outcome_of(Action::Remove);
+            assert!(!o.keep_detail);
+            assert!(o.recollect);
+            // Lifecycle: the resource stays → keep the overlay, re-collect to
+            // refresh the status in place.
+            for a in [Action::Stop, Action::Start] {
+                let o = outcome_of(a);
+                assert!(o.keep_detail);
+                assert!(o.recollect);
+            }
+            // Interactive: we only borrowed the terminal, changed no store → no
+            // forced re-collect, overlay stays.
+            for a in [Action::Logs, Action::Exec] {
+                let o = outcome_of(a);
+                assert!(o.keep_detail);
+                assert!(!o.recollect);
+            }
+        }
+
+        #[test]
+        fn state_reconstructs_after_a_remove() {
+            // The loop re-collects after an action; model the data a `remove`
+            // leaves behind and check the overlay/selection reconstruct the way
+            // the real loop does: the acted row is gone, selection snaps to a
+            // surviving row (its id adopted), and the by-id detail lookup for
+            // the removed resource yields None (overlay shows "no longer
+            // present").
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let b = row_k("id-b", "beta", "Container", "running");
+            let acted = "id-a";
+
+            // Pre-action view: both rows present, selection on the acted one.
+            let before = vec![&a, &b];
+            let mut sel = Some(acted.to_string());
+            assert_eq!(resolve_selection(&before, &mut sel), Some(0));
+
+            // Post-remove re-collect: the acted row is no longer in the data.
+            let after = vec![&b];
+            // The by-id detail lookup for the removed resource is now empty.
+            assert!(after.iter().find(|r| r.id == acted).is_none());
+            // Selection reconstructs onto the survivor and adopts its id.
+            assert_eq!(resolve_selection(&after, &mut sel), Some(0));
+            assert_eq!(sel.as_deref(), Some("id-b"));
+
+            // And if that was the last resource, it clears cleanly.
+            let empty: Vec<&Row> = Vec::new();
+            assert_eq!(resolve_selection(&empty, &mut sel), None);
+            assert_eq!(sel, None);
         }
     }
 }
