@@ -2633,7 +2633,319 @@ voltou ABERTO depois do respawn do holder"
   rm -rf "$dir"
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed firewall_icmp_type firewall_logging pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy)
+# --- §10 linux-net partials: live proof for the backend-complete rows ---------
+#
+# The helpers these six share. `ipof` reads the recorded address; `nft_` enters
+# the holder to read the counters that decide each verdict; `fwcount` reads one
+# rule's packet counter by the text unique to its line (a `-` when the chain or
+# the rule is absent — absence is an answer, never a 0); `recv` is ICMP replies;
+# `redis_ping` is a TCP round-trip to the default `redis-server` the image runs
+# when no command overrides it (PONG only when the SYN AND the reply crossed).
+# Redefined per scenario, like the firewall scenarios above, because the pin is
+# asked for on every call and a phase that drops a refcount to 0 gets a NEW
+# infra — a cached pid would read a dead netns.
+_np_helpers() {
+  nft_() { nsenter -t "$(holder_pid)" -U -m -n -- nft "$@"; }
+  ipof() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF2'
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")==sys.argv[1]: print(d.get("ip") or ""); break
+EOF2
+  }
+  fwcount() {
+    local ch n
+    ch=$(nft_ list map ip dlxing fwmap 2>/dev/null | grep -oP "$1 : jump \Kfw[0-9a-f]+")
+    [ -n "$ch" ] || { echo -; return; }
+    n=$(nft_ list chain ip dlxing "$ch" 2>/dev/null | grep -F -- "$2" | grep -oP 'packets \K[0-9]+' | head -1)
+    echo "${n:--}"
+  }
+  recv() {
+    local n
+    n=$(dlx container exec "$1" ping -c"$3" -W2 "$2" 2>/dev/null | grep -oP '[0-9]+(?= packets received)')
+    echo "${n:-0}"
+  }
+  # PONG when the TCP round-trip to <ip>:6379 completed, empty otherwise. `-t 2`
+  # is redis-cli's own connect timeout, so a DROPed SYN fails in 2s instead of
+  # hanging the 180s `dlx` wrapper.
+  redis_ping() { dlx container exec "$1" redis-cli -h "$2" -t 2 ping 2>/dev/null | tr -d '\r\n'; }
+}
+
+# `--ip` pins a container to a FIXED address: the container really gets that
+# address (not merely "accepted"), it is reachable there BY TRAFFIC, and the
+# IPAM ledger then REFUSES a second owner of the same address — the reservation
+# is what makes the fixed address safe, so a scenario that only checked the
+# first container would miss the whole point.
+scen_static_ip() {
+  head_ "static-ip — \`--ip\` pin o endereco, e o IPAM recusa um segundo dono"
+  _np_helpers
+  if ! dlx network create sipnet --subnet 172.31.88.0/24 >/dev/null 2>&1; then
+    skip "static-ip" "nao consegui criar a rede 172.31.88.0/24"; return
+  fi
+  local fixed=172.31.88.50
+  dlx container run -d --name sipsrv --net sipnet --ip "$fixed" "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name sipcli --net sipnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local got_ip got
+  got_ip=$(ipof sipsrv)
+  if [ -z "$got_ip" ] || [ -z "$(holder_pid)" ]; then
+    skip "static-ip" "o container com \`--ip\` nao arrancou com endereco"
+    dlx container rm -f sipsrv sipcli >/dev/null 2>&1; dlx network rm sipnet >/dev/null 2>&1; return
+  fi
+  got=$(recv sipcli "$fixed" 3)
+  log "ip pedido $fixed · ip obtido $got_ip · sipcli->$fixed $got/3"
+  if [ "$got_ip" = "$fixed" ] && [ "$got" = 3 ]; then
+    ok "static-ip/endereco-fixo ($fixed atribuido e alcancavel por trafego $got/3)"
+  else
+    bad "static-ip/endereco-fixo" "pedi $fixed, obtive '$got_ip', trafego $got/3 — o endereco fixo nao pegou"
+  fi
+
+  # The reservation: a second `--ip <same>` is refused by the IPAM ledger, so
+  # the fixed address is never handed to two owners.
+  local out rc
+  out=$(dlx container run -d --name sipdup --net sipnet --ip "$fixed" "$IMAGE" sleep 300 2>&1); rc=$?
+  log "segundo \`--ip $fixed\`: rc=$rc · $(printf '%s' "$out" | grep -oiE 'already leased|conflict|DX-[0-9]+' | tr '\n' ' ')"
+  if [ "$rc" != 0 ] && printf '%s' "$out" | grep -qiE 'already leased|conflict'; then
+    ok "static-ip/reserva-exclusiva (o IPAM recusou um segundo dono de $fixed)"
+  else
+    bad "static-ip/reserva-exclusiva" "um segundo \`--ip $fixed\` nao foi recusado (rc=$rc) — dois donos do mesmo endereco"
+  fi
+  dlx container rm -f sipsrv sipcli sipdup >/dev/null 2>&1
+  dlx network rm sipnet >/dev/null 2>&1
+}
+
+# The holder's resolver serves `<name>.<ns>.delonix.internal` (ADR-0048): a name
+# RESOLVES to the workload's IPAM address AND a packet sent to that name arrives
+# — the resolution is proven end-to-end by TRAFFIC, not just by a lookup. The
+# negative is a name that does NOT exist: it must NOT resolve (a resolver that
+# answers everything is as good as none).
+scen_dns() {
+  head_ "dns — \`<name>.<ns>.delonix.internal\` resolve para o IP do workload, provado por trafego"
+  _np_helpers
+  dlx container run -d --name dnssrv --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name dnscli --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local srv_ip; srv_ip=$(ipof dnssrv)
+  if [ -z "$srv_ip" ] || [ -z "$(holder_pid)" ]; then
+    skip "dns" "o container alvo nao arrancou com endereco"
+    dlx container rm -f dnssrv dnscli >/dev/null 2>&1; return
+  fi
+  local fqdn=dnssrv.default.delonix.internal resolved pinged
+  # `getent hosts` is the libc resolver path (/etc/resolv.conf → the holder), the
+  # same one every program in the container uses — so this is the real path, not
+  # a special DNS client.
+  resolved=$(dlx container exec dnscli getent hosts "$fqdn" 2>/dev/null | awk 'NR==1{print $1}')
+  pinged=$(recv dnscli "$fqdn" 3)
+  log "getent $fqdn -> '${resolved:-—}' (IPAM $srv_ip) · ping pelo nome $pinged/3"
+  if [ "$resolved" = "$srv_ip" ] && [ "$pinged" = 3 ]; then
+    ok "dns/resolve-e-alcanca ($fqdn -> $srv_ip, ping pelo nome $pinged/3)"
+  else
+    bad "dns/resolve-e-alcanca" "getent deu '$resolved' (IPAM $srv_ip), ping pelo nome $pinged/3 — o nome nao resolveu para o workload"
+  fi
+
+  # The negative: a name with no workload behind it does not resolve. `getent`
+  # exits non-zero and prints nothing — the holder did not invent an answer.
+  local bogus miss_rc miss_out
+  bogus=nosuch.default.delonix.internal
+  miss_out=$(dlx container exec dnscli getent hosts "$bogus" 2>/dev/null); miss_rc=$?
+  log "getent $bogus -> rc=$miss_rc saida='${miss_out:-vazia}'"
+  if [ "$miss_rc" != 0 ] && [ -z "$miss_out" ]; then
+    ok "dns/nome-inexistente-nao-resolve (o resolver nao inventou resposta para $bogus)"
+  else
+    bad "dns/nome-inexistente-nao-resolve" "$bogus resolveu (rc=$miss_rc, saida '$miss_out') — o resolver respondeu a um nome sem workload"
+  fi
+  dlx container rm -f dnssrv dnscli >/dev/null 2>&1
+}
+
+# `net ingress policy <c> deny` CLOSES a container by default — proven both ways
+# in PACKETS. With the policy at deny a same-network client's TCP is DROPed (the
+# default-drop counter of the container's chain moves and the round-trip fails);
+# then `ingress allow tcp/6379` reopens exactly that port (the accept counter
+# moves and the round-trip returns PONG). Same client, same target — only the
+# policy/rule changes.
+scen_firewall_default_deny() {
+  head_ "firewall-default-deny — \`policy deny\` fecha, \`allow\` reabre a porta nomeada, em pacotes"
+  _np_helpers
+  dlx container run -d --name ddsrv --net chaosnet "$IMAGE" >/dev/null 2>&1
+  dlx container run -d --name ddcli --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local S; S=$(ipof ddsrv)
+  if [ -z "$S" ] || [ -z "$(holder_pid)" ] || [ "$(redis_ping ddcli "$S")" != PONG ]; then
+    skip "firewall-default-deny" "sem IP ou sem round-trip redis antes de qualquer regra"
+    dlx container rm -f ddsrv ddcli >/dev/null 2>&1; return
+  fi
+
+  # denied — default policy deny drops the same-network client.
+  dlx net ingress policy ddsrv deny >/dev/null 2>&1
+  local d0 d1 got
+  d0=$(fwcount "$S" "ip daddr $S counter")
+  got=$(redis_ping ddcli "$S")
+  d1=$(fwcount "$S" "ip daddr $S counter")
+  log "policy deny: round-trip '${got:-—}' · drop por omissao $d0->$d1"
+  if [ -z "$got" ] && [ "$d0" != - ] && [ "$d1" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+    ok "firewall-default-deny/fecha (o cliente nao chega, o drop por omissao contou $((d1 - d0)))"
+  else
+    bad "firewall-default-deny/fecha" "round-trip '$got' com policy deny; drop $d0->$d1 — a politica nao fechou"
+  fi
+
+  # permitted — an explicit allow of tcp/6379 reopens exactly that port.
+  dlx net ingress allow ddsrv tcp/6379 >/dev/null 2>&1
+  local a0 a1
+  a0=$(fwcount "$S" "ip daddr $S tcp dport 6379 counter")
+  got=$(redis_ping ddcli "$S")
+  a1=$(fwcount "$S" "ip daddr $S tcp dport 6379 counter")
+  log "allow tcp/6379: round-trip '${got:-—}' · accept(6379) $a0->$a1"
+  if [ "$got" = PONG ] && [ "$a0" != - ] && [ "$a1" != - ] && [ $((a1 - a0)) -ge 1 ]; then
+    ok "firewall-default-deny/reabre (allow tcp/6379 deixou passar, o accept contou $((a1 - a0)))"
+  else
+    bad "firewall-default-deny/reabre" "round-trip '$got' com allow tcp/6379; accept $a0->$a1 — o allow nao reabriu a porta"
+  fi
+  dlx container rm -f ddsrv ddcli >/dev/null 2>&1
+}
+
+# `ingress allow <port> --from <cidr>` filters by SOURCE: a client inside the
+# allowed CIDR reaches the port, a client OUTSIDE it does not — proven in
+# packets both ways against ONE rule. The target is at `policy deny`, the rule
+# allows tcp/6379 only from the allowed client's /32; the allowed client's
+# accept counter moves and it gets PONG, the other client's SYN falls to the
+# default drop and it gets nothing.
+scen_firewall_source_filter() {
+  head_ "firewall-source-filtering — \`allow --from <cidr>\` deixa a origem routavel, nega a outra"
+  _np_helpers
+  dlx container run -d --name sfsrv --net chaosnet "$IMAGE" >/dev/null 2>&1
+  dlx container run -d --name sfok  --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name sfno  --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local S OK NO; S=$(ipof sfsrv); OK=$(ipof sfok); NO=$(ipof sfno)
+  if [ -z "$S" ] || [ -z "$OK" ] || [ -z "$NO" ] || [ -z "$(holder_pid)" ] \
+     || [ "$(redis_ping sfok "$S")" != PONG ]; then
+    skip "firewall-source-filtering" "containers sem IP ou sem round-trip antes de qualquer regra"
+    dlx container rm -f sfsrv sfok sfno >/dev/null 2>&1; return
+  fi
+  dlx net ingress policy sfsrv deny >/dev/null 2>&1
+  dlx net ingress allow sfsrv tcp/6379 --from "$OK/32" >/dev/null 2>&1
+
+  # allowed source — the `ip saddr <OK> ... accept` counter moves, PONG returns.
+  local a0 a1 gok
+  a0=$(fwcount "$S" "ip saddr $OK tcp dport 6379 counter")
+  gok=$(redis_ping sfok "$S")
+  a1=$(fwcount "$S" "ip saddr $OK tcp dport 6379 counter")
+  # other source — the default drop counts it, nothing returns.
+  local d0 d1 gno
+  d0=$(fwcount "$S" "ip daddr $S counter")
+  gno=$(redis_ping sfno "$S")
+  d1=$(fwcount "$S" "ip daddr $S counter")
+  log "allow --from $OK/32: origem permitida '${gok:-—}' accept $a0->$a1 · outra origem '${gno:-—}' drop $d0->$d1"
+  if [ "$gok" = PONG ] && [ "$a0" != - ] && [ $((a1 - a0)) -ge 1 ] \
+     && [ -z "$gno" ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+    ok "firewall-source-filtering (a origem $OK passou [accept +$((a1 - a0))], $NO foi cortada [drop +$((d1 - d0))])"
+  else
+    bad "firewall-source-filtering" "permitida '$gok' accept $a0->$a1, outra '$gno' drop $d0->$d1 — o filtro de origem nao distinguiu"
+  fi
+  dlx container rm -f sfsrv sfok sfno >/dev/null 2>&1
+}
+
+# Egress policy BLOCKS outbound, and an `egress allow --to <cidr>` scopes the
+# reopening to one destination — the gap the partial named ("battery lists, does
+# not block"). Proven in packets: baseline reaches; `egress policy deny` drops
+# every destination (the source's own drop counter moves); `egress allow --to
+# <B>` reopens B only, while a THIRD container stays blocked. Same source.
+scen_firewall_egress_policy() {
+  head_ "firewall-egress-policy — \`policy deny\` corta a saida, \`allow --to\` reabre so um destino"
+  _np_helpers
+  dlx container run -d --name egsrc --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name egdst --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name egoth --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local A B D; A=$(ipof egsrc); B=$(ipof egdst); D=$(ipof egoth)
+  if [ -z "$A" ] || [ -z "$B" ] || [ -z "$D" ] || [ -z "$(holder_pid)" ] || [ "$(recv egsrc "$B" 1)" != 1 ]; then
+    skip "firewall-egress-policy" "containers sem IP ou sem trafego antes de qualquer regra"
+    dlx container rm -f egsrc egdst egoth >/dev/null 2>&1; return
+  fi
+
+  # denied — `egress policy deny` drops all of egsrc's egress.
+  dlx net egress policy egsrc deny >/dev/null 2>&1
+  local d0 d1 got
+  d0=$(fwcount "$A" "ip saddr $A counter")
+  got=$(recv egsrc "$B" 3)
+  d1=$(fwcount "$A" "ip saddr $A counter")
+  log "egress policy deny: egsrc->egdst $got/3 · drop da saida $d0->$d1"
+  if [ "$got" = 0 ] && [ "$d0" != - ] && [ "$d1" != - ] && [ $((d1 - d0)) -ge 3 ]; then
+    ok "firewall-egress-policy/corta (a saida foi cortada, o drop contou $((d1 - d0)))"
+  else
+    bad "firewall-egress-policy/corta" "egsrc->egdst $got/3 com egress deny; drop $d0->$d1 — a politica nao cortou a saida"
+  fi
+
+  # permitted — `egress allow --to <B>` reopens B, egoth stays cut.
+  dlx net egress allow egsrc '*' --to "$B/32" >/dev/null 2>&1
+  local a0 a1 gb god
+  a0=$(fwcount "$A" "ip saddr $A ip daddr $B counter")
+  gb=$(recv egsrc "$B" 3)
+  a1=$(fwcount "$A" "ip saddr $A ip daddr $B counter")
+  d0=$(fwcount "$A" "ip saddr $A counter")
+  god=$(recv egsrc "$D" 3)
+  d1=$(fwcount "$A" "ip saddr $A counter")
+  # The accept counter moves by ONE per ICMP flow, not per packet: conntrack
+  # fast-paths the 2nd/3rd echo of the same id past the `ct state established`
+  # prologue, so one reopened flow reads as `+1` while every DROP (no reply, no
+  # established state) counts each packet — hence the asymmetric thresholds.
+  log "egress allow --to $B/32: egsrc->egdst $gb/3 accept $a0->$a1 · egsrc->egoth $god/3 drop $d0->$d1"
+  if [ "$gb" = 3 ] && [ "$a0" != - ] && [ $((a1 - a0)) -ge 1 ] \
+     && [ "$god" = 0 ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 3 ]; then
+    ok "firewall-egress-policy/reabre-um-destino (egdst passou [accept +$((a1 - a0))], egoth continua cortado [drop +$((d1 - d0))])"
+  else
+    bad "firewall-egress-policy/reabre-um-destino" "egdst $gb/3 accept $a0->$a1, egoth $god/3 drop $d0->$d1 — o allow nao limitou a reabertura a um destino"
+  fi
+  dlx container rm -f egsrc egdst egoth >/dev/null 2>&1
+}
+
+# `net capture <c>` runs the host's `tcpdump` inside the container's netns and
+# writes a real pcap. Proven by EFFECT: with `-c N` it stops after N frames and
+# the file it wrote parses back to the traffic generated towards the container —
+# the ICMP echoes we fired are all there (the rest of the cap is the ARP the
+# same traffic needed) — a capture that wrote a file but caught no packets would
+# be as useless as none.
+scen_packet_capture() {
+  head_ "packet-capture — \`net capture\` escreve um pcap com os pacotes reais do trafego"
+  _np_helpers
+  command -v tcpdump >/dev/null 2>&1 || { skip "packet-capture" "tcpdump nao esta instalado no host"; return; }
+  dlx container run -d --name pcsrv --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name pccli --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local S; S=$(ipof pcsrv)
+  if [ -z "$S" ] || [ -z "$(holder_pid)" ] || [ "$(recv pccli "$S" 1)" != 1 ]; then
+    skip "packet-capture" "containers sem IP ou sem trafego antes da captura"
+    dlx container rm -f pcsrv pccli >/dev/null 2>&1; return
+  fi
+  local pcap="$SANDBOX/capture.pcap"
+  rm -f "$pcap"
+  # Capture up to 12 frames on pcsrv's eth0, then fire 8+8 ICMP echoes at it.
+  dlx net capture pcsrv -i eth0 -w "$pcap" -c 12 >/dev/null 2>&1 &
+  local cap=$!
+  sleep 1
+  dlx container exec pccli ping -c8 -W2 "$S" >/dev/null 2>&1
+  dlx container exec pcsrv ping -c8 -W2 "$(ipof pccli)" >/dev/null 2>&1
+  wait "$cap" 2>/dev/null
+  local total icmp
+  if [ ! -s "$pcap" ]; then
+    bad "packet-capture" "a captura nao escreveu um pcap com conteudo em $pcap"
+    dlx container rm -f pcsrv pccli >/dev/null 2>&1; return
+  fi
+  total=$(tcpdump -r "$pcap" 2>/dev/null | wc -l)
+  icmp=$(tcpdump -r "$pcap" icmp 2>/dev/null | wc -l)
+  log "pcap escrito: $total pacotes · $icmp ICMP"
+  # The `-c 12` cap bounds the total; the generated ICMP echoes (8+8) dominate it,
+  # so a healthy capture carries most of its frames as the ICMP we fired.
+  if [ "$total" -ge 8 ] && [ "$icmp" -ge 8 ] && [ "$total" -ge "$icmp" ]; then
+    ok "packet-capture ($icmp dos $total frames sao os echos ICMP gerados — o trafego real foi para o ficheiro)"
+  else
+    bad "packet-capture" "pcap com $total pacotes ($icmp ICMP) — a captura nao apanhou o trafego gerado"
+  fi
+  rm -f "$pcap"
+  dlx container rm -f pcsrv pccli >/dev/null 2>&1
+}
+
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_shared_ipc_uts pod_shared_pid firewall_fail_closed firewall_icmp_type firewall_logging pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy static_ip dns firewall_default_deny firewall_source_filter firewall_egress_policy packet_capture)
 
 while [ $# -gt 0 ]; do
   case "$1" in
