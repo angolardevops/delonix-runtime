@@ -54,3 +54,28 @@ Durante a consolidação apanhou-se (e corrigiu-se, `d7c517ca`) uma dívida cros
 
 ## Invariante mantido
 Cada `+1` em supported passou pelo gate que exige evidência real (teste `check:`/`e2e:`/`live:`/`chaos:`/`test:` existente) — zero promoções só-etiqueta. 15 promoções líquidas a supported, todas com prova; progresso não medido só pela redução de negativos.
+
+---
+
+## Checkpoint 2 (2026-10-25, HEAD 722956f1) — verificação integrada repetida
+
+Após mais 6 pares de frentes (firewall §10, clone/template, hotplug disco/NIC/cpu/mem add+remove, consolas, backups, migração cold, cloud-init, snapshots proxmox), re-corri a verificação integrada sobre todo o corpo acumulado (**121 commits** desde `558e5f20`):
+
+- `make gates` COMPLETO verde: lang_ratchet 3181/1044/116, arch_fitness (library_prints **82**), version, dev_docs, adr (85/81), folhas (353/572).
+- `capability_ratchet`: **152 of 274 (55.5 %)**.
+- Testes dos crates da campanha, juntos em HEAD, **0 falhas**: delonix-runtime-bin 233, delonix-proxmox 136, delonix-provider-libvirt 72, delonix-provider-cloud-hypervisor 40, delonix-mgmt 36, delonix-cri 99, delonix-compute 130, delonix-telemetry 14.
+
+### Antes/depois (atualizado)
+
+| estado | relatório inicial | agora | Δ |
+|---|---|---|---|
+| supported | 103 | **152** | **+49** |
+| partial | 93 | 64 | −29 |
+| not-implemented | 74 | 55 | −19 |
+| unsupported-by-provider | 230 | 229 | −1 |
+| proved/applicable | — | **152/274 (55.5 %)** | — |
+
+### Compatibilidade VM (domínios vm-compute/protection/mobility/console): **85/118 = 72.0 %**
+cloud-hypervisor 23/36 (63.9 %) · libvirt 32/45 (71.1 %) · proxmox 30/37 (81.1 %).
+
+Caminho restante para a % VM é maioritariamente **hardware-gated** (pci-passthrough/tpm/hugepages/guest-agent) e **arquitecturalmente partial honesto** (hot-remove de cpu/mem inseguro → cold resize; migração live/cold entre hosts precisa de 2.º nó; raw-definition é fronteira de segurança). O invariante mantém-se: cada promoção a supported tem evidência real verificada por gate; nenhuma promoção só-etiqueta.
