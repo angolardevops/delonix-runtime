@@ -3454,6 +3454,108 @@ fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
     );
 }
 
+/// `vm.hotplug.disk.add` and `vm.hotplug.nic.add` on a RUNNING Proxmox VM,
+/// asserted from the node's own config and `pending`, never from the call's
+/// answer. A fresh VM boots with `disk` and `network` in its `hotplug` list
+/// (`HOTPLUG_LIST`), so the node can plug a device into the live QEMU instead
+/// of parking it for the next boot:
+///
+/// - the VM is created and left RUNNING (no stop);
+/// - `hotplug_disk_add` attaches a fresh `scsi1` disk: the config carries it
+///   as a volume on this VM's storage, and `pending` holds nothing for `scsi1`
+///   — the disk is plugged, not parked;
+/// - `hotplug_nic_add` attaches a `net1` NIC: the config carries the model and
+///   bridge asked for, and `pending` holds nothing for `net1`;
+/// - the VM was running throughout (never stopped), and a destroy takes both
+///   the device and the hot-added disk's volume with it.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn a_running_vm_gets_a_disk_and_a_nic_hotplugged() {
+    let t = target().expect(NEEDS_TARGET);
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxhotplug{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = record_of(&name, &cfg, &boot);
+    let client = b.client();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+
+    // The device is plugged into a RUNNING QEMU, not parked: the VM is up now
+    // and stays up — nothing here stops it.
+    assert!(b.is_running(&vm), "the VM must be running before a hotplug");
+
+    // A fresh disk into `scsi1`, live. The node allocates it under this VM's id
+    // and the config reads it back; `pending` holding nothing for `scsi1` is
+    // the proof it was plugged and not parked for the next boot.
+    let scsi1 = client
+        .hotplug_disk_add(&ledger, vmid, "scsi1", &format!("{storage}:1"))
+        .expect("hotplug a disk into scsi1");
+    let owned = format!("{storage}:vm-{vmid}-disk-");
+    assert!(
+        scsi1.starts_with(&owned),
+        "scsi1 is not a fresh volume on this VM's storage: {scsi1}"
+    );
+    let c = client.config(vmid).expect("config after disk hotplug");
+    assert!(
+        c.get("scsi1").and_then(|v| v.as_str()).unwrap_or_default() == scsi1,
+        "the config does not carry the hot-added scsi1: {c}"
+    );
+    let pending = client.pending(vmid).expect("pending after disk hotplug");
+    assert!(
+        !pending.iter().any(|e| e.get("key").and_then(|k| k.as_str()) == Some("scsi1")
+            && (e.get("pending").is_some() || e.get("delete").is_some())),
+        "the disk hotplug was parked as PENDING for scsi1: {pending:?}"
+    );
+    assert!(b.is_running(&vm), "the VM must still be running after the disk hotplug");
+
+    // A NIC into `net1`, live, same discipline.
+    let net1 = client
+        .hotplug_nic_add(&ledger, vmid, "net1", "virtio,bridge=vmbr0")
+        .expect("hotplug a NIC into net1");
+    assert!(
+        net1.starts_with("virtio") && net1.contains("bridge=vmbr0"),
+        "net1 did not take the model/bridge asked for: {net1}"
+    );
+    let c = client.config(vmid).expect("config after NIC hotplug");
+    assert!(
+        c.get("net1").and_then(|v| v.as_str()).unwrap_or_default() == net1,
+        "the config does not carry the hot-added net1: {c}"
+    );
+    let pending = client.pending(vmid).expect("pending after NIC hotplug");
+    assert!(
+        !pending.iter().any(|e| e.get("key").and_then(|k| k.as_str()) == Some("net1")
+            && (e.get("pending").is_some() || e.get("delete").is_some())),
+        "the NIC hotplug was parked as PENDING for net1: {pending:?}"
+    );
+    assert!(b.is_running(&vm), "the VM must still be running after the NIC hotplug");
+
+    // Clean up: the destroy takes the VM and the hot-added disk's volume with
+    // it, leaving nothing on the node or its storage.
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+    let left = client.list_images(&storage, vmid).expect("storage content");
+    assert!(
+        left.is_empty(),
+        "a destroy left disks on the storage: {left:?}"
+    );
+}
+
 /// `vm cloud-init` on Proxmox (`vm.cloud-init`), asserted from the node's
 /// OWN rendering of the drive (`…/cloudinit/dump?type=user`), never from the
 /// call's answer:
