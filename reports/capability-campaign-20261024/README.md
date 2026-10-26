@@ -17,13 +17,13 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **148** |
-| partial | 93 | 86 | 66 |
-| not-implemented | 74 | 72 | 57 |
+| supported | 103 | 112 | **152** |
+| partial | 93 | 86 | 64 |
+| not-implemented | 74 | 72 | 55 |
 | unsupported-by-provider | 230 | 230 | 229 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **148/274 (54.0%)** |
+| proved/applicable (N2) | — | 112/273 | **152/274 (55.5%)** |
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
@@ -90,10 +90,12 @@ Disco do host a **99–100%** (~12G livres após limpeza de worktrees). Cada bui
 
 | provider | supported/aplicável | % |
 |---|---|---|
-| cloud-hypervisor | 21/36 | 58.3 % |
+| cloud-hypervisor | 23/36 | 63.9 % |
 | libvirt | 32/45 | 71.1 % |
-| proxmox | 28/37 | 75.7 % |
-| **TOTAL VM** | **81/118** | **68.6 %** |
+| proxmox | 30/37 | 81.1 % |
+| **TOTAL VM** | **85/118** | **72.0 %** |
+
+Par `18fdf6fd`: CH `vm.hotplug.cpu/memory.add` →supported (nproc 1→2, MemTotal +512M no guest; removes ficam not-impl honestos por risco §7); proxmox `vm.console.serial/vnc` →supported (handshake websocket 101 completo via termproxy/vncproxy).
 
 Par `993c7ae0`: proxmox `vm.hotplug.disk/nic.add` (anexo a quente a VM a correr, `refuse_pending`) + libvirt `vm.hotplug.disk/nic.remove` (remoção cooperativa segura — disco em uso não sai; registo só perde o device após o guest o largar) →supported.
 
