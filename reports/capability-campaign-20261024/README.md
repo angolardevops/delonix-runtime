@@ -17,13 +17,15 @@ Objectivo: tratar individualmente todas as entradas parciais, não implementadas
 
 | estado | relatório | pós-reconciliação (0894caf9) | agora (b6aa53ff) |
 |---|---|---|---|
-| supported | 103 | 112 | **154** |
-| partial | 93 | 86 | 62 |
+| supported | 103 | 112 | **160** |
+| partial | 93 | 86 | 56 |
 | not-implemented | 74 | 72 | 54 |
 | unsupported-by-provider | 230 | 230 | 230 |
 | requires-external-component | 12 | 12 | 12 |
 | unavailable-on-host | 3 | 3 | 3 |
-| proved/applicable (N2) | — | 112/273 | **154/273 (56.4%)** |
+| proved/applicable (N2) | — | 112/273 | **160/273 (58.6%)** |
+
+Trio paralelo (b/c/d, `9bc5e13e`): **rede §10** — 6 promoções (net.static-ip, net.dns, firewall.default-deny/source-filtering/egress-policy, net.packet-capture) provadas com tráfego permitido+negado e contadores nft; net.verify.dataplane fica not-impl honesto (feature ADR-0059). **storage §12** — sem root nesta sessão → arnês e2e root-gated pronto + detalhes honestos; lvm/zfs/btrfs ficam partial (falta privilégio, não implementação). **migração VM §7** — 2.º nó montado (sshd userspace, DELONIX_ROOT separado), cold A→B provado cross-host + bug ssh `$HOME` corrigido; live fica not-impl honesto (precisa 2 libvirtd + copy-storage-all).
 
 Nota de integridade: no caminho até aqui o `vm.snapshot-memory` (libvirt) foi DEMOVIDO supported→partial de propósito (RAM não observável sem guest com SO) — baixar a métrica por honestidade é progresso (§5/§17); depois `metrics.prometheus` subiu com prova real.
 
