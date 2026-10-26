@@ -119,11 +119,11 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::NetIpam => base(S::Supported {
                     evidence: "chaos:scen_concurrent_attach",
                 }),
-                C::NetStaticIp => base(S::Partial {
-                    detail: "`--ip` reserves in the same per-prefix IPAM ledger; unit-tested, not attached live in the battery",
+                C::NetStaticIp => base(S::Supported {
+                    evidence: "chaos:scen_static_ip",
                 }),
-                C::NetDns => base(S::Partial {
-                    detail: "`<name>.<ns>.delonix.internal` served by the holder; proven E2E in-session, no battery `nslookup`",
+                C::NetDns => base(S::Supported {
+                    evidence: "chaos:scen_dns",
                 }),
                 C::NetPublishPorts => base(S::Supported {
                     evidence: "check:update: publish-add a quente",
@@ -146,20 +146,20 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::NetRateLimit => base(S::Supported {
                     evidence: "check:update: net-rate a quente",
                 }),
-                C::NetPacketCapture => base(S::Partial {
-                    detail: "`net capture` on a container's SDN interface; no battery",
+                C::NetPacketCapture => base(S::Supported {
+                    evidence: "chaos:scen_packet_capture",
                 }),
                 C::FirewallPerWorkload => filt(S::Supported {
                     evidence: "e2e:container em rede custom: hot reconfig pelo ingress",
                 }),
-                C::FirewallDefaultDeny => filt(S::Partial {
-                    detail: "`policy deny` per direction with the conntrack prologue (2026-07-28); validated live, no battery check",
+                C::FirewallDefaultDeny => filt(S::Supported {
+                    evidence: "chaos:scen_firewall_default_deny",
                 }),
-                C::FirewallSourceFiltering => filt(S::Partial {
-                    detail: "`allow <port> --from <cidr>` works on published ports for routable sources (never for a loopback client); validated live, no battery",
+                C::FirewallSourceFiltering => filt(S::Supported {
+                    evidence: "chaos:scen_firewall_source_filter",
                 }),
-                C::FirewallEgressPolicy => filt(S::Partial {
-                    detail: "per-container and per-network egress policy; battery lists (`net egress ls`), does not block",
+                C::FirewallEgressPolicy => filt(S::Supported {
+                    evidence: "chaos:scen_firewall_egress_policy",
                 }),
                 // Catalog 1.1.0 (ADR-0059 D2): the node's own SDN against the roles of a remote provider.
                 C::NetGatewayFilter
