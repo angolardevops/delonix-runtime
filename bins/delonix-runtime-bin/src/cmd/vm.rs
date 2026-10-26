@@ -1405,10 +1405,10 @@ pub enum VmCmd {
         /// Attach a NIC (`network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`), repeatable.
         #[arg(long = "nic-add", value_name = "SPEC")]
         nic_add: Vec<String>,
-        /// Remove an extra disk by its target (`vdc`) or source path — stopped VMs only (ADR-0068 D10).
+        /// Remove an extra disk by its target (`vdc`) or source path — hot-detached on a running VM where the backend proves it, else at the next boot (ADR-0068 D10).
         #[arg(long = "disk-rm", value_name = "TARGET|PATH")]
         disk_rm: Vec<String>,
-        /// Remove an extra NIC by its MAC — stopped VMs only (ADR-0068 D10).
+        /// Remove an extra NIC by its MAC — hot-detached on a running VM where the backend proves it, else at the next boot (ADR-0068 D10).
         #[arg(long = "nic-rm", value_name = "MAC")]
         nic_rm: Vec<String>,
     },
@@ -2123,10 +2123,12 @@ fn device_change_label(c: &delonix_vm::DeviceChange, live: bool) -> String {
             "NIC on {source} recorded for the next boot",
             &[("source", n.source.as_deref().unwrap_or(n.kind.as_str()))],
         ),
-        (D::RemoveDisk(k), _) => {
+        (D::RemoveDisk(k), true) => super::po::tf("disk {disk} removed", &[("disk", k)]),
+        (D::RemoveDisk(k), false) => {
             super::po::tf("disk {disk} removed from the next boot", &[("disk", k)])
         }
-        (D::RemoveNic(m), _) => {
+        (D::RemoveNic(m), true) => super::po::tf("NIC {mac} removed", &[("mac", m)]),
+        (D::RemoveNic(m), false) => {
             super::po::tf("NIC {mac} removed from the next boot", &[("mac", m)])
         }
     }
@@ -4157,7 +4159,11 @@ pub fn run(action: VmCmd) -> Result<()> {
             );
             println!("{}", vm.name);
             if wait {
-                wait_for_boot(&base, &vm.name, std::time::Duration::from_secs(boot_timeout))?;
+                wait_for_boot(
+                    &base,
+                    &vm.name,
+                    std::time::Duration::from_secs(boot_timeout),
+                )?;
             }
             Ok(())
         }

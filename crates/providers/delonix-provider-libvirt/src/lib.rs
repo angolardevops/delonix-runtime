@@ -389,11 +389,15 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmHotplugDiskAdd => sys(S::Supported {
                 evidence: "e2e:vm: um disco a QUENTE e detectado e fica R/W DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
-            C::VmHotplugDiskRemove => S::NotImplemented,
+            C::VmHotplugDiskRemove => sys(S::Supported {
+                evidence: "e2e:vm: um disco a QUENTE REMOVIDO com seguranca DENTRO do guest (libvirt, cloud-init, guestfish)",
+            }),
             C::VmHotplugNicAdd => sys(S::Supported {
                 evidence: "e2e:vm: uma NIC a QUENTE e detectada e passa TRAFEGO REAL DENTRO do guest (libvirt, cloud-init, guestfish)",
             }),
-            C::VmHotplugNicRemove => S::NotImplemented,
+            C::VmHotplugNicRemove => sys(S::Supported {
+                evidence: "e2e:vm: uma NIC a QUENTE REMOVIDA DENTRO do guest sem derrubar a primaria (libvirt, cloud-init, guestfish)",
+            }),
             C::VmExtraDisks => bin(S::Supported {
                 evidence: "e2e:vm: an extra disk declared at create is seen and R/W inside the guest (libvirt, cloud-init, guestfish)",
             }),
@@ -1027,6 +1031,35 @@ fn attach_xml(
     out.map(|_| ())
 }
 
+/// Writes `xml` to the VM's state directory and DETACHES it live; the file is
+/// removed whatever the answer. Mirror of [`attach_xml`] — the SAME device XML
+/// (disk matched by its `<target dev>`, interface by its `<mac address>`) the
+/// attach used, so `detach-device --live` names exactly the device the add
+/// created. The request is cooperative: libvirt sends the unplug and the guest
+/// releases it — the caller polls the domain to confirm it actually left.
+fn detach_xml(
+    vmdir: &Path,
+    vm: &Vm,
+    uri: &str,
+    xml: &str,
+    what: &str,
+) -> delonix_model::Result<()> {
+    let path = vmdir.join(format!("{}.{what}.rm.xml", vm.name));
+    std::fs::write(&path, xml).map_err(|e| {
+        delonix_model::Error::from(Error::Command {
+            context: "vm hotplug",
+            message: format!("{}: {e}", path.display()),
+        })
+    })?;
+    let file = path.to_string_lossy().into_owned();
+    let out = virsh_hotplug(
+        &detach_device_argv(uri, &vm.name, &file),
+        "virsh detach-device",
+    );
+    let _ = std::fs::remove_file(&path);
+    out.map(|_| ())
+}
+
 /// The targets `virsh domblklist` lists. Pure.
 fn parse_domblklist(out: &str) -> Vec<String> {
     out.lines()
@@ -1122,6 +1155,48 @@ fn nic_outcome(mac: &str, interfaces: Option<&serde_json::Value>) -> HotplugOutc
     }
 }
 
+/// D4 for a disk REMOVAL: complete when the guest lists one fewer disk than
+/// before the detach — the guest released it, not just the hypervisor. Pure.
+fn disk_remove_outcome(before: Option<usize>, after: Option<usize>) -> HotplugOutcome {
+    match (before, after) {
+        (Some(b), Some(a)) if a < b => HotplugOutcome::Complete,
+        (Some(b), Some(a)) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain dropped the disk but the guest still lists {a} disk(s), as before ({b})"
+            ),
+        },
+        _ => HotplugOutcome::Partial {
+            reason: "the domain dropped the disk, but no guest agent answers to say the guest \
+                     released it (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
+/// D4 for a NIC REMOVAL: complete when the guest's agent no longer lists an
+/// interface with that MAC. Pure.
+fn nic_remove_outcome(mac: &str, interfaces: Option<&serde_json::Value>) -> HotplugOutcome {
+    let Some(list) = interfaces.and_then(|v| v.as_array()) else {
+        return HotplugOutcome::Partial {
+            reason: "the domain dropped the NIC, but no guest agent answers to say the guest \
+                     released it (ADR-0068 D4)"
+                .into(),
+        };
+    };
+    let still = list.iter().any(|i| {
+        i.get("hardware-address")
+            .and_then(|m| m.as_str())
+            .is_some_and(|m| m.eq_ignore_ascii_case(mac))
+    });
+    if still {
+        HotplugOutcome::Partial {
+            reason: format!("the domain dropped the NIC {mac} but the guest still lists it"),
+        }
+    } else {
+        HotplugOutcome::Complete
+    }
+}
+
 /// The connection a RUNNING domain lives on, or an error naming it.
 fn live_domain_uri(vm: &Vm) -> delonix_model::Result<&'static str> {
     libvirt_domain_uri(&vm.name).ok_or_else(|| {
@@ -1207,6 +1282,23 @@ fn attach_device_argv(uri: &str, name: &str, file: &str) -> Vec<String> {
         "-c".into(),
         uri.into(),
         "attach-device".into(),
+        "--domain".into(),
+        name.into(),
+        "--file".into(),
+        file.into(),
+        "--live".into(),
+    ]
+}
+
+/// `virsh detach-device --live`: the reverse of [`attach_device_argv`]. Only
+/// `--live` — this backend's domains are transient (rebuilt from the record at
+/// each boot), so there is no persistent config to touch; the record losing
+/// the device is what keeps the next boot from recreating it. Pure.
+fn detach_device_argv(uri: &str, name: &str, file: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "detach-device".into(),
         "--domain".into(),
         name.into(),
         "--file".into(),
@@ -3514,6 +3606,160 @@ impl VmBackend for LibvirtBackend {
             match outcome {
                 HotplugOutcome::Complete => return Ok((pinned, outcome)),
                 partial if std::time::Instant::now() >= deadline => return Ok((pinned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// `vm update --disk-rm` on a running domain (ADR-0068 D10, Phase 6): the
+    /// SAME `<disk>` the add attached, detached with `detach-device --live`,
+    /// which is COOPERATIVE — libvirt asks the guest to release the device and
+    /// the domain drops it only once it does. Read back with `domblklist`: the
+    /// target leaving the list is the guest having let go (level 2), polled up
+    /// to `wait`; a disk the guest still holds (mounted, in use) never leaves,
+    /// so the removal reports `Partial` and the record keeps it — nothing is
+    /// torn out from under the guest. The guest agent listing one fewer disk is
+    /// what makes it complete (D4). The record loses the disk (`removed`) only
+    /// AFTER the domain confirms it is gone.
+    fn hotplug_remove_disk(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        disk: &ExtraDisk,
+        wait: std::time::Duration,
+        removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<HotplugOutcome> {
+        let uri = live_domain_uri(vm)?;
+        let target = disk.target.as_deref().ok_or_else(|| {
+            delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}': the disk to remove has no pinned target — stop the VM and remove it \
+                 by source",
+                vm.name
+            )))
+        })?;
+        // Safety: the boot disk (target letter 'a', e.g. vda/sda) is never
+        // hot-removed — only the extras the engine hands here, which start at
+        // 'b'. A defence against a record that names the boot disk by mistake.
+        if target.ends_with('a') {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}': the boot disk '{target}' is not removable live",
+                vm.name
+            ))
+            .into());
+        }
+        let in_domain = |name: &str| -> delonix_model::Result<bool> {
+            Ok(parse_domblklist(&virsh_hotplug(
+                &["-c", uri, "domblklist", "--domain", name],
+                "virsh domblklist",
+            )?)
+            .iter()
+            .any(|t| t == target))
+        };
+        // The domain does not have it — only the record still names it. Drop it
+        // from the record and report done; the guest cannot see what the domain
+        // does not carry.
+        if !in_domain(&vm.name)? {
+            removed()?;
+            return Ok(HotplugOutcome::Complete);
+        }
+        let before = guest_disk_count(uri, &vm.name)?;
+        detach_xml(
+            vmdir,
+            vm,
+            uri,
+            &libvirt_extra_disk_xml(disk, target),
+            "disk",
+        )?;
+        // Level 2: wait for the COOPERATIVE unplug to land — the domain drops
+        // the target once the guest releases it.
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            if !in_domain(&vm.name)? {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(HotplugOutcome::Partial {
+                    reason: format!(
+                        "the guest has not released '{target}': the domain still lists it (is it \
+                         still mounted or in use inside the guest?) — nothing was removed"
+                    ),
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        // The domain dropped the disk (D6 reverse): the record may lose it now.
+        removed()?;
+        loop {
+            let after = guest_disk_count(uri, &vm.name)?;
+            let outcome = disk_remove_outcome(before, after);
+            match outcome {
+                HotplugOutcome::Complete => return Ok(outcome),
+                partial if std::time::Instant::now() >= deadline => return Ok(partial),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// `vm update --nic-rm` on a running domain (ADR-0068 D10, Phase 6): the
+    /// SAME `<interface>` the add attached, detached with `detach-device
+    /// --live` (matched by its `<mac address>`). Read back with `domiflist`:
+    /// the MAC leaving the list is level 2, polled up to `wait`; the guest
+    /// agent no longer listing that MAC is what makes it complete (D4). The
+    /// record loses the NIC (`removed`) only AFTER the domain confirms it gone.
+    fn hotplug_remove_nic(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        nic: &ExtraNic,
+        wait: std::time::Duration,
+        removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<HotplugOutcome> {
+        let uri = live_domain_uri(vm)?;
+        let mac = nic.mac.as_deref().ok_or_else(|| {
+            delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}': the NIC to remove has no pinned MAC",
+                vm.name
+            )))
+        })?;
+        let in_domain = |name: &str| -> delonix_model::Result<bool> {
+            Ok(parse_domiflist_macs(&virsh_hotplug(
+                &["-c", uri, "domiflist", "--domain", name],
+                "virsh domiflist",
+            )?)
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(mac)))
+        };
+        if !in_domain(&vm.name)? {
+            removed()?;
+            return Ok(HotplugOutcome::Complete);
+        }
+        detach_xml(vmdir, vm, uri, &libvirt_extra_nic_xml(nic), "nic")?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            if !in_domain(&vm.name)? {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(HotplugOutcome::Partial {
+                    reason: format!(
+                        "the guest has not released the NIC {mac}: the domain still lists it — \
+                         nothing was removed"
+                    ),
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        removed()?;
+        loop {
+            let guest = qemu_agent_query(
+                uri,
+                &vm.name,
+                r#"{"execute":"guest-network-get-interfaces"}"#,
+            )?;
+            let outcome = nic_remove_outcome(mac, guest.as_ref());
+            match outcome {
+                HotplugOutcome::Complete => return Ok(outcome),
+                partial if std::time::Instant::now() >= deadline => return Ok(partial),
                 _ => std::thread::sleep(std::time::Duration::from_millis(500)),
             }
         }
@@ -5860,6 +6106,47 @@ mod hotplug_tests {
         ));
         assert!(matches!(
             nic_outcome("x", None),
+            HotplugOutcome::Partial { .. }
+        ));
+    }
+
+    /// Phase 6: `detach-device --live` is the exact reverse of the attach,
+    /// and a removal is complete only when the GUEST released it — the count
+    /// dropping (disk) or the MAC leaving the agent's list (NIC).
+    #[test]
+    fn a_removal_detaches_and_is_complete_only_when_the_guest_releases_it() {
+        assert_eq!(
+            detach_device_argv("qemu:///system", "-hp", "/f.xml").join(" "),
+            "-c qemu:///system detach-device --domain -hp --file /f.xml --live"
+        );
+        // The guest dropped a disk: one fewer than before -> Complete.
+        assert_eq!(
+            disk_remove_outcome(Some(3), Some(2)),
+            HotplugOutcome::Complete
+        );
+        // The domain dropped it but the guest still lists as many -> Partial.
+        assert!(matches!(
+            disk_remove_outcome(Some(3), Some(3)),
+            HotplugOutcome::Partial { .. }
+        ));
+        // No agent to confirm -> Partial, never a false Complete.
+        assert!(matches!(
+            disk_remove_outcome(None, None),
+            HotplugOutcome::Partial { .. }
+        ));
+        let ifs = serde_json::json!([{"name": "eth1", "hardware-address": "52:54:00:AA:00:01"}]);
+        // The MAC is gone from the agent's list -> Complete.
+        assert_eq!(
+            nic_remove_outcome("52:54:00:aa:00:02", Some(&ifs)),
+            HotplugOutcome::Complete
+        );
+        // The MAC is still there -> Partial (the guest has not released it).
+        assert!(matches!(
+            nic_remove_outcome("52:54:00:aa:00:01", Some(&ifs)),
+            HotplugOutcome::Partial { .. }
+        ));
+        assert!(matches!(
+            nic_remove_outcome("x", None),
             HotplugOutcome::Partial { .. }
         ));
     }

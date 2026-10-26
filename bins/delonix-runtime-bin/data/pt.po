@@ -16091,11 +16091,11 @@ msgstr "Liga uma imagem de disco (`<caminho>[,bus=virtio|sata|scsi][,format=qcow
 msgid "Attach a NIC (`network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`), repeatable"
 msgstr "Liga uma NIC (`network:<nome>`, `bridge:<nome>` ou `user`, e depois `[,model=…][,mac=…]`), repetível"
 
-msgid "Remove an extra disk by its target (`vdc`) or source path — stopped VMs only (ADR-0068 D10)"
-msgstr "Remove um disco extra pelo seu alvo (`vdc`) ou caminho de origem — só em VMs paradas (ADR-0068 D10)"
+msgid "Remove an extra disk by its target (`vdc`) or source path — hot-detached on a running VM where the backend proves it, else at the next boot (ADR-0068 D10)"
+msgstr "Remove um disco extra pelo seu alvo (`vdc`) ou caminho de origem — desligado a quente numa VM a correr onde o backend o prova, senão no próximo arranque (ADR-0068 D10)"
 
-msgid "Remove an extra NIC by its MAC — stopped VMs only (ADR-0068 D10)"
-msgstr "Remove uma NIC extra pelo seu MAC — só em VMs paradas (ADR-0068 D10)"
+msgid "Remove an extra NIC by its MAC — hot-detached on a running VM where the backend proves it, else at the next boot (ADR-0068 D10)"
+msgstr "Remove uma NIC extra pelo seu MAC — desligada a quente numa VM a correr onde o backend o prova, senão no próximo arranque (ADR-0068 D10)"
 
 msgid "--disk-add '{value}': expected `<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`"
 msgstr "--disk-add '{value}': esperava `<caminho>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`"
