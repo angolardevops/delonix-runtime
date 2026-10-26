@@ -91,13 +91,21 @@ log "guest NICs after: $IF1 ($(gx 'ls /sys/class/net | tr "\n" " "'))"
 NEWIF="$(gx 'for i in $(ls /sys/class/net | grep -v lo); do ip -o -4 addr show $i | grep -q inet || echo $i; done | tail -1')"
 log "candidate new NIC: ${NEWIF:-none}"
 if [ -n "$NEWIF" ]; then
-  gx "sudo ip link set $NEWIF up && sudo dhclient -1 -v $NEWIF" >/dev/null 2>&1
-  IP2="$(gx "ip -o -4 addr show $NEWIF | awk '{print \$4}'")"
+  # The golden runs systemd-networkd (no dhclient): a DHCP .network for the new
+  # link, reload, and read back the lease.
+  gx "printf '[Match]\nName=$NEWIF\n[Network]\nDHCP=yes\n' | sudo -n tee /etc/systemd/network/10-$NEWIF.network >/dev/null && sudo -n networkctl reload" >/dev/null 2>&1
+  IP2=""; for _ in $(seq 1 10); do
+    IP2="$(gx "ip -o -4 addr show $NEWIF | awk '{print \$4}'")"
+    [ -n "$IP2" ] && break; sleep 2
+  done
   [ -n "$IP2" ] && ok "hot-added NIC $NEWIF got address $IP2 via DHCP" || bad "hot-added NIC got no DHCP lease"
   GW2="$(gx "ip route show dev $NEWIF | awk '/via/{print \$3; exit}'")"
-  [ -z "$GW2" ] && GW2="$(gx 'ip route | awk "/default/{print \$3; exit}"')"
   if [ -n "$GW2" ]; then
-    gx "ping -c2 -W2 -I $NEWIF $GW2" >/dev/null 2>&1 && ok "traffic on hot-added NIC: ping $GW2 via $NEWIF" || bad "no traffic on hot-added NIC (ping $GW2)"
+    if gx "ping -c3 -W2 -I $NEWIF $GW2" >/dev/null 2>&1; then
+      ok "traffic on hot-added NIC: ping $GW2 via $NEWIF"
+    else
+      bad "no traffic on hot-added NIC (ping $GW2)"
+    fi
   else
     bad "no gateway found for hot-added NIC"
   fi
