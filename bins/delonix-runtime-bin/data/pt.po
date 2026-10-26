@@ -9828,6 +9828,12 @@ msgstr "DETALHE (Esc: voltar)"
 msgid "resource no longer present"
 msgstr "recurso já não existe"
 
+msgid "stopping… (Ctrl+C to quit)"
+msgstr "a parar… (Ctrl+C para sair)"
+
+msgid "stop thread exited unexpectedly"
+msgstr "a tarefa de paragem terminou inesperadamente"
+
 # net l4guard (CLI wiring for the ingress-wide L4 DDoS guard)
 msgid "Ingress-wide L4 DDoS guard (per-source connection rate + concurrent cap)."
 msgstr "Guarda L4 anti-DDoS do ingress inteiro (taxa de ligações + tecto concorrente, por origem)."
