@@ -330,13 +330,37 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:CH: vm resize --vcpus 2 com a VM parada",
             }),
-            C::VmHotplugCpuAdd => bin(S::Partial {
-                detail: "`vm update --vcpus` via `vm.resize`, add only; always reports `partial` — no channel to confirm the guest onlined the vCPU (ADR-0068 D4/Q5), no battery check yet",
+            // CPU add is proven live end to end (the guest's `nproc` rises
+            // after `vm update --vcpus`): the hypervisor `vm.resize` succeeds
+            // and the guest onlines the hot-added vCPU. The RUNTIME still
+            // reports the operation `partial` (CH has no in-band channel to
+            // confirm the guest side — ADR-0068 D4/Q5), exactly as the proven
+            // disk/NIC adds do; the capability is `supported` because the
+            // feature is exercised and the evidence names the proof.
+            C::VmHotplugCpuAdd => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-cpumem.sh",
             }),
+            // Hot CPU REMOVAL from a running guest is not wired and not safe to
+            // wire here: a vCPU the guest has not offlined first cannot be torn
+            // out without risking the tasks on it, and CH gives no channel to
+            // coordinate "guest offlined → now remove" (the same D4/Q5 gap). The
+            // engine routes every CPU decrease through cold `vm resize` on a
+            // stopped VM (`VmResizeCold`, supported); libvirt and Proxmox leave
+            // this `not-implemented` for the same reason.
             C::VmHotplugCpuRemove => S::NotImplemented,
-            C::VmHotplugMemoryAdd => bin(S::Partial {
-                detail: "`vm update --memory` via `vm.resize` over a virtio-mem region declared at create (ADR-0068 D3); `memory_actual_size` confirms the guest only with a driver and the onlining policy (D8), no battery check yet",
+            // Memory add is proven live end to end (the guest's `MemTotal`
+            // rises after `vm update --memory`): the virtio-mem region declared
+            // at create (ADR-0068 D3) is grown by `vm.resize` and the guest's
+            // driver plugs and onlines the blocks, so `memory_actual_size`
+            // reaches the target and the runtime reports `Complete`.
+            C::VmHotplugMemoryAdd => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-cpumem.sh",
             }),
+            // Hot memory REMOVAL (virtio-mem shrink) is cooperative and unsafe
+            // to force: the guest driver only releases blocks it can spare, and
+            // pulling memory in use would OOM the guest. Not wired; every memory
+            // decrease goes through cold `vm resize` on a stopped VM
+            // (`VmResizeCold`, supported), as on libvirt and Proxmox.
             C::VmHotplugMemoryRemove => S::NotImplemented,
             C::VmHotplugDiskAdd => bin(S::Supported {
                 evidence: "live:scripts/vm-native-ch-hotplug.sh",
