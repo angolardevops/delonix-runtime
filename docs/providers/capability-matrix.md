@@ -193,7 +193,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 |  | `volume.quota` | supported — check:volume create --parent |
 |  | `volume.snapshot` | supported — check:snapshot create |
 |  | `volume.provision.nas` | requires-external-component — a TrueNAS SCALE 25.x API (`spec.provision.truenas`, ADR-0009); `scen_truenas_destroy` skips without one |
-|  | `storage.lvm-thin` | partial — driver lvm-thin implementado, registado no arranque e aceite pela allowlist; sem prova e2e num pool LVM-thin real |
-|  | `storage.zfs-btrfs` | partial — drivers zfs e btrfs implementados, registados no arranque e aceites pela allowlist; sem prova e2e num pool real |
+|  | `storage.lvm-thin` | partial — driver lvm-thin implementado, registado no arranque e aceite pela allowlist; o e2e num thin pool REAL (ficheiro loopback dedicado) está em scripts/e2e.sh e exige root para losetup/pvcreate/vgcreate/lvcreate — salta sem privilégio, logo ainda sem prova live |
+|  | `storage.zfs-btrfs` | partial — drivers zfs e btrfs implementados, registados no arranque e aceites pela allowlist; o e2e em filesystems REAIS (ficheiro loopback dedicado) está em scripts/e2e.sh e exige root (mkfs.btrfs/mount; modprobe zfs/zpool create, zfsutils-linux) — salta sem privilégio, logo ainda sem prova live |
 |  | `storage.ceph` | requires-external-component — a Ceph cluster and an RBD/CephFS driver the engine does not ship |
 
