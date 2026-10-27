@@ -6,6 +6,7 @@ use axum::response::IntoResponse;
 use tonic::{Request, Response, Status};
 
 use crate::proto::v1::container_service_server::{ContainerService, ContainerServiceServer};
+use crate::proto::v1::image_service_server::{ImageService, ImageServiceServer};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
@@ -38,6 +39,10 @@ use crate::proto::v1::{
 use crate::proto::v1::{
     CreateVolumeRequest, DeleteVolumeRequest, GetVolumeRequest, ListVolumesRequest,
     ListVolumesResponse, Volume,
+};
+use crate::proto::v1::{
+    BuildImageRequest, DeleteImageRequest, GetImageRequest, Image, ListImagesRequest,
+    ListImagesResponse, PullImageRequest, PushImageRequest, ScanImageRequest,
 };
 use crate::proto::v1::{
     ContainerStats, CreateContainerRequest, DeleteContainerRequest, ExecRequest, ExecResponse,
@@ -286,6 +291,69 @@ impl VolumeService for NodeApi {
         })
         .await?
         .map(Response::new)
+    }
+}
+
+#[tonic::async_trait]
+impl ImageService for NodeApi {
+    // Read half served from the OCI image store, in-process (no re-exec).
+    async fn get_image(&self, req: Request<GetImageRequest>) -> Result<Response<Image>, Status> {
+        let req = req.into_inner();
+        blocking("image", move || {
+            crate::images::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_images(
+        &self,
+        req: Request<ListImagesRequest>,
+    ) -> Result<Response<ListImagesResponse>, Status> {
+        let req = req.into_inner();
+        blocking("images", move || {
+            crate::images::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    // Mutations (pull/delete/push/build/scan) are in the contract and this
+    // engine does not serve them on the node API yet — `delonix pull`/`rmi`/
+    // `build`/`push`/`scan` do.
+    async fn pull_image(
+        &self,
+        _req: Request<PullImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ImageService", "PullImage"))
+    }
+
+    async fn delete_image(
+        &self,
+        _req: Request<DeleteImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ImageService", "DeleteImage"))
+    }
+
+    async fn push_image(
+        &self,
+        _req: Request<PushImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ImageService", "PushImage"))
+    }
+
+    async fn build_image(
+        &self,
+        _req: Request<BuildImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ImageService", "BuildImage"))
+    }
+
+    async fn scan_image(
+        &self,
+        _req: Request<ScanImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("ImageService", "ScanImage"))
     }
 }
 
@@ -706,6 +774,10 @@ pub fn router() -> axum::Router {
             &format!("/{}/*rest", VirtualMachineServiceServer::<NodeApi>::NAME),
             VirtualMachineServiceServer::new(NodeApi),
         )
+        .route_service(
+            &format!("/{}/*rest", ImageServiceServer::<NodeApi>::NAME),
+            ImageServiceServer::new(NodeApi),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
@@ -780,6 +852,7 @@ async fn rest(
             "VirtualMachineService" => {
                 transcode::dispatch_virtual_machine_service(&NodeApi, route.rpc, input).await
             }
+            "ImageService" => transcode::dispatch_image_service(&NodeApi, route.rpc, input).await,
             _ => Err(transcode::not_served(route)),
         }
     };

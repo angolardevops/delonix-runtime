@@ -88,6 +88,7 @@ pub mod container_update;
 pub mod containers;
 pub mod docs;
 pub mod events;
+pub mod images;
 pub mod network_ops;
 pub mod networks;
 pub mod node;
