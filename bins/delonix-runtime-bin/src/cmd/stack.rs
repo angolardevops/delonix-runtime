@@ -420,6 +420,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::RUNTIME_POLICY => super::policy::desired(doc)?,
                 k::CONTAINER => super::container::desired(doc)?,
                 k::VOLUME => super::volume::desired(doc)?,
+                k::OBJECT_STORAGE => super::objectstorage::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
                 k::SECRET => super::secret::desired(doc)?,
@@ -462,6 +463,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     let mut out = super::policy::actual(docs)?;
     out.extend(super::container::actual()?);
     out.extend(super::volume::actual()?);
+    out.extend(super::objectstorage::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
     out.extend(super::secret::actual()?);
@@ -847,6 +849,10 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         ),
         (k::CONTAINER, super::container::RECONCILED_CONTAINER_FIELDS),
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
+        (
+            k::OBJECT_STORAGE,
+            super::objectstorage::RECONCILED_OBJECT_STORAGE_FIELDS,
+        ),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
         (k::SECRET, super::secret::RECONCILED_SECRET_FIELDS),
@@ -1594,6 +1600,9 @@ fn presence(
                 Err(e) => ("?".into(), e.to_string()),
             }
         }
+        // An object store's presence is its node record — the S3 identity on
+        // the gateway (cephRgw) or the validated reference (external).
+        k::OBJECT_STORAGE => super::objectstorage::presence_of(doc),
         k::NETWORK => match delonix_sdn::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
@@ -2455,6 +2464,11 @@ fn run_layers_inner(
         super::storage_pool::apply(docs)
     })?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
+    // After the volumes, in FACTS order: an object store is independent of them
+    // but provisions a tenant's S3 identity and its credentials Secret.
+    layers.run(k::OBJECT_STORAGE, "🪣", || {
+        super::objectstorage::apply(docs)
+    })?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
     layers.run(k::APP, "🏗", || super::app::apply(docs))?;
     layers.run(k::VM, "🖥", || super::vm::apply(docs, base))?;
@@ -2563,6 +2577,11 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // Shared content-addressed cache: not ownable, so it never reaches a
         // prune or a destroy, and a `Replace` is just a pull.
         k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
+        k::OBJECT_STORAGE => {
+            "an object store holds a tenant's S3 data — removing it because a manifest stops \
+             naming it would orphan the buckets and objects. Remove the S3 identity on purpose \
+             with `radosgw-admin user rm`, and the generated credentials with `delonix secret rm`"
+        }
         k::SECRET => {
             "a secret has no record of ownership to stamp, so no stack prunes or destroys it; \
              remove one on purpose with `delonix secret rm`"
@@ -2824,6 +2843,21 @@ fn converge_and_stamp(
                 }
                 k::CONTAINER => super::container::converge(&c.name, &c.diffs)?,
                 k::VOLUME => super::volume::converge(&c.name, &c.diffs)?,
+                // Every comparable field of an object store converges hot by
+                // re-materializing WHOLE — the same shape as `RuntimePolicy`
+                // above, needing the document rather than the diff list.
+                k::OBJECT_STORAGE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "ObjectStorage/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::objectstorage::converge_doc(doc)?
+                }
                 k::VM => super::vm::converge(&c.name, &c.diffs)?,
                 k::NETWORK => super::network::converge(&c.name, &c.diffs)?,
                 k::IMAGE => super::image::converge(&c.name, &c.diffs)?,
@@ -3047,6 +3081,7 @@ fn stamp_all(
                 super::container::stamp(&d.name, stack, &d.fields, spec.as_ref())
             }
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
+            k::OBJECT_STORAGE => super::objectstorage::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),

@@ -1,0 +1,35 @@
+# ObjectStorage — an S3-compatible object store (ADR-0081).
+#
+# Two backends: `cephRgw` provisions a tenant S3 identity on the node's Ceph
+# Object Gateway and writes its keys into a generated Secret (<name>-s3);
+# `external` points at a foreign S3 store you already run, using credentials
+# from a Secret you provide. A workload consumes either the same way: endpoint
+# + accessKey/secretKey read from the Secret.
+#
+# Apply with:  delonix stack apply -f examples/objectstorage.yaml
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: ObjectStorage
+metadata:
+  name: media
+spec:
+  backend: cephRgw          # provision on the node's Ceph Object Gateway
+  bucket: media             # the tenant creates it over S3 with the keys below
+  cephRgw:
+    uid: media              # S3 user id (default: metadata.name)
+    displayName: Media store # cosmetic label on the S3 identity
+    endpoint: http://rgw.internal:80 # public S3 endpoint exposed to consumers
+  # On apply: credentials land in secret/media-s3 (accessKey, secretKey,
+  # endpoint, bucket).
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: ObjectStorage
+metadata:
+  name: backups
+spec:
+  backend: external         # bring your own S3 (AWS, MinIO, Backblaze, …)
+  bucket: company-backups
+  external:
+    endpoint: https://s3.eu-west-1.amazonaws.com
+    region: eu-west-1       # only when the store needs one
+    credentialsSecret: aws-s3 # an existing Secret with accessKey + secretKey

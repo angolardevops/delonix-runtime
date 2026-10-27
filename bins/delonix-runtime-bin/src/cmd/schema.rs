@@ -51,6 +51,7 @@ const TYPED_KINDS: &[&str] = &[
     k::CONTAINER,
     k::POD,
     k::VOLUME,
+    k::OBJECT_STORAGE,
     k::NETWORK,
     k::VM,
     k::SECRET,
@@ -197,6 +198,11 @@ fn typed_spec_parts(
             generator.subschema_for::<super::volume::VolumeSpec>(),
             "VolumeSpec",
             super::volume::VOLUME_SPEC_FIELDS,
+        ),
+        k::OBJECT_STORAGE => (
+            generator.subschema_for::<super::objectstorage::ObjectStorageSpec>(),
+            "ObjectStorageSpec",
+            super::objectstorage::OBJECT_STORAGE_SPEC_FIELDS,
         ),
         k::NETWORK => (
             generator.subschema_for::<super::network::NetworkSpec>(),

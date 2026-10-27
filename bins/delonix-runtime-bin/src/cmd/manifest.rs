@@ -391,6 +391,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::POD => Some(crate::cmd::container::POD_SPEC_FIELDS),
         k::VM => Some(crate::cmd::vm::VM_SPEC_FIELDS),
         k::VOLUME => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
+        k::OBJECT_STORAGE => Some(crate::cmd::objectstorage::OBJECT_STORAGE_SPEC_FIELDS),
         k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
         k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
         k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
@@ -482,6 +483,9 @@ fn check_unknown_fields(doc: &ManifestDoc) {
     }
     if doc.kind == k::VOLUME {
         crate::cmd::volume::warn_unknown_nested(doc);
+    }
+    if doc.kind == k::OBJECT_STORAGE {
+        crate::cmd::objectstorage::warn_unknown_nested(doc);
     }
     let nested = match doc.kind.as_str() {
         k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
@@ -1857,6 +1861,7 @@ spec: { image: nginx }
             "networkZones" => ("{ vnets: [{ name: prod }] }", "NetworkZone"),
             "storagePools" => ("{ alertPct: 85 }", "StoragePool"),
             "volumes" => ("{}", "Volume"),
+            "objectStorages" => ("{ backend: cephRgw, bucket: media }", "ObjectStorage"),
             "images" => ("{ pull: alpine }", "Image"),
             "apps" => ("{ source: ., image: shop }", "App"),
             "vms" => ("{ disk: base }", "VirtualMachine"),

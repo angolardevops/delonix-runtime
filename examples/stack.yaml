@@ -112,6 +112,17 @@ spec:
         quota: 5G          # hard cap on the volume's data
         alertPct: 80       # warn when it is 80% full
 
+  # S3-compatible object storage (see objectstorage.yaml). `cephRgw` provisions
+  # an S3 identity on the node's Ceph gateway; `external` points at a store you
+  # already run. Credentials land in secret/<name>-s3.
+  objectStorages:
+    - name: media
+      spec:
+        backend: cephRgw
+        bucket: media
+        cephRgw:
+          endpoint: http://rgw.internal:80
+
   images:
     - name: alpine-base
       spec:

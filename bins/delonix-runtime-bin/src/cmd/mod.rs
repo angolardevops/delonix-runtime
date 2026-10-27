@@ -61,6 +61,7 @@ pub mod network_gateway;
 pub mod network_provider;
 pub mod network_zone;
 pub mod network_zone_providers;
+pub mod objectstorage;
 pub mod output;
 pub mod pki;
 pub mod po;

@@ -293,6 +293,20 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // the old one — cold, which turns it into a refused `Replace` rather
         // than a silent move.
         k::VOLUME => &["quota", "alertPct", "labels"],
+        // An object store has no identity to destroy and no data on the node:
+        // `objectstorage::converge_doc` re-materializes WHOLE (the S3 identity is
+        // provisioned idempotently and the record and Secret are rewritten in
+        // place), so every comparable field converges hot. The list must equal
+        // `objectstorage::RECONCILED_OBJECT_STORAGE_FIELDS`; a test there keeps
+        // it so.
+        k::OBJECT_STORAGE => &[
+            "backend",
+            "bucket",
+            "uid",
+            "endpoint",
+            "region",
+            "credentialsSecret",
+        ],
         // Measured on PVE 9.2.2 against a running container before being
         // declared: `memory` and `swap` land in its cgroup at once, `cores` in
         // its cpuset a few seconds later, and nothing is left pending. `image`,
