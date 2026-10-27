@@ -73,6 +73,26 @@ pub(crate) struct CephRgwBlock {
     /// public URL, so the operator declares it here when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     endpoint: Option<String>,
+    /// An optional ceiling on the tenant's total S3 usage (a user quota on the
+    /// gateway, across all its buckets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    quota: Option<QuotaBlock>,
+}
+
+/// `spec.cephRgw.quota` — a user quota on the gateway.
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct QuotaBlock {
+    /// Maximum total bytes, in the gateway's own spelling (`100G`, `1T`, or a
+    /// byte count). Omit for no byte ceiling.
+    #[serde(default, rename = "maxSize", skip_serializing_if = "Option::is_none")]
+    max_size: Option<String>,
+    /// Maximum total object count. Omit for no object ceiling.
+    #[serde(
+        default,
+        rename = "maxObjects",
+        skip_serializing_if = "Option::is_none"
+    )]
+    max_objects: Option<i64>,
 }
 
 /// `spec.external` — a foreign, already-running S3-compatible store.
@@ -95,7 +115,10 @@ pub(crate) const OBJECT_STORAGE_SPEC_FIELDS: &[&str] =
     &["backend", "bucket", "cephRgw", "external"];
 
 /// Accepted keys of `spec.cephRgw` (drift-guard + nested unknown-field warning).
-pub(crate) const CEPH_RGW_FIELDS: &[&str] = &["uid", "displayName", "endpoint"];
+pub(crate) const CEPH_RGW_FIELDS: &[&str] = &["uid", "displayName", "endpoint", "quota"];
+
+/// Accepted keys of `spec.cephRgw.quota`.
+pub(crate) const QUOTA_FIELDS: &[&str] = &["maxSize", "maxObjects"];
 
 /// Accepted keys of `spec.external`.
 pub(crate) const EXTERNAL_FIELDS: &[&str] = &["endpoint", "region", "credentialsSecret"];
@@ -111,12 +134,15 @@ pub(crate) const RECONCILED_OBJECT_STORAGE_FIELDS: &[&str] = &[
     "endpoint",
     "region",
     "credentialsSecret",
+    "maxSize",
+    "maxObjects",
 ];
 
 /// Warns about unknown keys INSIDE the `cephRgw:`/`external:` blocks — the
 /// top-level guard only sees the spec's own keys. Called from the manifest load.
 pub(crate) fn warn_unknown_nested(doc: &ManifestDoc) {
     manifest::warn_unknown_fields_in(doc, "cephRgw", CEPH_RGW_FIELDS);
+    manifest::warn_unknown_fields_in(doc, "cephRgw.quota", QUOTA_FIELDS);
     manifest::warn_unknown_fields_in(doc, "external", EXTERNAL_FIELDS);
 }
 
@@ -196,6 +222,12 @@ struct ObjectStorageRecord {
     /// The S3 endpoint exposed to consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     endpoint: Option<String>,
+    /// `cephRgw`: the user-quota ceiling on total bytes, if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_size: Option<String>,
+    /// `cephRgw`: the user-quota ceiling on object count, if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_objects: Option<i64>,
     /// `external`: the region, when the store needs one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     region: Option<String>,
@@ -237,6 +269,14 @@ fn fields_of(spec: &ObjectStorageSpec, name: &str) -> BTreeMap<String, String> {
             if let Some(e) = spec.ceph_rgw.as_ref().and_then(|c| c.endpoint.clone()) {
                 f.insert("endpoint".into(), e);
             }
+            if let Some(q) = spec.ceph_rgw.as_ref().and_then(|c| c.quota.as_ref()) {
+                if let Some(s) = &q.max_size {
+                    f.insert("maxSize".into(), s.clone());
+                }
+                if let Some(n) = q.max_objects {
+                    f.insert("maxObjects".into(), n.to_string());
+                }
+            }
         }
         BACKEND_EXTERNAL => {
             if let Some(ext) = &spec.external {
@@ -264,6 +304,12 @@ fn record_fields(r: &ObjectStorageRecord) -> BTreeMap<String, String> {
             }
             if let Some(e) = &r.endpoint {
                 f.insert("endpoint".into(), e.clone());
+            }
+            if let Some(s) = &r.max_size {
+                f.insert("maxSize".into(), s.clone());
+            }
+            if let Some(n) = r.max_objects {
+                f.insert("maxObjects".into(), n.to_string());
             }
         }
         BACKEND_EXTERNAL => {
@@ -367,6 +413,14 @@ fn materialize(doc: &ManifestDoc) -> Result<ObjectStorageRecord> {
                 .unwrap_or_else(|| uid.clone());
             let endpoint = spec.ceph_rgw.as_ref().and_then(|c| c.endpoint.clone());
             let user = provision_rgw_user(&uid, &display)?;
+            // The ceiling is set AFTER the identity exists — quota set/enable
+            // name the uid, which `ensure_user` has just guaranteed. Idempotent.
+            let quota = spec.ceph_rgw.as_ref().and_then(|c| c.quota.clone());
+            if let Some(q) = &quota {
+                gateway()
+                    .set_user_quota(&uid, q.max_size.as_deref(), q.max_objects)
+                    .map_err(rgw_error)?;
+            }
             let secret_name = format!("{name}-s3");
             write_credentials_secret(
                 &secret_name,
@@ -379,6 +433,8 @@ fn materialize(doc: &ManifestDoc) -> Result<ObjectStorageRecord> {
             )?;
             record.uid = Some(uid);
             record.endpoint = endpoint;
+            record.max_size = quota.as_ref().and_then(|q| q.max_size.clone());
+            record.max_objects = quota.as_ref().and_then(|q| q.max_objects);
             record.region = None;
             record.credentials_secret = None;
             record.credentials_secret_out = secret_name;
@@ -392,6 +448,8 @@ fn materialize(doc: &ManifestDoc) -> Result<ObjectStorageRecord> {
                 .expect("check() guarantees an external block for this backend");
             record.uid = None;
             record.endpoint = Some(ext.endpoint.clone());
+            record.max_size = None;
+            record.max_objects = None;
             record.region = ext.region.clone();
             record.credentials_secret = Some(ext.credentials_secret.clone());
             record.credentials_secret_out = ext.credentials_secret.clone();
@@ -540,6 +598,10 @@ struct ObjectStorageView {
     region: Option<String>,
     #[serde(rename = "credentialsSecret")]
     credentials_secret: String,
+    #[serde(rename = "maxSize", skip_serializing_if = "Option::is_none")]
+    max_size: Option<String>,
+    #[serde(rename = "maxObjects", skip_serializing_if = "Option::is_none")]
+    max_objects: Option<i64>,
     owner: Option<String>,
 }
 
@@ -552,6 +614,8 @@ impl ObjectStorageView {
             endpoint: r.endpoint.clone(),
             region: r.region.clone(),
             credentials_secret: r.credentials_secret_out.clone(),
+            max_size: r.max_size.clone(),
+            max_objects: r.max_objects,
             owner: r.owner.clone(),
         }
     }
@@ -609,6 +673,15 @@ pub fn run(action: ObjectStorageCmd) -> Result<()> {
                         println!("Region:   {region}");
                     }
                     println!("Secret:   {}", view.credentials_secret);
+                    if view.max_size.is_some() || view.max_objects.is_some() {
+                        println!(
+                            "Quota:    size {}, objects {}",
+                            view.max_size.as_deref().unwrap_or("-"),
+                            view.max_objects
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "-".into()),
+                        );
+                    }
                     println!("Owner:    {}", view.owner.as_deref().unwrap_or("-"));
                 }
             }
@@ -732,10 +805,12 @@ mod tests {
         // or a freshly-applied store would show drift forever.
         for yaml in [
             "backend: cephRgw\nbucket: media\ncephRgw:\n  endpoint: http://rgw:80\n",
+            "backend: cephRgw\nbucket: media\ncephRgw:\n  endpoint: http://rgw:80\n  quota: { maxSize: 100G, maxObjects: 10000 }\n",
             "backend: external\nbucket: backups\nexternal:\n  endpoint: https://s3.example.com\n  region: eu-west-1\n  credentialsSecret: aws-s3\n",
         ] {
             let s = spec(yaml);
             let desired = fields_of(&s, "x");
+            let q = s.ceph_rgw.as_ref().and_then(|c| c.quota.clone());
             let rec = ObjectStorageRecord {
                 name: "x".into(),
                 backend: s.backend.clone(),
@@ -745,6 +820,8 @@ mod tests {
                     BACKEND_CEPH_RGW => s.ceph_rgw.as_ref().and_then(|c| c.endpoint.clone()),
                     _ => s.external.as_ref().map(|e| e.endpoint.clone()),
                 },
+                max_size: q.as_ref().and_then(|q| q.max_size.clone()),
+                max_objects: q.as_ref().and_then(|q| q.max_objects),
                 region: s.external.as_ref().and_then(|e| e.region.clone()),
                 credentials_secret: s.external.as_ref().map(|e| e.credentials_secret.clone()),
                 credentials_secret_out: "x-s3".into(),
@@ -753,6 +830,17 @@ mod tests {
             };
             assert_eq!(desired, record_fields(&rec), "drift for: {yaml}");
         }
+    }
+
+    #[test]
+    fn cephrgw_quota_is_parsed_and_compared() {
+        let s = spec(
+            "backend: cephRgw\nbucket: media\ncephRgw:\n  quota: { maxSize: 100G, maxObjects: 10000 }\n",
+        );
+        assert!(s.check("media").is_ok());
+        let f = fields_of(&s, "media");
+        assert_eq!(f.get("maxSize").map(String::as_str), Some("100G"));
+        assert_eq!(f.get("maxObjects").map(String::as_str), Some("10000"));
     }
 
     #[test]

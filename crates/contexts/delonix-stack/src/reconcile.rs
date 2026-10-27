@@ -306,6 +306,8 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
             "endpoint",
             "region",
             "credentialsSecret",
+            "maxSize",
+            "maxObjects",
         ],
         // Measured on PVE 9.2.2 against a running container before being
         // declared: `memory` and `swap` land in its cgroup at once, `cores` in

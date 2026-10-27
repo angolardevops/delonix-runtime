@@ -19,6 +19,9 @@ spec:
     uid: media              # S3 user id (default: metadata.name)
     displayName: Media store # cosmetic label on the S3 identity
     endpoint: http://rgw.internal:80 # public S3 endpoint exposed to consumers
+    quota:                  # optional ceiling on the tenant's total S3 usage
+      maxSize: 100G         # total bytes across all its buckets
+      maxObjects: 100000    # total object count
   # On apply: credentials land in secret/media-s3 (accessKey, secretKey,
   # endpoint, bucket).
 ---

@@ -17063,3 +17063,6 @@ msgstr "remove-o: o Secret gerado, o seu registo, e a identidade S3 no gateway (
 
 msgid "and delete the buckets/objects the S3 user still owns too (destructive)"
 msgstr "e apaga também os buckets/objectos que o utilizador S3 ainda possui (destrutivo)"
+
+msgid "S3-compatible object stores (buckets): ls/inspect/rm."
+msgstr "Object stores (buckets) compatíveis com S3: ls/inspect/rm."

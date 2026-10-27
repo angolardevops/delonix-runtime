@@ -154,6 +154,46 @@ impl Rgw {
         }
     }
 
+    /// Sets (and enables) a user quota on the tenant's S3 identity — a ceiling
+    /// on the total bytes and/or object count across all its buckets. A `None`
+    /// leaves that dimension unset; both `None` is a no-op. `max_size` takes the
+    /// gateway's own spelling (`100G`, `1T`, or a byte count); a negative value
+    /// is the gateway's "unlimited". Idempotent: re-setting the same ceiling is
+    /// not an error.
+    pub fn set_user_quota(
+        &self,
+        uid: &str,
+        max_size: Option<&str>,
+        max_objects: Option<i64>,
+    ) -> RgwResult<()> {
+        if max_size.is_none() && max_objects.is_none() {
+            return Ok(());
+        }
+        let mut parts: Vec<String> = ["quota", "set", "--quota-scope", "user", "--uid", uid]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if let Some(s) = max_size {
+            parts.push("--max-size".into());
+            parts.push(s.to_string());
+        }
+        if let Some(n) = max_objects {
+            parts.push("--max-objects".into());
+            parts.push(n.to_string());
+        }
+        let argv: Vec<&str> = parts.iter().map(String::as_str).collect();
+        match self.call(&argv) {
+            Answer::Ok(_) => {}
+            other => return Err(map_fail(other)),
+        }
+        // A quota that is set but not enabled is silently not enforced — the
+        // enable is what makes the ceiling real.
+        match self.call(&["quota", "enable", "--quota-scope", "user", "--uid", uid]) {
+            Answer::Ok(_) => Ok(()),
+            other => Err(map_fail(other)),
+        }
+    }
+
     /// Removes a tenant's S3 identity. `purge` also deletes the buckets and
     /// objects it still owns; WITHOUT it the gateway refuses a user that still
     /// owns data — so a caller never destroys a tenant's objects by accident.
@@ -268,6 +308,34 @@ mod tests {
         assert_eq!(b.name, "delonix-bucket");
         assert_eq!(b.objects, 3);
         assert_eq!(b.size_bytes, 4096);
+    }
+
+    #[test]
+    fn set_user_quota_sets_then_enables() {
+        let script = Arc::new(Script::new());
+        script.on(&["radosgw-admin"], 0, "", "");
+        let rgw = Rgw::new(script.clone(), None);
+        rgw.set_user_quota("delonix", Some("100G"), Some(10_000))
+            .unwrap();
+        let calls = script.calls();
+        // The set carries both ceilings and the scope...
+        assert!(calls.iter().any(|c| c.contains(&"set".to_string())
+            && c.contains(&"--max-size".to_string())
+            && c.contains(&"100G".to_string())
+            && c.contains(&"--max-objects".to_string())
+            && c.contains(&"10000".to_string())));
+        // ...and a separate enable makes it enforced (a set alone is silent).
+        assert!(calls
+            .iter()
+            .any(|c| c.contains(&"enable".to_string()) && c.contains(&"user".to_string())));
+    }
+
+    #[test]
+    fn set_user_quota_with_nothing_is_a_noop() {
+        let script = Arc::new(Script::new());
+        let rgw = Rgw::new(script.clone(), None);
+        rgw.set_user_quota("delonix", None, None).unwrap();
+        assert!(script.calls().is_empty(), "no quota fields → no call");
     }
 
     #[test]

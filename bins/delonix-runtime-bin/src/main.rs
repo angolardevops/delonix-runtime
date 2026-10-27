@@ -284,8 +284,8 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::volume::VolumeCmd,
     },
-    /// S3-compatible object stores: ls/inspect/rm.
-    ObjectStorage {
+    /// S3-compatible object stores (buckets): ls/inspect/rm.
+    Bucket {
         #[command(subcommand)]
         action: cmd::objectstorage::ObjectStorageCmd,
     },
@@ -1174,7 +1174,7 @@ fn run() -> Result<()> {
         Cmd::Systemcontainer { action } => cmd::system_container::run(action),
         Cmd::Workload { action } => cmd::workload::run(action),
         Cmd::Volume { action } => cmd::volume::run(action),
-        Cmd::ObjectStorage { action } => cmd::objectstorage::run(action),
+        Cmd::Bucket { action } => cmd::objectstorage::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Policy { action } => cmd::policy::run(action),
@@ -1916,6 +1916,7 @@ mod cli_stability_classification_tests {
         "api-resources",
         "apply",
         "backup",
+        "bucket",
         "cluster",
         "compatibility",
         "compose",
@@ -1937,7 +1938,6 @@ mod cli_stability_classification_tests {
         "mcp",
         "net",
         "network",
-        "object-storage",
         "plan",
         "pod",
         "policy",

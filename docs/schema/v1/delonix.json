@@ -126,6 +126,17 @@
             "null"
           ]
         },
+        "quota": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuotaBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional ceiling on the tenant's total S3 usage (a user quota on the\ngateway, across all its buckets)."
+        },
         "uid": {
           "description": "The S3 user id to provision. Defaults to the document's `metadata.name`.",
           "type": [
@@ -2457,6 +2468,27 @@
             {
               "type": "null"
             }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "QuotaBlock": {
+      "description": "`spec.cephRgw.quota` — a user quota on the gateway.",
+      "properties": {
+        "maxObjects": {
+          "description": "Maximum total object count. Omit for no object ceiling.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxSize": {
+          "description": "Maximum total bytes, in the gateway's own spelling (`100G`, `1T`, or a\nbyte count). Omit for no byte ceiling.",
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
