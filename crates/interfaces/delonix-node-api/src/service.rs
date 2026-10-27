@@ -9,6 +9,8 @@ use crate::proto::v1::container_service_server::{ContainerService, ContainerServ
 use crate::proto::v1::image_service_server::{ImageService, ImageServiceServer};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
+use crate::proto::v1::pod_service_server::{PodService, PodServiceServer};
+use crate::proto::v1::stack_service_server::{StackService, StackServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
 use crate::proto::v1::virtual_machine_service_server::{
     VirtualMachineService, VirtualMachineServiceServer,
@@ -43,6 +45,12 @@ use crate::proto::v1::{
 use crate::proto::v1::{
     BuildImageRequest, DeleteImageRequest, GetImageRequest, Image, ListImagesRequest,
     ListImagesResponse, PullImageRequest, PushImageRequest, ScanImageRequest,
+};
+use crate::proto::v1::{
+    CreatePodRequest, DeletePodRequest, GetPodRequest, ListPodsRequest, ListPodsResponse, Pod,
+};
+use crate::proto::v1::{
+    ApplyStackRequest, DestroyStackRequest, PlanStackRequest, StackPlan,
 };
 use crate::proto::v1::{
     ContainerStats, CreateContainerRequest, DeleteContainerRequest, ExecRequest, ExecResponse,
@@ -375,6 +383,83 @@ impl ImageService for NodeApi {
         let req = req.into_inner();
         blocking("image scan", move || {
             crate::image_ops::scan_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+}
+
+#[tonic::async_trait]
+impl PodService for NodeApi {
+    // Read half derived from the container records (a pod is its members).
+    async fn get_pod(&self, req: Request<GetPodRequest>) -> Result<Response<Pod>, Status> {
+        let req = req.into_inner();
+        blocking("pod", move || crate::pods::get_in(&node::state_root(), &req))
+            .await?
+            .map(Response::new)
+    }
+
+    async fn list_pods(
+        &self,
+        req: Request<ListPodsRequest>,
+    ) -> Result<Response<ListPodsResponse>, Status> {
+        let req = req.into_inner();
+        blocking("pods", move || crate::pods::list_in(&node::state_root(), &req))
+            .await?
+            .map(Response::new)
+    }
+
+    // Create (from a `kind: Pod` manifest) and Delete (removing every member)
+    // are in the contract and not served on the node API yet (DX-6001) —
+    // `delonix pod create` / removing the members does it.
+    async fn create_pod(
+        &self,
+        _req: Request<CreatePodRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("PodService", "CreatePod"))
+    }
+
+    async fn delete_pod(
+        &self,
+        _req: Request<DeletePodRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("PodService", "DeletePod"))
+    }
+}
+
+#[tonic::async_trait]
+impl StackService for NodeApi {
+    async fn plan_stack(
+        &self,
+        req: Request<PlanStackRequest>,
+    ) -> Result<Response<StackPlan>, Status> {
+        let req = req.into_inner();
+        blocking("stack plan", move || {
+            crate::stacks::plan_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn apply_stack(
+        &self,
+        req: Request<ApplyStackRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("stack apply", move || {
+            crate::stacks::apply_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn destroy_stack(
+        &self,
+        req: Request<DestroyStackRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("stack destroy", move || {
+            crate::stacks::destroy_in(&node::state_root(), &req)
         })
         .await?
         .map(Response::new)
@@ -802,6 +887,14 @@ pub fn router() -> axum::Router {
             &format!("/{}/*rest", ImageServiceServer::<NodeApi>::NAME),
             ImageServiceServer::new(NodeApi),
         )
+        .route_service(
+            &format!("/{}/*rest", PodServiceServer::<NodeApi>::NAME),
+            PodServiceServer::new(NodeApi),
+        )
+        .route_service(
+            &format!("/{}/*rest", StackServiceServer::<NodeApi>::NAME),
+            StackServiceServer::new(NodeApi),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
@@ -877,6 +970,8 @@ async fn rest(
                 transcode::dispatch_virtual_machine_service(&NodeApi, route.rpc, input).await
             }
             "ImageService" => transcode::dispatch_image_service(&NodeApi, route.rpc, input).await,
+            "PodService" => transcode::dispatch_pod_service(&NodeApi, route.rpc, input).await,
+            "StackService" => transcode::dispatch_stack_service(&NodeApi, route.rpc, input).await,
             _ => Err(transcode::not_served(route)),
         }
     };

@@ -611,6 +611,9 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
     };
     for (method, path) in [
         ("POST", "/v1/namespaces/default/networks/lab:connect"),
+        // PodService read is served; CreatePod/DeletePod are not plumbed yet.
+        ("POST", "/v1/namespaces/default/pods"),
+        ("DELETE", "/v1/namespaces/default/pods/web"),
         ("GET", "/v1/events:watch"),
         // A stream is served over gRPC; the REST encoding does not carry one.
         ("GET", "/v1/operations/op-1:watch"),
@@ -633,6 +636,11 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
     let (status, _, v) = call("GET", "/v1/namespaces/default/containers", "").await;
     assert_eq!(status, 200, "ListContainers is served: {v}");
     assert!(v["containers"].is_array(), "{v}");
+    // `ListPods` is served now: pods are derived from the container records, so a
+    // node with no pods answers 200 with an empty list.
+    let (status, _, v) = call("GET", "/v1/namespaces/default/pods", "").await;
+    assert_eq!(status, 200, "ListPods is served: {v}");
+    assert!(v["pods"].is_array(), "{v}");
     // `ListImages` is served now: the image read-path answers 200 with a
     // (possibly empty) list, read from the process's image store.
     let (status, _, v) = call("GET", "/v1/images", "").await;
@@ -646,6 +654,12 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         ("POST", "/v1/images:push", r#"{"reference":""}"#),
         ("POST", "/v1/images:scan", r#"{"reference":""}"#),
         ("POST", "/v1/images:build", r#"{"tags":[]}"#),
+        // StackService: plan/apply/destroy are served; each refuses an empty
+        // manifest with 400 — decided before any work, not the 501 of an
+        // unserved route.
+        ("POST", "/v1/stacks/dd:plan", r#"{"manifest":""}"#),
+        ("POST", "/v1/stacks/dd:apply", r#"{"manifest":""}"#),
+        ("POST", "/v1/stacks/dd:destroy", r#"{"manifest":""}"#),
     ] {
         let (status, _, v) = call(method, path, body).await;
         assert_eq!((status, v["grpc_status"].as_i64()), (400, Some(3)), "{method} {path}: {v}");
