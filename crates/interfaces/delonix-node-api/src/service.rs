@@ -534,8 +534,8 @@ impl ContainerService for NodeApi {
         .map(Response::new)
     }
 
-    // ---- lifecycle write-path + stats + logs. `UpdateContainer` and `Exec`
-    // are the two the contract still carries unserved here (own passes).
+    // ---- lifecycle write-path + stats + logs + resize. `Exec` is the one the
+    // contract still carries unserved here (its own pass).
 
     async fn create_container(
         &self,
@@ -554,9 +554,14 @@ impl ContainerService for NodeApi {
 
     async fn update_container(
         &self,
-        _req: Request<UpdateContainerRequest>,
+        req: Request<UpdateContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("ContainerService", "UpdateContainer"))
+        let req = req.into_inner();
+        blocking("container update", move || {
+            crate::container_update::update_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn delete_container(

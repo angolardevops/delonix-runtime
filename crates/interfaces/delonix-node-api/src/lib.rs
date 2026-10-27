@@ -83,6 +83,7 @@ pub mod activation;
 pub mod container_launch;
 pub mod container_logs;
 pub mod container_ops;
+pub mod container_update;
 pub mod containers;
 pub mod docs;
 pub mod events;
