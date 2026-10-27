@@ -1,0 +1,11 @@
+### cilium-envoy pós-fix (/dev/shm + ordenação de mounts aninhados)
+NAME                                READY   STATUS    RESTARTS   AGE     IP               NODE        NOMINATED NODE   READINESS GATES
+cilium-b2fhb                        1/1     Running   0          2m22s   10.237.193.253   d7env-w1    <none>           <none>
+cilium-envoy-4l9t8                  1/1     Running   0          2m24s   10.237.232.9     d7env-cp1   <none>           <none>
+cilium-envoy-ps4j5                  1/1     Running   0          2m22s   10.237.193.253   d7env-w1    <none>           <none>
+cilium-lwnpg                        1/1     Running   0          2m24s   10.237.232.9     d7env-cp1   <none>           <none>
+cilium-operator-5cbd99564f-b7ptr    1/1     Running   0          2m24s   10.237.232.9     d7env-cp1   <none>           <none>
+cilium-operator-5cbd99564f-mzxbs    1/1     Running   0          2m24s   10.237.193.253   d7env-w1    <none>           <none>
+### mounts no pod envoy
+tmpfs on /dev/shm type tmpfs (rw,nosuid,nodev,noexec,relatime,size=65536k,inode64)
+tmpfs on /run/cilium/envoy/sockets type tmpfs (rw,nosuid,nodev,noexec,relatime,size=400988k,mode=755,inode64)

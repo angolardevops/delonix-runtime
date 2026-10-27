@@ -324,3 +324,80 @@ Still not working, and none of it is small:
   has no separate «with its anonymous volumes» mode.
 - **Ryuk** (the reaper sidecar, enabled by default) was not tried. It needs
   the Docker socket mounted inside a container, which this layer does not map.
+
+## 9. Testcontainers runs end to end now (2026-10-27)
+
+The three "still not working" routes above are served, and the **real
+testcontainers-python flow is green against `delonix serve docker-api`** —
+driven by the same docker-py 7.2.0, with Ryuk disabled:
+
+| testcontainers call | route added | result |
+|---|---|---|
+| `DockerContainer(...).start()` | `GET /images/{name}/json` (image inspect — docker-py calls it before create; its 404 was the next wall after the §8 fixes) | green |
+| `get_exposed_port(80)` | (§8) | green — a host port |
+| `wait_for_logs("ready")` | `GET /containers/{id}/logs` — Docker stdcopy framing (stdout/stderr split under `--log-cri`, else one stdout stream), follow/tail/since/timestamps | green |
+| `exec(["echo","hi"])` | `POST /containers/{id}/exec` → `POST /exec/{id}/start` (101 hijack, stdcopy-framed, re-exec of `container exec`) → `GET /exec/{id}/json` (ExitCode) | green, exit 0 |
+| `get_logs()` | `GET …/logs` | green |
+| `stop()` | (§8) | green |
+
+Containers created over this API now log in CRI format by default, so the logs
+route frames stdout and stderr on SEPARATE streams: a client asking for only
+stderr gets only stderr (proven — see below).
+
+Checked two ways: `tests/compat/docker_api_smoke.py` (extended with logs, exec
+and the stdout/stderr-split assertions — the base binary 404s or mixes them)
+passes, and a testcontainers harness exercising the list above passes every
+call.
+
+Added since, so the Docker-API layer is fuller (each proven live, in
+`docker_api_smoke.py` and by hand):
+
+- **`GET /containers/{id}/stats`.** A one-shot sample (`?stream=false`) in
+  Docker's shape — cpu/memory from the container's cgroup, read twice ~100 ms
+  apart so `precpu_stats`/`cpu_stats` yield a real CPU %. Used by Dev Containers
+  and GitLab Runner. (A streaming request gets one sample; live rates are what
+  `/metrics` is for.)
+- **Anonymous volumes (`Config.Volumes` + `rm ?v=1`).** The create maps each
+  source-less target to a deterministic `dlxanon-<name>-…` volume (so the
+  container gets real isolated storage there), and remove with `v=1` deletes
+  them by that prefix — Docker's auto-create/auto-remove lifecycle, in the
+  compat layer. The native `-v` CLI still refuses a source-less spec by design
+  (DX-1209); this is Docker-API fidelity only.
+
+- **Label filtering on `GET /containers/json`.** `?filters={"label":[…]}` is
+  honoured server-side now (`label` ANDed; `status`/`name`/`id` ORed; unknown
+  keys ignored). This is the reaping primitive — list by label, remove what
+  comes back.
+
+### Ryuk runs on delonix — and safer than on Docker
+
+An earlier draft of this section said Ryuk could not run here. That was wrong,
+and `tests/compat/ryuk_reap.py` proves it: Testcontainers with Ryuk **enabled**
+pulls and runs the real `testcontainers/ryuk` image, binds the control socket
+into it, and Ryuk reaps the session's labelled resources — measured end to end,
+including an orphan from a crashed session reaped in ~4 s, after which Ryuk
+removes itself too.
+
+Three properties make it work, none of them a hole:
+
+- **The socket accepts Ryuk because Ryuk IS the engine.** `SO_PEERCRED` still
+  admits only the engine's own uid. A rootless container's `root` (uid 0) is
+  mapped to the engine's uid on the host (`newuidmap`: container 0 → our euid),
+  so Ryuk — root in its image — is recognised as the engine itself. A process
+  belonging to any *other* user is still refused. The `access.transport-verified`
+  boundary holds.
+- **Safer than Docker, by construction.** On Docker the daemon is root, so a
+  container with the socket bound in is host-root — the canonical escape. On
+  delonix the socket peer is the UNPRIVILEGED engine user (euid 1000 here, not
+  0): a socket-bearing container can do only what that rootless user can, never
+  touch host root. The most dangerous bind mount in the container world stops
+  being a privilege escalation.
+- **Reaping is label-scoped, so it is exact.** Ryuk removes by
+  `label=org.testcontainers=…`, and the engine honours that filter server-side
+  (above) — so it reaps the session's resources and nothing else. Without the
+  server-side filter Ryuk would have had to trust a client-side list; with it,
+  the engine is the one that scopes the blast radius.
+
+So Testcontainers runs with its defaults — no `TESTCONTAINERS_RYUK_DISABLED`
+needed — and the reaper is less dangerous here than on the daemon it was written
+for.

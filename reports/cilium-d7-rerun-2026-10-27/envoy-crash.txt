@@ -1,0 +1,25 @@
+[pod/cilium-envoy-7q484/cilium-envoy] [2026-10-27 20:25:34.340][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #8: [0x63700b64c162]
+[pod/cilium-envoy-7q484/cilium-envoy] [2026-10-27 20:25:34.340][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #9: [0x63700b64c2bc]
+[pod/cilium-envoy-7q484/cilium-envoy] [2026-10-27 20:25:34.340][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #10: [0x63700992449d]
+[pod/cilium-envoy-7q484/cilium-envoy] [2026-10-27 20:25:34.340][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #11: [0x782b4502e1ca]
+[pod/cilium-envoy-7q484/cilium-envoy] [2026-10-27 20:25:34.340][3][critical][backtrace] [external/envoy/source/server/backtrace.h:121] #12: __libc_start_main [0x782b4502e28b]
+[pod/cilium-envoy-7q484/cilium-envoy] [2026-10-27 20:25:34.340][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #13: [0x637009816025]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.906][3][critical][assert] [external/envoy/source/server/hot_restart_impl.cc:44] panic: cannot open shared memory region /envoy_shared_memory_0 check user permissions. Error: No such file or directory
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.906][3][critical][backtrace] [external/envoy/source/server/backtrace.h:129] Caught Aborted, suspect faulting address 0x3
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.906][3][critical][backtrace] [external/envoy/source/server/backtrace.h:113] Backtrace (use tools/stack_decode.py to get line numbers):
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.906][3][critical][backtrace] [external/envoy/source/server/backtrace.h:114] Envoy version: cbec91f666af0bf742da986d43832932dbb26b82/1.37.6/Distribution/RELEASE/BoringSSL
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.906][3][critical][backtrace] [external/envoy/source/server/backtrace.h:116] Address mapping: 5a2f65d42000-5a2f68edd000 /usr/bin/cilium-envoy
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #0: [0x7abf3d6ad330]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:121] #1: raise [0x7abf3d6ad27e]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:121] #2: abort [0x7abf3d6908ff]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #3: [0x5a2f67b8a4b2]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #4: [0x5a2f67b8b068]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #5: [0x5a2f67b7a554]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #6: [0x5a2f67b79f86]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #7: [0x5a2f67b77992]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #8: [0x5a2f67b78162]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #9: [0x5a2f67b782bc]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #10: [0x5a2f65e5049d]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #11: [0x7abf3d6921ca]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:121] #12: __libc_start_main [0x7abf3d69228b]
+[pod/cilium-envoy-x9x5h/cilium-envoy] [2026-10-27 20:24:57.912][3][critical][backtrace] [external/envoy/source/server/backtrace.h:123] #13: [0x5a2f65d42025]

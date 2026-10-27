@@ -50,6 +50,13 @@ pub(crate) enum Support {
     /// Implemented and artefact-verified, but NOT yet validated end to end
     /// against this engine's CRI in a multi-node topology. The `&'static str`
     /// is the reason, and it reaches the operator verbatim.
+    ///
+    /// DORMANT as of 2026-10-28: every profile in the table is now `Supported`
+    /// (Cilium/Calico/Flannel all passed D7 — see `support`). The variant, the
+    /// DX-1705 gate in [`validate`] and `--experimental-cni` are kept as the
+    /// ready mechanism for the NEXT profile that ships unmeasured — hence
+    /// `allow(dead_code)`: never constructed today, matched in two places.
+    #[allow(dead_code)]
     Experimental(&'static str),
 }
 
@@ -110,21 +117,35 @@ impl Profile {
     pub(crate) fn support(self) -> Support {
         match self {
             Profile::Default | Profile::None => Support::Supported,
-            // The reason is the evidence, quoted from where it is recorded.
-            Profile::Cilium => Support::Experimental(
-                "the Cilium dataplane has not been measured against this engine's CRI on more \
-                 than one node (ADR-0074's own «what was not measured»); its agent needs a \
-                 lifted capability ceiling, bidirectional mount propagation and bpffs, all of \
-                 which this engine implements but none of which has been proven together",
-            ),
-            Profile::Calico => Support::Experimental(
-                "the Calico dataplane has not been measured against this engine's CRI on more \
-                 than one node",
-            ),
-            Profile::Flannel => Support::Experimental(
-                "the Flannel dataplane has not been measured against this engine's CRI on more \
-                 than one node",
-            ),
+            // Measured 2026-10-27/28 (ADR-0078 D7, this campaign): the Cilium
+            // agent came up on a two-node kubeadm cluster once the three CRI
+            // defects it needed were fixed — the capability ceiling + bpffs
+            // (#869/#871), the pod-identity `CNI_ARGS` (without which endpoints
+            // stayed `reserved:init`), and `cilium-envoy`'s `/dev/shm` +
+            // nested-mount ordering. Proven: both nodes Ready, cilium
+            // agent/operator/envoy Running, cross-node pod-to-pod and ClusterIP
+            // DNS working, 0 endpoints in `reserved:init`. It is the HA default
+            // `cni: default` resolves to. NetworkPolicy ENFORCEMENT is a
+            // separate claim, still untested here (ADR-0078 pendency #3).
+            Profile::Cilium => Support::Supported,
+            // Measured 2026-10-28 (ADR-0078 D7): a two-node kubeadm cluster
+            // (`--cni calico`) on the 1.37 golden came up with both nodes Ready,
+            // the calico-node DaemonSet 2/2 + calico-kube-controllers Running,
+            // cross-node pod-to-pod traffic both ways (distinct nodes, distinct
+            // /24s) and ClusterIP DNS resolving. The DATAPLANE is proven; Calico's
+            // NetworkPolicy ENFORCEMENT is a separate claim, still untested here
+            // (ADR-0078 pendency #3) — `enforces_network_policy` describes what
+            // the profile implements, not what was measured.
+            Profile::Calico => Support::Supported,
+            // Measured 2026-10-27 (ADR-0078 D7): a two-node kubeadm cluster
+            // (`--cni flannel`) on the 1.37 golden came up with both nodes
+            // Ready, the flannel DaemonSet 2/2, cross-node pod-to-pod traffic
+            // working both ways (pods pinned to distinct nodes, distinct /24s)
+            // and ClusterIP DNS resolving — the vxlan dataplane and the CRI
+            // fixes it needed (entrypoint override, hostPath create) are in
+            // develop. Flannel installs no NetworkPolicy, which `cni: default`
+            // never promised either.
+            Profile::Flannel => Support::Supported,
         }
     }
 
@@ -548,6 +569,32 @@ fn is_interface_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'
 }
 
+/// The profile the engine will actually install for `cni`, AFTER its own
+/// default-selection — `None` only when `cni` is not a name this engine knows
+/// (the caller turns that into DX-1701).
+///
+/// The one rule that lives here: `default` on a MULTI-NODE kubeadm cluster is
+/// not the node-local bridge (which routes nothing between nodes and would
+/// leave every node `NotReady`) — the engine installs the HA default
+/// cross-node pod network, Cilium, so `default` means «give me a cluster that
+/// works», one node or many. `mode: kind` is excluded: there `default` is the
+/// node image's own kindnet, which already routes. A single node keeps the
+/// bridge. This replaces the old DX-6701 refusal (ADR-0078's «D1», amended).
+///
+/// SINGLE SOURCE of the rule, so `validate` (before any machine exists) and
+/// the bootstrap's plan/install/readiness-wait in `cmd::cluster` cannot
+/// disagree about what `default` became.
+pub(crate) fn resolved_profile(cni: &str, mode: &str, nodes: u32) -> Option<Profile> {
+    let requested = Profile::parse(cni)?;
+    Some(
+        if mode != "kind" && requested == Profile::Default && nodes > 1 {
+            Profile::Cilium
+        } else {
+            requested
+        },
+    )
+}
+
 /// Everything that can be refused before a machine exists.
 ///
 /// Ordered deliberately: the profile first (so an unknown name is never
@@ -557,7 +604,7 @@ fn is_interface_char(c: char) -> bool {
 /// the whole manifest.
 pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
     // --- 1. the profile itself -------------------------------------------
-    let profile = Profile::parse(&req.cni).ok_or_else(|| {
+    let requested = Profile::parse(&req.cni).ok_or_else(|| {
         Error::coded(
             1701,
             Error::Invalid(super::po::tf(
@@ -567,21 +614,13 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
         )
     })?;
 
-    // The historical refusal, unchanged: `default` on a kubeadm cluster is a
-    // node-local bridge and serves exactly one node.
-    if req.mode != "kind" && profile == Profile::Default && req.nodes > 1 {
-        return Err(Error::coded(
-            6701,
-            Error::Unavailable(super::po::tf(
-                "a kubeadm cluster of {n} nodes cannot use the default CNI: it is a node-local \
-                 bridge with nothing that routes pod traffic between nodes, so every node would \
-                 stay NotReady. Nothing was created. Choose a cross-node profile (`--cni cilium`, \
-                 `--cni calico`, `--cni flannel`), or `--cni none` and apply your own, or create \
-                 a one-node cluster (`--workers 0`)",
-                &[("n", &req.nodes.to_string())],
-            )),
-        ));
-    }
+    // The engine's own default-selection (`resolved_profile`): `default` on a
+    // multi-node kubeadm cluster is NOT refused any more (the old DX-6701) —
+    // it resolves to Cilium, the HA default cross-node pod network. When that
+    // happened, the engine chose this dataplane; `engine_chose_default` carries
+    // that fact to the support gate below.
+    let profile = resolved_profile(&req.cni, &req.mode, req.nodes).unwrap_or(requested);
+    let engine_chose_default = profile != requested;
 
     // An add-on profile is a kubeadm-path capability. In `mode: kind` the
     // node image's own kindnet is what `default` means, and installing a
@@ -600,8 +639,14 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
     }
 
     // --- 2. support level -------------------------------------------------
+    // The gate is for an OPERATOR who asks for an experimental add-on by name.
+    // When the engine itself resolved `default` to Cilium (`engine_chose_default`),
+    // it stands behind that choice — `default` is `Support::Supported`, and
+    // routing it through the opt-in gate would make a plain `cluster kubeadm
+    // --workers 1` refuse itself. The measurement that earns this is
+    // `docs/network-compatibility.md`'s D7 (run multi-node before this shipped).
     if let Support::Experimental(why) = profile.support() {
-        if profile.is_addon() && !req.experimental {
+        if profile.is_addon() && !req.experimental && !engine_chose_default {
             return Err(Error::coded(
                 1705,
                 Error::Invalid(super::po::tf(
@@ -1105,20 +1150,22 @@ mod tests {
 
     // --- support level ----------------------------------------------------
 
-    /// An experimental profile is refused without the explicit opt-in, and
-    /// the refusal carries the REASON, not just the word.
+    /// Every add-on profile is now `Supported` (all three passed D7 this
+    /// campaign), so NONE needs `--experimental-cni` — a plain `--cni
+    /// cilium|calico|flannel` validates with `experimental: false`. The DX-1705
+    /// gate and the `Support::Experimental` variant stay in the code as the
+    /// DORMANT mechanism for the next profile that ships unmeasured; this test
+    /// is the inverse of the old one, and would start failing the day a profile
+    /// is marked `Experimental` again (the reminder to re-add that coverage).
     #[test]
-    fn an_experimental_profile_needs_an_explicit_opt_in() {
-        let mut r = req("cilium");
-        r.experimental = false;
-        let e = validate(&r).unwrap_err();
-        assert_eq!(e.number(), 1705, "{e}");
-        assert!(e.to_string().contains("more than one node"), "{e}");
-        assert!(e.to_string().contains("experimental: true"), "{e}");
-        // With the opt-in it resolves.
-        r.experimental = true;
-        assert_eq!(validate(&r).unwrap().profile, Profile::Cilium);
-        // `default`/`none` are not gated by it.
+    fn every_addon_profile_is_supported_and_needs_no_opt_in() {
+        for cni in ["cilium", "calico", "flannel"] {
+            assert_eq!(Profile::parse(cni).unwrap().support(), Support::Supported, "{cni}");
+            let mut r = req(cni);
+            r.experimental = false; // no opt-in
+            assert!(validate(&r).is_ok(), "{cni} must validate without --experimental-cni");
+        }
+        // `default`/`none` were never gated.
         let mut d = req("none");
         d.experimental = false;
         assert!(validate(&d).is_ok());
@@ -1134,18 +1181,38 @@ mod tests {
         assert!(e.to_string().contains("cilium"), "{e}");
     }
 
+    /// `default` on a multi-node kubeadm cluster is no longer the old DX-6701
+    /// refusal: the engine resolves it to Cilium, the HA default cross-node pod
+    /// network (#799, ADR-0078 amended). A single node keeps the node-local
+    /// bridge, and kind mode keeps kindnet.
     #[test]
-    fn the_default_cni_still_serves_only_one_kubeadm_node() {
-        let e = validate(&req("default")).unwrap_err();
-        assert_eq!(e.number(), 6701, "{e}");
-        // One node is fine.
+    fn the_default_cni_resolves_to_cilium_above_one_kubeadm_node() {
+        // Multi-node, and WITHOUT the experimental opt-in: the engine stands
+        // behind its OWN default, so there is no DX-1705 either.
+        let mut multi = req("default");
+        multi.experimental = false;
+        assert_eq!(validate(&multi).unwrap().profile, Profile::Cilium);
+        // One node keeps the node-local bridge.
         let mut one = req("default");
         one.nodes = 1;
         assert_eq!(validate(&one).unwrap().profile, Profile::Default);
-        // And kind mode was never refused.
+        // Kind mode keeps `default` as kindnet, several nodes or not.
         let mut k = req("default");
         k.mode = "kind".into();
-        assert!(validate(&k).is_ok());
+        assert_eq!(validate(&k).unwrap().profile, Profile::Default);
+    }
+
+    /// The resolution rule in isolation — the single source both `validate`
+    /// (before a machine exists) and the bootstrap's plan/install/wait read.
+    #[test]
+    fn resolved_profile_maps_default_to_cilium_only_for_multi_node_kubeadm() {
+        assert_eq!(resolved_profile("default", "ssh", 2), Some(Profile::Cilium));
+        assert_eq!(resolved_profile("default", "vm", 5), Some(Profile::Cilium));
+        assert_eq!(resolved_profile("default", "ssh", 1), Some(Profile::Default));
+        assert_eq!(resolved_profile("default", "kind", 3), Some(Profile::Default));
+        assert_eq!(resolved_profile("none", "ssh", 3), Some(Profile::None));
+        assert_eq!(resolved_profile("flannel", "ssh", 3), Some(Profile::Flannel));
+        assert_eq!(resolved_profile("bogus", "ssh", 3), None);
     }
 
     /// Kind mode already has an owner of the pod network.

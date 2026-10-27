@@ -515,6 +515,10 @@ async fn serve(uds: tokio::net::UnixListener, state: Arc<AppState>) -> Result<()
             let svc = service_fn(move |req| handle(req, state.clone()));
             let _ = hyper::server::conn::http1::Builder::new()
                 .serve_connection(io, svc)
+                // `exec` answers 101 Switching Protocols and then streams over
+                // the raw upgraded socket (`handle_exec_start`); without this the
+                // connection is closed after the 101 and the hijack never happens.
+                .with_upgrades()
                 .await;
         });
     }
@@ -667,6 +671,36 @@ pub(crate) const API_MATRIX: &[(&str, &str, &str)] = &[
         "/images/create",
         "the pull — image pull <ref>, streamed as Docker's chunked JSON",
     ),
+    (
+        "GET",
+        "/containers/{id}/logs",
+        "container logs — Docker's multiplexed stdout/stderr stream (follow/tail/since/timestamps); the wait strategy Testcontainers uses most",
+    ),
+    (
+        "POST",
+        "/containers/{id}/exec",
+        "exec create — registers the command, returns an exec id",
+    ),
+    (
+        "POST",
+        "/exec/{id}/start",
+        "exec start — hijacks the connection (101) and streams the command's stdcopy output; Testcontainers' `.exec()`",
+    ),
+    (
+        "GET",
+        "/exec/{id}/json",
+        "exec inspect — carries the ExitCode the client reads after the stream ends",
+    ),
+    (
+        "GET",
+        "/images/{name}/json",
+        "image inspect — Testcontainers/docker-py call it before create to confirm the image is present",
+    ),
+    (
+        "GET",
+        "/containers/{id}/stats",
+        "one-shot resource sample (cpu/memory from the cgroup, two reads for a real cpu %); a streaming request gets one sample",
+    ),
 ];
 
 /// Routes deliberately NOT implemented, each with the reason.
@@ -681,20 +715,9 @@ pub(crate) const API_MATRIX: &[(&str, &str, &str)] = &[
 pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
     (
         "POST",
-        "/containers/{id}/exec",
-        "needs HTTP hijacking (a raw bidirectional stream over the upgraded \
-         connection); use `delonix container exec`",
-    ),
-    (
-        "POST",
         "/containers/{id}/attach",
         "same hijacking requirement, and this engine keeps no live stdin conduit \
          to an already-started detached container",
-    ),
-    (
-        "GET",
-        "/containers/{id}/logs",
-        "not written yet; `delonix container logs` covers it",
     ),
     (
         "GET",
@@ -720,18 +743,6 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
         "GET",
         "/networks/{id}",
         "not written yet; `delonix network inspect` covers it",
-    ),
-    (
-        "GET",
-        "/images/{name}/json",
-        "not written yet; `delonix image describe` covers it",
-    ),
-    (
-        "GET",
-        "/containers/{id}/stats",
-        "not written yet — it is a live metric stream, and this engine exposes \
-         those over Prometheus (`/metrics`) instead; `delonix dash` covers the \
-         interactive case",
     ),
     (
         "GET|POST|DELETE",
@@ -960,7 +971,7 @@ pub(crate) fn print_matrix() {
 }
 
 async fn handle(
-    req: Request<Incoming>,
+    mut req: Request<Incoming>,
     state: Arc<AppState>,
 ) -> std::result::Result<Response<RespBody>, Infallible> {
     let method = req.method().as_str().to_string();
@@ -974,6 +985,31 @@ async fn handle(
         .get("X-Registry-Auth")
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
+
+    // `POST /exec/{id}/start` must grab the connection-upgrade future from the
+    // LIVE request, before `into_body()` consumes it — the whole route is a
+    // hijack (101 → raw stdcopy stream). Handled here for that reason; its three
+    // sibling routes (`containers/{id}/exec`, `exec/{id}/json`) are ordinary
+    // buffered arms below.
+    if method == "POST" {
+        let segs: Vec<&str> = path
+            .trim_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        if let ["exec", execid, "start"] = segs.as_slice() {
+            let execid = execid.to_string();
+            let upgrade = hyper::upgrade::on(&mut req);
+            let body = req
+                .into_body()
+                .collect()
+                .await
+                .map(|c| c.to_bytes())
+                .unwrap_or_default();
+            return Ok(exec_start_response(&execid, &body, upgrade));
+        }
+    }
+
     let body_bytes = req
         .into_body()
         .collect()
@@ -989,13 +1025,47 @@ async fn handle(
         return Ok(handle_images_create(&state, &params, registry_auth.as_deref()).await);
     }
 
+    // Also a live STREAM, not a buffered `(status, body)`: container logs, which
+    // `follow=1` keeps open as the container writes. It is dispatched here, next
+    // to the pull, for the same reason — the caller must start reading before
+    // the stream ends. (Classified in `API_MATRIX`; the dispatch-coverage test
+    // only parses `match` arms, so an early `return` like this needs its row
+    // added by hand, as `/images/create` does.)
+    if method == "GET" {
+        let segs: Vec<&str> = path
+            .trim_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        if let ["containers", id, "logs"] = segs.as_slice() {
+            return Ok(handle_logs(&state, id, &params).await);
+        }
+        // Image inspect — buffered, but a special-case (not a `match` arm) so
+        // its placeholder stays `{name}` to match the upstream-used list (a
+        // namespaced repo carries `/`, which the arm parser cannot render).
+        if let ["images", rest @ .., "json"] = segs.as_slice() {
+            if !rest.is_empty() {
+                let (status, body) = handle_image_inspect(&state, &rest.join("/"));
+                return Ok(api_json_response(status, body));
+            }
+        }
+    }
+
     let (status, body): (StatusCode, Vec<u8>) = match (method.as_str(), path.as_str()) {
         ("GET" | "HEAD", "/_ping") => (StatusCode::OK, b"OK".to_vec()),
         ("GET", "/version") => (StatusCode::OK, version_json()),
         ("GET", "/info") => (StatusCode::OK, info_json(&state)),
         ("GET", "/containers/json") => (
             StatusCode::OK,
-            containers_json(&state, query_flag(&params, "all")).unwrap_or_else(|_| b"[]".to_vec()),
+            containers_json(
+                &state,
+                query_flag(&params, "all"),
+                &params
+                    .get("filters")
+                    .and_then(|f| serde_json::from_str::<serde_json::Value>(f).ok())
+                    .unwrap_or(serde_json::Value::Null),
+            )
+            .unwrap_or_else(|_| b"[]".to_vec()),
         ),
         ("GET", "/images/json") => (
             StatusCode::OK,
@@ -1019,6 +1089,11 @@ async fn handle(
                 ("POST", ["containers", id, "rename"]) => handle_rename(&state, id, &params).await,
                 ("DELETE", ["containers", id]) => handle_remove(&state, id, &params).await,
                 ("GET", ["containers", id, "json"]) => handle_inspect(&state, id),
+                ("POST", ["containers", id, "exec"]) => {
+                    handle_exec_create(&state, id, &body_bytes)
+                }
+                ("GET", ["exec", execid, "json"]) => handle_exec_json(execid),
+                ("GET", ["containers", id, "stats"]) => handle_stats(&state, id).await,
                 _ => (
                     StatusCode::NOT_FOUND,
                     json!({
@@ -1038,16 +1113,7 @@ async fn handle(
             }
         }
     };
-    let resp = Response::builder()
-        .status(status)
-        .header("Content-Type", "application/json")
-        .header("Api-Version", API_VERSION)
-        .header("Docker-Experimental", "false")
-        .header("OSType", "linux")
-        .header("Server", format!("delonix/{}", env!("CARGO_PKG_VERSION")))
-        .body(buffered(body))
-        .unwrap_or_else(|_| Response::new(buffered(Vec::new())));
-    Ok(resp)
+    Ok(api_json_response(status, body))
 }
 
 /// Decodes the `X-Registry-Auth` header (base64 JSON `AuthConfig`) into the
@@ -1165,6 +1231,594 @@ async fn handle_images_create(
         .header("OSType", "linux")
         .header("Server", format!("delonix/{}", env!("CARGO_PKG_VERSION")))
         .body(body)
+        .unwrap_or_else(|_| Response::new(buffered(Vec::new())))
+}
+
+/// One Docker stdcopy frame: the 8-byte header (`stream` id in byte 0, bytes
+/// 1-3 zero, a big-endian `u32` length in bytes 4-7) followed by the payload.
+/// `stream` is 1 for stdout, 2 for stderr — the demux a non-TTY client does.
+fn docker_stream_frame(stream: u8, payload: &[u8]) -> Vec<u8> {
+    let mut f = Vec::with_capacity(8 + payload.len());
+    f.push(stream);
+    f.extend_from_slice(&[0, 0, 0]);
+    f.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    f.extend_from_slice(payload);
+    f
+}
+
+/// `GET /containers/{id}/logs` — the container's output as Docker's multiplexed
+/// stream (see [`docker_stream_frame`]). `wait_for_logs` is Testcontainers' most
+/// common wait strategy, so this is the single biggest adoption unblock.
+///
+/// Two storage formats. A container started with `--log-cri` keeps one tagged
+/// line per write, so stdout and stderr are framed SEPARATELY and
+/// `tail`/`since`/`timestamps` are honoured per line. The default MIXED log has
+/// no per-line tag, so its bytes are framed as one stdout stream — enough for
+/// `wait_for_logs`, which greps the demuxed text — and the per-line filters do
+/// not apply (noted in the compatibility matrix as the format caveat).
+async fn handle_logs(
+    state: &Arc<AppState>,
+    id: &str,
+    params: &std::collections::HashMap<String, String>,
+) -> Response<RespBody> {
+    let c = match super::util::find(&state.store, id) {
+        Ok(c) => c,
+        Err(e) => return json_error(StatusCode::NOT_FOUND, &e.to_string()),
+    };
+    // Docker returns nothing when neither stream is asked for; be lenient so a
+    // bare `?follow=1` still shows stdout.
+    let mut want_stdout = query_flag(params, "stdout");
+    let want_stderr = query_flag(params, "stderr");
+    if !want_stdout && !want_stderr {
+        want_stdout = true;
+    }
+    let follow = query_flag(params, "follow");
+    let timestamps = query_flag(params, "timestamps");
+    let tail = params
+        .get("tail")
+        .filter(|t| t.as_str() != "all")
+        .and_then(|t| t.parse::<usize>().ok());
+    let since = params.get("since").and_then(|s| s.parse::<u64>().ok());
+    let log_path = c.log_path.clone().map(std::path::PathBuf::from).unwrap_or_else(|| {
+        state.images.root().join("containers").join(&c.id).join("log")
+    });
+    let log_cri = c.log_cri;
+    let state = Arc::clone(state);
+    let cid = c.id.clone();
+
+    let (tx, rx) =
+        tokio::sync::mpsc::channel::<std::result::Result<Frame<Bytes>, Infallible>>(64);
+    tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Seek};
+        let send = |bytes: Vec<u8>| tx.blocking_send(Ok(Frame::data(Bytes::from(bytes)))).is_ok();
+        let frame_line = |stream: &str, ts: &str, body: &str| -> Option<Vec<u8>> {
+            let sid = if stream == "stderr" { 2u8 } else { 1u8 };
+            if (sid == 1 && !want_stdout) || (sid == 2 && !want_stderr) {
+                return None;
+            }
+            let mut payload = String::new();
+            if timestamps {
+                payload.push_str(ts);
+                payload.push(' ');
+            }
+            payload.push_str(body);
+            payload.push('\n');
+            Some(docker_stream_frame(sid, payload.as_bytes()))
+        };
+
+        // --- backlog ---
+        let mut buf = Vec::new();
+        let _ = std::fs::File::open(&log_path).and_then(|mut f| f.read_to_end(&mut buf));
+        if log_cri {
+            let text = String::from_utf8_lossy(&buf);
+            let since_prefix = since.map(super::container::unix_secs_to_rfc3339_prefix);
+            let mut rows: Vec<(String, String, String)> = Vec::new();
+            for line in text.lines() {
+                if let Some((ts, stream, body)) = super::container::parse_cri_log_line_full(line) {
+                    if let Some(thr) = &since_prefix {
+                        if ts < thr.as_str() {
+                            continue;
+                        }
+                    }
+                    rows.push((stream.to_string(), ts.to_string(), body.to_string()));
+                }
+            }
+            if let Some(n) = tail {
+                let start = rows.len().saturating_sub(n);
+                rows.drain(..start);
+            }
+            for (stream, ts, body) in &rows {
+                if let Some(fr) = frame_line(stream, ts, body) {
+                    if !send(fr) {
+                        return;
+                    }
+                }
+            }
+        } else if want_stdout && !buf.is_empty() && !send(docker_stream_frame(1, &buf)) {
+            return;
+        }
+
+        if !follow {
+            return;
+        }
+        // --- follow: frame appended bytes until the container stops and the
+        // file stops growing (reopens on shrink, i.e. a log rotation). ---
+        let mut pos = buf.len() as u64;
+        let mut pending = String::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let len = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
+            if len < pos {
+                pos = 0;
+            }
+            if len > pos {
+                let Ok(mut f) = std::fs::File::open(&log_path) else {
+                    break;
+                };
+                if f.seek(std::io::SeekFrom::Start(pos)).is_err() {
+                    break;
+                }
+                let mut chunk = Vec::new();
+                if f.read_to_end(&mut chunk).is_err() {
+                    break;
+                }
+                pos += chunk.len() as u64;
+                if log_cri {
+                    pending.push_str(&String::from_utf8_lossy(&chunk));
+                    while let Some(nl) = pending.find('\n') {
+                        let line: String = pending.drain(..=nl).collect();
+                        let line = line.trim_end_matches('\n');
+                        if let Some((ts, stream, body)) =
+                            super::container::parse_cri_log_line_full(line)
+                        {
+                            if let Some(fr) = frame_line(stream, ts, body) {
+                                if !send(fr) {
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                } else if want_stdout && !send(docker_stream_frame(1, &chunk)) {
+                    return;
+                }
+            } else {
+                let running = super::util::find(&state.store, &cid)
+                    .map(|mut cc| {
+                        let _ = delonix_linux::reconcile_status(&mut cc);
+                        matches!(cc.status, Status::Running)
+                    })
+                    .unwrap_or(false);
+                if !running {
+                    break;
+                }
+            }
+        }
+    });
+
+    let body = StreamBody::new(ReceiverStream::new(rx)).boxed();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/vnd.docker.multiplexed-stream")
+        .header("Api-Version", API_VERSION)
+        .header("Docker-Experimental", "false")
+        .header("OSType", "linux")
+        .header("Server", format!("delonix/{}", env!("CARGO_PKG_VERSION")))
+        .body(body)
+        .unwrap_or_else(|_| Response::new(buffered(Vec::new())))
+}
+
+/// In-memory exec records: `POST /containers/{id}/exec` creates one,
+/// `/exec/{id}/start` runs it, `/exec/{id}/json` reports its exit. Process-global
+/// and never persisted — an exec is live state of THIS server, exactly as the
+/// Docker daemon keeps it; a restart forgets them, as the daemon's would.
+static EXEC_REGISTRY: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, ExecRecord>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[derive(Clone)]
+struct ExecRecord {
+    container_id: String,
+    cmd: Vec<String>,
+    tty: bool,
+    attach_stdin: bool,
+    running: bool,
+    exit_code: Option<i32>,
+}
+
+/// `POST /containers/{id}/exec` — registers a command to run in the container
+/// and returns its exec id. Nothing runs until `/exec/{id}/start`.
+fn handle_exec_create(state: &Arc<AppState>, id: &str, body: &[u8]) -> (StatusCode, Vec<u8>) {
+    let c = match super::util::find(&state.store, id) {
+        Ok(c) => c,
+        Err(e) => return err_response(&e),
+    };
+    let cfg: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let cmd: Vec<String> = cfg
+        .get("Cmd")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if cmd.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            json!({"message": "Cmd is required and must be a non-empty array"})
+                .to_string()
+                .into_bytes(),
+        );
+    }
+    let tty = cfg.get("Tty").and_then(|v| v.as_bool()).unwrap_or(false);
+    let attach_stdin = cfg.get("AttachStdin").and_then(|v| v.as_bool()).unwrap_or(false);
+    let execid = delonix_node::host::generate_id();
+    EXEC_REGISTRY.lock().unwrap().insert(
+        execid.clone(),
+        ExecRecord { container_id: c.id, cmd, tty, attach_stdin, running: false, exit_code: None },
+    );
+    (StatusCode::CREATED, json!({ "Id": execid }).to_string().into_bytes())
+}
+
+/// `GET /exec/{id}/json` — the exec's state. `ExitCode` is null while it runs and
+/// the integer code once it is done (what Testcontainers reads for `.exec()`).
+fn handle_exec_json(execid: &str) -> (StatusCode, Vec<u8>) {
+    match EXEC_REGISTRY.lock().unwrap().get(execid) {
+        Some(r) => ok_json(json!({
+            "ID": execid,
+            "Running": r.running,
+            "ExitCode": r.exit_code,
+            "ContainerID": r.container_id,
+            "ProcessConfig": {
+                "entrypoint": r.cmd.first().cloned().unwrap_or_default(),
+                "arguments": r.cmd.get(1..).map(<[String]>::to_vec).unwrap_or_default(),
+                "tty": r.tty,
+            },
+            "OpenStdin": r.attach_stdin,
+            "OpenStdout": true,
+            "OpenStderr": !r.tty,
+        })),
+        None => (
+            StatusCode::NOT_FOUND,
+            json!({"message": format!("no such exec: {execid}")}).to_string().into_bytes(),
+        ),
+    }
+}
+
+fn set_exec_running(execid: &str, running: bool) {
+    if let Some(r) = EXEC_REGISTRY.lock().unwrap().get_mut(execid) {
+        r.running = running;
+    }
+}
+fn finish_exec(execid: &str, code: i32) {
+    if let Some(r) = EXEC_REGISTRY.lock().unwrap().get_mut(execid) {
+        r.running = false;
+        r.exit_code = Some(code);
+    }
+}
+
+/// The re-exec of `delonix container exec` for one record — the same safe,
+/// single-threaded re-exec the rest of this server uses (`spawn_run_via_reexec`),
+/// so the `setns` happens in a fresh process, never the multi-threaded daemon.
+/// `command` is a trailing var-arg that allows hyphens, so the user's argv needs
+/// no `--` guard.
+fn exec_command(rec: &ExecRecord) -> tokio::process::Command {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("delonix"));
+    let mut cmd = tokio::process::Command::new(exe);
+    cmd.arg("container").arg("exec");
+    if rec.attach_stdin {
+        cmd.arg("-i");
+    }
+    if rec.tty {
+        cmd.arg("-t");
+    }
+    cmd.arg(&rec.container_id);
+    cmd.args(&rec.cmd);
+    cmd.kill_on_drop(true);
+    cmd
+}
+
+/// `POST /exec/{id}/start`. `Detach: true` fire-and-forgets (200); otherwise the
+/// connection is HIJACKED (101) and the command's output streams back over it in
+/// Docker's stdcopy framing (raw when `Tty`), its stdin fed from the same socket
+/// when the exec attached it. The exit code lands in the record before the
+/// socket closes, so the client's follow-up `/exec/{id}/json` reads it.
+fn exec_start_response(
+    execid: &str,
+    body: &[u8],
+    upgrade: hyper::upgrade::OnUpgrade,
+) -> Response<RespBody> {
+    let cfg: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let detach = cfg.get("Detach").and_then(|v| v.as_bool()).unwrap_or(false);
+    let Some(mut rec) = EXEC_REGISTRY.lock().unwrap().get(execid).cloned() else {
+        return json_error(StatusCode::NOT_FOUND, &format!("no such exec: {execid}"));
+    };
+    // The start body's Tty overrides the create's (docker-py sets it here).
+    if let Some(t) = cfg.get("Tty").and_then(|v| v.as_bool()) {
+        rec.tty = t;
+    }
+    let execid = execid.to_string();
+    set_exec_running(&execid, true);
+    if detach {
+        tokio::task::spawn(async move {
+            let code = run_exec_detached(&rec).await;
+            finish_exec(&execid, code);
+        });
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(buffered(Vec::new()))
+            .unwrap_or_else(|_| Response::new(buffered(Vec::new())));
+    }
+    tokio::task::spawn(async move {
+        match upgrade.await {
+            Ok(upgraded) => bridge_exec(upgraded, &rec, &execid).await,
+            Err(_) => finish_exec(&execid, -1),
+        }
+    });
+    Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header("Content-Type", "application/vnd.docker.multiplexed-stream")
+        .header(hyper::header::CONNECTION, "Upgrade")
+        .header(hyper::header::UPGRADE, "tcp")
+        .body(buffered(Vec::new()))
+        .unwrap_or_else(|_| Response::new(buffered(Vec::new())))
+}
+
+/// Runs a detached exec with no attached streams; returns its exit code.
+async fn run_exec_detached(rec: &ExecRecord) -> i32 {
+    let mut cmd = exec_command(rec);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd.status().await.ok().and_then(|s| s.code()).unwrap_or(126)
+}
+
+/// Bridges the hijacked socket to a re-exec'd `container exec`: socket→stdin
+/// (when attached), stdout/stderr→socket (stdcopy-framed, or raw under a TTY).
+/// Records the exit code BEFORE closing the socket, so the client's follow-up
+/// inspect sees it. Returns nothing — it owns the record's completion.
+async fn bridge_exec(upgraded: hyper::upgrade::Upgraded, rec: &ExecRecord, execid: &str) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let io = TokioIo::new(upgraded);
+    let (mut sock_rd, sock_wr) = tokio::io::split(io);
+    let sock_wr = std::sync::Arc::new(tokio::sync::Mutex::new(sock_wr));
+
+    let mut cmd = exec_command(rec);
+    cmd.stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => {
+            finish_exec(execid, 126);
+            return;
+        }
+    };
+    let child_stdin = child.stdin.take();
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+
+    // stdin: socket -> child (only when the exec attached stdin).
+    let stdin_task = if rec.attach_stdin {
+        child_stdin.map(|mut cin| {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 8192];
+                loop {
+                    match sock_rd.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if cin.write_all(&buf[..n]).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let _ = cin.shutdown().await;
+            })
+        })
+    } else {
+        None
+    };
+
+    let tty = rec.tty;
+    let out_wr = sock_wr.clone();
+    let out_task = tokio::spawn(async move {
+        if let Some(mut so) = child_stdout {
+            pump_framed(&mut so, &out_wr, if tty { None } else { Some(1) }).await;
+        }
+    });
+    // Under a TTY the pty merges stderr into stdout, so there is no separate
+    // stderr stream to frame.
+    let err_task = (!tty).then(|| {
+        let err_wr = sock_wr.clone();
+        tokio::spawn(async move {
+            if let Some(mut se) = child_stderr {
+                pump_framed(&mut se, &err_wr, Some(2)).await;
+            }
+        })
+    });
+
+    let code = child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1);
+    let _ = out_task.await;
+    if let Some(t) = err_task {
+        let _ = t.await;
+    }
+    if let Some(t) = stdin_task {
+        t.abort();
+    }
+    // Code before close: the client reads `/exec/{id}/json` as soon as it sees EOF.
+    finish_exec(execid, code);
+    let mut w = sock_wr.lock().await;
+    let _ = w.shutdown().await;
+}
+
+/// Copies `src` to the locked socket writer, each read framed as a Docker
+/// stdcopy frame for `stream` (1 stdout / 2 stderr), or raw when `stream` is
+/// `None` (a TTY exec, whose bytes are already a single terminal stream).
+async fn pump_framed<R, W>(
+    src: &mut R,
+    wr: &std::sync::Arc<tokio::sync::Mutex<W>>,
+    stream: Option<u8>,
+) where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = [0u8; 8192];
+    loop {
+        match src.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let chunk = match stream {
+                    Some(s) => docker_stream_frame(s, &buf[..n]),
+                    None => buf[..n].to_vec(),
+                };
+                let mut w = wr.lock().await;
+                if w.write_all(&chunk).await.is_err() {
+                    break;
+                }
+                let _ = w.flush().await;
+            }
+        }
+    }
+}
+
+/// `GET /images/{name}/json` — image inspect. Testcontainers (and docker-py's
+/// `images.get`) call this BEFORE `create`, to confirm the image is present and
+/// read its config; a 404 here aborts the whole `DockerContainer.start()`. The
+/// `name` may carry a `/` (a namespaced repo), so the caller joins the middle
+/// path segments back together.
+fn handle_image_inspect(state: &Arc<AppState>, name: &str) -> (StatusCode, Vec<u8>) {
+    let img = match state.images.resolve(name) {
+        Ok(i) => i,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                json!({"message": format!("no such image: {name}")})
+                    .to_string()
+                    .into_bytes(),
+            );
+        }
+    };
+    let size = super::image::image_size(&state.images, &img).unwrap_or(0);
+    let entrypoint = if img.config.entrypoint.is_empty() {
+        serde_json::Value::Null
+    } else {
+        json!(img.config.entrypoint)
+    };
+    let arch = if img.config.architecture.is_empty() {
+        "amd64".to_string()
+    } else {
+        img.config.architecture.clone()
+    };
+    ok_json(json!({
+        "Id": img.id,
+        "RepoTags": if img.repo_tags.is_empty() { vec!["<none>:<none>".to_string()] } else { img.repo_tags.clone() },
+        "RepoDigests": [],
+        "Parent": "",
+        "Comment": "",
+        "Created": img.created_unix,
+        "Size": size,
+        "VirtualSize": size,
+        "Architecture": arch,
+        "Os": "linux",
+        "Config": {
+            "Cmd": img.config.cmd,
+            "Entrypoint": entrypoint,
+            "Env": img.config.env,
+            "WorkingDir": img.config.working_dir,
+            "User": img.config.user,
+            "Labels": serde_json::Value::Object(serde_json::Map::new()),
+        },
+        "RootFS": { "Type": "layers", "Layers": [] },
+    }))
+}
+
+/// Total host CPU time in NANOSECONDS (the sum of every core's jiffies in
+/// `/proc/stat`'s aggregate `cpu` line, converted at `USER_HZ`=100). This is
+/// Docker's `system_cpu_usage`; a client divides the container's own delta by
+/// this delta, times `online_cpus`, to get the CPU percentage.
+fn system_cpu_ns() -> u64 {
+    let stat = std::fs::read_to_string("/proc/stat").unwrap_or_default();
+    let Some(line) = stat.lines().next().filter(|l| l.starts_with("cpu ")) else {
+        return 0;
+    };
+    let jiffies: u64 = line.split_whitespace().skip(1).filter_map(|f| f.parse::<u64>().ok()).sum();
+    // USER_HZ is 100 on every Linux this runs on; jiffies → ns.
+    jiffies.saturating_mul(1_000_000_000 / 100)
+}
+
+/// The cgroup's `memory.max` in bytes, or `None` when it is `max` (unlimited) —
+/// Docker reports the host's total memory as the limit in that case.
+fn cgroup_memory_limit(dir: &std::path::Path) -> Option<u64> {
+    let raw = std::fs::read_to_string(dir.join("memory.max")).ok()?;
+    raw.trim().parse::<u64>().ok()
+}
+
+/// `GET /containers/{id}/stats` — a one-shot resource sample in Docker's shape
+/// (`?stream=false`; a streaming request gets one sample then EOF). CPU and
+/// memory come from the container's cgroup, read TWICE ~100 ms apart so the
+/// `precpu_stats`/`cpu_stats` pair yields a real CPU percentage, the way Docker
+/// fills a non-streamed stats call. Used by Dev Containers and GitLab Runner.
+async fn handle_stats(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
+    let mut c = match super::util::find(&state.store, id) {
+        Ok(c) => c,
+        Err(e) => return err_response(&e),
+    };
+    let _ = delonix_linux::reconcile_status(&mut c);
+    let name = c.name.clone();
+    let cid = c.id.clone();
+    let dir = std::path::PathBuf::from(delonix_linux::live_cgroup(&c));
+    let running = matches!(c.status, Status::Running);
+    let body = run_blocking(move || {
+        use delonix_linux::pressure::read_cgroup;
+        let ncpu = delonix_linux::host_ncpu();
+        let (pre, pre_sys) = (read_cgroup(&dir), system_cpu_ns());
+        if running {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let (cur, cur_sys) = (read_cgroup(&dir), system_cpu_ns());
+        let usec_to_ns = |u: u64| u.saturating_mul(1000);
+        let cpu_now = usec_to_ns(cur.cpu_usage_usec.unwrap_or(0));
+        let cpu_pre = usec_to_ns(pre.cpu_usage_usec.unwrap_or(0));
+        let mem = cur.memory_current.unwrap_or(0);
+        let limit = cgroup_memory_limit(&dir).unwrap_or_else(delonix_linux::host_mem_bytes);
+        Ok(json!({
+            "read": unix_to_rfc3339(delonix_node::host::now_unix()),
+            "id": cid,
+            "name": format!("/{name}"),
+            "pids_stats": {},
+            "cpu_stats": {
+                "cpu_usage": { "total_usage": cpu_now },
+                "system_cpu_usage": cur_sys,
+                "online_cpus": ncpu,
+            },
+            "precpu_stats": {
+                "cpu_usage": { "total_usage": cpu_pre },
+                "system_cpu_usage": pre_sys,
+                "online_cpus": ncpu,
+            },
+            "memory_stats": { "usage": mem, "limit": limit },
+            "blkio_stats": { "io_service_bytes_recursive": [] },
+            "networks": {},
+        })
+        .to_string()
+        .into_bytes())
+    })
+    .await
+    .unwrap_or_else(|_| b"{}".to_vec());
+    (StatusCode::OK, body)
+}
+
+/// Wraps a buffered `(status, body)` in the standard Docker-API response (the
+/// headers every route sends). Used by the dispatcher's tail and by the
+/// buffered special-cases (image inspect) that `return` before reaching it.
+fn api_json_response(status: StatusCode, body: Vec<u8>) -> Response<RespBody> {
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .header("Api-Version", API_VERSION)
+        .header("Docker-Experimental", "false")
+        .header("OSType", "linux")
+        .header("Server", format!("delonix/{}", env!("CARGO_PKG_VERSION")))
+        .body(buffered(body))
         .unwrap_or_else(|_| Response::new(buffered(Vec::new())))
 }
 
@@ -1350,13 +2004,68 @@ async fn handle_remove(
     params: &std::collections::HashMap<String, String>,
 ) -> (StatusCode, Vec<u8>) {
     let force = query_flag(params, "force");
+    // Docker spells it `v`; the SDK also sends `volumes`. Either removes the
+    // container's ANONYMOUS volumes with it (named ones are left alone, as Docker
+    // does). Capture the name before the record is gone.
+    let remove_vols = query_flag(params, "v") || query_flag(params, "volumes");
+    let name = super::util::find(&state.store, id).ok().map(|c| c.name);
     let state = state.clone();
     let id = id.to_string();
     match run_blocking(move || super::container::cmd_rm(&state.images, &state.store, &id, force))
         .await
     {
-        Ok(()) => (StatusCode::NO_CONTENT, Vec::new()),
+        Ok(()) => {
+            if remove_vols {
+                if let Some(n) = name {
+                    remove_anon_volumes(&n);
+                }
+            }
+            (StatusCode::NO_CONTENT, Vec::new())
+        }
         Err(e) => err_response(&e),
+    }
+}
+
+/// FNV-1a over a target path — a short, stable suffix so a container's two
+/// anonymous volumes on different targets never collide, and the SAME target
+/// re-derives the SAME name (what `rm -v` relies on).
+fn fnv1a32(s: &str) -> u32 {
+    let mut h = 0x811c_9dc5u32;
+    for b in s.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// A container name reduced to the characters a volume name allows.
+fn sanitize_vol_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect()
+}
+
+/// Deterministic name for an anonymous volume, keyed on the container name and
+/// the mount target — so `handle_remove` finds and deletes it by prefix without
+/// persisting any mapping.
+fn anon_volume_name(container: &str, target: &str) -> String {
+    format!("dlxanon-{}-{:08x}", sanitize_vol_name(container), fnv1a32(target))
+}
+
+/// Removes every anonymous volume a container owns (named `dlxanon-<name>-…`).
+/// Best-effort: a volume another container still mounts stays (the store's own
+/// in-use guard refuses it), exactly as Docker leaves a shared volume.
+fn remove_anon_volumes(container_name: &str) {
+    let prefix = format!("dlxanon-{}-", sanitize_vol_name(container_name));
+    let Ok(store) = delonix_volume::VolumeStore::open(super::util::state_root()) else {
+        return;
+    };
+    if let Ok(list) = store.list() {
+        for v in list {
+            if v.name.starts_with(&prefix) {
+                let _ = store.remove(&v.name);
+            }
+        }
     }
 }
 
@@ -1396,6 +2105,28 @@ fn inspect_json(c: &Container) -> serde_json::Value {
             "Tty": false,
         },
         "Image": c.image,
+        // `HostConfig` — clients read `NetworkMode`, `Binds`, `Privileged` and
+        // the caps off the inspect; its absence was the last of the three
+        // Testcontainers gaps (#826). Populated from the record, not invented.
+        "HostConfig": {
+            "NetworkMode": c.network.clone().unwrap_or_else(|| "default".to_string()),
+            "Privileged": c.privileged,
+            "CapAdd": c.cap_add,
+            "CapDrop": c.cap_drop,
+            "Binds": c.mounts.iter().map(|m| {
+                let ro = if m.readonly { ":ro" } else { "" };
+                format!("{}:{}{ro}", m.source, m.target)
+            }).collect::<Vec<_>>(),
+            "PortBindings": serde_json::Map::new(),
+            "RestartPolicy": { "Name": "", "MaximumRetryCount": 0 },
+        },
+        "Mounts": c.mounts.iter().map(|m| json!({
+            "Type": "bind",
+            "Source": m.source,
+            "Destination": m.target,
+            "RW": !m.readonly,
+            "Mode": if m.readonly { "ro" } else { "rw" },
+        })).collect::<Vec<_>>(),
         "NetworkSettings": {
             "Ports": docker_inspect_ports(&c.ports),
             "Networks": {
@@ -1465,7 +2196,26 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         .unwrap_or_default();
 
     let host = &cfg["HostConfig"];
-    let volumes: Vec<String> = json_str_array(&host["Binds"]);
+    let mut volumes: Vec<String> = json_str_array(&host["Binds"]);
+    // Anonymous volumes — Docker's `Config.Volumes` is a set of target paths with
+    // no source; the daemon auto-creates a volume per target and (with `rm -v`)
+    // removes it with the container. Map each target a bind does not already
+    // cover to a deterministic named volume, so the container gets real isolated
+    // storage there. `handle_remove` with `v=1` deletes them by the
+    // `dlxanon-<name>-` prefix — no extra bookkeeping. (The native `-v` CLI still
+    // refuses a source-less spec by design, DX-1209; this is Docker-API fidelity.)
+    if let Some(vols) = cfg["Volumes"].as_object() {
+        let bound: std::collections::HashSet<String> = volumes
+            .iter()
+            .filter_map(|b| b.split(':').nth(1).map(str::to_string))
+            .collect();
+        let extra: Vec<String> = vols
+            .keys()
+            .filter(|t| !t.is_empty() && !bound.contains(t.as_str()))
+            .map(|t| format!("{}:{}", anon_volume_name(&name, t), t))
+            .collect();
+        volumes.extend(extra);
+    }
     // `HostConfig.ExtraHosts` — o formato é `host:ip`, o mesmo do
     // `--add-host`, logo o mesmo parser. É o campo que o Testcontainers usa;
     // ignorá-lo em silêncio dava um contentor sem a resolução que o teste
@@ -1581,6 +2331,13 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         // «exit code was not captured» for every container created over this API
         // (measured: `exit 7` → `Exited (unknown)`).
         no_supervisor: false,
+        // CRI log format (one timestamped, stream-tagged line per write) so the
+        // `GET …/logs` route frames stdout and stderr on SEPARATE Docker streams
+        // — a client that asks for only stderr gets only stderr. A mixed log
+        // cannot be split and comes back as one stdout stream; an API-created
+        // container has no reason to carry that ambiguity. `delonix logs` reads
+        // either format.
+        log_cri: true,
         name: Some(name),
         net: "host".to_string(),
         volumes,
@@ -1959,11 +2716,12 @@ fn docker_status_text(c: &Container) -> String {
 /// ignored until 2026-10-11 and every container came back, the dead ones
 /// included. `filters` is still not applied: a client that sends one gets every
 /// container its `all` allows, and filters on its side.
-fn containers_json(state: &AppState, all: bool) -> Result<Vec<u8>> {
+fn containers_json(state: &AppState, all: bool, filters: &serde_json::Value) -> Result<Vec<u8>> {
     let containers = state.store.list()?;
     let items: Vec<_> = containers
         .iter()
         .filter(|c| all || super::container::listed_without_all(&c.status))
+        .filter(|c| container_matches_filters(c, filters))
         .map(|c| {
             let ports = docker_port_entries(&c.ports);
             json!({
@@ -1989,6 +2747,61 @@ fn containers_json(state: &AppState, all: bool) -> Result<Vec<u8>> {
         })
         .collect();
     Ok(serde_json::to_vec(&items)?)
+}
+
+/// Whether one container passes Docker's `filters` map (`?filters={...}`). This
+/// is what makes LABEL-based reaping work: a client lists `label=…` and removes
+/// what comes back. (Testcontainers normally hands that job to its Ryuk sidecar,
+/// which this engine does not run — Ryuk would need the control socket bound
+/// INTO a container, and only the engine's own uid may speak to that socket
+/// (`SO_PEERCRED`, the `access.transport-verified` boundary). Rather than weaken
+/// that to let an in-container subuid drive the whole API, the engine serves the
+/// label filter Ryuk relies on, so the trusted user — or `delonix system prune`
+/// — does the reaping. Set `TESTCONTAINERS_RYUK_DISABLED=true`.)
+///
+/// Semantics match the daemon's: `label` values are ANDed (every one must
+/// match), `status`/`name`/`id` are ORed within the key, and an unknown filter
+/// key is ignored rather than failing the whole list.
+fn container_matches_filters(c: &Container, filters: &serde_json::Value) -> bool {
+    filters_match(&c.labels, docker_state(&c.status), &c.name, &c.id, filters)
+}
+
+/// Pure half of [`container_matches_filters`] — the matching tested without a
+/// `Container` fixture.
+fn filters_match(
+    labels: &std::collections::BTreeMap<String, String>,
+    state: &str,
+    name: &str,
+    id: &str,
+    filters: &serde_json::Value,
+) -> bool {
+    let Some(obj) = filters.as_object() else {
+        return true;
+    };
+    let label_ok = |spec: &str| match spec.split_once('=') {
+        Some((k, v)) => labels.get(k).is_some_and(|val| val == v),
+        None => labels.contains_key(spec),
+    };
+    for (key, raw) in obj {
+        let vals: Vec<&str> = raw
+            .as_array()
+            .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+            .unwrap_or_default();
+        if vals.is_empty() {
+            continue;
+        }
+        let pass = match key.as_str() {
+            "label" => vals.iter().all(|s| label_ok(s)),
+            "status" => vals.contains(&state),
+            "name" => vals.iter().any(|s| name.contains(s)),
+            "id" => vals.iter().any(|s| id.starts_with(s)),
+            _ => true,
+        };
+        if !pass {
+            return false;
+        }
+    }
+    true
 }
 
 /// A boolean query parameter, read the way the Docker daemon reads it
@@ -2069,6 +2882,112 @@ mod matrix_tests {
     /// This failed when it was written, which is the whole reason it exists —
     /// `POST /images/create`, `GET /containers/{id}/stats` and the image/network
     /// inspect routes were in neither list.
+    #[test]
+    fn filters_match_label_status_and_name() {
+        use std::collections::BTreeMap;
+        let labels: BTreeMap<String, String> = [
+            ("org.testcontainers".to_string(), "true".to_string()),
+            ("session".to_string(), "abc".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let j = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        // Label present by key, and by key=value — the reaping filter.
+        assert!(super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"label":["org.testcontainers"]}"#)));
+        assert!(super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"label":["org.testcontainers=true"]}"#)));
+        // Wrong value, or missing label → no match.
+        assert!(!super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"label":["org.testcontainers=false"]}"#)));
+        assert!(!super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"label":["absent"]}"#)));
+        // Multiple labels are ANDed.
+        assert!(super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"label":["org.testcontainers","session=abc"]}"#)));
+        assert!(!super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"label":["org.testcontainers","session=zzz"]}"#)));
+        // status/name are ORed within the key; an unknown key is ignored.
+        assert!(super::filters_match(&labels, "exited", "web", "deadbeef", &j(r#"{"status":["created","exited"]}"#)));
+        assert!(!super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"status":["exited"]}"#)));
+        assert!(super::filters_match(&labels, "running", "my-web-1", "deadbeef", &j(r#"{"name":["web"]}"#)));
+        assert!(super::filters_match(&labels, "running", "web", "deadbeef", &j(r#"{"bogus":["x"]}"#)));
+        // No filters → everything matches (Null and empty object).
+        assert!(super::filters_match(&labels, "running", "web", "deadbeef", &serde_json::Value::Null));
+    }
+
+    #[test]
+    fn anon_volume_name_is_deterministic_and_prefixed() {
+        // Same (container, target) → same name: `rm -v` re-derives the prefix to
+        // find what to delete, so this MUST be stable.
+        let a = super::anon_volume_name("my/ctr", "/var/lib/data");
+        assert_eq!(a, super::anon_volume_name("my/ctr", "/var/lib/data"));
+        assert!(a.starts_with("dlxanon-my-ctr-"), "{a}");
+        // A different target is a different volume (no data collision).
+        assert_ne!(a, super::anon_volume_name("my/ctr", "/other"));
+        // The prefix `rm -v` enumerates by.
+        assert!(a.starts_with(&format!("dlxanon-{}-", super::sanitize_vol_name("my/ctr"))));
+    }
+
+    #[test]
+    fn docker_stream_frame_carries_the_stdcopy_header() {
+        // stdout frame: byte 0 = 1, bytes 1-3 = 0, bytes 4-7 = big-endian len.
+        let f = super::docker_stream_frame(1, b"hi\n");
+        assert_eq!(&f[..8], &[1, 0, 0, 0, 0, 0, 0, 3]);
+        assert_eq!(&f[8..], b"hi\n");
+        // stderr frame: byte 0 = 2; the length still big-endian.
+        let e = super::docker_stream_frame(2, b"boom");
+        assert_eq!(e[0], 2);
+        assert_eq!(&e[4..8], &4u32.to_be_bytes());
+        assert_eq!(&e[8..], b"boom");
+        // empty payload is a well-formed 8-byte frame, not a dropped write.
+        assert_eq!(super::docker_stream_frame(1, b"").len(), 8);
+    }
+
+    #[test]
+    fn exec_command_builds_the_container_exec_reexec() {
+        let rec = super::ExecRecord {
+            container_id: "abc".into(),
+            cmd: vec!["sh".into(), "-c".into(), "exit 7".into()],
+            tty: false,
+            attach_stdin: true,
+            running: false,
+            exit_code: None,
+        };
+        let cmd = super::exec_command(&rec);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // `-i` because attach_stdin, no `-t`; then the id, then the argv whole —
+        // `-c` and `exit 7` ride through the trailing var-arg, no `--` needed.
+        assert_eq!(args, ["container", "exec", "-i", "abc", "sh", "-c", "exit 7"]);
+    }
+
+    #[test]
+    fn exec_json_reports_the_exit_code_only_once_finished() {
+        let eid = "execjsontest0001";
+        super::EXEC_REGISTRY.lock().unwrap().insert(
+            eid.to_string(),
+            super::ExecRecord {
+                container_id: "c".into(),
+                cmd: vec!["echo".into(), "hi".into()],
+                tty: false,
+                attach_stdin: false,
+                running: true,
+                exit_code: None,
+            },
+        );
+        // Running: ExitCode is null (the client keeps polling).
+        let (_, body) = super::handle_exec_json(eid);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["Running"], true);
+        assert!(v["ExitCode"].is_null(), "running exec has a null ExitCode: {v}");
+        assert_eq!(v["ProcessConfig"]["entrypoint"], "echo");
+        // Finished: Running false, ExitCode the integer the client reads.
+        super::finish_exec(eid, 7);
+        let (_, body) = super::handle_exec_json(eid);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["Running"], false);
+        assert_eq!(v["ExitCode"], 7);
+        super::EXEC_REGISTRY.lock().unwrap().remove(eid);
+    }
+
     #[test]
     fn every_route_real_tooling_calls_is_classified() {
         let unclassified: Vec<String> = API_UPSTREAM_USED
@@ -2686,12 +3605,26 @@ mod containers_json_tests {
             "max".into(),
         );
         c.ports = vec!["127.0.0.1:49152:80/tcp".to_string()];
+        c.privileged = true;
+        c.mounts = vec![delonix_compute::Mount {
+            source: "/data".into(),
+            target: "/in".into(),
+            readonly: true,
+            propagation: None,
+            optional: false,
+        }];
         let v = inspect_json(&c);
         assert_eq!(v["Config"]["Tty"], json!(false));
         assert_eq!(
             v["NetworkSettings"]["Ports"]["80/tcp"][0]["HostPort"],
             json!("49152")
         );
+        // HostConfig was the last Testcontainers gap (#826): present, and read
+        // off the record — NetworkMode, Privileged, and the bind in `Binds`.
+        assert!(v["HostConfig"].is_object(), "HostConfig present: {v}");
+        assert_eq!(v["HostConfig"]["Privileged"], json!(true));
+        assert_eq!(v["HostConfig"]["Binds"][0], json!("/data:/in:ro"));
+        assert_eq!(v["Mounts"][0]["Destination"], json!("/in"));
     }
 
     #[test]

@@ -1,0 +1,36 @@
+info created network "dlxha-cfdff4dd" for cluster "dlxha" (removed again by `cluster destroy`)
+info Creating cluster "dlxha" (kubeadm, k8s-golden)...
+ • Provisioning 3 control-plane(s) 📦
+ ✓ Provisioning 3 control-plane(s) 📦 1m23s
+ • Provisioning 1 worker(s) 📦
+ ✓ Provisioning 1 worker(s) 📦 21.3s
+ • Provisioning the HAProxy load balancer ⚖️
+ ✓ Provisioning the HAProxy load balancer ⚖️ 51.2s
+delonix-cri: release asset — /home/walter/.local/share/delonix/bin/5.1.1/delonix-cri (sha256 a20016616361ab922642a53ad1b8d73645815c2907fee3a55dd41003dfef2b31)
+ ○ Preparing 4 host(s)
+ ○ Bootstrapping control-plane (kubeadm init)
+ ○ Fetching kubeconfig
+ ○ Installing the flannel pod network
+ ○ Joining 2 more control-plane(s)
+ ○ Joining 1 worker(s)
+ ○ Waiting for all nodes to be Ready
+ • Preparing 4 host(s) 🔧
+[dlxha-cp3] the node's delonix CLI differs from this one's (sha256 c86ac62b19ad) — replacing it (delonix-cri re-execs it to spawn every container)
+[dlxha-cp2] the node's delonix CLI differs from this one's (sha256 c86ac62b19ad) — replacing it (delonix-cri re-execs it to spawn every container)
+[dlxha-cp1] the node's delonix CLI differs from this one's (sha256 c86ac62b19ad) — replacing it (delonix-cri re-execs it to spawn every container)
+[dlxha-w1] the node's delonix CLI differs from this one's (sha256 c86ac62b19ad) — replacing it (delonix-cri re-execs it to spawn every container)
+ ✓ Preparing 4 host(s) 🔧 10.7s
+ • Bootstrapping control-plane (kubeadm init) 🕹️
+ ✓ Bootstrapping control-plane (kubeadm init) 🕹️ 10.2s
+ • Fetching kubeconfig 📇
+merged into /home/walter/.kube/config as context 'dlxha' — kubectl now points here
+ ✓ Fetching kubeconfig 📇 0.3s
+ • Installing the flannel pod network 🔌
+ ✓ Installing the flannel pod network 🔌 1.0s
+ • Joining 2 more control-plane(s) 🎮
+ ✓ Joining 2 more control-plane(s) 🎮 48.7s
+ • Joining 1 worker(s) 🚜
+ ✓ Joining 1 worker(s) 🚜 1.7s
+ • Waiting for the flannel pod network and all nodes to be Ready ⏳
+ ✗ Waiting for the flannel pod network and all nodes to be Ready ⏳ 7m00s
+error[DX-6704] unavailable: the flannel pod network did not converge within 420s: its agent is Ready on 0/4 node(s) and 0/4 node(s) report Ready. The cluster is bootstrapped and the manifest WAS applied — nothing was deleted or rolled back, so the evidence is still there. Look with `delonix cluster dlxha -n kube-flannel describe daemonset kube-flannel-ds` and `delonix cluster dlxha -n kube-flannel logs -l k8s-app=kube-flannel-ds`; re-running the same apply is safe and resumes from here

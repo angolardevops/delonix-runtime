@@ -637,7 +637,7 @@ pub struct BuildArgs {
     #[arg(long, default_value = "42-1.1")]
     pub fedora_release: String,
     /// Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION`
-    /// (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam
+    /// (1.37, o estável mais recente do pkgs.k8s.io). 1.34/1.35/1.36 continuam
     /// disponíveis passando-as aqui.
     #[arg(long)]
     pub k8s_version: Option<String>,
@@ -1438,22 +1438,27 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
 
 /// Versão do Kubernetes por OMISSÃO da golden.
 ///
-/// **1.36**, e o número não é arbitrário: é o canal estável mais recente do
-/// `pkgs.k8s.io` (v1.37 não existe — verificado, não suposto) E é exactamente
-/// o tecto que o control-plane alojado aceita. O webhook do Kamaji recusa um
-/// `TenantControlPlane` acima de `upgrade.KubeadmVersion`, que na versão que
-/// alojamos é `v1.36.0`.
+/// **1.37** (pedido do dono, 2026-10-27), o canal estável mais recente do
+/// `pkgs.k8s.io` — v1.37.0 verificado a existir no `pkgs.k8s.io` e como
+/// `kindest/node:v1.37.0` (o comentário anterior dizia «v1.37 não existe»;
+/// deixou de ser verdade). Serve os caminhos SELF-MANAGED: `cluster kubeadm`
+/// (control-plane próprio, kubeadm) e `cluster kind` (via `KIND_NODE_IMAGE`,
+/// bumpada em par para `v1.37.0`).
 ///
-/// Esse alinhamento é a razão de ser desta constante. Um nó **mais novo** que
-/// o seu control-plane não é uma combinação suportada pelo kubeadm, por isso
-/// uma golden à frente do tecto do Kamaji produz workers que nunca se juntam —
-/// foi exactamente esse par impossível (golden 1.34/1.35 contra um Kamaji que
-/// parava em 1.30.2) que bloqueou o DKS. Ao mexer neste número, confirma o
-/// tecto do Kamaji alojado ANTES, não depois.
+/// **O DKS/control-plane alojado é um eixo SEPARADO, e não é capado por aqui.**
+/// O Kamaji que o `delonix-deploy` aloja (v1.0.0) recusa pelo seu webhook um
+/// `TenantControlPlane` acima de `1.30.2` (ADR 0006), e a golden DKS já estava
+/// à frente disso (1.36) — um mismatch que o próprio `delonix-deploy` regista
+/// como por resolver («needs an aligned golden or a Kamaji upgrade — neither is
+/// decided here», `roles/dks_worker_golden`). Um nó mais novo que o seu
+/// control-plane não é combinação suportada pelo kubeadm; para o DKS isso
+/// resolve-se LÁ (golden alinhada ou upgrade do Kamaji), não baixando a omissão
+/// self-managed. Ao preparar uma release DKS, alinha a golden do tenant com o
+/// tecto do Kamaji alojado ANTES.
 ///
-/// As tags 1.34 e 1.35 continuam a ser construíveis com `--k8s-version`; só
-/// deixam de ser a omissão.
-pub(crate) const DEFAULT_K8S_VERSION: &str = "1.36";
+/// As tags 1.34/1.35/1.36 continuam construíveis com `--k8s-version`; só deixam
+/// de ser a omissão.
+pub(crate) const DEFAULT_K8S_VERSION: &str = "1.37";
 
 /// The architecture the Kubernetes golden image is built for.
 ///
@@ -1511,7 +1516,7 @@ pub(crate) const GOLDEN_DISK_SIZE_GIB: u32 = 10;
 /// A tag TEM de ser `DEFAULT_K8S_VERSION` — amarrado pelo teste
 /// `a_imagem_oficial_aponta_para_a_versao_por_omissao` (o `concat!` não aceita
 /// constantes, e duas fontes de verdade para o mesmo número divergem sempre).
-pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.36";
+pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.37";
 
 /// Golden VM image with NO Kubernetes — just the `delonix` engine binary and
 /// rootless prerequisites (see `rootless_customization_steps`). Selected by
@@ -7906,15 +7911,17 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         );
     }
 
-    /// A omissão da golden e o tecto do control-plane alojado são o MESMO
-    /// número, e é isso que impede o par impossível que bloqueou o DKS: uma
-    /// golden 1.34/1.35 contra um Kamaji que parava em 1.30.2. Um nó mais novo
-    /// que o seu control-plane não é combinação suportada pelo kubeadm.
+    /// A omissão self-managed é 1.37 (o estável mais recente do `pkgs.k8s.io`,
+    /// v1.37.0 verificado a existir). O alinhamento com o control-plane alojado
+    /// (DKS/Kamaji) é um eixo SEPARADO, tratado no `delonix-deploy` e já em
+    /// mismatch conhecido lá — não é capado por esta constante (ver o doc de
+    /// `DEFAULT_K8S_VERSION`). O que este teste trava é a `OFFICIAL_VM_IMAGE`
+    /// discordar da omissão: as duas TÊM de apontar para o mesmo minor.
     #[test]
     fn a_imagem_oficial_aponta_para_a_versao_por_omissao() {
         assert_eq!(
-            DEFAULT_K8S_VERSION, "1.36",
-            "o tecto do Kamaji alojado (upgrade.KubeadmVersion=v1.36.0)"
+            DEFAULT_K8S_VERSION, "1.37",
+            "o estável mais recente do pkgs.k8s.io; o alinhamento DKS/Kamaji vive no delonix-deploy"
         );
         assert!(
             OFFICIAL_VM_IMAGE.ends_with(&format!(":{DEFAULT_K8S_VERSION}")),

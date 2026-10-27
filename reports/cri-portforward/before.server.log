@@ -1,0 +1,12 @@
+[2m2026-10-24T11:31:47.039960Z[0m [32m INFO[0m [2mdelonix_cri[0m[2m:[0m delonix-cri starting [3maddr[0m[2m=[0munix:///tmp/pfw-before.DZYE/cri.sock [3mroot[0m[2m=[0m/tmp/pfw-before.DZYE/state
+delonix-cri (CRI v1) listening on unix:///tmp/pfw-before.DZYE/cri.sock
+delonix-cri: streaming (exec/attach) at http://127.0.0.1:27203
+delonix-cri: capability ceiling: CHOWN,DAC_OVERRIDE,FOWNER,FSETID,KILL,SETGID,SETUID,SETPCAP,NET_BIND_SERVICE,NET_BROADCAST,NET_RAW,SYS_CHROOT,AUDIT_WRITE,SETFCAP (mode=reject)
+[2m2026-10-24T11:31:47.040585Z[0m [32m INFO[0m [2mdelonix_cri[0m[2m:[0m delonix-cri: capability ceiling: CHOWN,DAC_OVERRIDE,FOWNER,FSETID,KILL,SETGID,SETUID,SETPCAP,NET_BIND_SERVICE,NET_BROADCAST,NET_RAW,SYS_CHROOT,AUDIT_WRITE,SETFCAP (mode=reject)
+[2m2026-10-24T11:31:50.356310Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling e2e-test-images/nginx:1.14-2 from registry.k8s.io [3mrepo[0m[2m=[0me2e-test-images/nginx [3mreference[0m[2m=[0m1.14-2 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-24T11:31:53.251175Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+[2m2026-10-24T11:33:15.844076Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI StopPodSandbox [3msandbox[0m[2m=[0ma838c8d8d398a6c7
+[2m2026-10-24T11:33:16.275229Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI RemovePodSandbox [3msandbox[0m[2m=[0ma838c8d8d398a6c7
+[2m2026-10-24T11:33:16.489309Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling k8s-staging-cri-tools/hostnet-nginx-amd64:latest from gcr.io [3mrepo[0m[2m=[0mk8s-staging-cri-tools/hostnet-nginx-amd64 [3mreference[0m[2m=[0mlatest [3mhost[0m[2m=[0mgcr.io
+[2m2026-10-24T11:34:38.696765Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI StopPodSandbox [3msandbox[0m[2m=[0m39c885a0e89531c0
+[2m2026-10-24T11:34:39.131244Z[0m [32m INFO[0m [2mdelonix_cri::runtime_svc::lifecycle[0m[2m:[0m CRI RemovePodSandbox [3msandbox[0m[2m=[0m39c885a0e89531c0

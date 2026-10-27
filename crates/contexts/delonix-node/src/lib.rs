@@ -7,7 +7,7 @@ pub mod alloc_tuning;
 mod atomic;
 pub mod dispatch;
 pub mod events;
-mod host;
+pub mod host;
 pub mod peer_cred;
 pub mod virt;
 

@@ -1,0 +1,42 @@
+=== PREFLIGHT ===
+delonix=/home/walter/.local/bin/delonix  image=k8s-golden  kvm=ok  ch=cloud-hypervisor v52.0
+=== A. create + boot + cloud-init + guest exec ===
+PASS: backend é cloud-hypervisor
+PASS: sem qemu/libvirt para a VM
+PASS: guest acessível por SSH (cloud-init aplicou a chave)
+PASS: cloud-init aplicou o hostname
+=== A2. CPU/mem/disco/rede/DNS dentro do guest ===
+PASS: guest vê 2 vCPUs
+PASS: guest vê ~2G (1964 MB)
+PASS: escrita+sha em disco (e8c26459f45807fec91fe81ce7579b6904d205214a9e4c12f42f7f0e8cf3dcdc)
+PASS: rede: ping ao gateway 10.200.0.1
+PASS: DNS/egress (slirp NAT) resolve
+=== B. stop -> start (mesma identidade + persistência de disco) ===
+PASS: stop: Stopped
+PASS: stop: processo VMM terminou
+PASS: start: guest de volta
+PASS: mesma identidade: machine-id estável
+PASS: disco persistiu stop/start
+=== C. restart (reboot real) ===
+PASS: restart: guest de volta
+PASS: restart: uptime reiniciou (9->8)
+PASS: disco persistiu reboot
+=== D. pause -> unpause ===
+PASS: pause ok
+PASS: unpause ok
+PASS: unpause: guest responde
+=== E. cold resize (2 -> 3 vCPUs, guest confirma) ===
+PASS: resize ok
+PASS: resize: guest vê 3 vCPUs
+=== F. snapshot (CH: só VM parada) ===
+PASS: snapshot criado e listado
+=== G. concorrência (2 creates paralelos, recursos distintos) ===
+PASS: concorrência: IPs distintos (10.200.254.91,10.200.254.183)
+PASS: concorrência: MACs distintos
+=== H. destroy -> sem órfãos (processo/tap/ficheiros/registo) ===
+PASS: destroy dlxh-729928-b: zero órfãos
+PASS: destroy dlxh-729928-c: zero órfãos
+PASS: destroy dlxh-729928-a: zero órfãos
+
+==== RESULTADO: 28 passaram, 0 falharam, 0 saltados ====
+(evidência preservada em /tmp/dlxh.GXwhtO/evidence.txt)

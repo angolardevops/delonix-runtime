@@ -1,0 +1,51 @@
+diff --git a/bins/delonix-runtime-bin/data/pt.po b/bins/delonix-runtime-bin/data/pt.po
+index 849881e7..7d7bff46 100644
+--- a/bins/delonix-runtime-bin/data/pt.po
++++ b/bins/delonix-runtime-bin/data/pt.po
+@@ -3960,6 +3960,9 @@ msgstr "`--network` é para builds de VMfile; a receita dourada decide isso com
+ msgid "log in with the key you injected"
+ msgstr "entrar com a chave que injectaste"
+ 
++msgid "or by IP, from a host that can reach the VM"
++msgstr "ou por IP, a partir de um host que alcance a VM"
++
+ # ---- vm convert / default-backend / HYPERVISOR do VMfile -------------------
+ 
+ msgid "no such local VM image or file: {source} (see `delonix vm image ls`)"
+diff --git a/bins/delonix-runtime-bin/src/cmd/vm.rs b/bins/delonix-runtime-bin/src/cmd/vm.rs
+index db42b8d6..14912313 100644
+--- a/bins/delonix-runtime-bin/src/cmd/vm.rs
++++ b/bins/delonix-runtime-bin/src/cmd/vm.rs
+@@ -5479,16 +5479,31 @@ fn print_vm_next_steps(
+     ];
+     // Second row, not last: it is what most people want first, and it is the
+     // one piece of the block they cannot derive themselves.
++    //
++    // Lead with `delonix vm ssh <name>`, NOT a bare `ssh <user>@<ip>`: on the
++    // default rootless SDN the VM's address lives inside the infra netns and is
++    // NOT routable from the host, so `ssh <user>@<ip>` resolves to the host's
++    // default gateway and times out. `vm ssh` reaches the guest in EVERY
++    // topology (it enters the netns when needed). The raw-IP form stays as a
++    // labelled fallback for the networks where the host CAN reach the VM
++    // directly (rootful/bridged/libvirt).
+     if has_key {
+         rows.insert(
+             1,
++            (
++                format!("delonix vm ssh {name}"),
++                super::po::t("log in with the key you injected").to_string(),
++            ),
++        );
++        rows.insert(
++            2,
+             (
+                 format!(
+                     "ssh {}@{}",
+                     ssh_user.unwrap_or(GUEST_SSH_USER),
+                     ip.unwrap_or("<ip>")
+                 ),
+-                super::po::t("log in with the key you injected").to_string(),
++                super::po::t("or by IP, from a host that can reach the VM").to_string(),
+             ),
+         );
+     } else if ssh_user == Some("root") {

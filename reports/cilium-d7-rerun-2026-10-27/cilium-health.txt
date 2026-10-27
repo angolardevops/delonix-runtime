@@ -1,0 +1,8 @@
+### cilium status --brief (agent cilium-6lxpz)
+OK
+
+### cilium-health status (cross-node datapath)
+Cluster health:           2/2 reachable   (2026-10-27T20:24:59Z)   (Probe interval: 1m36.566274746s)
+Name                      IP              Node                     Endpoints
+  d7cil-cp1 (localhost)   10.253.141.83   1/1                      1/1
+  d7cil-w1                10.253.73.117   1/1                      0/1 (1 unknown)

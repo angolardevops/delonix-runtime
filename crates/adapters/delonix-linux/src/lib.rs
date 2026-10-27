@@ -1809,7 +1809,34 @@ fn setup_dev(rootfs: &str) -> nix::Result<()> {
     }
     dev_std_symlinks(&dev); // /dev/stdout→/proc/self/fd/1 etc. (nginx/etc. logs)
     mount_devpts(&dev, true); // own pseudo-terminals (gid=5 = host's tty group)
+    mount_dev_shm(&dev); // /dev/shm tmpfs (POSIX shared memory)
     Ok(())
+}
+
+/// Mounts the POSIX shared-memory tmpfs at `<dev>/shm`, the OCI default mount
+/// every real runtime (runc/containerd/Docker) provides and this engine did
+/// not. Its absence was a real failure, not a nicety: the Cilium agent's
+/// `cilium-envoy` sidecar aborts at startup with «cannot open shared memory
+/// region /envoy_shared_memory_0 … No such file or directory» because
+/// `/dev/shm` was simply missing — and anything using `shm_open`/`/dev/shm`
+/// (Envoy, Chromium, PostgreSQL's dynamic shared memory, many test harnesses)
+/// hits the same wall.
+///
+/// A SEPARATE tmpfs over `<dev>/shm`, so its 64 MiB are its own and not carved
+/// from the 1 MiB `/dev`. `mode=1777` (world-writable, sticky) and
+/// `nosuid,noexec,nodev` match what runc mounts; the size is runc's default.
+/// Best-effort: a container whose image has no `/dev/shm` mount point still
+/// starts, exactly as before — this only ADDS the mount when it can.
+fn mount_dev_shm(dev: &str) {
+    let shm = format!("{dev}/shm");
+    let _ = std::fs::create_dir_all(&shm); // mount point on the /dev tmpfs
+    let _ = mount(
+        Some("tmpfs"),
+        shm.as_str(),
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
+        Some("mode=1777,size=65536k"),
+    );
 }
 
 /// Creates the standard *stream* symlinks in `<dev>`: `/dev/stdout`, `/dev/stderr`,
@@ -1881,6 +1908,7 @@ fn setup_dev_userns(old_root: &str, devices: &[String]) {
     bind_devices(old_root, "", devices); // --device (host's real nodes, via the old root)
     dev_std_symlinks("/dev"); // /dev/stdout→/proc/self/fd/1 etc.
     mount_devpts("/dev", false); // no gid=5 (not mappable in the user ns)
+    mount_dev_shm("/dev"); // /dev/shm tmpfs (POSIX shared memory)
 }
 
 /// Wires the requested devices (`--device /dev/host[:/dev/cont]`) into the container's
@@ -2394,6 +2422,15 @@ fn set_opaque_dir(dir: &std::path::Path) -> std::io::Result<()> {
 // destructured, so it takes the pieces individually. Group it the way
 // `container_init` was grouped if it grows again.
 #[allow(clippy::too_many_arguments)]
+/// Mount-ordering depth of a target (see the sort in `setup_rootfs`): the
+/// number of path components, with any trailing slash trimmed first so a parent
+/// written `/a/b/` sorts BEFORE its child `/a/b/c` instead of tying with it.
+/// Stable-sorting by this lifts every parent above its own descendants and
+/// leaves siblings in arrival order.
+fn mount_target_depth(target: &str) -> usize {
+    target.trim_end_matches('/').matches('/').count()
+}
+
 fn setup_rootfs(
     rootfs: &str,
     hostname: &str,
@@ -2474,8 +2511,19 @@ fn setup_rootfs(
     // down and would bury (or duplicate) what this loop placed inside it. They
     // are applied by `bind_sys_mounts` once `/sys` is final — see
     // `target_under_sys`.
-    let (sys_mounts, early_mounts): (Vec<&Mount>, Vec<&Mount>) =
+    let (sys_mounts, mut early_mounts): (Vec<&Mount>, Vec<&Mount>) =
         mounts.iter().partition(|m| target_under_sys(&m.target));
+    // Shallower targets FIRST, so a child mount lands ON TOP of its parent
+    // instead of being buried by it. runc does the same (it sorts by cleaned
+    // destination). Measured on the Cilium agent's `cilium-envoy`: the pod binds
+    // `/var/run/cilium/envoy/` READ-ONLY and `/var/run/cilium/envoy/sockets`
+    // READ-WRITE, and the kubelet lists the read-write child BEFORE the
+    // read-only parent — so applying them in arrival order put the RO parent
+    // over the RW child, and Envoy died with «cannot bind
+    // '/var/run/cilium/envoy/sockets/admin.sock': Read-only file system». A
+    // stable sort by path depth keeps arrival order among siblings and only
+    // lifts parents above their own descendants.
+    early_mounts.sort_by_key(|m| mount_target_depth(&m.target));
     for m in early_mounts {
         // A target under `/proc` is mounted here and then COVERED by the
         // `/proc` the engine mounts further down — measured, and deliberately
@@ -14460,6 +14508,34 @@ mod ulimit_tests {
 #[cfg(test)]
 mod spawn_step_tests {
     use super::*;
+
+    /// A read-write child mount must land ON TOP of a read-only parent, so the
+    /// ordering sorts shallower targets first — even when the parent is written
+    /// with a trailing slash (which ties the raw `/` count with the child).
+    /// This is the Cilium `cilium-envoy` case: `/var/run/cilium/envoy/` (RO)
+    /// arrives before being sorted below `/var/run/cilium/envoy/sockets` (RW).
+    #[test]
+    fn mount_depth_puts_a_parent_before_its_child() {
+        assert!(
+            mount_target_depth("/var/run/cilium/envoy/")
+                < mount_target_depth("/var/run/cilium/envoy/sockets"),
+            "a trailing-slash parent must still sort before its child"
+        );
+        // The kubelet's arrival order for this pod, RW child before RO parent.
+        let mut targets = [
+            "/var/run/cilium/envoy/sockets",
+            "/var/run/cilium/envoy/artifacts",
+            "/var/run/cilium/envoy/",
+        ];
+        targets.sort_by_key(|t| mount_target_depth(t));
+        assert_eq!(targets[0], "/var/run/cilium/envoy/", "parent mounts first");
+        // Siblings keep their arrival order (stable sort, equal depth).
+        assert_eq!(
+            mount_target_depth("/a/b"),
+            mount_target_depth("/a/c"),
+            "siblings tie, so arrival order is preserved among them"
+        );
+    }
 
     fn ctr() -> Container {
         Container::new(

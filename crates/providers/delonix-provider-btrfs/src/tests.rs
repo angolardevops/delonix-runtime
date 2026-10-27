@@ -99,6 +99,7 @@ fn setup() -> Setup {
     run.on(&["btrfs", "--version"], 0, "btrfs-progs v6.6.3\n", "")
         .on(&["btrfs", "subvolume", "create"], 0, "", "")
         .on(&["btrfs", "subvolume", "delete"], 0, "", "")
+        .on(&["btrfs", "quota", "enable"], 0, "", "")
         .on(&["btrfs", "qgroup", "limit"], 0, "", "");
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("pool");
@@ -208,6 +209,28 @@ fn a_root_engine_also_sets_the_qgroup_limit_to_the_requested_size() {
         .calls_of("btrfs")
         .iter()
         .any(|c| s(c) == ["btrfs", "qgroup", "limit", &size, dir.to_str().unwrap()]));
+}
+
+#[test]
+fn a_root_engine_enables_quota_on_the_pool_before_limiting_a_subvolume() {
+    // Regression: a qgroup limit is refused ("quota not enabled") unless quota
+    // accounting is on for the filesystem. A pool the administrator mounted by
+    // hand has it off, so the driver must enable it (on the pool root) before
+    // the limit — and in that order.
+    let st = setup();
+    st.driver(true)
+        .allocate(&st.pool(), &req("db"), &owner())
+        .unwrap();
+    let calls = st.run.calls_of("btrfs");
+    let enable = calls
+        .iter()
+        .position(|c| s(c) == ["btrfs", "quota", "enable", st.root.to_str().unwrap()])
+        .expect("quota is enabled on the pool root");
+    let limit = calls
+        .iter()
+        .position(|c| c.get(1).map(String::as_str) == Some("qgroup"))
+        .expect("a qgroup limit is set");
+    assert!(enable < limit, "quota must be enabled before the limit");
 }
 
 #[test]

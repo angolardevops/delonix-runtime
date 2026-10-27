@@ -3024,8 +3024,11 @@ fn handle_control(line: &str) -> String {
     // CNI (rootless): the plugin runs HERE, in the holder — mapped-root and owner of the netns
     // (the host, the user's uid, wouldn't have CAP_NET_ADMIN in it). `cni-add` returns
     // the assigned IP in the reply body (`ok <cidr>`), for the host to register.
-    if let ["cni-add", netns, id, ifname, hex] = parts.as_slice() {
-        return match do_cni_add(netns, id, ifname, hex) {
+    // Four tokens (no pod identity) OR five (the `CNI_ARGS` hex, from a sender
+    // that had the pod's namespace/name). Both accepted, so the host and holder
+    // can differ in age without the attach failing.
+    if let Some((netns, id, ifname, hex, args)) = parse_cni_add(&parts) {
+        return match do_cni_add(netns, id, ifname, hex, args.as_deref()) {
             Ok(ip) => format!("ok {ip}\n"),
             Err(e) => format!("err: {e}\n"),
         };
@@ -3820,12 +3823,47 @@ fn prefix_of(ip: &str) -> String {
 /// CNI plugins (`crate::cni::add`) — the bridge/veth/IPAM are the plugin's, not the native
 /// SDN's. Runs in the holder (mapped-root, owner of the netns → CAP_NET_ADMIN). Returns the
 /// IP (CIDR) assigned by the CNI's IPAM. `hex` = the conflist JSON in hex.
-fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<String> {
+/// The `cni-add` control line the host sends the holder. The conflist is a hex
+/// token (opaque to the line); the optional pod-identity `CNI_ARGS` is a FIFTH
+/// hex token, for the same reason — its `;`/`=` must not split on the space.
+/// Pure, so the round-trip with [`parse_cni_add`] is tested.
+fn build_cni_add_cmd(netns: &str, ifname: &str, conf_hex: &str, cni_args: Option<&str>) -> String {
+    let mut cmd = format!("cni-add {netns} {netns} {ifname} {conf_hex}");
+    if let Some(args) = cni_args.filter(|a| !a.is_empty()) {
+        cmd.push(' ');
+        cmd.push_str(&hex_encode(args.as_bytes()));
+    }
+    cmd
+}
+
+/// Parses a `cni-add` control line into `(netns, id, ifname, conf_hex, args)`.
+/// Four tokens (no identity) OR five (the `CNI_ARGS` hex) — both accepted so the
+/// host and holder may differ in age. Returns `None` for anything else.
+#[allow(clippy::type_complexity)]
+fn parse_cni_add<'a>(
+    parts: &[&'a str],
+) -> Option<(&'a str, &'a str, &'a str, &'a str, Option<String>)> {
+    match parts {
+        ["cni-add", netns, id, ifname, hex] => Some((netns, id, ifname, hex, None)),
+        ["cni-add", netns, id, ifname, hex, args_hex] => {
+            let args = hex_decode(args_hex).and_then(|b| String::from_utf8(b).ok());
+            Some((netns, id, ifname, hex, args))
+        }
+        _ => None,
+    }
+}
+
+fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str, cni_args: Option<&str>) -> Result<String> {
     let netns = sanitize(netns);
     let bytes = hex_decode(hex).ok_or_else(|| Error::InvalidHex("invalid conflist hex".into()))?;
     let conf = crate::cni::parse_config(&String::from_utf8_lossy(&bytes))?;
     // Same body as a root CRI's host netns — see `cni::attach_named_netns`.
-    crate::cni::attach_named_netns(&conf, &netns, id, ifname)
+    // `cni_args` carries the pod-identity keys (`K8S_POD_NAMESPACE`/…) when the
+    // host sent them (fifth control-line token); a pod-aware plugin (Cilium)
+    // needs them to resolve the endpoint's identity, exactly as on the ROOT
+    // path. `None` when the sender omitted them (older host, or a conflist that
+    // does not read identity).
+    crate::cni::attach_named_netns(&conf, &netns, id, ifname, cni_args)
 }
 
 /// Rootless CNI (holder): runs the plugins' `DEL` and removes the netns. Best-effort.
@@ -7287,14 +7325,15 @@ pub fn container_ip(id: &str) -> String {
 /// netns. Returns `(netns, ip_cidr)`. The IP comes from the plugin's IPAM. On failure
 /// it undoes the ref-count. Preserves rootless-first: the plugin runs in the holder (owner
 /// of the netns), not on the host without privilege.
-pub fn cni_attach_container(id: &str, conf_json: &str) -> Result<(String, String)> {
+pub fn cni_attach_container(
+    id: &str,
+    conf_json: &str,
+    cni_args: Option<&str>,
+) -> Result<(String, String)> {
     acquire(id)?; // ensure_up + ref marker for `id`
     let netns = sanitize(id);
     let hex = hex_encode(conf_json.as_bytes());
-    let cmd = format!(
-        "cni-add {netns} {netns} {} {hex}",
-        crate::cni::DEFAULT_IFNAME
-    );
+    let cmd = build_cni_add_cmd(&netns, crate::cni::DEFAULT_IFNAME, &hex, cni_args);
     match control_query(&cmd) {
         Ok(ip) => Ok((netns, ip)),
         Err(e) => {
@@ -8585,6 +8624,68 @@ fn parse_proc_net_dev(text: &str) -> Option<(u64, u64)> {
         seen = true;
     }
     seen.then_some((rx_total, tx_total))
+}
+
+/// One named interface's `(rx_bytes, tx_bytes)` from a `/proc/net/dev` dump.
+/// `None` when that interface is absent or its line is unparseable — the
+/// holder's netns carries every VM's tap plus the bridge and veths, so the SUM
+/// ([`parse_proc_net_dev`]) is meaningless here; a per-VM metric must read ONE
+/// tap by name.
+fn parse_iface_proc_net_dev(text: &str, iface: &str) -> Option<(u64, u64)> {
+    for line in text.lines() {
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim() != iface {
+            continue;
+        }
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        if f.len() < 9 {
+            return None;
+        }
+        return match (f[0].parse::<u64>(), f[8].parse::<u64>()) {
+            (Ok(rx), Ok(tx)) => Some((rx, tx)),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// The guest-perspective `(rx_bytes, tx_bytes)` of a Cloud Hypervisor VM, read
+/// from the HOST side of its tap inside the ingress holder's netns — where CH
+/// attaches every VM tap (there is no per-VM netns to enter, unlike a
+/// container). The tap is the host end, so its counters are MIRRORED relative
+/// to the guest: bytes the host receives on the tap are the guest's transmit,
+/// and vice-versa. So `(guest_rx, guest_tx) = (tap_tx, tap_rx)` — the same swap
+/// the root container model makes when it reads a host-side veth. `None` when
+/// the infra holder is down or the tap is gone, which callers surface as
+/// *unmeasured*, never as zero.
+pub fn vm_tap_net_bytes(tap: &str) -> Option<(u64, u64)> {
+    if tap.is_empty() {
+        return None;
+    }
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path())?;
+    let out = Command::new("nsenter")
+        .args([
+            "-t",
+            &holder.to_string(),
+            "-U",
+            "-m",
+            "-n",
+            "--preserve-credentials",
+            "--",
+            "cat",
+            "/proc/net/dev",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let (tap_rx, tap_tx) =
+        parse_iface_proc_net_dev(&String::from_utf8_lossy(&out.stdout), tap)?;
+    // Swap: the tap is the host end of the guest's link (see the doc comment).
+    Some((tap_tx, tap_rx))
 }
 
 /// Cumulative `(rx_bytes, tx_bytes)` of a container, summed over ALL of its
@@ -9965,6 +10066,35 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{build_cni_add_cmd, parse_cni_add};
+
+    /// The rootless CNI path carries the pod-identity `CNI_ARGS` to the holder
+    /// as a fifth hex token, and the holder parses it back verbatim — `;`/`=`
+    /// and all — so a pod-aware plugin (Cilium) resolves the endpoint instead
+    /// of leaving it in `reserved:init`. Round-trip, and the no-args shape stays
+    /// four tokens (back-compatible).
+    #[test]
+    fn cni_add_control_line_round_trips_the_pod_identity_args() {
+        let args = "IgnoreUnknown=1;K8S_POD_NAMESPACE=kube-system;K8S_POD_NAME=cilium-abc;\
+                    K8S_POD_INFRA_CONTAINER_ID=cri-dead";
+        let cmd = build_cni_add_cmd("cri-dead", "eth0", "deadbeef", Some(args));
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        let (netns, id, ifname, hex, parsed) =
+            parse_cni_add(&parts).expect("the five-token line must parse");
+        assert_eq!((netns, id, ifname, hex), ("cri-dead", "cri-dead", "eth0", "deadbeef"));
+        assert_eq!(parsed.as_deref(), Some(args), "args survive the hex round-trip");
+
+        // No args → four tokens, and parses with None (older host / no identity).
+        let cmd0 = build_cni_add_cmd("cri-x", "eth0", "ab12", None);
+        assert_eq!(cmd0, "cni-add cri-x cri-x eth0 ab12");
+        let parts0: Vec<&str> = cmd0.split_whitespace().collect();
+        assert_eq!(parse_cni_add(&parts0).unwrap().4, None);
+
+        // An empty args string is treated as absent (no stray fifth token).
+        let cmd_empty = build_cni_add_cmd("cri-y", "eth0", "cd34", Some(""));
+        assert_eq!(cmd_empty.split_whitespace().count(), 5);
+    }
+
     #[test]
     fn a_service_member_must_be_ready_not_merely_running() {
         assert!(service_member_ready(Some("Running"), false, None));
@@ -10232,6 +10362,33 @@ mod tests {
     /// measured. Header lines and `lo` must be excluded, and an unusable dump
     /// must be `None` (unmeasured), never `Some(0)`.
     ///
+    /// A VM's per-tap read picks ONE interface out of the holder's many (bridge
+    /// + every VM's tap + veths) — the sum would be meaningless. The parser
+    /// returns the tap's OWN (host-side) counters; `vm_tap_net_bytes` then swaps
+    /// them to the guest's perspective (host rx = guest tx).
+    #[test]
+    fn parse_iface_picks_one_tap_and_ignores_the_rest() {
+        let dump = "\
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 487295143 1281691    0    0    0     0          0         0 487295143 1281691    0    0    0     0       0          0
+ dlxbr0: 999999999 9999    0    0    0     0          0         0 888888888 9999    0    0    0     0       0          0
+ tapdeadbeef: 13058207 101175 0 0 0 0 0 0 3728721 31476 0 0 0 0 0 0
+";
+        // The parser returns the tap's own host-side counters, un-swapped.
+        let (tap_rx, tap_tx) =
+            super::parse_iface_proc_net_dev(dump, "tapdeadbeef").expect("the tap line parses");
+        assert_eq!(tap_rx, 13_058_207);
+        assert_eq!(tap_tx, 3_728_721);
+        // `vm_tap_net_bytes` reports `(tap_tx, tap_rx)` — so the guest sees
+        // rx=3_728_721 (what the host sent it), tx=13_058_207 (what it sent out).
+        assert_eq!((tap_tx, tap_rx), (3_728_721, 13_058_207));
+        // Only the named tap is read — the bridge's huge counters never leak in.
+        assert_ne!(tap_tx, 888_888_888);
+        // An absent interface is UNKNOWN, not zero.
+        assert_eq!(super::parse_iface_proc_net_dev(dump, "tapmissing"), None);
+    }
+
     /// The header/column layout below is verbatim from a real `/proc/net/dev`
     /// on this host — parsing a shape invented for the test would prove nothing.
     #[test]

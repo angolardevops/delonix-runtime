@@ -1,0 +1,7 @@
+### CROSS-NODE calico: c-cp1 -> c-w1:8080
+OK-w1
+  => OK
+### DNS/serviço via ClusterIP
+Name:	kubernetes.default.svc.cluster.local
+Address: 10.96.0.1
+

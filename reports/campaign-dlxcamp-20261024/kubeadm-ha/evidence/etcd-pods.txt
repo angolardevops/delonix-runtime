@@ -1,0 +1,4 @@
+NAME             READY   STATUS    RESTARTS   AGE
+etcd-dlxha-cp1   1/1     Running   0          17m
+etcd-dlxha-cp2   1/1     Running   0          17m
+etcd-dlxha-cp3   1/1     Running   0          16m

@@ -6871,15 +6871,22 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
 /// `(timestamp, body)`. `None` for anything that doesn't match — a raw
 /// (non-CRI) log, or an odd malformed record.
 fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
+    parse_cri_log_line_full(line).map(|(ts, _stream, body)| (ts, body))
+}
+
+/// Like [`parse_cri_log_line`] but also returns the STREAM field (`stdout` or
+/// `stderr`) — the Docker-API logs route needs it to multiplex the two into
+/// separate frames, the one thing the CLI `logs` reader throws away.
+pub(crate) fn parse_cri_log_line_full(line: &str) -> Option<(&str, &str, &str)> {
     let mut parts = line.splitn(4, ' ');
     let ts = parts.next()?;
-    let _stream = parts.next()?;
+    let stream = parts.next()?;
     let _tag = parts.next()?;
     let body = parts.next().unwrap_or("");
     if ts.len() < 20 || !ts.ends_with('Z') || ts.as_bytes().get(4) != Some(&b'-') {
         return None;
     }
-    Some((ts, body))
+    Some((ts, stream, body))
 }
 
 /// Unix seconds -> the same `YYYY-MM-DDTHH:MM:SS` prefix a CRI log line's own
@@ -6889,7 +6896,7 @@ fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
 /// civil-calendar conversion (mirrors `delonix_linux`'s own private
 /// `rfc3339` helper) rather than a `chrono` dependency, matching this
 /// project's supply-chain-minimalism rule (see AGENTS.md's "Output" section).
-fn unix_secs_to_rfc3339_prefix(secs: u64) -> String {
+pub(crate) fn unix_secs_to_rfc3339_prefix(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);

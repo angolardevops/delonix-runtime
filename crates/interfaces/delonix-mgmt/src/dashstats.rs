@@ -456,12 +456,21 @@ pub fn collect_workload_series(root: &Path) -> Vec<WorkloadSeries> {
             Some(pid) => pressure::vmm_cgroup(Path::new("/proc"), Path::new("/sys/fs/cgroup"), pid),
             None => Err(Why::CgroupMissing),
         };
-        out.push(workload_series(
-            WorkloadKind::Vm,
-            &vm.name,
-            &vm.name,
-            cgroup,
-        ));
+        let mut ws = workload_series(WorkloadKind::Vm, &vm.name, &vm.name, cgroup);
+        // Per-VM network, like the per-container series: Cloud Hypervisor attaches
+        // the VM's tap in the ingress holder's netns, so its rx/tx is one
+        // `nsenter`+read away (`vm_tap_net_bytes`, which also makes the host→guest
+        // swap). libvirt VMs sit on `virbr0` in the host netns and carry no tap
+        // name here (the `tap` field holds the net MODE), so they are left
+        // unmeasured — a `domifstat` path, not this one. This runs on the slow
+        // background refresh (`collect_workload_series` caller), off the request path.
+        if vm.backend == "cloud-hypervisor" {
+            if let Some((rx, tx)) = delonix_sdn::infra::vm_tap_net_bytes(&vm.tap) {
+                ws.net_rx_bytes = Some(rx);
+                ws.net_tx_bytes = Some(tx);
+            }
+        }
+        out.push(ws);
     }
     out
 }

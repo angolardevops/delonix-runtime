@@ -1,10 +1,13 @@
 # ADR-0078: A rede dos pods de um cluster kubeadm é um PERFIL seleccionável, fixado por conteúdo e recusado antes de existir máquina
 
-- **Status:** Accepted (2026-10-15). **D1 a D6 implementados**; **D7 (validação
-  ao vivo multi-nó) EXECUTADO no mesmo dia** — e o Cilium **falhou**, com
-  causa-raiz medida (bpffs duplicado dentro do container, um defeito do CRI).
-  Tudo até ao dataplane passou. Os três perfis ficam `EXPERIMENTAL`, agora por
-  medição e não por precaução.
+- **Status:** Accepted (2026-10-15); **emendado 2026-10-27** — ver
+  «Actualização, 2026-10-27» no fim. D1 a D6 implementados. O D7 de 2026-10-15
+  falhou no Cilium (bpffs duplicado, defeito do CRI); desde então os dois
+  defeitos de CRI que o bloqueavam foram **corrigidos e o D7 do Cilium passa ao
+  vivo** (nós Ready + pod-a-pod cross-node + serviços). Decisão nova: em
+  multi-nó kubeadm o `cni: default` **resolve para Cilium** em vez de ser
+  recusado (o antigo DX-6701), por isso um cluster multi-nó sobe funcional sem
+  opt-in.
 - **Date:** 2026-10-15
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0074 (publicação de `hostPort` no CRI — a sua própria
@@ -317,14 +320,34 @@ foi verificado**, e é o primeiro item do laboratório.
 
 ## Pendências, por ordem de importância
 
-1. **O bpffs duplicado dentro de um container privilegiado** — é o que impede o
-   Cilium de arrancar (D7). `/sys` entra por bind recursivo E o pod pede
-   `/sys/fs/bpf` como hostPath; o agente recusa com «multiple mount points
-   detected». Vive no caminho de mounts de containers privilegiados, que serve
-   muito mais do que CNIs, por isso é trabalho próprio e não um remendo aqui.
+> A pendência 1 (bpffs) foi CORRIGIDA (#869/#871), o bloqueador seguinte que
+> revelava (CNI_ARGS) também, e o `cilium-envoy` também — ver «Actualização,
+> 2026-10-27». O Cilium sobe agora COMPLETO (agent + envoy + operator), não só o
+> agente.
+
+1. ~~**O bpffs duplicado dentro de um container privilegiado**~~ — **CORRIGIDO**
+   em #869 (`c95a3b19`, dedup do bind recursivo de `/sys`) + #871 (`f43287c5`),
+   ambos em `develop`. Re-provado ao vivo 2026-10-27: o Cilium arranca.
+   `/sys` entrava por bind recursivo E o pod pedia `/sys/fs/bpf` como hostPath;
+   o agente recusava com «multiple mount points detected».
 2. **Correr D7 para o Calico e o Flannel**, e promover ou bloquear cada um com
-   o resultado. O flannel é o que isola: não precisa de bpffs, por isso um
-   cross-node a funcionar nele separa a falha do Cilium do resto da cadeia.
+   o resultado — **AMBOS FEITOS e PROMOVIDOS a `Supported`.**
+   - **Flannel (2026-10-27)**: D7 num cluster 2 nós (`--cni flannel`, golden
+     1.37): nós Ready v1.37.1, DaemonSet 2/2, pod-a-pod cross-node OK e DNS
+     ClusterIP a resolver (`reports/.../d7-flannel*`). Sem bpffs/identidade,
+     isolou o datapath.
+   - **Calico (2026-10-28)**: D7 igual (`--cni calico`): nós Ready v1.37.1,
+     calico-node 2/2 + calico-kube-controllers Running, pod-a-pod cross-node OK
+     e DNS a resolver (`reports/.../d7-calico*`). O DATAPLANE está provado; a
+     ENFORCEMENT de NetworkPolicy do Calico fica por testar (pendência #3).
+   - **Cilium (2026-10-28, promoção deliberada do dono)**: provado end-to-end
+     esta campanha (nós Ready, agent/operator/envoy Running, cross-node + DNS, 0
+     endpoints em `reserved:init`) depois dos três fixes de CRI (bpffs #869/#871,
+     CNI_ARGS, envoy `/dev/shm`+ordenação de mounts). `Profile::Cilium.support()`
+     → `Supported`. **Os TRÊS addons são agora `Supported`** — nenhum perfil é
+     `Experimental`. O mecanismo (`Support::Experimental` + DX-1705 +
+     `--experimental-cni`) fica DORMENTE (`#[allow(dead_code)]`), pronto para o
+     próximo perfil que chegue sem medição.
 3. **Políticas de rede testadas** (ingress e egress) nos perfis que as
    implementam. Instalar o Cilium não é entregar isolamento.
 4. **Resolver as imagens do Calico e do Flannel para digests** (D4).
@@ -341,3 +364,104 @@ foi verificado**, e é o primeiro item do laboratório.
 8. **`k8s_repo_version` tem um default independente** (`stable:/v1.31`) que
    discorda do `DEFAULT_K8S_VERSION` (1.36). Há correcção numa árvore de
    trabalho de outra sessão; não foi duplicada aqui para não conflituar.
+
+## Actualização, 2026-10-27 — `cni: default` → Cilium em multi-nó, e o D7 passa
+
+Duas coisas mudaram desde 2026-10-15, e uma reverte em parte a alternativa
+«Deixar o `cni: default` crescer para multi-nó. Rejeitado.» acima — que fazia
+sentido quando NENHUM perfil cross-node funcionava.
+
+**1. Os dois defeitos de CRI que bloqueavam o Cilium estão corrigidos.**
+
+- O bpffs duplicado (pendência nº1) foi corrigido em **#869** (`c95a3b19`) e
+  **#871** (`f43287c5`), já em `develop`. Com eles o Cilium ARRANCA.
+- Correr o D7 então revelou o bloqueador seguinte: **o CRI não passava
+  `CNI_ARGS`** ao plugin CNI. Sem `K8S_POD_NAMESPACE`/`K8S_POD_NAME`, o Cilium
+  não associava o sandbox ao pod Kubernetes, não lia as suas labels, e deixava
+  cada endpoint na identidade `reserved:init` — que a sua própria política
+  isola. Resultado: nós Ready, agente Ready 2/2, mas pod-a-pod cross-node
+  bloqueado. **Corrigido** nesta sessão: `delonix-sdn/src/cni.rs` (`Target.args`
+  → `build_env` emite `CNI_ARGS`; `add`/`attach_named_netns` passam-no) e
+  `delonix-cri/.../lifecycle.rs` (`cni_k8s_args` monta as chaves do kubelet a
+  partir do `PodSandboxConfig`, no caminho ROOT). O caminho rootless opt-in
+  (`DELONIX_CNI=1`) **também passa agora**: a linha de controlo do holder ganhou
+  um QUINTO token — os `CNI_ARGS` em hex (`build_cni_add_cmd`/`parse_cni_add` em
+  `delonix-sdn/infra.rs`, 4 OU 5 tokens aceites p/ compatibilidade entre host e
+  holder), e o `do_cni_add` reencaminha-os ao `attach_named_netns`. Round-trip
+  testado; a prova live rootless end-to-end (crictl + plugin CNI falso +
+  delonix-cri rootless) não foi corrida — o mecanismo de identidade já está
+  provado no caminho root e o downstream (`attach_named_netns`→`build_env`) é o
+  mesmo.
+
+**2. `cni: default` resolve para Cilium num cluster kubeadm multi-nó.**
+
+Decisão do dono (2026-10-27). `net_profiles::resolved_profile` (fonte única)
+mapeia `default` → `Cilium` quando `mode != kind` e `nodes > 1`; um nó continua
+com a bridge node-local, e `mode: kind` continua kindnet. O antigo **DX-6701**
+(recusa) deixa de disparar — `default` passa a significar «dá-me um cluster que
+funciona». Como é o motor a escolher, o perfil engine-default não passa pelo
+portão `EXPERIMENTAL` (DX-1705); nomear `cilium`/`calico`/`flannel`
+explicitamente continua a exigir `--experimental-cni`. O código vive em
+`cmd::net_profiles` e `cmd::cluster` (orquestração), não no CRI.
+
+**D7 re-executado e PASSA (2026-10-27)**, host com 31 GiB livres (o de
+2026-10-15 tinha 5). `delonix cluster kubeadm --control-plane 1 --workers 1
+--memory 4G` (cni default, SEM opt-in):
+
+- `cilium agent Ready on 2/2 node(s); 2/2 node(s) Ready`; cluster ready.
+- Identidades resolvidas (`k8s:app=…`), **0 endpoints em `reserved:init`**.
+- **Pod-a-pod cross-node OK** nos dois sentidos (pods fixados a cp1 e w1, /24s
+  distintos, HTTP via busybox httpd).
+- **Serviço/DNS OK**: `nslookup kubernetes.default` pela ClusterIP resolve —
+  kube-proxy + coredns + datapath cross-node ponta-a-ponta.
+
+Evidência em `reports/cilium-d7-rerun-2026-10-27/` (`create-with-cniargs.log`,
+`crossnode-connectivity-FIXED.txt`, `cilium-health.txt`, `diag-identity.txt`).
+
+**3. `cilium-envoy` sobe (dois defeitos de mount do CRI, corrigidos).** Depois do
+agente, o sidecar `cilium-envoy` ainda ficava em CrashLoopBackOff — por DUAS
+razões, uma a esconder a outra:
+
+- (a) **`/dev/shm` em falta**: o `setup_dev`/`setup_dev_userns` montava `/dev`
+  (tmpfs) mas nunca o `/dev/shm`, que todo o runtime OCI (runc) fornece; o Envoy
+  abortava em «cannot open shared memory region /envoy_shared_memory_0». Corrigido
+  com `mount_dev_shm` (tmpfs `mode=1777,size=65536k`, `nosuid,noexec,nodev`) em
+  ambos os caminhos (`delonix-linux/src/lib.rs`). Serve qualquer `shm_open`
+  (Envoy, Chromium, PostgreSQL DSM, testes).
+- (b) **ordenação de mounts aninhados**: o pod monta `/var/run/cilium/envoy/`
+  READ-ONLY e `/var/run/cilium/envoy/sockets` READ-WRITE, e o kubelet lista o
+  filho RW ANTES do pai RO; o `setup_rootfs` aplicava-os por ordem de chegada, o
+  pai RO enterrava o filho RW, e o Envoy morria em «cannot bind
+  '…/sockets/admin.sock': Read-only file system». Corrigido com um sort estável
+  por profundidade do destino (`mount_target_depth`), como o runc — pais antes
+  dos descendentes. Provado ao vivo 2026-10-27: `cilium-envoy` Running 1/1 nos
+  dois nós, `/dev/shm` e `…/sockets` ambos `rw`
+  (`reports/cilium-d7-rerun-2026-10-27/envoy-FIXED.txt`). O Cilium sobe COMPLETO.
+
+**Flannel e Calico: D7 FEITO e PROMOVIDOS a `Supported` (2026-10-27/28)** —
+cluster 2 nós (`--cni flannel` / `--cni calico`, golden 1.37): nós Ready
+v1.37.1, DaemonSets prontos, pod-a-pod cross-node OK e DNS ClusterIP a resolver.
+`Profile::{Flannel,Calico}.support()` passaram a `Supported`, por isso já não
+exigem `--experimental-cni`. Só o Cilium continua `Experimental`.
+
+**Cilium, Calico e Flannel: os TRÊS `Supported` (2026-10-28).** Nenhum perfil é
+`Experimental`; o mecanismo (`Support::Experimental` + DX-1705 +
+`--experimental-cni`) fica DORMENTE, pronto para o próximo perfil não-medido.
+
+**NetworkPolicy enforcement (Cilium): PROVADO (2026-10-28, pendência #3 para o
+Cilium).** Cluster Cilium (golden 1.37), pods `srv`/`cli`: baseline OK →
+`default-deny-ingress` em `app=srv` → `cli→srv` BLOQUEADO → `allow from app=cli`
+→ OK de novo (`reports/.../netpol-enforcement.txt`). O Calico usa o mesmo
+contrato de NetworkPolicy k8s; não re-testado aqui.
+
+**CNI_ARGS no caminho rootless: PROVADO LIVE (2026-10-28).** delonix-cri
+rootless (`DELONIX_CNI=1`, root/socket próprios) + `crictl runp` + plugin CNI
+falso em `/opt/cni/bin`: o plugin recebeu, via o holder,
+`IgnoreUnknown=1;K8S_POD_NAMESPACE=argns;K8S_POD_NAME=argtest-pod;
+K8S_POD_INFRA_CONTAINER_ID=cri-…;K8S_POD_UID=…`
+(`reports/.../rootless-cni-args-proof.txt`). O 5º token hex da linha de controlo
+chega ao plugin ponta-a-ponta.
+
+**Fica por fazer:** enforcement de NetworkPolicy do Calico (mesmo contrato,
+não re-medido); egress policy; e as interfaces secundárias do Multus (pendência
+#5).

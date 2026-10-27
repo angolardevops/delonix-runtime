@@ -52,7 +52,7 @@ delonix-mgmt = { workspace = true }
 # Reverse-proxy L7 embutido (`delonix ingress-proxy`, kind: HTTPRoute) — hyper puro
 # + hyper-util. JÁ estão na árvore do bin (transitivos via delonix-cri/tonic), por
 # isso não acrescentam superfície de supply-chain nova; só passam a deps directas.
-tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "io-util", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "io-util", "signal", "process"] }
 hyper = { workspace = true, features = ["server", "client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1"] }
 http-body-util = { workspace = true }

@@ -300,10 +300,11 @@ pub(crate) use super::net_profiles::CNI_CHOICES;
 /// of the request, because `provision_and_apply` has to ask the question
 /// before it has a `ClusterSpec` to ask it with.
 ///
-/// The two historical refusals are unchanged in meaning: an unknown value is
-/// DX-1701, and `default` on a kubeadm cluster of more than one node is
-/// DX-6701 (a node-local bridge routes nothing between nodes). `mode: kind` is
-/// not refused for `default`: there it is kindnet, which does.
+/// An unknown value is still DX-1701. `default` on a kubeadm cluster of more
+/// than one node is NO LONGER refused (the old DX-6701): the engine resolves it
+/// to Cilium, the HA default cross-node pod network (`resolved_profile`), so a
+/// node-local bridge that routes nothing is never installed across nodes.
+/// `mode: kind` keeps `default` as kindnet, which already routes.
 fn network_request(spec: &ClusterSpec, nodes: u32) -> super::net_profiles::NetworkRequest {
     network_request_parts(
         &spec.cni,
@@ -419,18 +420,39 @@ fn check_distinct_node_addresses(nodes: &[(&str, &str)]) -> Result<()> {
     ))
 }
 
-/// Whether `apply_ssh` installs the default CNI itself: only for a cluster of
-/// exactly one node (`net_profiles::validate` refuses `default` above that).
-/// One function for the plan line and the step, so the two cannot disagree.
+/// The node count this spec resolves to — hosts in `mode: ssh` (the bootstrap
+/// path always has them populated by now), replicas otherwise. The engine's
+/// `default` -> Cilium selection keys on it, so it is computed once here.
+fn node_count(spec: &ClusterSpec) -> u32 {
+    (spec.control_plane.count() + spec.workers.count()) as u32
+}
+
+/// Whether `apply_ssh` installs the node-local bridge CNI itself: only when the
+/// resolved profile is `default`, i.e. a single-node cluster. A multi-node
+/// `default` now resolves to Cilium (`net_profiles::resolved_profile`), so it
+/// takes the profile path below, not this one. One function for the plan line
+/// and the step, so the two cannot disagree.
 fn installs_default_cni(spec: &ClusterSpec) -> bool {
-    spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1
+    super::net_profiles::resolved_profile(&spec.cni, &spec.mode, node_count(spec))
+        == Some(super::net_profiles::Profile::Default)
 }
 
 /// Whether `apply_ssh` installs a selectable pod-network PROFILE
 /// (`cilium`/`calico`/`flannel`) — the step that did not exist and is the
-/// reason a multi-node kubeadm cluster could not be brought up here.
+/// reason a multi-node kubeadm cluster could not be brought up here. A
+/// multi-node `cni: default` resolves to Cilium and reaches this path too.
 fn installs_profile(spec: &ClusterSpec) -> bool {
-    super::net_profiles::Profile::parse(&spec.cni).is_some_and(|p| p.is_addon())
+    super::net_profiles::resolved_profile(&spec.cni, &spec.mode, node_count(spec))
+        .is_some_and(|p| p.is_addon())
+}
+
+/// The CNI this spec resolves to after the engine's default-selection, as a
+/// display name for the plan line and the readiness wait — «cilium», not the
+/// «default» the operator wrote, when `default` resolved to it.
+fn effective_cni_name(spec: &ClusterSpec) -> String {
+    super::net_profiles::resolved_profile(&spec.cni, &spec.mode, node_count(spec))
+        .map(|p| p.name().to_string())
+        .unwrap_or_else(|| spec.cni.clone())
 }
 
 /// Whether `apply_ssh` waits for every node to be `Ready`. Never with
@@ -481,7 +503,7 @@ fn bootstrap_plan(spec: &ClusterSpec, wait_ready: bool) -> Vec<String> {
     if installs_profile(spec) {
         plan.push(super::po::tf(
             "Installing the {cni} pod network",
-            &[("cni", &spec.cni)],
+            &[("cni", &effective_cni_name(spec))],
         ));
         if spec.network.multus {
             plan.push(super::po::t("Installing Multus").to_string());
@@ -1267,13 +1289,14 @@ pub enum ClusterCmd {
         pod_subnet: String,
         #[arg(long, default_value = "10.96.0.0/12")]
         service_subnet: String,
-        /// Pod network. `default` = the engine's node-local bridge, which only
-        /// serves a ONE-node cluster: with more nodes it is refused before any VM
-        /// is created. `none` = install nothing; every node stays NotReady until
-        /// you apply your own CNI. `cilium`/`calico`/`flannel` = a selectable
-        /// profile, pinned to a version and an artefact digest, installed and
-        /// waited for by the bootstrap itself (`delonix cluster network
-        /// profiles` lists them with their support level).
+        /// Pod network. `default` = «give me a cluster that works»: a
+        /// node-local bridge on a ONE-node cluster, and on MORE than one node
+        /// the engine's HA default cross-node pod network, Cilium, installed
+        /// and waited for automatically. `none` = install nothing; every node
+        /// stays NotReady until you apply your own CNI. `cilium`/`calico`/`flannel`
+        /// = a selectable profile, pinned to a version and an artefact digest,
+        /// all Supported (D7-measured) — `delonix cluster network profiles`
+        /// lists them with their support level.
         #[arg(long, default_value = "default", value_parser = CNI_CHOICES.to_vec())]
         cni: String,
         /// Encapsulation / forwarding mode of the chosen profile. Omit for its
@@ -2003,6 +2026,36 @@ fn kubeconfig_candidates(name: &str, root: &Path, home: Option<&Path>) -> Vec<Pa
     v
 }
 
+/// A name that is actually a kubectl command — the slip in `cluster <name>
+/// <kubectl args>` where a verb is typed FIRST and read as the cluster name
+/// (so `get` lands in the name slot). Not exhaustive: just the verbs a user is
+/// likely to type by reflex, so the refusal below can teach the shape instead
+/// of hunting for a cluster named after the verb.
+fn looks_like_kubectl_verb(name: &str) -> bool {
+    matches!(
+        name,
+        "get"
+            | "describe"
+            | "logs"
+            | "exec"
+            | "apply"
+            | "delete"
+            | "create"
+            | "edit"
+            | "rollout"
+            | "scale"
+            | "top"
+            | "explain"
+            | "port-forward"
+            | "cp"
+            | "label"
+            | "annotate"
+            | "run"
+            | "expose"
+            | "patch"
+    )
+}
+
 fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let candidatos = kubeconfig_candidates(name, &state_root(), home.as_deref());
@@ -2011,11 +2064,24 @@ fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
     }
     let cache = candidatos[0].clone();
     let names = reachable_kubeconfig_names_in(&state_root(), home.as_deref());
-    let hint = if names.is_empty() {
+    let avail = if names.is_empty() {
         super::po::t("run `cluster create`/`cluster apply`/`cluster kubeadm` first").into()
     } else {
         super::po::tf("available: {names}", &[("names", &names.join(", "))])
     };
+    // The frequent slip: a kubectl verb typed where the CLUSTER NAME belongs,
+    // so the verb lands in the name slot. Say THAT instead of "no kubeconfig
+    // for cluster 'get'", which sends the reader hunting for a cluster they
+    // never made. The name comes first: `cluster <name> <args>`.
+    if looks_like_kubectl_verb(name) {
+        let first = names.first().cloned();
+        let example = first.as_deref().unwrap_or("<name>");
+        return Err(Error::Invalid(super::po::tf(
+            "'{name}' is a kubectl command, not a cluster name — the cluster name comes FIRST: \
+             `delonix cluster {ex} {name} ...` ({avail})",
+            &[("name", name), ("ex", example), ("avail", &avail)],
+        )));
+    }
     // Naming BOTH paths that were tried, because "no kubeconfig" sends the
     // reader looking in the wrong one half the time.
     Err(Error::Invalid(super::po::tf(
@@ -2023,7 +2089,7 @@ fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
         &[
             ("name", name),
             ("cache", &cache.display().to_string()),
-            ("hint", &hint),
+            ("hint", &avail),
         ],
     )))
 }
@@ -2794,14 +2860,14 @@ fn apply_ssh(
     // anywhere in this function — every cluster bootstrapped through this
     // path stayed `NotReady` forever, with nothing but a manual
     // `kubectl apply -f <cni>.yaml` able to fix it (see the KaaS capability
-    // audit, docs/discovery/kaas-matrix-2026-10-08.md, gap #1). Only the
-    // provably safe case is wired up here: EXACTLY one node total. A plain
-    // bridge CNI gives that one node working pod networking (the same
-    // conflist delonix-cri's own root-CNI path uses for every pod sandbox —
-    // ADR-0074), but has nothing that routes pod traffic BETWEEN nodes. A
-    // multi-node cluster with `cni: default` never gets here:
-    // `net_profiles::validate` refuses it before any machine is created
-    // (#799), and `cni: none` is the operator saying they bring their own.
+    // audit, docs/discovery/kaas-matrix-2026-10-08.md, gap #1). This step is
+    // the SINGLE-node `default`: a plain bridge CNI gives that one node working
+    // pod networking (the same conflist delonix-cri's own root-CNI path uses
+    // for every pod sandbox — ADR-0074), but has nothing that routes pod
+    // traffic BETWEEN nodes. A MULTI-node `cni: default` no longer reaches here
+    // — `net_profiles::resolved_profile` turns it into Cilium (#799), which
+    // takes the profile step just below — and `cni: none` is the operator
+    // saying they bring their own.
     if installs_default_cni(spec) {
         p.step(
             super::po::t("Installing the default CNI (bridge, single node)"),
@@ -2865,12 +2931,12 @@ fn apply_ssh(
         // is not a report it is allowed to make. The deadline is longer than
         // the historical 180s because the first thing a fresh agent does is
         // pull its own image on every node.
-        let profile = super::net_profiles::Profile::parse(&spec.cni)
+        let profile = super::net_profiles::resolved_profile(&spec.cni, &spec.mode, expected as u32)
             .unwrap_or(super::net_profiles::Profile::None);
         p.step(
             &super::po::tf(
                 "Waiting for the {cni} pod network and all nodes to be Ready",
-                &[("cni", &spec.cni)],
+                &[("cni", profile.name())],
             ),
             "⏳",
         );
@@ -2885,7 +2951,7 @@ fn apply_ssh(
         output::info(&super::po::tf(
             "{cni} agent Ready on {ar}/{ad} node(s); {nr}/{nt} node(s) Ready",
             &[
-                ("cni", &spec.cni),
+                ("cni", profile.name()),
                 ("ar", &r.agents_ready.to_string()),
                 ("ad", &r.agents_desired.to_string()),
                 ("nr", &r.nodes_ready.to_string()),
@@ -6648,27 +6714,32 @@ workers:
         }
     }
 
-    /// The measured failure of #799: two nodes, `cni: default`, every node
-    /// `NotReady` after a bootstrap that said «ready». Refused now, with its
-    /// own number and the «unavailable» exit class (69), not a generic 1.
+    /// The measured failure of #799 — two nodes, `cni: default`, every node
+    /// `NotReady` after a bootstrap that said «ready» — is closed now by the
+    /// engine RESOLVING `default` to Cilium (the HA default cross-node pod
+    /// network) instead of refusing it (ADR-0078 amended). No opt-in needed:
+    /// the engine stands behind its own default.
     #[test]
-    fn a_multi_node_kubeadm_cluster_refuses_the_default_cni() {
-        let err = validate(&spec_ssh_cp_and_worker("default")).unwrap_err();
-        assert_eq!(err.number(), 6701, "{err}");
-        assert_eq!(super::super::exitcode::for_error(&err), 69, "{err}");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("--cni none"),
-            "the refusal names the way out: {msg}"
-        );
-        assert!(msg.contains("2 nodes"), "{msg}");
+    fn a_multi_node_kubeadm_cluster_resolves_default_to_cilium() {
+        let spec = spec_ssh_cp_and_worker("default");
+        assert!(validate(&spec).is_ok(), "the old DX-6701 refusal is gone");
+        assert!(!installs_default_cni(&spec), "not the node-local bridge");
+        assert!(installs_profile(&spec), "takes the cross-node profile path");
+        assert_eq!(effective_cni_name(&spec), "cilium");
+        // The plan announces the cilium step and the readiness wait, by the
+        // resolved name — not the «default» the operator wrote.
+        let plan = bootstrap_plan(&spec, true);
+        let installing =
+            super::super::po::tf("Installing the {cni} pod network", &[("cni", "cilium")]);
+        assert!(plan.iter().any(|l| *l == installing), "{plan:?}");
     }
 
-    /// `mode: vm` counts REPLICAS, not hosts: the manifest path of
-    /// `cluster apply -f cluster-vm.yaml` is refused before `apply_vm`
-    /// creates its first VM.
+    /// `mode: vm` counts REPLICAS, not hosts, for the engine's default
+    /// selection: a multi-node vm cluster with `cni: default` resolves to
+    /// Cilium before `apply_vm` creates its first VM, and a one-node one keeps
+    /// the node-local bridge.
     #[test]
-    fn a_vm_mode_cluster_counts_replicas_for_the_cni_refusal() {
+    fn a_vm_mode_cluster_counts_replicas_for_default_resolution() {
         let spec = ClusterSpec {
             mode: "vm".into(),
             control_plane: NodesSpec {
@@ -6681,12 +6752,15 @@ workers:
             },
             ..Default::default()
         };
-        assert_eq!(validate(&spec).unwrap_err().number(), 6701);
+        assert!(validate(&spec).is_ok());
+        assert!(installs_profile(&spec));
+        assert_eq!(effective_cni_name(&spec), "cilium");
         let one = ClusterSpec {
             workers: NodesSpec::default(),
             ..spec
         };
         assert!(validate(&one).is_ok(), "one node keeps the default bridge");
+        assert!(installs_default_cni(&one));
     }
 
     /// REGRESSION, found live with 3 VMs cloned from `k8s-golden`: the image
@@ -6767,6 +6841,20 @@ workers:
         let installing = super::super::po::t("Installing the default CNI (bridge, single node)");
         assert!(!plan.iter().any(|l| l == waiting), "{plan:?}");
         assert!(!plan.iter().any(|l| l == installing), "{plan:?}");
+    }
+
+    /// A kubectl verb typed where the cluster name belongs (`cluster <name>
+    /// <args>`) is read as the name. The verb table is what lets the refusal
+    /// teach that shape instead of reporting a cluster named after the verb.
+    #[test]
+    fn common_kubectl_verbs_are_recognised_as_a_misplaced_name() {
+        for v in ["get", "describe", "logs", "exec", "apply", "delete"] {
+            assert!(looks_like_kubectl_verb(v), "{v}");
+        }
+        // A real cluster name is not mistaken for a verb.
+        for n in ["d7cil", "prod", "mbandi-saurimo-32"] {
+            assert!(!looks_like_kubectl_verb(n), "{n}");
+        }
     }
 
     /// Kind mode is not refused: there `default` is kindnet, which routes

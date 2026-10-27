@@ -1,0 +1,151 @@
+preparing the working image (flattened, no backing file)...
+Formatting '/tmp/delonix-vmimage-build-3202571/work.qcow2', fmt=qcow2 cluster_size=65536 extended_l2=off compression_type=zlib size=10737418240 lazy_refcounts=off refcount_bits=16
+[   0.0] Examining /home/walter/.local/share/delonix/vm-images/_base/ubuntu-24.04-server-cloudimg-amd64.img
+**********
+
+Summary of changes:
+
+virt-resize: /dev/sda14: This partition will be left alone.
+
+virt-resize: /dev/sda15: This partition will be left alone.
+
+virt-resize: /dev/sda16: This partition will be left alone.
+
+virt-resize: /dev/sda1: This partition will be resized from 2.5G to 9.0G.  The filesystem ext4 on /dev/sda1 will be expanded using the ‘resize2fs’ method.
+
+**********
+[   2.1] Setting up initial partition table on /tmp/delonix-vmimage-build-3202571/work.qcow2
+[  16.0] Copying /dev/sda14
+[  16.0] Copying /dev/sda15
+[  16.1] Copying /dev/sda16
+[  16.7] Copying /dev/sda1
+[  19.8] Expanding /dev/sda1 (now /dev/sda4) using the ‘resize2fs’ method
+
+virt-resize: Resize operation completed with no errors.  Before deleting the old disk, carefully check that the resized disk boots and works correctly.
+delonix-cri: next to delonix — /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix-cri (sha256 6da9211392e48ec75bde9e1d18f631688b09210404f1df45ba55dc4827bb46c5)
+offline mode: getting the k8s .deb on the host...
+verifying the k8s repo signature (stable:/v1.37)...
+gpgv: Signature made Wed 23 Sep 2026 08:14:31 PM WAT
+gpgv:                using RSA key DE15B14486CD377B9E876E1A234654DA9A296436
+gpgv: Good signature from "isv:kubernetes OBS Project <isv:kubernetes@build.opensuse.org>"
+  kubeadm 1.37.1-1.1 (amd64)
+  kubectl 1.37.1-1.1 (amd64)
+  kubelet 1.37.1-1.1 (amd64)
+  kubernetes-cni 1.9.1-1.1 (amd64)
+offline mode: getting the guest agent from the noble archive...
+gpgv: Signature made Thu 25 Apr 2024 04:11:21 PM WAT
+gpgv:                using RSA key F6ECB3762474EDA9D21B7022871920D1991BC93C
+gpgv: Good signature from "Ubuntu Archive Automatic Signing Key (2018) <ftpmaster@ubuntu.com>"
+pre-seeding the kubeadm images on the host...
+  pre-seeding registry.k8s.io/kube-apiserver:v1.37.1...
+[2m2026-10-27T22:20:58.841775Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling kube-apiserver:v1.37.1 from registry.k8s.io [3mrepo[0m[2m=[0mkube-apiserver [3mreference[0m[2m=[0mv1.37.1 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:01.347873Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+  pre-seeding registry.k8s.io/kube-controller-manager:v1.37.1...
+[2m2026-10-27T22:21:09.816777Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling kube-controller-manager:v1.37.1 from registry.k8s.io [3mrepo[0m[2m=[0mkube-controller-manager [3mreference[0m[2m=[0mv1.37.1 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:11.415149Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+  pre-seeding registry.k8s.io/kube-scheduler:v1.37.1...
+[2m2026-10-27T22:21:16.132002Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling kube-scheduler:v1.37.1 from registry.k8s.io [3mrepo[0m[2m=[0mkube-scheduler [3mreference[0m[2m=[0mv1.37.1 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:17.752869Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+  pre-seeding registry.k8s.io/kube-proxy:v1.37.1...
+[2m2026-10-27T22:21:23.419426Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling kube-proxy:v1.37.1 from registry.k8s.io [3mrepo[0m[2m=[0mkube-proxy [3mreference[0m[2m=[0mv1.37.1 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:25.015480Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+  pre-seeding registry.k8s.io/coredns/coredns:v1.14.6...
+[2m2026-10-27T22:21:34.108798Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling coredns/coredns:v1.14.6 from registry.k8s.io [3mrepo[0m[2m=[0mcoredns/coredns [3mreference[0m[2m=[0mv1.14.6 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:35.314169Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+  pre-seeding registry.k8s.io/pause:3.10.2...
+[2m2026-10-27T22:21:41.359856Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling pause:3.10.2 from registry.k8s.io [3mrepo[0m[2m=[0mpause [3mreference[0m[2m=[0m3.10.2 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:42.952142Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+  pre-seeding registry.k8s.io/etcd:3.7.0-0...
+[2m2026-10-27T22:21:44.876103Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling etcd:3.7.0-0 from registry.k8s.io [3mrepo[0m[2m=[0metcd [3mreference[0m[2m=[0m3.7.0-0 [3mhost[0m[2m=[0mregistry.k8s.io
+[2m2026-10-27T22:21:46.519117Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+running virt-customize (49 step(s), no network)...
+[   0.0] Examining the guest ...
+[   2.0] Setting a random seed
+virt-customize: warning: random seed could not be set for this type of guest
+[   2.0] Setting the machine ID in /etc/machine-id
+[   2.0] Running: mkdir -p /tmp/k8s-debs
+[   2.1] Copying: /tmp/delonix-vmimage-build-3202571/debs/kubeadm_1.37.1-1.1_amd64.deb to /tmp/k8s-debs
+[   2.1] Copying: /tmp/delonix-vmimage-build-3202571/debs/kubectl_1.37.1-1.1_amd64.deb to /tmp/k8s-debs
+[   2.1] Copying: /tmp/delonix-vmimage-build-3202571/debs/kubelet_1.37.1-1.1_amd64.deb to /tmp/k8s-debs
+[   2.2] Copying: /tmp/delonix-vmimage-build-3202571/debs/kubernetes-cni_1.9.1-1.1_amd64.deb to /tmp/k8s-debs
+[   2.2] Copying: /tmp/delonix-vmimage-build-3202571/debs/conntrack_1.4.8-1ubuntu1_amd64.deb to /tmp/k8s-debs
+[   2.2] Copying: /tmp/delonix-vmimage-build-3202571/debs/ethtool_6.7-1build1_amd64.deb to /tmp/k8s-debs
+[   2.3] Copying: /tmp/delonix-vmimage-build-3202571/debs/liburing2_2.5-1build1_amd64.deb to /tmp/k8s-debs
+[   2.3] Copying: /tmp/delonix-vmimage-build-3202571/debs/tcpdump_4.99.4-3ubuntu4_amd64.deb to /tmp/k8s-debs
+[   2.3] Copying: /tmp/delonix-vmimage-build-3202571/debs/qemu-guest-agent_8.2.2+ds-0ubuntu1_amd64.deb to /tmp/k8s-debs
+[   2.3] Running: dpkg -i /tmp/k8s-debs/*.deb && apt-mark hold kubeadm kubelet kubectl && rm -rf /tmp/k8s-debs
+[   8.0] Running: sed -i '/[[:space:]]swap[[:space:]]/d' /etc/fstab
+[   8.0] Running: printf 'overlay\nbr_netfilter\n' > /etc/modules-load.d/k8s.conf
+[   8.0] Running: printf 'net.bridge.bridge-nf-call-iptables=1\nnet.ipv4.ip_forward=1\nnet.bridge.bridge-nf-call-ip6tables=1\n' > /etc/sysctl.d/k8s.conf
+[   8.1] Running: printf 'vxlan\ngeneve\nipip\nip_tables\nnf_conntrack\nip_vs\nip_vs_rr\nip_vs_wrr\nip_vs_sh\n' > /etc/modules-load.d/delonix-cni.conf
+[   8.1] Running: printf 'net.ipv4.conf.all.rp_filter=0\nnet.ipv4.conf.default.rp_filter=0\nnet.ipv4.conf.all.arp_announce=2\nnet.ipv4.conf.all.arp_ignore=1\n' > /etc/sysctl.d/delonix-cni.conf
+[   8.1] Running: DEBIAN_FRONTEND=noninteractive apt-get purge -y snapd lxd-installer modemmanager fwupd bpftrace bpfcc-tools pollinate byobu landscape-common ubuntu-pro-client sosreport python3-botocore unattended-upgrades git
+[  12.4] Running: DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y
+[  18.6] Running: systemctl mask apt-daily.timer apt-daily-upgrade.timer
+[  18.6] Copying: /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix-cri to /usr/local/bin
+[  18.7] Running: chmod +x /usr/local/bin/delonix-cri
+[  18.7] Copying: /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix to /usr/local/bin
+[  18.8] Running: chmod +x /usr/local/bin/delonix
+[  18.8] Copying: /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/dist/delonix-cri.service to /etc/systemd/system
+[  18.8] Running: systemctl enable delonix-cri.service
+[  18.8] Running: mkdir -p /opt/cni/bin /tmp/cni-plugins
+[  18.9] Copying: /home/walter/.local/share/delonix/vm-images/_cni-plugins/cni-plugins-linux-amd64-v1.9.1.tgz to /tmp/cni-plugins
+[  19.0] Running: tar -xzf /tmp/cni-plugins/cni-plugins-linux-amd64-v1.9.1.tgz -C /opt/cni/bin ./loopback ./bridge ./host-local ./portmap ./bandwidth ./tuning ./firewall ./macvlan ./ipvlan ./host-device && rm -rf /tmp/cni-plugins
+[  19.6] Running: cd /opt/cni/bin && for f in *; do case " loopback bridge host-local portmap bandwidth tuning firewall macvlan ipvlan host-device " in *" $f "*) ;; *) rm -rf "$f" ;; esac; done && chmod 0755 /opt/cni/bin/*
+[  19.6] Copying: /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/dist/delonix-node-preflight.sh to /usr/local/bin
+[  19.6] Running: mv /usr/local/bin/delonix-node-preflight.sh /usr/local/bin/delonix-node-preflight && chmod 0755 /usr/local/bin/delonix-node-preflight
+[  19.6] Running: useradd -m -s /bin/bash -G sudo delonix || true
+[  19.7] Running: echo 'delonix ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-delonix && chmod 440 /etc/sudoers.d/90-delonix
+[  19.8] Running: systemctl list-unit-files qemu-guest-agent.service >/dev/null 2>&1 && systemctl enable qemu-guest-agent.service || true
+[  19.8] Running: passwd -l root >/dev/null 2>&1 || true; passwd -l delonix >/dev/null 2>&1 || true
+[  19.8] Running: mkdir -p /etc/ssh/sshd_config.d && printf 'PasswordAuthentication no\nPermitRootLogin prohibit-password\nKbdInteractiveAuthentication no\n' > /etc/ssh/sshd_config.d/99-delonix-hardening.conf && chmod 644 /etc/ssh/sshd_config.d/99-delonix-hardening.conf && if [ -f /etc/ssh/sshd_config ]; then sed -i -E 's/^[[:space:]]*(PasswordAuthentication|PermitRootLogin|KbdInteractiveAuthentication|ChallengeResponseAuthentication)[[:space:]]/#&/I' /etc/ssh/sshd_config && printf '\n# --- Delonix golden image hardening (the built-in password is public) ---\nPasswordAuthentication no\nPermitRootLogin prohibit-password\nKbdInteractiveAuthentication no\n' >> /etc/ssh/sshd_config; fi
+[  19.8] Running: cat >> /etc/bash.bashrc <<'DELONIX_KUBECTL_EOF'
+
+# --- Delonix golden image: kubectl/kubeadm completion + `k` alias (k8s docs) ---
+if command -v kubectl >/dev/null 2>&1; then
+  source <(kubectl completion bash)
+  alias k=kubectl
+  complete -o default -F __start_kubectl k
+fi
+if command -v kubeadm >/dev/null 2>&1; then
+  source <(kubeadm completion bash)
+fi
+if command -v crictl >/dev/null 2>&1; then
+  source <(crictl completion bash) 2>/dev/null || true
+fi
+# --- end Delonix ---
+DELONIX_KUBECTL_EOF
+[  19.8] Running: ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | sort -V | tail -1 > /etc/delonix-kernel-version || echo unknown > /etc/delonix-kernel-version
+[  19.9] Running: mkdir -p /var/log/journal /etc/systemd/journald.conf.d && printf '[Journal]\nStorage=persistent\nCompress=yes\nSystemMaxUse=200M\nSystemMaxFileSize=50M\nRuntimeMaxUse=50M\n' > /etc/systemd/journald.conf.d/99-delonix.conf && chmod 644 /etc/systemd/journald.conf.d/99-delonix.conf && systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+[  19.9] Running: apt-get clean && rm -rf /var/lib/apt/lists/*
+[  19.9] Running: mkdir -p /usr/share/delonix && dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' 2>/dev/null | LC_ALL=C sort > /usr/share/delonix/packages.tsv && chmod 644 /usr/share/delonix/packages.tsv
+[  19.9] Running: printf '%s' '# Generated by `delonix vm image build` — do not edit.
+DELONIX_IMAGE="delonix-vm-k8s:1.37"
+DELONIX_DISTRO="ubuntu"
+DELONIX_RELEASE="24.04"
+DELONIX_BUILT_BY="delonix 5.1.1"
+DELONIX_BASE_IMAGE="ubuntu-24.04-server-cloudimg-amd64.img"
+DELONIX_BASE_SHA256="ffe6203da54deeb6db5d2a98a83f9ec8e55f149d3f7ba622e1abe5fa966ee3d6"
+DELONIX_K8S_VERSION="1.37"
+DELONIX_OFFLINE="true"
+DELONIX_NODE_EXPORTER="none"
+DELONIX_EXTRA_PACKAGES=""
+DELONIX_CNI_PLUGINS="v1.9.1 (amd64, sha256:b98f74a0f8522f0a)"
+DELONIX_NET_PROFILES="cilium:1.20.2,calico:3.33.0,flannel:0.28.10,multus:4.3.1"
+' > /etc/delonix-image-release && chmod 644 /etc/delonix-image-release
+[  20.0] Running: grub-install --target=i386-pc /dev/sda && update-grub
+[  20.7] Running: truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && mkdir -p /var/lib/dbus && ln -sf /etc/machine-id /var/lib/dbus/machine-id
+[  20.7] Running: mkdir -p /var/lib/delonix
+[  20.7] Copying: /tmp/delonix-vmimage-build-3202571/preseed-images/images to /var/lib/delonix
+[  20.8] Copying: /tmp/delonix-vmimage-build-3202571/preseed-images/layers to /var/lib/delonix
+[  20.8] Copying: /tmp/delonix-vmimage-build-3202571/preseed-images/containers to /var/lib/delonix
+[  20.8] Copying: /tmp/delonix-vmimage-build-3202571/preseed-images/blobs to /var/lib/delonix
+[  21.1] Running: if [ -f /etc/selinux/config ]; then if command -v setfiles >/dev/null 2>&1; then . /etc/selinux/config; p=/; for d in $(awk '$1 !~ /^#/ && $2 ~ /^\/./ && $3 !~ /^(vfat|msdos|exfat|ntfs|ntfs3|iso9660|udf|swap|tmpfs|none)$/ {print $2}' /etc/fstab 2>/dev/null); do [ -d "$d" ] && p="$p $d"; done; setfiles -F /etc/selinux/${SELINUXTYPE:-targeted}/contexts/files/file_contexts $p; else touch /.autorelabel; fi; fi
+[  21.2] Finishing off
+package inventory: 538 packages
+compacting the image (sparsify + zstd compression)...
+[   1.6] Trimming /dev/sda2
+[   1.6] Trimming /dev/sda3
+[   1.6] Trimming /dev/sda4
+[   1.8] Sparsify in-place operation completed with no errors
+delonix-vm-k8s:1.37

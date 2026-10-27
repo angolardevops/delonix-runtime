@@ -72,6 +72,10 @@ d = c.api.inspect_container(cid)
 check("inspect State.Running", d["State"]["Running"] is True)
 check("inspect Name", d["Name"].lstrip("/") == NAME, d["Name"])
 check("inspect Config.Image", d["Config"]["Image"] == IMAGE, d["Config"]["Image"])
+# HostConfig — the last of the three §8 Testcontainers gaps; clients read
+# NetworkMode/Binds/Privileged off it.
+check("inspect carries HostConfig", isinstance(d.get("HostConfig"), dict), str(type(d.get("HostConfig"))))
+check("HostConfig.NetworkMode is set", bool(d.get("HostConfig", {}).get("NetworkMode")), str(d.get("HostConfig", {}).get("NetworkMode")))
 
 listed = [x for x in c.api.containers() if x["Id"] == cid]
 check("shows up in ps", len(listed) == 1)
@@ -125,6 +129,86 @@ for _ in range(24):
             break
         time.sleep(5)
 check("remove of a RUNNING container with force=True", removed, why)
+
+# Logs and exec — the two calls that used to 404 and stopped most Testcontainers
+# suites (measured §8). `logs()` is `wait_for_logs`' backbone; `exec_*` is
+# `.exec()`. docker-py demuxes the stdcopy frames using `Config.Tty` (false
+# here), so a correctly framed stream comes back as the bytes the command wrote.
+lg = c.api.create_container(
+    IMAGE, command=["sh", "-c", "echo ready-marker; sleep 60"], name=NAME + "-lg"
+)["Id"]
+c.api.start(lg)
+logged = b""
+for _ in range(40):  # the write lands shortly after start
+    logged = c.api.logs(lg, stdout=True, stderr=True)
+    if b"ready-marker" in logged:
+        break
+    time.sleep(0.25)
+check("logs stream carries the container's stdout", b"ready-marker" in logged, repr(logged[:60]))
+
+e_ok = c.api.exec_create(lg, cmd=["echo", "exec-marker"])["Id"]
+out = c.api.exec_start(e_ok)
+check("exec stdout comes back", b"exec-marker" in out, repr(out[:60]))
+check("exec ExitCode is 0", c.api.exec_inspect(e_ok)["ExitCode"] == 0)
+
+e_err = c.api.exec_create(lg, cmd=["sh", "-c", "echo boom 1>&2; exit 7"])["Id"]
+err_out = c.api.exec_start(e_err)
+check("exec stderr comes back", b"boom" in err_out, repr(err_out[:60]))
+check("exec ExitCode reflects a non-zero exit", c.api.exec_inspect(e_err)["ExitCode"] == 7)
+
+c.api.remove_container(lg, force=True)
+
+# stdout and stderr come back on SEPARATE streams (API-created containers log in
+# CRI format), so a client that asks for only one gets only that one — the demux
+# docker-py does off the stdcopy header, and what a stderr-only wait relies on.
+sp = c.api.create_container(
+    IMAGE, command=["sh", "-c", "echo OUT-line; echo ERR-line 1>&2; sleep 60"], name=NAME + "-sp"
+)["Id"]
+c.api.start(sp)
+both = b""
+for _ in range(40):
+    both = c.api.logs(sp, stdout=True, stderr=True)
+    if b"OUT-line" in both and b"ERR-line" in both:
+        break
+    time.sleep(0.25)
+only_out = c.api.logs(sp, stdout=True, stderr=False)
+only_err = c.api.logs(sp, stdout=False, stderr=True)
+check("stdout stream has only stdout", b"OUT-line" in only_out and b"ERR-line" not in only_out, repr(only_out[:60]))
+check("stderr stream has only stderr", b"ERR-line" in only_err and b"OUT-line" not in only_err, repr(only_err[:60]))
+c.api.remove_container(sp, force=True)
+
+# A one-shot stats sample (what Dev Containers / GitLab Runner read): the cpu and
+# memory numbers come from the container's cgroup, two reads apart for a real %.
+stc = c.api.create_container(IMAGE, command=["sleep", "60"], name=NAME + "-st")["Id"]
+c.api.start(stc)
+st = c.api.stats(stc, stream=False)
+check(
+    "stats carries cpu_stats.cpu_usage.total_usage",
+    st.get("cpu_stats", {}).get("cpu_usage", {}).get("total_usage") is not None,
+    str(st.get("cpu_stats", {}).get("cpu_usage", {}).get("total_usage")),
+)
+check(
+    "stats carries memory usage and limit",
+    st.get("memory_stats", {}).get("usage") is not None and st.get("memory_stats", {}).get("limit"),
+    str(st.get("memory_stats", {})),
+)
+c.api.remove_container(stc, force=True)
+
+# Label filtering — the server-side filter label-based reaping relies on (what
+# Testcontainers would otherwise hand to Ryuk). A client lists `label=…` and gets
+# only the matching containers.
+lab = c.api.create_container(
+    IMAGE, command=["sleep", "60"], name=NAME + "-lab", labels={"org.testcontainers": "true"}
+)["Id"]
+c.api.start(lab)
+tagged = c.api.containers(all=True, filters={"label": "org.testcontainers=true"})
+check("label filter returns the tagged container", any(x["Id"] == lab for x in tagged))
+check(
+    "label filter excludes the untagged ones",
+    all(x["Labels"].get("org.testcontainers") == "true" for x in tagged),
+    f"{len(tagged)} returned",
+)
+c.api.remove_container(lab, force=True)
 
 print()
 if fails:

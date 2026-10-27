@@ -1,0 +1,19 @@
+Teste de falha/recuperação de control-plane (API/etcd level) — dlxha (3 CP + 1 worker, HAProxy)
+================================================================================================
+Baseline:          kubectl get --raw=/readyz => ok ; 3 etcd membros Running (quórum 3/3)
+Endpoint HA:       kubeconfig server = https://10.240.84.84:6443 (VM dlxha-lb / HAProxy)
+
+FALHA controlada:  `delonix vm stop dlxha-cp1`  (cp1 removido do `vm ls`)
+  /readyz via HAProxy, 8 sondas com cp1 em baixo:  OK=8  FAIL=0
+  kubectl get nodes: responde (servido por cp2/cp3); quórum etcd 2/3 mantido.
+  => HAProxy afasta o backend morto; a API permanece 100% disponível com 1/3 CP em baixo.
+
+RECUPERAÇÃO:       `delonix vm start dlxha-cp1`
+  cp1 volta com o MESMO IP 10.240.222.241 (reserva DHCP preservada)
+  etcd-dlxha-cp1: Running (RESTARTS 1) => reentra no quórum (3/3)
+  /readyz via HAProxy durante a recuperação, 8 sondas: OK=7/8 (um blip transitório no boot)
+  => recuperação dentro do contrato HA.
+
+NOTA: os nós permanecem NotReady em todo o teste por causa do bug de CNI (compose_command);
+      a HA do plano de controlo (multi-apiserver + etcd stacked + HAProxy) é independente do CNI
+      e foi validada na mesma.

@@ -1,0 +1,10 @@
+# Reference host facts (2026-10-24)
+kernel: 7.0.0-38-generic
+cpu: 13th Gen Intel(R) Core(TM) i9-13900H x20
+virt flags: vmx 
+nested: Y
+cloud-hypervisor: cloud-hypervisor v52.0
+firmware: -rw-r--r-- 1 root root 4194304 Sep 29 16:28 /usr/local/share/delonix/CLOUDHV.fd
+delonix: delonix 5.1.1 / commit f49d3570c (+45 commits since v5.1.1) · built: 2026-10-18 · Apache-2.0
+repo develop: 69c349c37a64c3d94e1cc8f705adc146d614e8a5
+guest image: k8s-golden (ubuntu 24.04, kernel 6.8.0-134-generic, cloud-init)

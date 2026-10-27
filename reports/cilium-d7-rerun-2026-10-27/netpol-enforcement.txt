@@ -1,0 +1,11 @@
+srv=10.244.1.228
+### 1) BASELINE (sem política): cli -> srv
+OK-srv
+  => OK (esperado)
+### 2) aplicar default-deny-ingress em app=srv
+### 3) cli -> srv DEVE estar BLOQUEADO
+  => BLOQUEADO (enforcement OK)
+### 4) aplicar allow de app=cli
+### 5) cli -> srv DEVE voltar a OK
+OK-srv
+  => OK (allow funciona)

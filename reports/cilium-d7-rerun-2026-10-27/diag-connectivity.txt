@@ -1,0 +1,8 @@
+### re-teste após estabilizar
+-- cp1->w1 TCP:80? usar wget a um http na w1? antes, ICMP de novo:
+PING 10.244.1.122 (10.244.1.122): 56 data bytes
+
+--- 10.244.1.122 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+command terminated with exit code 1
+-- cp1 -> w1 TCP 3600? abrir nc listener na w1:

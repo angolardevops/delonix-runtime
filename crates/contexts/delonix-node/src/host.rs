@@ -179,8 +179,197 @@ pub fn self_bin() -> std::path::PathBuf {
     PathBuf::from("delonix")
 }
 
+/// The local host's capacity to run workloads: CPU, memory, swap and the disk
+/// that holds the VM images. For a provider whose VMs run on THIS machine
+/// (Cloud Hypervisor, libvirt `qemu:///system`), the "node" of `host.capacity`
+/// IS this host — the parallel of Proxmox's `GET /nodes/{node}/status`.
+///
+/// Discipline (same as the node-api's `/v1/node/capacity`): a number that could
+/// not be measured names itself in [`HostCapacity::unmeasured`] and stays `0`,
+/// never a silent zero. A number that is LEGITIMATELY zero (a host with no
+/// swap) is a real `0` and is NOT unmeasured.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HostCapacity {
+    /// Logical CPUs the host reports (`processor` lines in `/proc/cpuinfo`).
+    pub cpus: u64,
+    /// The CPU model string (first `model name` in `/proc/cpuinfo`).
+    pub cpu_model: String,
+    /// Total RAM in bytes (`MemTotal`).
+    pub mem_total_bytes: u64,
+    /// RAM in use in bytes (`MemTotal - MemAvailable`).
+    pub mem_used_bytes: u64,
+    /// Total swap in bytes (`SwapTotal`); a real `0` on a host without swap.
+    pub swap_total_bytes: u64,
+    /// Swap in use in bytes (`SwapTotal - SwapFree`).
+    pub swap_used_bytes: u64,
+    /// Total bytes of the filesystem holding the VM images.
+    pub disk_total_bytes: u64,
+    /// Bytes in use on that filesystem.
+    pub disk_used_bytes: u64,
+    /// Names of the counts above that could not be measured on this host.
+    pub unmeasured: Vec<&'static str>,
+}
+
+/// Reads [`HostCapacity`] for this host, using `disk_path` for the filesystem
+/// figures (the provider passes the directory its VM images live in).
+pub fn capacity(disk_path: &std::path::Path) -> HostCapacity {
+    let mut cap = HostCapacity::default();
+    match std::fs::read_to_string("/proc/cpuinfo") {
+        Ok(text) => {
+            let (cpus, model) = parse_cpuinfo(&text);
+            if cpus > 0 {
+                cap.cpus = cpus;
+            } else {
+                cap.unmeasured.push("cpus");
+            }
+            match model {
+                Some(m) => cap.cpu_model = m,
+                None => cap.unmeasured.push("cpu_model"),
+            }
+        }
+        Err(_) => cap.unmeasured.extend(["cpus", "cpu_model"]),
+    }
+    match std::fs::read_to_string("/proc/meminfo") {
+        Ok(text) => match parse_meminfo_bytes(&text) {
+            Some(m) => {
+                cap.mem_total_bytes = m.mem_total;
+                cap.mem_used_bytes = m.mem_total.saturating_sub(m.mem_available);
+                cap.swap_total_bytes = m.swap_total;
+                cap.swap_used_bytes = m.swap_total.saturating_sub(m.swap_free);
+            }
+            None => cap
+                .unmeasured
+                .extend(["mem_total", "mem_used", "swap_total", "swap_used"]),
+        },
+        Err(_) => cap
+            .unmeasured
+            .extend(["mem_total", "mem_used", "swap_total", "swap_used"]),
+    }
+    match statvfs_bytes(disk_path) {
+        Some((total, used)) => {
+            cap.disk_total_bytes = total;
+            cap.disk_used_bytes = used;
+        }
+        None => cap.unmeasured.extend(["disk_total", "disk_used"]),
+    }
+    cap
+}
+
+/// Logical CPU count (`processor` lines) and the first `model name`, out of the
+/// text of `/proc/cpuinfo`. Pure.
+fn parse_cpuinfo(text: &str) -> (u64, Option<String>) {
+    let cpus = text
+        .lines()
+        .filter(|l| l.split_once(':').map(|(k, _)| k.trim() == "processor") == Some(true))
+        .count() as u64;
+    let model = text
+        .lines()
+        .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim() == "model name"))
+        .map(|(_, v)| v.trim().to_string())
+        .filter(|m| !m.is_empty());
+    (cpus, model)
+}
+
+struct MemInfo {
+    mem_total: u64,
+    mem_available: u64,
+    swap_total: u64,
+    swap_free: u64,
+}
+
+/// The four byte counts out of the text of `/proc/meminfo` (its values are kB).
+/// `None` when `MemTotal`/`MemAvailable` are absent — a meminfo without them is
+/// not a measurement. Swap lines absent means a host with no swap: a real `0`.
+/// Pure.
+fn parse_meminfo_bytes(text: &str) -> Option<MemInfo> {
+    let kib = |key: &str| -> Option<u64> {
+        text.lines()
+            .find_map(|l| l.strip_prefix(key))?
+            .split_whitespace()
+            .next()?
+            .parse::<u64>()
+            .ok()
+    };
+    Some(MemInfo {
+        mem_total: kib("MemTotal:")?.saturating_mul(1024),
+        mem_available: kib("MemAvailable:")?.saturating_mul(1024),
+        swap_total: kib("SwapTotal:").unwrap_or(0).saturating_mul(1024),
+        swap_free: kib("SwapFree:").unwrap_or(0).saturating_mul(1024),
+    })
+}
+
+/// `(total, used)` bytes of the filesystem holding `path`, via `statvfs(3)`.
+/// `None` when the path cannot be stat'd (absent store, unreadable) — surfaced
+/// as unmeasured, never as zero bytes.
+fn statvfs_bytes(path: &std::path::Path) -> Option<(u64, u64)> {
+    let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
+    // SAFETY: `statvfs` fills a plain C struct of integers; all-zero is valid.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c` is a valid NUL-terminated path; `st` is our out-param buffer.
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    let frsize = st.f_frsize as u64;
+    let total = (st.f_blocks as u64).saturating_mul(frsize);
+    let used = (st.f_blocks.saturating_sub(st.f_bfree) as u64).saturating_mul(frsize);
+    (total > 0).then_some((total, used))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    /// The reader on the REAL host: a machine always has at least one CPU, some
+    /// total RAM and a filesystem under the state root — and "in use" never
+    /// exceeds "total" for any of the three. The parallel of Proxmox's
+    /// `the_node_reports_its_cpu_memory_and_disk_capacity`, but of THIS host.
+    #[test]
+    fn host_capacity_reads_the_local_host() {
+        let cap = super::capacity(Path::new("/"));
+        assert!(cap.cpus >= 1, "the host has at least one CPU: {cap:?}");
+        assert!(cap.mem_total_bytes > 0, "the host reports total RAM: {cap:?}");
+        assert!(
+            cap.mem_used_bytes <= cap.mem_total_bytes,
+            "RAM in use never exceeds total: {cap:?}"
+        );
+        assert!(
+            cap.swap_used_bytes <= cap.swap_total_bytes,
+            "swap in use never exceeds total (both 0 without swap): {cap:?}"
+        );
+        assert!(
+            cap.disk_total_bytes > 0,
+            "the host reports the VM-image disk: {cap:?}"
+        );
+        assert!(
+            cap.disk_used_bytes <= cap.disk_total_bytes,
+            "disk in use never exceeds total: {cap:?}"
+        );
+    }
+
+    /// `/proc/cpuinfo` parsing: one count per `processor` line, the first
+    /// `model name`, both pure.
+    #[test]
+    fn cpuinfo_counts_processors_and_names_the_model() {
+        let text = "processor\t: 0\nmodel name\t: Fake CPU @ 3GHz\nprocessor\t: 1\nmodel name\t: Fake CPU @ 3GHz\n";
+        let (cpus, model) = super::parse_cpuinfo(text);
+        assert_eq!(cpus, 2);
+        assert_eq!(model.as_deref(), Some("Fake CPU @ 3GHz"));
+        // No processor lines and no model: zero and None (caller marks unmeasured).
+        assert_eq!(super::parse_cpuinfo("bogus\n"), (0, None));
+    }
+
+    /// `/proc/meminfo` kB → bytes; absent swap is a real zero, absent MemTotal
+    /// is `None` (not a measurement).
+    #[test]
+    fn meminfo_converts_kb_to_bytes_and_tolerates_missing_swap() {
+        let text = "MemTotal:       32000 kB\nMemFree: 1000 kB\nMemAvailable:   20000 kB\n";
+        let m = super::parse_meminfo_bytes(text).expect("MemTotal+MemAvailable present");
+        assert_eq!(m.mem_total, 32_000 * 1024);
+        assert_eq!(m.mem_available, 20_000 * 1024);
+        assert_eq!(m.swap_total, 0, "no SwapTotal line is a real zero");
+        assert!(super::parse_meminfo_bytes("MemFree: 1 kB\n").is_none());
+    }
+
     /// `MemAvailable` in kB becomes MiB; a text without the line is `None`,
     /// which the VM admission reads as «cannot tell» and does not block on.
     #[test]

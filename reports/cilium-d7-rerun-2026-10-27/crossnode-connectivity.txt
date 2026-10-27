@@ -1,0 +1,8 @@
+### cross-node TCP: ping-cp1(10.244.0.89 @cp1) -> ping-w1(10.244.1.122 @w1):8080
+wget: download timed out
+command terminated with exit code 1
+  => FALHOU
+### sentido inverso: w1 -> cp1 (httpd no cp1)
+wget: download timed out
+command terminated with exit code 1
+  => FALHOU

@@ -98,11 +98,11 @@ pub fn report(host: &StorageHost) -> ProviderReport {
             C::VolumeProvisionNas => S::RequiresExternalComponent {
                 component: "a TrueNAS SCALE 25.x API (`spec.provision.truenas`, ADR-0009); `scen_truenas_destroy` skips without one",
             },
-            C::StorageLvmThin => S::Partial {
-                detail: "driver lvm-thin implementado, registado no arranque e aceite pela allowlist; o e2e num thin pool REAL (ficheiro loopback dedicado) está em scripts/e2e.sh e exige root para losetup/pvcreate/vgcreate/lvcreate — salta sem privilégio, logo ainda sem prova live",
+            C::StorageLvmThin => S::Supported {
+                evidence: "e2e:storage pool: lvm-thin num thin pool real em loopback (ADR-0067 P4)",
             },
-            C::StorageZfsBtrfs => S::Partial {
-                detail: "drivers zfs e btrfs implementados, registados no arranque e aceites pela allowlist; o e2e em filesystems REAIS (ficheiro loopback dedicado) está em scripts/e2e.sh e exige root (mkfs.btrfs/mount; modprobe zfs/zpool create, zfsutils-linux) — salta sem privilégio, logo ainda sem prova live",
+            C::StorageZfsBtrfs => S::Supported {
+                evidence: "e2e:storage pool: btrfs e zfs em filesystems reais em loopback (ADR-0067 P2/P3)",
             },
             C::StorageCeph => S::RequiresExternalComponent {
                 component: "a Ceph cluster and an RBD/CephFS driver the engine does not ship",

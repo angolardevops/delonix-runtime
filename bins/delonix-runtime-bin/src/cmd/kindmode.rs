@@ -41,7 +41,7 @@ use super::container::{self, RunOpts};
 /// Default node image (pinned by digest — a moving tag would make the
 /// clusters irreproducible across machines).
 pub(crate) const DEFAULT_NODE_IMAGE: &str =
-    "kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a";
+    "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5";
 
 /// Parameters of a kind-mode cluster (coming from the flags or the manifest).
 pub(crate) struct KindCluster {
@@ -145,6 +145,37 @@ pub(crate) const DEFAULT_API_PORT: u16 = 6443;
 /// missing bridge (and the mechanism already existed, `-v /host:/dest`).
 fn cluster_dir(name: &str) -> std::path::PathBuf {
     super::util::state_root().join("clusters").join(name)
+}
+
+/// The apiserver PORT of a VM cluster, read from its exported kubeconfig's
+/// `server:` URL — the REAL endpoint the cluster hands kubectl, not a guess.
+/// `cluster ls` shows it in the API PORT column so a VM cluster is no longer
+/// blank there. `-` when there is no cached kubeconfig (a cluster created
+/// elsewhere), the same honesty the rest of the row keeps. Read, never
+/// probed: `ls` stays a cheap local listing with no SSH to the nodes.
+fn vm_api_port(name: &str) -> String {
+    let kubeconfig = super::util::state_root()
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"));
+    std::fs::read_to_string(&kubeconfig)
+        .ok()
+        .and_then(|t| api_port_from_kubeconfig(&t))
+        .unwrap_or_else(|| "-".into())
+}
+
+/// The port of the `server:` URL in a kubeconfig — pure, so the parsing is
+/// tested without a file. `https://10.253.141.83:6443` -> `6443`: the last
+/// `:`-separated field of an IPv4 `host:port`. `None` for no `server:` line or a
+/// field that is not digits (an IPv6 literal URL would need bracket parsing;
+/// this engine's kubeconfigs are IPv4, and a non-numeric tail is refused rather
+/// than shown).
+fn api_port_from_kubeconfig(content: &str) -> Option<String> {
+    content
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("server:").map(str::trim))
+        .and_then(|url| url.rsplit(':').next())
+        .filter(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+        .map(String::from)
 }
 
 /// Where `cluster_dir` appears INSIDE the node.
@@ -2340,16 +2371,21 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
 
     // The dashes below are deliberate and each one has a reason, not a gap:
     //
-    //   API PORT      a VM cluster's apiserver listens on the VM, not on a port
-    //                 published to this host. There is nothing here to report.
+    //   API PORT      READ from the cluster's own kubeconfig (`vm_api_port`):
+    //                 the real endpoint the cluster hands kubectl, which is why
+    //                 it is a value here and not a guess. `-` only when no
+    //                 kubeconfig is cached (a cluster created elsewhere).
     //   LAST RESTART  the event log records CONTAINER lifecycle. A VM restart
     //                 leaves no entry in it, and inventing one from `started_unix`
     //                 would report a boot as a restart.
-    //   CRI SOCKET    read from the cluster's `kubeadm.conf` when it exists, same
-    //                 as above. Absent for a cluster created elsewhere.
+    //   CRI SOCKET    lives in the node's `kubeadm.conf`, on the VM — this `ls`
+    //   K8S VERSION   is a cheap LOCAL listing that does not SSH the nodes, and a
+    //                 VM cluster caches neither value here (unlike a kind one,
+    //                 whose node is a local container). Reading them would mean a
+    //                 round-trip per node on every `ls`; left `-` instead.
     //
-    // Printing `-` for something unknown is the point. Guessing 6443 because it
-    // usually is would make this table look more informed than it is.
+    // Printing `-` for something genuinely unknown is the point: guessing a
+    // value would make this table look more informed than it is.
     for (name, vms) in vm_clusters {
         let total = vms.len();
         let cps = vms
@@ -2385,13 +2421,14 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
                     .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()))
             })
             .unwrap_or_else(|| "-".into());
+        let api = vm_api_port(&name);
         t.row(vec![
             name,
             "vm".to_string(),
             state,
             cps.to_string(),
             (total - cps).to_string(),
-            "-".to_string(),
+            api,
             uptime,
             "—".to_string(),
             cri,
@@ -2683,6 +2720,19 @@ fn remove_kubecontext_at(dest: &std::path::Path, name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The API PORT column of a VM cluster is read from its kubeconfig's
+    /// `server:` URL — the real endpoint, not a guess. A kubeconfig without one
+    /// (or with a non-numeric tail) yields `None`, which the caller shows as `-`.
+    #[test]
+    fn api_port_is_read_from_the_kubeconfig_server_url() {
+        let kc = "apiVersion: v1\nclusters:\n- cluster:\n    server: https://10.253.141.83:6443\n";
+        assert_eq!(api_port_from_kubeconfig(kc).as_deref(), Some("6443"));
+        // No server line → nothing to report.
+        assert_eq!(api_port_from_kubeconfig("apiVersion: v1\n"), None);
+        // A tail that is not a port is refused rather than shown.
+        assert_eq!(api_port_from_kubeconfig("    server: https://host/path"), None);
+    }
 
     /// `cluster load` packs a full copy of the image next to the cluster. The
     /// guard must remove it on EVERY exit, including an early `?` — a failed

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Live proof — Cloud Hypervisor hot DISK/NIC add (ADR-0068 Phases 4/5).
-# Boots a native CH microVM, hot-adds a disk and a NIC over the api-socket, and
-# proves INSIDE the guest (over `vm ssh`) that the guest sees and uses each.
+# Live proof — Cloud Hypervisor hot DISK/NIC add AND remove (ADR-0068 Ph. 4/5/6).
+# Boots a native CH microVM, hot-adds a disk and a NIC over the api-socket, proves
+# INSIDE the guest (over `vm ssh`) that the guest sees and uses each, then hot-
+# removes both (`vm.remove-device`) and proves the guest LOST each.
 #
 # The `vm update --disk-add/--nic-add` call itself exits non-zero on this
 # backend (honest `partial`: CH has no in-band guest-confirm channel), so the
@@ -78,6 +79,17 @@ else
   bad "no new virtio-blk device found to exercise"
 fi
 
+log "=== D. HOT DISK REMOVE (vm.remove-device) ==="
+# `--disk-rm <PATH>` detaches the SAME extra disk by its source path. The CLI
+# exits non-zero on the honest `partial` (no guest-confirm channel), so the
+# verdict is the guest: the block device count drops back.
+"$B" vm update "$VM" --disk-rm "$WORK/extra.raw" >/dev/null 2>&1
+RC=$?; log "vm update --disk-rm exit=$RC (partial expected)"
+sleep 3
+BLK2="$(gx 'ls /sys/block | grep -c .')"
+log "guest block devices after remove: $BLK2 ($(gx 'ls /sys/block | tr "\n" " "'))"
+[ "${BLK2:-9}" -lt "${BLK1:-0}" ] && ok "guest LOST the hot-removed disk ($BLK1 -> $BLK2)" || bad "guest still shows the removed disk"
+
 log "=== C. HOT NIC ADD (vm.add-net) ==="
 IF0="$(gx 'ls /sys/class/net | grep -vc lo')"
 log "guest NICs before: $IF0 ($(gx 'ls /sys/class/net | tr "\n" " "'))"
@@ -111,6 +123,22 @@ if [ -n "$NEWIF" ]; then
   fi
 else
   bad "no new NIC found to exercise"
+fi
+
+log "=== E. HOT NIC REMOVE (vm.remove-device) ==="
+# `--nic-rm <MAC>` detaches the extra NIC by its pinned MAC; read the MAC off
+# the guest's own new link so the proof never trusts a record we are testing.
+RMMAC="$(gx "cat /sys/class/net/$NEWIF/address" 2>/dev/null)"
+log "removing NIC with MAC ${RMMAC:-unknown}"
+if [ -n "$RMMAC" ]; then
+  "$B" vm update "$VM" --nic-rm "$RMMAC" >/dev/null 2>&1
+  RC=$?; log "vm update --nic-rm exit=$RC (partial expected)"
+  sleep 3
+  IF2="$(gx 'ls /sys/class/net | grep -vc lo')"
+  log "guest NICs after remove: $IF2 ($(gx 'ls /sys/class/net | tr "\n" " "'))"
+  [ "${IF2:-9}" -lt "${IF1:-0}" ] && ok "guest LOST the hot-removed NIC ($IF1 -> $IF2)" || bad "guest still shows the removed NIC"
+else
+  bad "could not read the hot-added NIC's MAC to remove it"
 fi
 
 log "=== SUMMARY: PASS=$PASS FAIL=$FAIL ==="

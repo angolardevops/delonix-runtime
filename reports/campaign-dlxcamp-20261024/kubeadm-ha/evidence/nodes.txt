@@ -1,0 +1,5 @@
+NAME        STATUS     ROLES           AGE   VERSION    INTERNAL-IP      EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
+dlxha-cp1   NotReady   control-plane   17m   v1.34.12   10.240.222.241   <none>        Ubuntu 24.04.4 LTS   6.8.0-134-generic   delonix://5.1.1
+dlxha-cp2   NotReady   control-plane   17m   v1.34.12   10.240.223.8     <none>        Ubuntu 24.04.4 LTS   6.8.0-134-generic   delonix://5.1.1
+dlxha-cp3   NotReady   control-plane   16m   v1.34.12   10.240.223.221   <none>        Ubuntu 24.04.4 LTS   6.8.0-134-generic   delonix://5.1.1
+dlxha-w1    NotReady   <none>          16m   v1.34.12   10.240.5.122     <none>        Ubuntu 24.04.4 LTS   6.8.0-134-generic   delonix://5.1.1

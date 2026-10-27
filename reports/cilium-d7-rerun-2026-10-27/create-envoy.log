@@ -1,0 +1,34 @@
+info created network "d7env-5b4b2f42" for cluster "d7env" (removed again by `cluster destroy`)
+info Creating cluster "d7env" (kubeadm, k8s-golden)...
+ • Provisioning 1 control-plane(s) 📦
+ ✓ Provisioning 1 control-plane(s) 📦 11.4s
+ • Provisioning 1 worker(s) 📦
+ ✓ Provisioning 1 worker(s) 📦 10.9s
+delonix-cri: next to delonix — /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix-cri (sha256 6da9211392e48ec75bde9e1d18f631688b09210404f1df45ba55dc4827bb46c5)
+ ○ Preparing 2 host(s)
+ ○ Bootstrapping control-plane (kubeadm init)
+ ○ Fetching kubeconfig
+ ○ Installing the cilium pod network
+ ○ Joining 1 worker(s)
+ ○ Waiting for all nodes to be Ready
+ • Preparing 2 host(s) 🔧
+[d7env-w1] delonix-cri differs from the resolved one (sha256 6da9211392e4) — replacing it and restarting the service
+[d7env-cp1] delonix-cri differs from the resolved one (sha256 6da9211392e4) — replacing it and restarting the service
+[d7env-w1] the node's delonix CLI differs from this one's (sha256 cd8fdc953c3d) — replacing it (delonix-cri re-execs it to spawn every container)
+[d7env-cp1] the node's delonix CLI differs from this one's (sha256 cd8fdc953c3d) — replacing it (delonix-cri re-execs it to spawn every container)
+ ✓ Preparing 2 host(s) 🔧 7.5s
+ • Bootstrapping control-plane (kubeadm init) 🕹️
+ ✓ Bootstrapping control-plane (kubeadm init) 🕹️ 7.9s
+ • Fetching kubeconfig 📇
+merged into /home/walter/.kube/config as context 'd7env' — kubectl now points here
+ ✓ Fetching kubeconfig 📇 0.2s
+ • Installing the cilium pod network 🔌
+ ✓ Installing the cilium pod network 🔌 0.8s
+ • Joining 1 worker(s) 🚜
+ ✓ Joining 1 worker(s) 🚜 6.2s
+ • Waiting for the cilium pod network and all nodes to be Ready ⏳
+ ✓ Waiting for the cilium pod network and all nodes to be Ready ⏳ 1m53s
+info cilium agent Ready on 2/2 node(s); 2/2 node(s) Ready
+info cluster "d7env" ready
+kubeconfig: /home/walter/.local/share/delonix/clusters/d7env-kubeconfig.yaml
+export KUBECONFIG=/home/walter/.local/share/delonix/clusters/d7env-kubeconfig.yaml

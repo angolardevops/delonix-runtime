@@ -354,8 +354,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmStop => bin(S::Supported {
                 evidence: "check:vm stop",
             }),
-            C::VmDestroy => bin(S::Partial {
-                detail: "`vm destroy` undefines the domain, releases the DHCP reservation and removes the overlay; the battery tears down without a named check",
+            C::VmDestroy => bin(S::Supported {
+                evidence: "e2e:vm: a libvirt VM boots at its reserved static IP, the engine observes it, and destroy tears it all down (libvirt, cloud-init)",
             }),
             C::VmRestart => bin(S::Supported {
                 evidence: "e2e:vm: stop-then-start is a real reboot — the guest boot id changes (libvirt, cloud-init, guestfish)",
@@ -411,13 +411,13 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 detail: "`<hostdev>` per validated PCI address; proving the EFFECT live needs a non-critical PCI device in an isolated IOMMU group bound to `vfio-pci`, and that bind needs root the battery does not run as — the host's own GPU/NIC/storage must never be detached to prove it",
             }),
             C::VmTpm => bin(S::Partial {
-                detail: "`<tpm model='tpm-crb'>` emulator reaches libvirt, which builds the swtpm chardev wiring; proving in-guest TPM presence needs the host's libvirt-swtpm-qemu socket plumbing to admit the qemu process (group membership on `/run/libvirt/qemu/swtpm`), a host-level fix needing root the battery does not run as",
+                detail: "`<tpm model='tpm-crb'>` reaches libvirt and swtpm launches (socket created), proven live as root; in-guest presence stays unproven because the host's system-libvirt swtpm stack admits the qemu process only once swtpm runs as the qemu identity (by default it runs as `tss`/`swtpm` with a 0600 socket the qemu user cannot open — group membership does not help a 0600 socket), which in turn needs the swtpm-localca statedir writable by that identity and an AppArmor allowance for the engine's rootless state root under $HOME — host libvirt/swtpm provisioning, not an engine defect",
             }),
             C::VmCpuModel => bin(S::Supported {
                 evidence: "e2e:vm: the requested CPU topology is seen inside the guest (libvirt, cloud-init, guestfish)",
             }),
-            C::VmCpuPinning => bin(S::Partial {
-                detail: "`<cputune>` quota + `<vcpupin>`; unit-tested XML, dropped on qemu:///session",
+            C::VmCpuPinning => bin(S::Supported {
+                evidence: "e2e:vm: a libvirt VM's vCPUs are pinned to the requested host cores, live (libvirt)",
             }),
             C::VmHugepages => bin(S::Supported {
                 evidence: "e2e:vm: a booted guest is backed by host hugepages (libvirt, cloud-init, guestfish)",
@@ -485,8 +485,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmNetworkSdn => S::UnsupportedByProvider {
                 reason: "the NIC is on virbr0 (host netns), not on the engine's SDN; `vm bridge` (root, experimental) is the only path across",
             },
-            C::VmStaticIp => sys(S::Partial {
-                detail: "`--ip` reserves a DHCP host entry (`net-update`), released on destroy; argv unit-tested, no battery",
+            C::VmStaticIp => sys(S::Supported {
+                evidence: "e2e:vm: a libvirt VM boots at its reserved static IP, the engine observes it, and destroy tears it all down (libvirt, cloud-init)",
             }),
             C::StoragePools => S::NotImplemented,
             C::VmSnapshotDisk => bin(S::Supported {
@@ -584,8 +584,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmGuestAgent => bin(S::Supported {
                 evidence: "live:crates/providers/delonix-provider-libvirt/tests/live.rs::libvirt_guest_agent_answers_on_a_real_cloud_init_boot",
             }),
-            C::VmIpObserved => sys(S::Partial {
-                detail: "DHCP lease with a lease floor, then `domifaddr`; pure test only, the battery does not read the IP",
+            C::VmIpObserved => sys(S::Supported {
+                evidence: "e2e:vm: a libvirt VM boots at its reserved static IP, the engine observes it, and destroy tears it all down (libvirt, cloud-init)",
             }),
             C::MetricsPrometheus => S::Partial {
                 detail: "`delonix_vms_running/total` only; no per-domain stats",
@@ -594,7 +594,9 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::HostHealth => S::Supported {
                 evidence: "check:system info",
             },
-            C::HostCapacity => S::NotImplemented,
+            C::HostCapacity => S::Supported {
+                evidence: "test:crates/providers/delonix-provider-libvirt/src/lib.rs::host_capacity_reports_the_local_host",
+            },
             C::TransportVerified => S::Partial {
                 detail: "local URIs only (qemu:///system|session); a remote libvirt URI is never built",
             },
@@ -4342,9 +4344,39 @@ impl LibvirtBackend {
     }
 }
 
+/// This host's capacity to run libvirt (`qemu:///system`) VMs — CPU, memory,
+/// swap and the disk the VM images live on (`vmdir`). The domains run on THIS
+/// machine, so the "node" of `host.capacity` is this host; the shared node
+/// reader measures it with the "never a silent zero" discipline.
+pub fn host_capacity(vmdir: &Path) -> delonix_node::host::HostCapacity {
+    delonix_node::host::capacity(vmdir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `host.capacity` on the real host, through the provider's own entry: a
+    /// libvirt host always has a CPU, RAM and a VM-image filesystem, and none of
+    /// the three reports more "in use" than it has.
+    #[test]
+    fn host_capacity_reports_the_local_host() {
+        let cap = host_capacity(Path::new("."));
+        assert!(cap.cpus >= 1, "a libvirt host has at least one CPU: {cap:?}");
+        assert!(cap.mem_total_bytes > 0, "it reports total RAM: {cap:?}");
+        assert!(
+            cap.mem_used_bytes <= cap.mem_total_bytes,
+            "RAM in use never exceeds total: {cap:?}"
+        );
+        assert!(
+            cap.disk_total_bytes > 0,
+            "it reports the VM-image disk: {cap:?}"
+        );
+        assert!(
+            cap.disk_used_bytes <= cap.disk_total_bytes,
+            "disk in use never exceeds total: {cap:?}"
+        );
+    }
 
     /// The address arithmetic of a NAT network, for the two prefixes that
     /// actually show up: a /16 (what `network create` hands out) and a /24.

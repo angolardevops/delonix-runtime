@@ -221,10 +221,10 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
                     "check:GET /v1/node/capacity: cada número é medido ou está em unmeasured, nunca um zero calado",
             },
             C::TransportVerified => S::Partial {
-                detail: "unix sockets with SO_PEERCRED (CRI, management, docker-api); no TCP is ever bound",
+                detail: "the control transports (CRI, management, docker-api) are unix sockets with SO_PEERCRED, owned by the engine's uid; the only TCP bound is the CRI streaming server on loopback (127.0.0.1, for exec/attach/port-forward), never 0.0.0.0 — local-only, but a named battery and a decision on whether the loopback streamer counts are pending",
             },
-            C::CredentialInVault => S::Partial {
-                detail: "`--secret` values are resolved from the vault at spawn and never persisted in the record",
+            C::CredentialInVault => S::Supported {
+                evidence: "e2e:access: a --secret is injected from the vault at spawn but never persisted in the container record (credential in vault)",
             },
             C::NetBridge
             | C::NetMacvlanIpvlan

@@ -1,0 +1,10 @@
+info created network "dlxha-cfdff4dd" for cluster "dlxha" (removed again by `cluster destroy`)
+info Creating cluster "dlxha" (kubeadm, k8s-golden)...
+ • Provisioning 3 control-plane(s) 📦
+ ✓ Provisioning 3 control-plane(s) 📦 1m29s
+ • Provisioning 1 worker(s) 📦
+ ✓ Provisioning 1 worker(s) 📦 29.1s
+ • Provisioning the HAProxy load balancer ⚖️
+ ✓ Provisioning the HAProxy load balancer ⚖️ 1m10s
+delonix-cri: release asset — /home/walter/.local/share/delonix/bin/5.1.1/delonix-cri (sha256 a20016616361ab922642a53ad1b8d73645815c2907fee3a55dd41003dfef2b31)
+error[DX-1000] invalid argument: resolving this CLI's own binary path: No such file or directory (os error 2)

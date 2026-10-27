@@ -1,0 +1,43 @@
+### CiliumIdentity CRDs
+No resources found
+### agent logs: identity/regenerat/error
+/var/log/bootstrap.log:2026-09-01 20:35:21 URL:http://archive.ubuntu.com/ubuntu/pool/main/libg/libgpg-error/libgpg-error0_1.58-2_amd64.deb [83308/83308] -> "/home/buildd/rockcraft-ubuntu-e1c60b1bc0d25a2115f571511888c62b/parts/chroot/build/chroot//var/cache/apt/archives/partial/libgpg-error0_1.58-2_amd64.deb" [1]
+/var/log/bootstrap.log:Preparing to unpack .../libgpg-error0_1.58-2_amd64.deb ...
+/var/log/bootstrap.log:Unpacking libgpg-error0:amd64 (1.58-2) ...
+/var/log/bootstrap.log:Setting up libgpg-error0:amd64 (1.58-2) ...
+/var/log/dpkg.log:2026-09-01 20:35:43 install libgpg-error0:amd64 <none> 1.58-2
+/var/log/dpkg.log:2026-09-01 20:35:43 status half-installed libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:35:43 status unpacked libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:35:43 configure libgpg-error0:amd64 1.58-2 <none>
+/var/log/dpkg.log:2026-09-01 20:35:43 status unpacked libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:35:43 status half-configured libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:35:43 status installed libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 upgrade libgpg-error0:amd64 1.58-2 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 status half-configured libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 status unpacked libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 status half-installed libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 status unpacked libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 configure libgpg-error0:amd64 1.58-2 <none>
+/var/log/dpkg.log:2026-09-01 20:36:05 status unpacked libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 status half-configured libgpg-error0:amd64 1.58-2
+/var/log/dpkg.log:2026-09-01 20:36:05 status installed libgpg-error0:amd64 1.58-2
+      --all-controllers            Show all controllers, not just failing
+      --all-health                 Show all health status, not just failing
+      --verbose                    Equivalent to --all-addresses --all-controllers --all-nodes --all-redirects --all-clusters --all-health
+### endpoint 2464 detalhe (porquê init)
+      "controllers": [
+            "error-retry": true,
+            "error-retry-base": "2s",
+          "name": "endpoint-2464-regeneration-recovery",
+            "error-retry": true,
+          "name": "resolve-identity-2464",
+            "error-retry": true,
+      "identity": {
+        "labels": [
+      "labels": {
+        "realized": {},
+          "message": "Successfully regenerated endpoint program (Reason: PeriodicRegeneration)",
+          "state": "ready",
+        "realized": {
+      "realized": {
+      "state": "ready"

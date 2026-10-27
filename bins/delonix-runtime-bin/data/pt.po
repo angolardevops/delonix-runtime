@@ -13711,8 +13711,8 @@ msgstr "Versão major do Rocky Linux (`8`, `9`, `10`) — só usada com `--distr
 msgid "Fedora release AND build, as shown on Fedora's download page (e.g. `42-1.1`) — only used with `--distro fedora`. The build number is not derivable from the release, and Fedora's redirector offers no listing to look it up, so it is asked for rather than guessed"
 msgstr "Release E build do Fedora, como aparece na página de downloads do Fedora (ex.: `42-1.1`) — só usado com `--distro fedora`. O número de build não se deduz da release e o redirector do Fedora não dá listagem para o consultar, por isso pede-se em vez de se adivinhar"
 
-msgid "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam disponíveis passando-as aqui"
-msgstr "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam disponíveis passando-as aqui"
+msgid "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.37, o estável mais recente do pkgs.k8s.io). 1.34/1.35/1.36 continuam disponíveis passando-as aqui"
+msgstr "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.37, o estável mais recente do pkgs.k8s.io). 1.34/1.35/1.36 continuam disponíveis passando-as aqui"
 
 msgid "Build a golden image with NO Kubernetes at all — just the `delonix` engine binary, ready for rootless containers (mutually exclusive with `--k8s-version`/`--offline`, which don't apply)"
 msgstr "Constrói uma golden SEM Kubernetes — só o binário do motor `delonix`, pronta para containers rootless (mutuamente exclusiva com `--k8s-version`/`--offline`, que não se aplicam)"
@@ -15857,14 +15857,14 @@ msgstr "O `spec.cni` (ou `--cni`) nomeia a rede dos pods que o motor instala nos
 msgid "Use `default` or `none`. To run Cilium, Calico or another CNI, use `none` and apply its manifest after the cluster is up."
 msgstr "Usa `default` ou `none`. Para correr Cilium, Calico ou outra CNI, usa `none` e aplica o manifesto dela depois de o cluster estar de pé."
 
-msgid "the default CNI of a kubeadm cluster only serves one node"
-msgstr "a CNI por omissão de um cluster kubeadm só serve um nó"
+msgid "RETIRED — the default CNI of a multi-node kubeadm cluster is no longer refused"
+msgstr "RETIRADO — a CNI por omissão de um cluster kubeadm multi-nó já não é recusada"
 
-msgid "A kubeadm cluster (`cluster kubeadm`, or `cluster apply` with `mode: vm`/`mode: ssh`) with more than one node asked for `cni: default`. On that path the default CNI is a node-local bridge: it gives pods an address on their own node and has nothing that routes pod traffic between nodes, so every node would stay `NotReady` after a bootstrap that reports success. A cross-node CNI is not implemented on this path yet; the refusal comes before any machine is created."
-msgstr "Um cluster kubeadm (`cluster kubeadm`, ou `cluster apply` com `mode: vm`/`mode: ssh`) com mais de um nó pediu `cni: default`. Nesse caminho a CNI por omissão é uma bridge local ao nó: dá aos pods um endereço no seu próprio nó e não tem nada que encaminhe o tráfego dos pods entre nós, por isso todos os nós ficariam `NotReady` depois de um bootstrap que reporta sucesso. Uma CNI entre nós ainda não está implementada neste caminho; a recusa vem antes de se criar qualquer máquina."
+msgid "No longer raised (kept so `explain DX-6701` stays honest for older output). A kubeadm cluster with more than one node and `cni: default` was once refused here, because the default CNI was a node-local bridge that routes nothing between nodes. The engine now RESOLVES `default` to Cilium on that path (`net_profiles::resolved_profile`), the HA default cross-node pod network — a single node still gets the bridge, and `mode: kind` still gets kindnet. See ADR-0078 (amended 2026-10-27)."
+msgstr "Já não é emitido (mantido para que `explain DX-6701` continue honesto perante saídas antigas). Um cluster kubeadm com mais de um nó e `cni: default` era aqui recusado, porque a CNI por omissão era uma bridge local ao nó que não encaminha nada entre nós. O motor agora RESOLVE `default` para Cilium nesse caminho (`net_profiles::resolved_profile`), a rede de pods entre nós por omissão em HA — um só nó continua com a bridge, e `mode: kind` continua com o kindnet. Ver ADR-0078 (emendada a 2026-10-27)."
 
-msgid "Choose the pod network explicitly: `--cni none` (or `spec.cni: none`) and apply your own CNI after the bootstrap (Cilium, Calico, flannel...), or create a one-node cluster (`--workers 0` with one control-plane). Kind mode (`cluster create`) installs kindnet and serves several nodes."
-msgstr "Escolhe a rede dos pods explicitamente: `--cni none` (ou `spec.cni: none`) e aplica a tua CNI depois do bootstrap (Cilium, Calico, flannel...), ou cria um cluster de um só nó (`--workers 0` com um control-plane). O modo kind (`cluster create`) instala o kindnet e serve vários nós."
+msgid "Nothing to do: `cluster kubeadm` with several nodes and `cni: default` now brings up a working Cilium cluster on its own. To pick a different pod network, pass `--cni cilium|calico|flannel` (with `--experimental-cni`) or `--cni none` to apply your own."
+msgstr "Nada a fazer: `cluster kubeadm` com vários nós e `cni: default` levanta sozinho um cluster Cilium funcional. Para escolher outra rede de pods, passa `--cni cilium|calico|flannel` (com `--experimental-cni`) ou `--cni none` para aplicares a tua."
 
 msgid "more than one node: the default CNI only serves one, so bring your own and apply it after the bootstrap"
 msgstr "mais de um nó: a CNI por omissão só serve um, por isso trazes a tua e aplica-la depois do bootstrap"
@@ -16262,8 +16262,8 @@ msgstr "Online: confirma o alcance de rede do próprio host ao publicador e volt
 msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `<command> --help` to get help in the chosen language"
 msgstr "Língua do output: `en` (omissão) ou `pt` (português, pt_AO). Também se define por `$DELONIX_L18N`. Usa com `--help` ou `<comando> --help` para obter a ajuda na língua escolhida"
 
-msgid "Pod network. `default` = the engine's node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI. `cilium`/`calico`/`flannel` = a selectable profile, pinned to a version and an artefact digest, installed and waited for by the bootstrap itself (`delonix cluster network profiles` lists them with their support level)"
-msgstr "Rede dos pods. `default` = a bridge local ao nó do próprio motor, que serve só um cluster de UM nó: com mais nós é recusada antes de qualquer VM ser criada. `none` = não instala nada; todos os nós ficam NotReady até aplicares a tua CNI. `cilium`/`calico`/`flannel` = um perfil seleccionável, fixado a uma versão e ao digest do artefacto, instalado e esperado pelo próprio bootstrap (o `delonix cluster network profiles` lista-os com o nível de suporte)"
+msgid "Pod network. `default` = «give me a cluster that works»: a node-local bridge on a ONE-node cluster, and on MORE than one node the engine's HA default cross-node pod network, Cilium, installed and waited for automatically. `none` = install nothing; every node stays NotReady until you apply your own CNI. `cilium`/`calico`/`flannel` = a selectable profile, pinned to a version and an artefact digest, all Supported (D7-measured) — `delonix cluster network profiles` lists them with their support level"
+msgstr "Rede dos pods. `default` = «dá-me um cluster que funciona»: uma bridge local ao nó num cluster de UM nó, e com MAIS de um nó a rede de pods entre nós por omissão em HA do motor, o Cilium, instalada e esperada automaticamente. `none` = não instala nada; todos os nós ficam NotReady até aplicares a tua CNI. `cilium`/`calico`/`flannel` = um perfil seleccionável, fixado a uma versão e ao digest do artefacto, todos Supported (medidos no D7) — o `delonix cluster network profiles` lista-os com o nível de suporte"
 
 msgid "Encapsulation / forwarding mode of the chosen profile. Omit for its default (`vxlan`, the only mode that asks nothing of the network between the nodes). `spec.network.dataplane` in a manifest"
 msgstr "Modo de encapsulamento/encaminhamento do perfil escolhido. Omite para o default dele (`vxlan`, o único modo que não pede nada à rede entre os nós). `spec.network.dataplane` num manifesto"

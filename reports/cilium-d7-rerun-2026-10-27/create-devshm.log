@@ -1,0 +1,34 @@
+info created network "d7shm2-39d312a8" for cluster "d7shm2" (removed again by `cluster destroy`)
+info Creating cluster "d7shm2" (kubeadm, k8s-golden)...
+ • Provisioning 1 control-plane(s) 📦
+ ✓ Provisioning 1 control-plane(s) 📦 16.1s
+ • Provisioning 1 worker(s) 📦
+ ✓ Provisioning 1 worker(s) 📦 11.6s
+delonix-cri: next to delonix — /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix-cri (sha256 3232a71791321c7cca642b4e285ece20e29c9c7b7f608664443d34c6db0cc973)
+ ○ Preparing 2 host(s)
+ ○ Bootstrapping control-plane (kubeadm init)
+ ○ Fetching kubeconfig
+ ○ Installing the cilium pod network
+ ○ Joining 1 worker(s)
+ ○ Waiting for all nodes to be Ready
+ • Preparing 2 host(s) 🔧
+[d7shm2-w1] delonix-cri differs from the resolved one (sha256 3232a7179132) — replacing it and restarting the service
+[d7shm2-cp1] delonix-cri differs from the resolved one (sha256 3232a7179132) — replacing it and restarting the service
+[d7shm2-w1] the node's delonix CLI differs from this one's (sha256 396b441fb2aa) — replacing it (delonix-cri re-execs it to spawn every container)
+[d7shm2-cp1] the node's delonix CLI differs from this one's (sha256 396b441fb2aa) — replacing it (delonix-cri re-execs it to spawn every container)
+ ✓ Preparing 2 host(s) 🔧 8.8s
+ • Bootstrapping control-plane (kubeadm init) 🕹️
+ ✓ Bootstrapping control-plane (kubeadm init) 🕹️ 7.8s
+ • Fetching kubeconfig 📇
+merged into /home/walter/.kube/config as context 'd7shm2' — kubectl now points here
+ ✓ Fetching kubeconfig 📇 0.2s
+ • Installing the cilium pod network 🔌
+ ✓ Installing the cilium pod network 🔌 0.8s
+ • Joining 1 worker(s) 🚜
+ ✓ Joining 1 worker(s) 🚜 6.2s
+ • Waiting for the cilium pod network and all nodes to be Ready ⏳
+ ✓ Waiting for the cilium pod network and all nodes to be Ready ⏳ 2m02s
+info cilium agent Ready on 2/2 node(s); 2/2 node(s) Ready
+info cluster "d7shm2" ready
+kubeconfig: /home/walter/.local/share/delonix/clusters/d7shm2-kubeconfig.yaml
+export KUBECONFIG=/home/walter/.local/share/delonix/clusters/d7shm2-kubeconfig.yaml

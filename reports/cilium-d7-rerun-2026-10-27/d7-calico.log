@@ -1,0 +1,34 @@
+info created network "d7cal-f48da30c" for cluster "d7cal" (removed again by `cluster destroy`)
+info Creating cluster "d7cal" (kubeadm, delonix-vm-k8s:1.37)...
+ • Provisioning 1 control-plane(s) 📦
+ ✓ Provisioning 1 control-plane(s) 📦 17.3s
+ • Provisioning 1 worker(s) 📦
+ ✓ Provisioning 1 worker(s) 📦 15.9s
+delonix-cri: next to delonix — /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix-cri (sha256 24a667b8d8283e4b5cb0f08699ca450b54a3c11db503f0abdef3f6c056972cd3)
+ ○ Preparing 2 host(s)
+ ○ Bootstrapping control-plane (kubeadm init)
+ ○ Fetching kubeconfig
+ ○ Installing the calico pod network
+ ○ Joining 1 worker(s)
+ ○ Waiting for all nodes to be Ready
+ • Preparing 2 host(s) 🔧
+[d7cal-w1] delonix-cri differs from the resolved one (sha256 24a667b8d828) — replacing it and restarting the service
+[d7cal-cp1] delonix-cri differs from the resolved one (sha256 24a667b8d828) — replacing it and restarting the service
+[d7cal-w1] the node's delonix CLI differs from this one's (sha256 a9a98aa82d4d) — replacing it (delonix-cri re-execs it to spawn every container)
+[d7cal-cp1] the node's delonix CLI differs from this one's (sha256 a9a98aa82d4d) — replacing it (delonix-cri re-execs it to spawn every container)
+ ✓ Preparing 2 host(s) 🔧 6.5s
+ • Bootstrapping control-plane (kubeadm init) 🕹️
+ ✓ Bootstrapping control-plane (kubeadm init) 🕹️ 7.8s
+ • Fetching kubeconfig 📇
+merged into /home/walter/.kube/config as context 'd7cal' — kubectl now points here
+ ✓ Fetching kubeconfig 📇 0.2s
+ • Installing the calico pod network 🔌
+ ✓ Installing the calico pod network 🔌 1.2s
+ • Joining 1 worker(s) 🚜
+ ✓ Joining 1 worker(s) 🚜 6.2s
+ • Waiting for the calico pod network and all nodes to be Ready ⏳
+ ✓ Waiting for the calico pod network and all nodes to be Ready ⏳ 1m36s
+info calico agent Ready on 2/2 node(s); 2/2 node(s) Ready
+info cluster "d7cal" ready
+kubeconfig: /home/walter/.local/share/delonix/clusters/d7cal-kubeconfig.yaml
+export KUBECONFIG=/home/walter/.local/share/delonix/clusters/d7cal-kubeconfig.yaml

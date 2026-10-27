@@ -317,6 +317,14 @@ impl StoragePoolDriver for BtrfsDriver {
                 return Err(e);
             }
             if self.qgroups {
+                // A qgroup limit is refused unless quota accounting is enabled
+                // for the whole filesystem. `create-pool` turns it on, but a
+                // pool the administrator mounted by hand (the common case for an
+                // existing btrfs) has it off, and the limit then fails with
+                // "quota not enabled". Enable it here, on the filesystem root —
+                // idempotent and instant when already on (measured), and it
+                // creates the qgroup for the subvolume made just above.
+                self.must(&["btrfs", "quota", "enable", &root.to_string_lossy()])?;
                 let size = req.size_bytes.to_string();
                 self.must(&["btrfs", "qgroup", "limit", &size, &dir.to_string_lossy()])?;
             }

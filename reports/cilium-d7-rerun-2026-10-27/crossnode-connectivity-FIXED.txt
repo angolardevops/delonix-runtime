@@ -1,0 +1,18 @@
+### CROSS-NODE pod-a-pod COM o fix CNI_ARGS
+-- x-cp1(@cp1) -> x-w1(10.244.0.51 @w1):8080
+OK-w1
+   => OK
+-- x-w1(@w1) -> x-cp1(10.244.1.92 @cp1):8080
+OK-cp1
+   => OK
+-- x-cp1 -> kube-dns ClusterIP 10.96.0.10:53 (serviço/kube-proxy)
+rc=1
+### DNS/serviço: nslookup kubernetes.default (kube-proxy ClusterIP + coredns, cross-node)
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Name:	kubernetes.default.svc.cluster.local
+Address: 10.96.0.1
+
+### resumo endpoints: nenhum reserved:init
+endpoints em reserved:init no cp1: 0

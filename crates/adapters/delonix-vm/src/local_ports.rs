@@ -101,20 +101,31 @@ fn clone_disk_independent(src: &Path, dest: &Path) -> super::Result<()> {
             format!("source disk {}", src.display())
         }))
     })?;
+    // Open the source with NO lock at all — not merely a shared one. `convert
+    // -U`/`--force-share` still takes a SHARED lock, which QEMU grants another
+    // reader but Cloud Hypervisor does NOT: CH holds the overlay in a mode that
+    // rejects even the shared request, so `-U` cloned a running CH VM failed
+    // outright with "Failed to lock byte 100" (libvirt/QEMU happened to grant
+    // it). `file.locking=off` opens the source read-only without touching the
+    // lock byte, so a RUNNING source on either backend is cloned. The copy is
+    // crash-consistent — exactly the guarantee a disk snapshot of a running
+    // guest gives. A stopped source (the template case) holds no lock and is
+    // copied cleanly regardless. The overlay this reads is always qcow2 (both
+    // local backends build their disk as a qcow2 overlay), so naming the driver
+    // explicitly — which `--image-opts` requires — is correct, not an
+    // assumption. A literal comma in the path is doubled per QemuOpts escaping.
+    let src_opts = format!(
+        "driver=qcow2,file.filename={},file.locking=off",
+        src.to_string_lossy().replace(',', ",,")
+    );
     run_quiet(
         "qemu-img",
         &[
             "convert",
-            // `-U` reads the source even while a running VM holds the qcow2
-            // write lock: without it `convert` demands a shared lock the live
-            // qemu refuses, and cloning a running VM failed outright. The copy
-            // is then crash-consistent — exactly the guarantee a disk snapshot
-            // of a running guest gives. A stopped source (the template case)
-            // holds no lock and is copied cleanly regardless.
-            "-U",
+            "--image-opts",
+            &src_opts,
             "-O",
             "qcow2",
-            &src.to_string_lossy(),
             &dest.to_string_lossy(),
         ],
     )

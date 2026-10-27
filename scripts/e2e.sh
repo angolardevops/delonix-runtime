@@ -6563,6 +6563,255 @@ else
 fi
 
 ########################################
+section "vm: a stopped CH VM cold-migrates — flatten, import, boot on the target with state intact (cloud-hypervisor, guestfish)"
+########################################
+# `vm.migration.cold` on the cloud-hypervisor provider was `partial` («`vm
+# migrate`: stop, copy over SSH, import, start; no battery»). This is the
+# battery — the SAME substantive steps the libvirt block above proves, on the CH
+# backend, minus only the generic scp transport between two hosts (not a
+# VM-provider capability):
+#   1. STOP + FLATTEN — `qemu-img convert -O qcow2` produces a STANDALONE disk
+#      with no backing-file dependency to carry across hosts;
+#   2. IMPORT --appliance — the carried disk is registered WITHOUT a fresh seed,
+#      so the guest's baked state is not reset;
+#   3. CREATE on the "target" (a second name here = the other host) and BOOT it.
+# A boot logger (a Type=oneshot systemd unit appending `boot_id` on every boot)
+# witnesses that the target actually BOOTED the migrated disk. UNLIKE libvirt,
+# the unit is NOT installed by cloud-init `runcmd`: a CH guest whose DHCP has not
+# yet settled stalls cloud-init's late stages, so `runcmd` is unreliable here.
+# Instead the unit is baked into the source overlay OFFLINE (guestfish) and the
+# source is booted once more to log its own id — this needs nothing from the
+# guest network. The flattened appliance carries that baked unit, so the target
+# logs a SECOND, distinct id on its own boot. Proof: the target's log holds TWO
+# distinct ids (the source's crossed intact AND the target booted) and the
+# source's baked hostname survived the seedless import.
+#
+# MEIA-ISOLAÇÃO É PIOR QUE NENHUMA (ver a secção de snapshots do CH): um
+# `DELONIX_ROOT` isolado sem `DELONIX_NET_RUNTIME_DIR` partilha os sockets de
+# rede por utilizador e parte o ingress do root real. Recusa-se aqui também.
+CMIMG="$("$BIN" vm image ls 2>/dev/null | awk '/cloud-init/{print $1; exit}')"
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "vm: a stopped CH VM cold-migrates — flatten, import, boot on the target with state intact" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif ch_usable && command -v guestfish >/dev/null 2>&1 && [[ -n "$CMIMG" ]]; then
+  CMSRC="cmsrc-$PFX"; CMDST="cmdst-$PFX"; CMTAG="migrated-$CMSRC"
+  CMFLAT="$OUT/$CMSRC-flat.qcow2"
+  CMSOVL="$SROOT/vms/$CMSRC.qcow2"; CMDOVL="$SROOT/vms/$CMDST.qcow2"
+  CMUNIT='[Unit]
+Description=delonix migration boot logger
+After=local-fs.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c "cat /proc/sys/kernel/random/boot_id >> /var/lib/delonix-mig-BOOTLOG"
+[Install]
+WantedBy=multi-user.target'
+  ch_wait_stopped() {  # poll the engine until the named VM is Stopped (VMM gone)
+    local _; for _ in $(seq 1 25); do
+      [[ "$("$BIN" describe vm "$1" 2>/dev/null | sed -n 's/^Status: *//p' | tr -d ' ')" == Stopped ]] && return 0
+      sleep 2
+    done
+  }
+  if check_then "cold-migrate CH: create+boot source" ok \
+       "$BIN" vm create "$CMSRC" --backend cloud-hypervisor --disk "$CMIMG" \
+         --vcpus 1 --vcpus-max 4 --memory 512M --memory-max 1536M --hostname dlx-mig-proof; then
+    sleep 100  # cloud-init bakes the hostname (config stage; needs no guest network)
+    "$BIN" vm stop "$CMSRC" >/dev/null 2>&1 || true; ch_wait_stopped "$CMSRC"; sleep 3
+    # Bake the boot logger ON DISK (not via cloud-init): survives the seedless
+    # appliance import and runs on the target's own boot.
+    guestfish --rw -a "$CMSOVL" -i \
+      mkdir-p /etc/systemd/system/multi-user.target.wants : \
+      write /etc/systemd/system/dlx-bootlog.service "$CMUNIT" : \
+      ln-sf /etc/systemd/system/dlx-bootlog.service /etc/systemd/system/multi-user.target.wants/dlx-bootlog.service \
+      >/dev/null 2>&1 || true
+    # Boot the source once more so it logs ITS OWN id before we carry the disk.
+    "$BIN" vm start "$CMSRC" >/dev/null 2>&1 || true
+    sleep 100
+    "$BIN" vm stop "$CMSRC" >/dev/null 2>&1 || true; ch_wait_stopped "$CMSRC"; sleep 3
+    check "cold-migrate CH: the source logged a boot id (baked unit ran)" ok bash -c \
+      "[ \"\$(guestfish --ro -a '$CMSOVL' -i cat /var/lib/delonix-mig-BOOTLOG 2>/dev/null | sort -u | grep -c '[0-9a-f]')\" -ge 1 ]"
+    # STEP 1: flatten — the standalone disk carries no backing dependency.
+    check "cold-migrate CH: the flattened disk is standalone (no backing file)" ok bash -c \
+      "qemu-img convert -O qcow2 -- '$CMSOVL' '$CMFLAT' && ! qemu-img info '$CMFLAT' | grep -qi 'backing file'"
+    # STEP 2+3: import --appliance, then create+boot on the 'target'.
+    check "cold-migrate CH: the carried disk imports as an appliance" ok \
+      "$BIN" vm image import "$CMFLAT" --tag "$CMTAG" --appliance --force
+    check "cold-migrate CH: the target VM creates+boots from the migrated disk" ok \
+      "$BIN" vm create "$CMDST" --disk "$CMTAG" --vcpus 1 --vcpus-max 4 --memory 512M --memory-max 1536M --network ingress --backend cloud-hypervisor
+    sleep 100
+    "$BIN" vm stop "$CMDST" >/dev/null 2>&1 || true; ch_wait_stopped "$CMDST"; sleep 3
+    # PROOF: the target's bootlog carries the source's id AND a second, distinct
+    # one — state crossed intact and the target booted the migrated disk.
+    check "cold-migrate CH: the target booted the migrated disk with state intact (two distinct boot ids)" ok bash -c \
+      "[ \"\$(guestfish --ro -a '$CMDOVL' -i cat /var/lib/delonix-mig-BOOTLOG 2>/dev/null | sort -u | grep -c '[0-9a-f]')\" -ge 2 ]"
+    check "cold-migrate CH: the target kept the source's baked hostname" ok bash -c \
+      "guestfish --ro -a '$CMDOVL' -i cat /etc/hostname | grep -qx dlx-mig-proof"
+    "$BIN" delete vm "$CMDST" -f >/dev/null 2>&1
+    "$BIN" vm image rm "$CMTAG" -f >/dev/null 2>&1 || "$BIN" vm image rm "$CMTAG" >/dev/null 2>&1
+    "$BIN" delete vm "$CMSRC" -f >/dev/null 2>&1
+  else
+    "$BIN" delete vm "$CMSRC" -f >/dev/null 2>&1
+  fi
+  rm -f "$CMFLAT"
+else
+  skip "vm: a stopped CH VM cold-migrates — flatten, import, boot on the target with state intact" \
+    "no usable cloud-hypervisor, no guestfish, or no cloud-init golden (vm image ls)"
+fi
+
+########################################
+section "vm: the Cloud Hypervisor control transport is a per-VM unix socket owned by the engine, not a network port (cloud-hypervisor)"
+########################################
+# `access.transport-verified` for cloud-hypervisor was `partial` for want of a
+# named battery. The capability asks that the provider's transport be verified
+# (TLS) or LOCAL-ONLY. CH is driven entirely over a per-VM api-socket — there is
+# no network control plane — so the proof is that the control channel is a UNIX
+# socket owned by the engine's own uid, readable/writable by nobody else (mode
+# 700), and that no TCP port is bound for it. An empty disk is enough: the VMM
+# comes up and opens its api-socket without a guest OS.
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "vm: the Cloud Hypervisor control transport is a per-VM unix socket owned by the engine" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif ch_usable; then
+  CTVM="chtv-$PFX"; CTDISK="$OUT/$CTVM.qcow2"; CTSOCK="$SROOT/vms/$CTVM.sock"
+  qemu-img create -f qcow2 "$CTDISK" 64M >/dev/null 2>&1
+  if check_then "transport (CH): create a VM whose VMM opens its api-socket" ok \
+       "$BIN" vm create "$CTVM" --backend cloud-hypervisor --disk "$CTDISK" --memory 256M; then
+    sleep 4
+    check "transport (CH): the control channel is a UNIX socket (not a TCP port)" ok bash -c \
+      "[ -S '$CTSOCK' ]"
+    check "transport (CH): the socket is owned by the engine's own uid" ok bash -c \
+      "[ \"\$(stat -c %u '$CTSOCK' 2>/dev/null)\" = \"\$(id -u)\" ]"
+    check "transport (CH): no other user may open it (mode 700)" ok bash -c \
+      "[ \"\$(stat -c %a '$CTSOCK' 2>/dev/null)\" = 700 ]"
+    "$BIN" vm destroy "$CTVM" >/dev/null 2>&1 || true
+  else
+    "$BIN" vm destroy "$CTVM" >/dev/null 2>&1 || true
+  fi
+  rm -f "$CTDISK"
+else
+  skip "vm: the Cloud Hypervisor control transport is a per-VM unix socket owned by the engine" \
+    "$(ch_missing)"
+fi
+
+########################################
+section "access: a --secret is injected from the vault at spawn but never persisted in the container record (credential in vault)"
+########################################
+# `access.credential-in-vault` (linux) was `partial` for want of a named
+# battery. The claim: a `--secret` value is resolved from the encrypted vault AT
+# SPAWN and never written into the container's own record. This proves both
+# halves with a UNIQUE plaintext marker:
+#   * it is PRESENT in the running container (resolved at spawn), and
+#   * it is ABSENT from the on-disk record AND from `container inspect` (never
+#     persisted), while `secret inspect` redacts it.
+if [ "$E2E_HAVE_IMAGE" = 1 ]; then
+  CVSEC="cvsec-$PFX"; CVCT="cvct-$PFX"; CVVAL="vaultmarker-$PFX-PLAINTEXT"
+  if check_then "credential-in-vault: create a secret in the encrypted vault" ok \
+       "$BIN" secret create "$CVSEC" --from-literal TOKEN="$CVVAL"; then
+    if check_then "credential-in-vault: run a container that consumes it via --secret" ok \
+         "$BIN" container run -d --name "$CVCT" --secret "$CVSEC" "$IMG" sleep 120; then
+      sleep 2
+      check "credential-in-vault: the value is resolved AT SPAWN (present in the running container)" ok bash -c \
+        "[ \"\$('$BIN' container exec '$CVCT' printenv TOKEN 2>/dev/null)\" = '$CVVAL' ]"
+      check "credential-in-vault: the plaintext is NOT in the on-disk container record" ok bash -c \
+        "[ \"\$(grep -rl '$CVVAL' '$SROOT/containers' 2>/dev/null | wc -l)\" = 0 ]"
+      check "credential-in-vault: the plaintext is NOT in container inspect" ok bash -c \
+        "! '$BIN' container inspect '$CVCT' 2>/dev/null | grep -q '$CVVAL'"
+      check "credential-in-vault: secret inspect redacts the value" ok bash -c \
+        "! '$BIN' secret inspect '$CVSEC' 2>/dev/null | grep -q '$CVVAL'"
+    fi
+    "$BIN" container rm -f "$CVCT" >/dev/null 2>&1 || true
+    "$BIN" secret rm "$CVSEC" >/dev/null 2>&1 || true
+  fi
+else
+  skip "access: a --secret is injected from the vault at spawn but never persisted in the container record" \
+    "no usable OCI image (E2E_IMAGE)"
+fi
+
+########################################
+section "vm: a libvirt VM boots at its reserved static IP, the engine observes it, and destroy tears it all down (libvirt, cloud-init)"
+########################################
+# Three libvirt rows were `partial` only for want of a named battery — the
+# mechanisms already worked. ONE booted guest proves all three:
+#   * vm.static-ip  — `--ip` writes a DHCP host reservation on the libvirt
+#     network (`net-update`), and the guest boots at EXACTLY that address;
+#   * vm.ip.observed — the engine reports the guest's OWN leased address, read
+#     back from the libvirt lease (`domifaddr`) — OBSERVED, not computed (unlike
+#     Cloud Hypervisor, whose IP is derived from the MAC);
+#   * vm.destroy    — `vm destroy` UNDEFINES the domain, RELEASES the DHCP
+#     reservation and REMOVES the overlay, each checked by name afterwards.
+# Needs a usable `qemu:///system` (the NAT network `--ip` reserves on) and a
+# cloud-init golden that DHCPs on boot; else an honest SKIP.
+LVIMG="$("$BIN" vm image ls 2>/dev/null | awk '/cloud-init/{print $1; exit}')"
+if libvirt_system_usable && [[ -n "$LVIMG" ]]; then
+  LVVM="lvsip-$PFX"; LVIP="192.168.122.231"
+  LVOVL="$SROOT/vms/$LVVM.qcow2"
+  if check_then "static-ip: create+boot a libvirt VM with --ip $LVIP" ok \
+       "$BIN" vm create "$LVVM" --backend libvirt --disk "$LVIMG" \
+         --vcpus 2 --memory 1G --ip "$LVIP" --hostname "$LVVM"; then
+    # The reservation exists BEFORE the guest is up: it is what the DHCP server
+    # will hand back for this MAC.
+    check "static-ip: the libvirt network holds the DHCP reservation for $LVIP" ok bash -c \
+      "virsh -c qemu:///system net-dumpxml default 2>/dev/null | grep -q \"ip='$LVIP'\""
+    sleep 100  # let the guest DHCP and claim its lease
+    # OBSERVED: the engine's reported IP equals the address libvirt's OWN lease
+    # table shows for the running domain (`domifaddr`), and both equal what was
+    # reserved — a read of reality, not a prediction.
+    check "ip.observed: the engine reports the guest's leased IP and it matches domifaddr and the reservation" ok bash -c \
+      "eng=\$('$BIN' describe vm '$LVVM' 2>/dev/null | sed -n 's/.*IP: *//p' | head -1 | tr -d ' '); \
+       lease=\$(virsh -c qemu:///system domifaddr '$LVVM' 2>/dev/null | awk '/ipv4/{print \$4}' | cut -d/ -f1 | head -1); \
+       [ \"\$eng\" = '$LVIP' ] && [ \"\$lease\" = '$LVIP' ]"
+    # DESTROY tears everything down — each effect named.
+    check_then "vm destroy: the command succeeds" ok "$BIN" vm destroy "$LVVM"
+    check "vm destroy: the domain is undefined (libvirt no longer knows it)" fail \
+      virsh -c qemu:///system domstate "$LVVM"
+    check "vm destroy: the DHCP reservation for $LVIP is released" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system net-dumpxml default 2>/dev/null | grep -c \"ip='$LVIP'\")\" = 0 ]"
+    check "vm destroy: the overlay disk is removed" ok bash -c "[ ! -f '$LVOVL' ]"
+  else
+    "$BIN" vm destroy "$LVVM" >/dev/null 2>&1 || true
+  fi
+else
+  skip "vm: a libvirt VM boots at its reserved static IP, the engine observes it, and destroy tears it all down" \
+    "no usable qemu:///system or no cloud-init golden (vm image ls)"
+fi
+
+########################################
+section "vm: a libvirt VM's vCPUs are pinned to the requested host cores, live (libvirt)"
+########################################
+# `vm.cpu.pinning` was `partial` — the `<vcpupin>` XML was unit-tested but
+# dropped on `qemu:///session`, so the EFFECT went unproven. On `qemu:///system`
+# (what the engine uses when it answers) the pin is real: this proves it on the
+# LIVE domain. `--cpu-affinity 0-1` on a 2-vCPU VM must put BOTH vCPU threads on
+# exactly host cores 0 and 1 — read back from `virsh vcpuinfo`, the hypervisor's
+# own view of each thread's affinity, not merely the XML we asked for. No guest
+# OS boot is needed: the vCPU threads exist as soon as qemu starts.
+LPIMG="$("$BIN" vm image ls 2>/dev/null | awk '/cloud-init/{print $1; exit}')"
+if libvirt_system_usable && [[ -n "$LPIMG" ]]; then
+  LPVM="lvpin-$PFX"
+  if check_then "cpu-pinning: create a libvirt VM with --cpu-affinity 0-1" ok \
+       "$BIN" vm create "$LPVM" --backend libvirt --disk "$LPIMG" \
+         --vcpus 2 --cpu-affinity 0-1 --memory 1G --hostname "$LPVM"; then
+    sleep 10  # qemu starts the vCPU threads; no full guest boot needed
+    check "cpu-pinning: the live domain XML carries the <vcpupin cpuset='0-1'>" ok bash -c \
+      "virsh -c qemu:///system dumpxml '$LPVM' 2>/dev/null | grep -q \"vcpupin vcpu='0' cpuset='0-1'\""
+    # The EFFECT: the hypervisor pinned BOTH vCPU threads to exactly cores 0-1.
+    # `vcpuinfo` prints one `CPU Affinity: yy----…` mask per vCPU — `y` where the
+    # thread MAY run. Assert two vCPUs, each masked to only cores 0 and 1.
+    check "cpu-pinning: both vCPU threads are pinned to exactly host cores 0-1 (live affinity)" ok bash -c \
+      "info=\$(virsh -c qemu:///system vcpuinfo '$LPVM' 2>/dev/null); \
+       n=\$(printf '%s' \"\$info\" | grep -c '^VCPU:'); \
+       bad=\$(printf '%s' \"\$info\" | awk -F'Affinity:' '/Affinity:/{gsub(/ /,\"\",\$2); if(\$2 !~ /^yy-+\$/) print \$2}'); \
+       [ \"\$n\" -eq 2 ] && [ -z \"\$bad\" ]"
+    "$BIN" vm destroy "$LPVM" >/dev/null 2>&1 || true
+  else
+    "$BIN" vm destroy "$LPVM" >/dev/null 2>&1 || true
+  fi
+else
+  skip "vm: a libvirt VM's vCPUs are pinned to the requested host cores, live" \
+    "no usable qemu:///system or no cloud-init golden (vm image ls)"
+fi
+
+########################################
 section "vm: the serial console connects and VNC answers RFB, live (libvirt, cloud-init)"
 ########################################
 # §7 of the mandate: `vm.console.serial` and `vm.console.vnc` on the libvirt
@@ -10651,6 +10900,58 @@ assert float(rx.group(1))>=0 and float(tx.group(1))>=0, "bytes negativos?!"
 else
   skip "métricas rede: /metrics tem rx e tx por container com o id/nome e valor plausível" \
        "sem imagem base ($IMG) ou sem curl no host"
+fi
+
+########################################
+section "metrics: /metrics exports per-VM cpu and memory series for a Cloud Hypervisor VM (cloud-hypervisor)"
+########################################
+# metrics.prometheus (CH) was `partial` — «vms_running/total only, no per-domain
+# stats». It is no longer: `collect_workload_series` reads each running VM's
+# cgroup leaf and the exporter renders a `delonix_workload_*{kind="vm",…}` series
+# per VM, exactly like the per-container ones. This boots a native CH VM, serves
+# `/metrics`, and confirms the VM's OWN cpu and memory series carry its name
+# under `kind="vm"`. An empty disk is enough — the VMM comes up and gets a cgroup
+# leaf without a guest OS. (Per-VM NETWORK is wired too — `vm_tap_net_bytes` —
+# but stays `partial`: proving it live needs the ingress holder's netns, which
+# this battery does not stand up. libvirt also stays `partial`: its qemu runs
+# under libvirt's own cgroup with no pid in the record here.)
+MVMSOCK="/tmp/dlxe2e-mvm-$$.sock"
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "metrics: /metrics exports per-VM cpu and memory series for a Cloud Hypervisor VM" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif ch_usable && command -v curl >/dev/null; then
+  MVM="metricsvm-$PFX"; MVMDISK="$OUT/$MVM.qcow2"
+  qemu-img create -f qcow2 "$MVMDISK" 64M >/dev/null 2>&1
+  if check_then "metrics VM: a native CH VM boots (VMM + cgroup leaf)" ok \
+       "$BIN" vm create "$MVM" --backend cloud-hypervisor --disk "$MVMDISK" --memory 256M; then
+    "$BIN" serve api --addr "unix://$MVMSOCK" >"$OUT/mgmt-api-vm.log" 2>&1 &
+    MVMPID=$!
+    for _ in $(seq 100); do [[ -S "$MVMSOCK" ]] && break; sleep 0.05; done
+    # The per-workload snapshot is published by the background refresh; poll
+    # /metrics until THIS VM's memory series shows up (or give up ~40s).
+    for _ in $(seq 80); do
+      curl -s --unix-socket "$MVMSOCK" http://localhost/metrics \
+        | grep -q "delonix_workload_memory_current_bytes{kind=\"vm\",id=\"$MVM\",name=\"$MVM\"}" && break
+      sleep 0.5
+    done
+    check "metrics VM: /metrics has per-VM cpu and memory series under kind=\"vm\"" ok env \
+      MET="$(curl -s --unix-socket "$MVMSOCK" http://localhost/metrics)" MVN="$MVM" \
+      python3 -c '
+import os,re
+met=os.environ["MET"]; n=re.escape(os.environ["MVN"])
+lbl=r"\{kind=\"vm\",id=\""+n+r"\",name=\""+n+r"\"\}"
+mem=re.search(r"delonix_workload_memory_current_bytes"+lbl+r" ([0-9.eE+]+)", met)
+cpu=re.search(r"delonix_workload_cpu_usage_seconds_total"+lbl+r" ([0-9.eE+]+)", met)
+assert mem and float(mem.group(1))>0, "no per-VM memory_current_bytes>0\n"+met
+assert cpu, "no per-VM cpu_usage_seconds_total\n"+met
+'
+    kill "$MVMPID" 2>/dev/null || true
+  fi
+  "$BIN" vm destroy "$MVM" >/dev/null 2>&1 || true
+  rm -f "$MVMSOCK" "$MVMDISK"
+else
+  skip "metrics: /metrics exports per-VM cpu and memory series for a Cloud Hypervisor VM" \
+    "$(ch_missing); ou sem curl"
 fi
 
 ########################################

@@ -1027,6 +1027,35 @@ fn cgroup_parent_of(cfg: &PodSandboxConfig) -> Result<String, Status> {
         .map_err(Status::invalid_argument)
 }
 
+/// The `CNI_ARGS` string a runtime owes a pod-aware CNI plugin, in the
+/// kubelet's own spelling: `IgnoreUnknown=1;K8S_POD_NAMESPACE=…;K8S_POD_NAME=…;
+/// K8S_POD_INFRA_CONTAINER_ID=…;K8S_POD_UID=…`. Cilium/Calico read the namespace
+/// and name to find the pod and its labels; containerd and CRI-O send exactly
+/// these keys.
+///
+/// `CNI_ARGS` is parsed on `;` and `=`, so a value carrying either (or a
+/// control byte) would corrupt the whole string and, worse, SILENTLY —
+/// shifting the meaning of the keys after it. Kubernetes object names are
+/// RFC1123 and never contain them, but a value that somehow does is DROPPED
+/// rather than allowed to rewrite its neighbours.
+fn cni_k8s_args(namespace: &str, name: &str, uid: &str, infra_container_id: &str) -> String {
+    fn safe(v: &str) -> bool {
+        !v.is_empty() && v.chars().all(|c| c != ';' && c != '=' && !c.is_control())
+    }
+    let mut parts = vec!["IgnoreUnknown=1".to_string()];
+    for (key, value) in [
+        ("K8S_POD_NAMESPACE", namespace),
+        ("K8S_POD_NAME", name),
+        ("K8S_POD_INFRA_CONTAINER_ID", infra_container_id),
+        ("K8S_POD_UID", uid),
+    ] {
+        if safe(value) {
+            parts.push(format!("{key}={value}"));
+        }
+    }
+    parts.join(";")
+}
+
 // ---- pods (sandboxes) -----------------------------------------------------
 
 pub fn run_pod_sandbox(
@@ -1115,7 +1144,12 @@ pub fn run_pod_sandbox(
             let conf = delonix_sdn::cni::with_port_mappings(&conf, &asked_ports);
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
-            match delonix_sdn::infra::cni_attach_container(&pod, &conf_json) {
+            // Same pod-identity keys as the ROOT path, carried over the holder's
+            // control line (fifth hex token) so a pod-aware plugin (Cilium)
+            // resolves the endpoint's identity here too — without them the
+            // rootless sandbox would sit in `reserved:init`.
+            let cni_args = cni_k8s_args(&md.namespace, &md.name, &md.uid, &pod);
+            match delonix_sdn::infra::cni_attach_container(&pod, &conf_json, Some(&cni_args)) {
                 Ok((_netns, cidr)) => {
                     cni_ip = cidr.split('/').next().unwrap_or("").to_string();
                 }
@@ -1166,11 +1200,20 @@ pub fn run_pod_sandbox(
             let conf = delonix_sdn::cni::with_port_mappings(&conf, &asked_ports);
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
+            // The pod-identity keys a CNI runtime owes a pod-aware plugin
+            // (Cilium, Calico): without them the plugin cannot map this sandbox
+            // to its Kubernetes pod, cannot read the pod's labels, and leaves
+            // the endpoint in `reserved:init` — which its own default policy
+            // isolates, so pods were reachable only on their own node. The keys
+            // are the kubelet's own (`K8S_POD_*`); `K8S_POD_INFRA_CONTAINER_ID`
+            // is the sandbox id, which is also our `CNI_CONTAINERID` (`pod`).
+            let cni_args = cni_k8s_args(&md.namespace, &md.name, &md.uid, &pod);
             let cidr = delonix_sdn::cni::attach_named_netns(
                 &conf,
                 &pod,
                 &pod,
                 delonix_sdn::cni::DEFAULT_IFNAME,
+                Some(&cni_args),
             )
             .map_err(|e| Status::internal(format!("CNI ADD of sandbox {pod}: {e}")))?;
             cni_ip = cidr.split('/').next().unwrap_or("").to_string();
@@ -3412,6 +3455,30 @@ fn publishable_port_specs(mappings: &[PortMapping]) -> Result<Vec<String>, Statu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The CNI_ARGS a pod-aware plugin needs, in the kubelet's spelling and
+    /// order; this is what was MISSING and left Cilium pods in `reserved:init`.
+    #[test]
+    fn cni_k8s_args_carries_the_pod_identity_keys() {
+        let a = cni_k8s_args("kube-system", "coredns-xyz", "uid-123", "cri-deadbeef");
+        assert_eq!(
+            a,
+            "IgnoreUnknown=1;K8S_POD_NAMESPACE=kube-system;K8S_POD_NAME=coredns-xyz;\
+             K8S_POD_INFRA_CONTAINER_ID=cri-deadbeef;K8S_POD_UID=uid-123"
+        );
+    }
+
+    /// A value carrying the `;`/`=` that CNI_ARGS parses on is dropped, never
+    /// allowed to rewrite the keys after it; an empty one is simply omitted.
+    #[test]
+    fn cni_k8s_args_drops_unsafe_or_empty_values() {
+        let a = cni_k8s_args("ns", "", "u=x;evil=1", "cri-1");
+        // name empty → omitted; uid has `;`/`=` → dropped; the rest stay.
+        assert_eq!(
+            a,
+            "IgnoreUnknown=1;K8S_POD_NAMESPACE=ns;K8S_POD_INFRA_CONTAINER_ID=cri-1"
+        );
+    }
 
     /// A pod's limits reach `container run` — they used to be read by nobody.
     #[test]

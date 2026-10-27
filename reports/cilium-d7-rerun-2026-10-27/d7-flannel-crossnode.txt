@@ -1,0 +1,8 @@
+### CROSS-NODE flannel: f-cp1 -> f-w1:8080
+OK-w1
+  => OK
+### DNS/serviço: nslookup kubernetes.default via ClusterIP
+Name:	kubernetes.default.svc.cluster.local
+Address: 10.96.0.1
+
+

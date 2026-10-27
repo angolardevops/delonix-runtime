@@ -325,8 +325,12 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmResumeSameIdentity => bin(S::Supported {
                 evidence: "check:CH: vm start",
             }),
-            C::VmClone => S::NotImplemented,
-            C::VmTemplate => S::NotImplemented,
+            C::VmClone => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-clone.sh",
+            }),
+            C::VmTemplate => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-clone.sh",
+            }),
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:CH: vm resize --vcpus 2 com a VM parada",
             }),
@@ -365,11 +369,15 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmHotplugDiskAdd => bin(S::Supported {
                 evidence: "live:scripts/vm-native-ch-hotplug.sh",
             }),
-            C::VmHotplugDiskRemove => S::NotImplemented,
+            C::VmHotplugDiskRemove => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-hotplug.sh",
+            }),
             C::VmHotplugNicAdd => bin(S::Supported {
                 evidence: "live:scripts/vm-native-ch-hotplug.sh",
             }),
-            C::VmHotplugNicRemove => S::NotImplemented,
+            C::VmHotplugNicRemove => bin(S::Supported {
+                evidence: "live:scripts/vm-native-ch-hotplug.sh",
+            }),
             C::VmExtraDisks => S::UnsupportedByProvider {
                 reason: "the CH command line carries one root disk and the seed; `extraDisks` are refused for this backend",
             },
@@ -495,8 +503,8 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 // actually undone. See scripts/vm-native-ch-backup.sh.
                 evidence: "live:scripts/vm-native-ch-backup.sh",
             }),
-            C::VmMigrationCold => bin(S::Partial {
-                detail: "`vm migrate`: stop, copy over SSH, import, start; no battery",
+            C::VmMigrationCold => bin(S::Supported {
+                evidence: "e2e:vm: a stopped CH VM cold-migrates — flatten, import, boot on the target with state intact (cloud-hypervisor, guestfish)",
             }),
             C::VmMigrationLive => S::UnsupportedByProvider {
                 reason: "ADR-0031: CH migrates memory only, never the disk",
@@ -532,18 +540,26 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmIpObserved => bin(S::Partial {
                 detail: "stays PARTIAL by provenance, not for lack of a proof: the reported address is COMPUTED from the MAC (`dhcp_lease_ip`, deterministic; `ip_is_predicted` -> `Predicted`), never read back from a lease file or a guest agent, which is what `vm.ip.observed` asks for. `vm create --wait` (`wait_for_boot` -> `delonix_sdn::infra::sdn_reachable`) ARP-probes the SDN and reads `ip neigh` REACHABLE for the (computed IP, guest MAC), and `scripts/vm-native-ch-vm-partials.sh` confirms live that the reported address equals the guest's OWN address — but confirming a computed address is reachable is not observing it, so it is not promoted",
             }),
-            C::MetricsPrometheus => S::Partial {
-                detail: "`delonix_vms_running/total` only",
+            C::MetricsPrometheus => S::Supported {
+                evidence: "e2e:metrics: /metrics exports per-VM cpu and memory series for a Cloud Hypervisor VM (cloud-hypervisor)",
             },
+            // Per-VM network IS now wired: `collect_workload_series` fills a VM's
+            // rx/tx from its tap via `delonix_sdn::infra::vm_tap_net_bytes` (read
+            // in the ingress holder's netns, host→guest swapped). Still `partial`
+            // because the live proof needs that holder's netns up, which the
+            // metrics battery does not stand up — the parser is unit-tested, the
+            // end-to-end render is not yet green on a host.
             C::MetricsPerWorkloadNetwork => S::Partial {
-                detail: "the tap's counters are readable in the holder; not exported per VM",
+                detail: "a running VM's tap rx/tx is read per VM (`vm_tap_net_bytes`) and exported as `delonix_workload_network_*{kind=\"vm\"}`; not yet proven live end to end (needs the ingress holder's netns)",
             },
             C::HostHealth => S::Supported {
                 evidence: "check:system info",
             },
-            C::HostCapacity => S::NotImplemented,
-            C::TransportVerified => S::Partial {
-                detail: "a unix socket per VMM, owned by the engine's uid",
+            C::HostCapacity => S::Supported {
+                evidence: "test:crates/providers/delonix-provider-cloud-hypervisor/src/lib.rs::host_capacity_reports_the_local_host",
+            },
+            C::TransportVerified => S::Supported {
+                evidence: "e2e:vm: the Cloud Hypervisor control transport is a per-VM unix socket owned by the engine, not a network port (cloud-hypervisor)",
             },
             C::CredentialInVault => S::UnsupportedByProvider {
                 reason: "no credential exists: the VMM is a child of the engine",
@@ -1402,6 +1418,126 @@ impl VmBackend for CloudHypervisorBackend {
         ))
     }
 
+    /// `vm update --disk-rm` on a RUNNING VM (ADR-0068 D10, Phase 6): detach an
+    /// extra disk over Cloud Hypervisor's `vm.remove-device`. CH removes by the
+    /// device id it assigned at add (`_diskN`), reported ONLY by `vm.info` (the
+    /// add discards it), so the id is rediscovered by the disk's `source` path —
+    /// the stable key the record keeps. A path the VMM no longer carries means
+    /// only the record still names it: drop it and report done. The record
+    /// loses the disk (`removed`) only AFTER `vm.info` confirms the VMM dropped
+    /// it (D6 reverse). This is a VMM-level unplug with no guest-release
+    /// negotiation (unlike libvirt's cooperative `detach-device`).
+    fn hotplug_remove_disk(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        disk: &ExtraDisk,
+        wait: Duration,
+        removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<HotplugOutcome> {
+        let carried = || -> delonix_model::Result<Option<String>> {
+            let (status, body) =
+                ch_api_call(&vm.api_socket, "GET", "/api/v1/vm.info", Duration::from_secs(10))?;
+            if !http_status_is_2xx(&status) {
+                return Err(delonix_model::Error::from(Error::CloudHypervisorApi(format!(
+                    "cloud-hypervisor vm.info for VM '{}': {}",
+                    vm.name,
+                    if status.is_empty() { "no response" } else { &status }
+                ))));
+            }
+            Ok(ch_vm_info_device_id(&body, "disks", "path", &disk.source))
+        };
+        let Some(id) = carried()? else {
+            removed()?;
+            return Ok(HotplugOutcome::Complete);
+        };
+        ch_remove_device(&vm.api_socket, &vm.name, &id)?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            if carried()?.is_none() {
+                removed()?;
+                return Ok(HotplugOutcome::Complete);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(HotplugOutcome::Partial {
+                    reason: format!(
+                        "cloud-hypervisor accepted vm.remove-device '{id}' but vm.info still \
+                         lists the disk at '{}'",
+                        disk.source
+                    ),
+                });
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    /// `vm update --nic-rm` on a RUNNING VM (ADR-0068 D10, Phase 6): detach an
+    /// extra NIC over `vm.remove-device`, matched by its pinned MAC against
+    /// `vm.info`'s `net` (same id-rediscovery as the disk). After the VMM drops
+    /// it, tear down exactly the tap the add laid on the SDN — recomputed from
+    /// the MAC, the mirror of `stop`'s per-NIC teardown — so no tap outlives the
+    /// NIC. The record loses the NIC (`removed`) only after `vm.info` confirms.
+    fn hotplug_remove_nic(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        nic: &ExtraNic,
+        wait: Duration,
+        removed: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<HotplugOutcome> {
+        let mac = nic.mac.clone().ok_or_else(|| {
+            delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}': the NIC to remove has no pinned MAC — stop the VM and remove it by \
+                 the next boot's definition",
+                vm.name
+            )))
+        })?;
+        let carried = || -> delonix_model::Result<Option<String>> {
+            let (status, body) =
+                ch_api_call(&vm.api_socket, "GET", "/api/v1/vm.info", Duration::from_secs(10))?;
+            if !http_status_is_2xx(&status) {
+                return Err(delonix_model::Error::from(Error::CloudHypervisorApi(format!(
+                    "cloud-hypervisor vm.info for VM '{}': {}",
+                    vm.name,
+                    if status.is_empty() { "no response" } else { &status }
+                ))));
+            }
+            Ok(ch_vm_info_device_id(&body, "net", "mac", &mac))
+        };
+        // The tap this NIC's add laid down, torn down once the VMM drops the NIC.
+        let teardown_tap = || {
+            if let Ok(net) = delonix_compute::vm_registry::network() {
+                let network = nic.source.as_deref().unwrap_or(&vm.network);
+                let owner = ch_extra_nic_owner(&vm.name, &mac);
+                let lease = net.lease_ip(network, &mac);
+                net.detach_tap(&owner, lease.as_deref());
+            }
+        };
+        let Some(id) = carried()? else {
+            removed()?;
+            teardown_tap();
+            return Ok(HotplugOutcome::Complete);
+        };
+        ch_remove_device(&vm.api_socket, &vm.name, &id)?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            if carried()?.is_none() {
+                removed()?;
+                teardown_tap();
+                return Ok(HotplugOutcome::Complete);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(HotplugOutcome::Partial {
+                    reason: format!(
+                        "cloud-hypervisor accepted vm.remove-device '{id}' but vm.info still \
+                         lists the NIC with MAC {mac}"
+                    ),
+                });
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+
     // ---- snapshots -------------------------------------------------------
     //
     // OFFLINE, in the VM's own qcow2 (`qemu-img snapshot`) — the same kind of
@@ -1638,6 +1774,27 @@ fn ch_api_put(sock: &str, path: &str) -> Result<()> {
             } else {
                 &status_line
             }
+        )))
+    }
+}
+
+/// `vm.remove-device {"id":<id>}` — the one hot-detach verb (ADR-0068 D10):
+/// Cloud Hypervisor unplugs the device the `_diskN`/`_netN` id names and answers
+/// 204. Errors name the VM and the id so a failed detach is diagnosable.
+fn ch_remove_device(sock: &str, vm_name: &str, id: &str) -> Result<()> {
+    let (status, _) = ch_api_call_with_body(
+        sock,
+        "PUT",
+        "/api/v1/vm.remove-device",
+        Some(&format!("{{\"id\":{}}}", json_string(id))),
+        Duration::from_secs(10),
+    )?;
+    if http_status_is_2xx(&status) {
+        Ok(())
+    } else {
+        Err(Error::CloudHypervisorApi(format!(
+            "cloud-hypervisor vm.remove-device '{id}' for VM '{vm_name}': {}",
+            if status.is_empty() { "no response" } else { &status }
         )))
     }
 }
@@ -2104,6 +2261,38 @@ fn vm_info_memory_actual_bytes(body: &[u8]) -> Option<u64> {
     digits.parse().ok()
 }
 
+/// Pure: the Cloud Hypervisor device id (`_diskN`/`_netN`) of the entry in a
+/// `vm.info` body's `config.<array>` whose `<field>` equals `value` — the id
+/// `vm.remove-device` needs. CH assigns the id at add time and reports it only
+/// here (the add call discards it), so a hot-remove rediscovers it by the
+/// stable key the record DID keep: a disk's `path`, a NIC's `mac`. `None` =
+/// no such entry, i.e. the VMM does not carry it. Entries are flat objects
+/// (all scalar fields), so a whitespace-strip + split on `},{` is enough — the
+/// same "no JSON parser for a handful of string fields" idiom as the siblings.
+fn ch_vm_info_device_id(body: &[u8], array: &str, field: &str, value: &str) -> Option<String> {
+    let compact: String = String::from_utf8_lossy(body)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let key = format!("\"{array}\":[");
+    let start = compact.find(&key)? + key.len();
+    let arr = &compact[start..compact[start..].find(']').map(|e| start + e)?];
+    for entry in arr.split("},{") {
+        if ch_entry_string_field(entry, field).as_deref() == Some(value) {
+            return ch_entry_string_field(entry, "id");
+        }
+    }
+    None
+}
+
+/// Pure: the value of `"field":"..."` in one compacted flat JSON object.
+fn ch_entry_string_field(entry: &str, field: &str) -> Option<String> {
+    let key = format!("\"{field}\":\"");
+    let at = entry.find(&key)? + key.len();
+    let end = entry[at..].find('"')? + at;
+    Some(entry[at..end].to_string())
+}
+
 /// Pure: how many of Cloud Hypervisor's own `vcpuN` thread names are present
 /// — ADR-0068 D5's vCPU truth, never `config.boot_vcpus` (measured, Annex A
 /// finding 3: a `vm.resize` that answers 204 can leave the OLD thread count
@@ -2173,9 +2362,40 @@ fn ch_socket_paths_fit(vmdir: &Path, cfg: &VmConfig) -> Result<()> {
     Ok(())
 }
 
+/// This host's capacity to run Cloud Hypervisor VMs — CPU, memory, swap and the
+/// disk the VM images live on (`vmdir`). A CH VM runs on THIS machine, so the
+/// "node" of `host.capacity` is this host; the shared node reader measures it
+/// with the "never a silent zero" discipline. The parallel of Proxmox's
+/// `Client::host_capacity`, for the local host.
+pub fn host_capacity(vmdir: &Path) -> delonix_node::host::HostCapacity {
+    delonix_node::host::capacity(vmdir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `host.capacity` on the real host, through the provider's own entry: a CH
+    /// host always has a CPU, RAM and a VM-image filesystem, and none of the
+    /// three reports more "in use" than it has.
+    #[test]
+    fn host_capacity_reports_the_local_host() {
+        let cap = host_capacity(Path::new("."));
+        assert!(cap.cpus >= 1, "a CH host has at least one CPU: {cap:?}");
+        assert!(cap.mem_total_bytes > 0, "it reports total RAM: {cap:?}");
+        assert!(
+            cap.mem_used_bytes <= cap.mem_total_bytes,
+            "RAM in use never exceeds total: {cap:?}"
+        );
+        assert!(
+            cap.disk_total_bytes > 0,
+            "it reports the VM-image disk: {cap:?}"
+        );
+        assert!(
+            cap.disk_used_bytes <= cap.disk_total_bytes,
+            "disk in use never exceeds total: {cap:?}"
+        );
+    }
 
     /// REGRESSION: every tool whose OUTPUT this crate parses runs with a
     /// pinned locale. `virsh` is a gettext program, and with its catalogues
@@ -2267,6 +2487,38 @@ mod tests {
     fn shq_escapes_quotes() {
         assert_eq!(shq("a b"), "'a b'");
         assert_eq!(shq("a'b"), "'a'\\''b'");
+    }
+
+    /// The hot-remove rediscovers Cloud Hypervisor's device id from a `vm.info`
+    /// body by the stable key the record keeps — a disk's path, a NIC's MAC.
+    /// Bodies are the REAL shapes captured live from CH v53 (`vm.info`), with
+    /// the pretty-printer whitespace it emits.
+    #[test]
+    fn ch_vm_info_device_id_matches_by_path_and_mac_on_the_real_shapes() {
+        let disks = br#"{"config": {"disks": [{"id": "_disk0", "path": "/vms/a.qcow2", "readonly": false, "image_type": "Qcow2"}, {"id": "_disk3", "path": "/tmp/extra.raw", "readonly": false, "image_type": "Raw"}], "net": []}}"#;
+        assert_eq!(
+            super::ch_vm_info_device_id(disks, "disks", "path", "/tmp/extra.raw").as_deref(),
+            Some("_disk3")
+        );
+        // The boot disk is found by its own path, never confused with the extra.
+        assert_eq!(
+            super::ch_vm_info_device_id(disks, "disks", "path", "/vms/a.qcow2").as_deref(),
+            Some("_disk0")
+        );
+        // A path the VMM does not carry: no id.
+        assert_eq!(
+            super::ch_vm_info_device_id(disks, "disks", "path", "/tmp/gone.raw"),
+            None
+        );
+        let net = br#"{"config": {"disks": [], "net": [{"id": "_net2", "tap": "vt0e4f452e", "mac": "52:54:00:4f:45:2e", "host_mac": "aa:45:ab:d2:0e:29"}]}}"#;
+        assert_eq!(
+            super::ch_vm_info_device_id(net, "net", "mac", "52:54:00:4f:45:2e").as_deref(),
+            Some("_net2")
+        );
+        assert_eq!(
+            super::ch_vm_info_device_id(net, "net", "mac", "52:54:00:00:00:00"),
+            None
+        );
     }
     /// The Cloud Hypervisor half of the same rule. Revert the fix and this fails:
     /// capture silently produced `socket=`, and `<name>.serial` stayed unwritten.

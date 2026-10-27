@@ -1,0 +1,34 @@
+info created network "dnp-350663be" for cluster "dnp" (removed again by `cluster destroy`)
+info Creating cluster "dnp" (kubeadm, delonix-vm-k8s:1.37)...
+ • Provisioning 1 control-plane(s) 📦
+ ✓ Provisioning 1 control-plane(s) 📦 15.9s
+ • Provisioning 1 worker(s) 📦
+ ✓ Provisioning 1 worker(s) 📦 17.2s
+delonix-cri: next to delonix — /home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/release/delonix-cri (sha256 24a667b8d8283e4b5cb0f08699ca450b54a3c11db503f0abdef3f6c056972cd3)
+ ○ Preparing 2 host(s)
+ ○ Bootstrapping control-plane (kubeadm init)
+ ○ Fetching kubeconfig
+ ○ Installing the cilium pod network
+ ○ Joining 1 worker(s)
+ ○ Waiting for all nodes to be Ready
+ • Preparing 2 host(s) 🔧
+[dnp-cp1] delonix-cri differs from the resolved one (sha256 24a667b8d828) — replacing it and restarting the service
+[dnp-w1] delonix-cri differs from the resolved one (sha256 24a667b8d828) — replacing it and restarting the service
+[dnp-w1] the node's delonix CLI differs from this one's (sha256 123a3bc35b75) — replacing it (delonix-cri re-execs it to spawn every container)
+[dnp-cp1] the node's delonix CLI differs from this one's (sha256 123a3bc35b75) — replacing it (delonix-cri re-execs it to spawn every container)
+ ✓ Preparing 2 host(s) 🔧 6.5s
+ • Bootstrapping control-plane (kubeadm init) 🕹️
+ ✓ Bootstrapping control-plane (kubeadm init) 🕹️ 8.7s
+ • Fetching kubeconfig 📇
+merged into /home/walter/.kube/config as context 'dnp' — kubectl now points here
+ ✓ Fetching kubeconfig 📇 0.2s
+ • Installing the cilium pod network 🔌
+ ✓ Installing the cilium pod network 🔌 0.9s
+ • Joining 1 worker(s) 🚜
+ ✓ Joining 1 worker(s) 🚜 6.2s
+ • Waiting for the cilium pod network and all nodes to be Ready ⏳
+ ✓ Waiting for the cilium pod network and all nodes to be Ready ⏳ 1m57s
+info cilium agent Ready on 2/2 node(s); 2/2 node(s) Ready
+info cluster "dnp" ready
+kubeconfig: /home/walter/.local/share/delonix/clusters/dnp-kubeconfig.yaml
+export KUBECONFIG=/home/walter/.local/share/delonix/clusters/dnp-kubeconfig.yaml

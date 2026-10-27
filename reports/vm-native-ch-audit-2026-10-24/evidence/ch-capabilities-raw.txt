@@ -1,0 +1,97 @@
+Provider:       cloud-hypervisor
+Kind:           compute
+Available:      yes
+Health:         healthy (Ok)
+Catalog:        1.4.0
+DOMAIN              CAPABILITY                         STATE                         DETAIL
+inventory           provider.availability              partial                       `available()` checks the binary; `provider ls` additionally probes /dev/kvm and the firmware
+inventory           provider.readback                  supported                     check:CH: ls nomeia-o
+inventory           provider.events                    not-implemented               
+inventory           provider.async-operations          not-implemented               
+vm-compute          vm.create                          supported                     e2e:vm: os mesmos snapshots no backend cloud-hypervisor
+vm-compute          vm.start                           supported                     check:CH: vm start
+vm-compute          vm.stop                            supported                     check:CH: vm stop
+vm-compute          vm.destroy                         partial                       terminates the VMM (pid + starttime guard) and removes the overlay; no named battery check
+vm-compute          vm.restart                         partial                       stop-then-start; no battery check names it
+vm-compute          vm.pause                           partial                       `PUT /api/v1/vm.pause` on the VMM socket; no battery check
+vm-compute          vm.resume                          partial                       `vm.resume` on the VMM socket; no battery check
+vm-compute          vm.resume-same-identity            supported                     check:CH: vm start
+vm-compute          vm.clone                           not-implemented               
+vm-compute          vm.template                        not-implemented               
+vm-compute          vm.resize.cold                     partial                       `vm resize` rewrites vcpus/memory in the record and `vm start` rebuilds the vmm command line from it; no battery check yet
+vm-compute          vm.hotplug.cpu.add                 partial                       `vm update --vcpus` via `vm.resize`, add only; always reports `partial` — no channel to confirm the guest onlined the vCPU (ADR-0068 D4/Q5), no battery check yet
+vm-compute          vm.hotplug.cpu.remove              not-implemented               
+vm-compute          vm.hotplug.memory.add              partial                       `vm update --memory` via `vm.resize` over a virtio-mem region declared at create (ADR-0068 D3); `memory_actual_size` confirms the guest only with a driver and the onlining policy (D8), no battery check yet
+vm-compute          vm.hotplug.memory.remove           not-implemented               
+vm-compute          vm.hotplug.disk.add                not-implemented               
+vm-compute          vm.hotplug.disk.remove             not-implemented               
+vm-compute          vm.hotplug.nic.add                 not-implemented               
+vm-compute          vm.hotplug.nic.remove              not-implemented               
+vm-compute          vm.disks.extra                     unsupported-by-provider       the CH command line carries one root disk and the seed; `extraDisks` are refused for this backend
+vm-compute          vm.nics.extra                      unsupported-by-provider       one tap on the SDN; `extraNics` are refused for this backend
+vm-compute          vm.disk.resize                     supported                     check:CH: o overlay cresceu para exactamente 1 GiB
+vm-compute          vm.device.pci-passthrough          partial                       `--device path=<sysfs>` per validated address; no IOMMU host in the battery
+vm-compute          vm.device.tpm                      unsupported-by-provider       no vTPM device is emitted for Cloud Hypervisor
+vm-compute          vm.cpu.model                       unsupported-by-provider       CH exposes the host CPU; no model selection is passed
+vm-compute          vm.cpu.pinning                     partial                       `cpuAffinity` becomes `--cpus affinity=`; not booted in the battery
+vm-compute          vm.memory.hugepages                partial                       `--memory hugepages=on`; unit-tested argument, pool not probed
+vm-compute          vm.cloud-init                      partial                       NoCloud seed ISO attached as a second disk; the battery never logs into a guest
+vm-compute          vm.restart-policy.native           unsupported-by-provider       the VMM has no crash policy; the engine's supervisor restarts it (`restart_policy_unsupervised`)
+vm-compute          vm.namespace-isolation             supported                     chaos:scen_namespace_isolation
+vm-compute          vm.antispoof                       partial                       the tap is pinned to its DHCP lease and the guest MAC in the bridge anti-spoofing table (`dlxspoof`, 2026-10-02; the old `ip` rule never matched); a booted guest got its lease and answered ARP through it, but no battery check forges from a guest yet
+vm-compute          vm.raw-definition                  unsupported-by-provider       no raw definition format exists for the CH command line
+containers          container.lifecycle                unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.exec                     unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.logs                     unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.hot-reconfigure          unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.resource-limits          unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.gpu.cdi                  unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.seccomp.custom-profile   unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.oom-detection            unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          pod.shared-network                 unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          pod.shared-ipc-uts                 unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          pod.shared-pid                     unsupported-by-provider       a VM provider; containers are the Linux provider's
+containers          container.images                   unsupported-by-provider       a VM provider; containers are the Linux provider's
+system-containers   system-container.lifecycle         unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.oci-image         unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.entrypoint-env    unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.exec              unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.logs              unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.exit-status       unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.network.bridge    unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.unprivileged      unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.snapshot          unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.resize            unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.backup            unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.clone             unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.firewall          unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+system-containers   system-container.move              unsupported-by-provider       a VM provider; a system container is the Proxmox provider's (ADR-0058)
+network             vm.network.nat                     unsupported-by-provider       no hypervisor NAT network: the tap joins the engine's SDN, which does the NAT
+network             vm.network.bridge                  unsupported-by-provider       the NIC is a tap on the SDN bridge inside the holder, never a host bridge
+network             vm.network.sdn                     supported                     check:CH: vm start
+network             vm.network.static-ip               unsupported-by-provider       the address is derived from the MAC by the engine's DHCP; a fixed IP is not honoured
+storage             storage.pools                      not-implemented               
+protection          vm.snapshot.disk                   supported                     check:CH: create com a VM parada
+protection          vm.snapshot.memory                 unsupported-by-provider       `vm.snapshot` of the VMM saves memory without the disk, which cannot be restored consistently; refused by design
+protection          vm.snapshot.restore                supported                     check:CH: restore
+protection          vm.snapshot.delete                 supported                     check:CH: rm com a VM parada
+protection          vm.snapshot.persistent             supported                     check:CH: ls nomeia-o
+protection          vm.backup.disk                     partial                       `backup create vm` copies the overlay of a STOPPED VM; a running CH VM holds the qcow2 exclusively
+protection          vm.backup.quiesced                 unsupported-by-provider       no guest agent channel; only an offline copy is consistent
+protection          vm.backup.restore                  partial                       `backup restore` re-imports the disk; battery covers the container kind only
+protection          container.backup-restore           unsupported-by-provider       a VM provider; containers are the Linux provider's
+mobility            vm.migration.cold                  partial                       `vm migrate`: stop, copy over SSH, import, start; no battery
+mobility            vm.migration.live                  unsupported-by-provider       ADR-0031: CH migrates memory only, never the disk
+mobility            vm.replication                     requires-external-component   shared or replicated VM storage outside the engine (ADR-0031)
+mobility            vm.high-availability               requires-external-component   a cluster manager with quorum and fencing
+console             vm.console.serial                  partial                       `vm console` bridges the tty to the VMM's serial socket; no battery
+console             vm.console.vnc                     unsupported-by-provider       no VNC device on the CH command line
+console             vm.guest-agent                     not-implemented               
+console             vm.ip.observed                     unsupported-by-provider       the address is PREDICTED from the MAC (`ip_is_predicted`); `--wait` verifies it by ARP instead
+metrics             metrics.prometheus                 partial                       `delonix_vms_running/total` only
+metrics             metrics.network.per-workload       partial                       the tap's counters are readable in the holder; not exported per VM
+metrics             host.health                        supported                     check:system info
+metrics             host.capacity                      not-implemented               
+access              access.transport-verified          partial                       a unix socket per VMM, owned by the engine's uid
+access              access.credential-in-vault         unsupported-by-provider       no credential exists: the VMM is a child of the engine
+

@@ -1,0 +1,18 @@
+### kubectl get nodes -o wide
+NAME        STATUS   ROLES           AGE     VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
+d7cil-cp1   Ready    control-plane   2m51s   v1.34.12   10.253.141.83   <none>        Ubuntu 24.04.4 LTS   6.8.0-134-generic   delonix://5.1.1
+d7cil-w1    Ready    <none>          2m40s   v1.34.12   10.253.73.117   <none>        Ubuntu 24.04.4 LTS   6.8.0-134-generic   delonix://5.1.1
+
+### cilium pods
+NAME           READY   STATUS    RESTARTS   AGE     IP              NODE        NOMINATED NODE   READINESS GATES
+cilium-6lxpz   1/1     Running   0          2m41s   10.253.141.83   d7cil-cp1   <none>           <none>
+cilium-px5mw   1/1     Running   0          2m40s   10.253.73.117   d7cil-w1    <none>           <none>
+cilium-6lxpz                        1/1     Running            0             2m41s
+cilium-envoy-7q484                  0/1     CrashLoopBackOff   3 (30s ago)   2m40s
+cilium-envoy-x9x5h                  0/1     CrashLoopBackOff   4 (21s ago)   2m40s
+cilium-operator-5cbd99564f-8fjkp    1/1     Running            0             2m40s
+cilium-operator-5cbd99564f-j2qm9    1/1     Running            0             2m40s
+cilium-px5mw                        1/1     Running            0             2m40s
+
+### cilium version/status via pod
+2/2 ready

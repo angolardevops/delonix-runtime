@@ -10093,6 +10093,17 @@ não encaminha pods entre nós — e `none`, que não instala nada e deixa todos
 (`docs/discovery/kaas-matrix-2026-10-08.md`), que nota que o estado «nó `Ready`» era
 *estruturalmente inalcançável* por este caminho.
 
+> **Emenda (2026-10-27).** O DX-6701 já **não** dispara: em multi-nó kubeadm o
+> `cni: default` **resolve para Cilium** (`net_profiles::resolved_profile`), o
+> cross-node por omissão, instalado e esperado pelo bootstrap sem opt-in. Um nó
+> continua com a bridge; `mode: kind` continua kindnet. Os dois defeitos de CRI
+> que bloqueavam o Cilium estão corrigidos — bpffs (#869/#871) e os `CNI_ARGS`
+> de identidade de pod (esta sessão: `delonix-sdn/cni.rs` + `delonix-cri`
+> `lifecycle.rs`, sem os quais os pods ficavam em `reserved:init` e o
+> cross-node era isolado). D7 do Cilium PROVADO ao vivo: nós Ready, pod-a-pod
+> cross-node e serviços. Ver ADR-0078 (emendada) e
+> `reports/cilium-d7-rerun-2026-10-27/`.
+
 Agora o `spec.cni` aceita `default | none | cilium | calico | flannel`, e um bloco
 `spec.network` novo exprime *como* (`dataplane`, `kubeProxy`, `mtu`, `nodeMtu`,
 `ipFamily`, `interface`, `multus`, `hubble`, `experimental`, `offline`). Dois módulos,

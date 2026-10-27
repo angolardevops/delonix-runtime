@@ -1,0 +1,27 @@
+info Creating cluster "k137"
+ • Ensuring node image (kindest/node:v1.37.0) 🖼
+pulling kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5…
+[2m2026-10-27T22:26:21.964841Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m pulling kindest/node:sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5 from registry-1.docker.io [3mrepo[0m[2m=[0mkindest/node [3mreference[0m[2m=[0msha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5 [3mhost[0m[2m=[0mregistry-1.docker.io
+[2m2026-10-27T22:26:23.046946Z[0m [32m INFO[0m [2mdelonix_oci::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+ ✓ Ensuring node image (kindest/node:v1.37.0) 🖼 54.6s
+ • Preparing nodes (1) 📦
+ • unpacking the image 📦
+ ✓ unpacking the image 📦 1.4s
+2bed17aa7015cfca
+ ✓ Preparing nodes (1) 📦 37.1s
+ • Writing configuration 📜
+ ✓ Writing configuration 📜 0.0s
+ • Starting control-plane 🕹️
+ ✓ Starting control-plane 🕹️ 59.3s
+ • Installing CNI (kindnet) 🔌
+ ✓ Installing CNI (kindnet) 🔌 0.1s
+ • Waiting for control-plane to be Ready ⏳
+ ✓ Waiting for control-plane to be Ready ⏳ 48.8s
+kubeconfig: /home/walter/.local/share/delonix/clusters/k137-kubeconfig.yaml
+ • Setting kubectl context to "delonix-k137" 📇
+ ✓ Setting kubectl context to "delonix-k137" 📇 0.0s
+
+You can now use your cluster:
+
+  kubectl cluster-info --context delonix-k137
+

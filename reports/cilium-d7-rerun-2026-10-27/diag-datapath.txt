@@ -1,0 +1,23 @@
+### [cp1] vxlan iface + MTU
+4: cilium_net@cilium_host: <BROADCAST,MULTICAST,NOARP,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default \    link/ether 7a:5a:1b:b9:4e:56 brd ff:ff:ff:ff:ff:ff
+5: cilium_host@cilium_net: <BROADCAST,MULTICAST,NOARP,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether ca:fc:5d:21:86:b4 brd ff:ff:ff:ff:ff:ff
+6: cilium_vxlan: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN mode DEFAULT group default \    link/ether fe:86:0a:32:e1:85 brd ff:ff:ff:ff:ff:ff
+--- pod iface MTU (lxc):
+8: lxc_health@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 1e:b1:81:9d:54:9e brd ff:ff:ff:ff:ff:ff link-netnsid 0
+22: lxcbc7f7f59f47c@if21: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether e6:64:60:ce:36:50 brd ff:ff:ff:ff:ff:ff link-netnsid 1
+42: lxc5867c50560da@if41: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether be:8a:07:14:28:8c brd ff:ff:ff:ff:ff:ff link-netnsid 4
+44: lxcea083e62e549@if43: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 5e:41:32:ca:ee:db brd ff:ff:ff:ff:ff:ff link-netnsid 2
+### [cp1] rota para o pod CIDR do w1 (10.244.1.0/24)
+10.244.1.122 dev cilium_host src 10.244.0.35 uid 0 
+    cache mtu 1400 
+### [cp1] endpoints cilium (busybox programado?)
+ENDPOINT   POLICY (ingress)   POLICY (egress)   IDENTITY   LABELS (source:key[=value])                                   IPv6   IPv4           STATUS   
+           ENFORCEMENT        ENFORCEMENT                                                                                                      
+547        Disabled           Disabled          4          reserved:health                                                      10.244.0.12    ready   
+896        Enabled            Enabled           5          reserved:init                                                        10.244.0.114   ready   
+1101       Enabled            Enabled           5          reserved:init                                                        10.244.0.242   ready   
+1978       Enabled            Enabled           5          reserved:init                                                        10.244.0.211   ready   
+2464       Enabled            Enabled           5          reserved:init                                                        10.244.0.89    ready   
+3178       Disabled           Disabled          1          k8s:node-role.kubernetes.io/control-plane                                           ready   
+                                                           k8s:node.kubernetes.io/exclude-from-external-load-balancers                                 
+                                                           reserved:host                                                                               

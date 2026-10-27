@@ -51,6 +51,15 @@ pub struct Target<'a> {
     pub netns: &'a str,
     /// Interface name inside the container (`CNI_IFNAME`).
     pub ifname: &'a str,
+    /// `CNI_ARGS` payload, already formatted as the spec's
+    /// `KEY=value;KEY=value` string — `None` omits the variable entirely.
+    /// This is how a pod-aware plugin (Cilium, Calico) learns which Kubernetes
+    /// pod a sandbox is: the kubelet-style keys `K8S_POD_NAMESPACE`,
+    /// `K8S_POD_NAME` and `K8S_POD_INFRA_CONTAINER_ID`. Without it the plugin
+    /// sees an anonymous endpoint, cannot fetch the pod's labels, and leaves it
+    /// in the `reserved:init` identity that its own default policy then
+    /// isolates — pods stay reachable only on their own node.
+    pub args: Option<&'a str>,
 }
 
 /// A CNI network configuration list (`*.conflist`): a chain of plugins that
@@ -297,13 +306,19 @@ fn build_env(cmd: Command_, t: Target, cni_path: &[PathBuf]) -> Vec<(String, Str
         .map(|p| p.display().to_string())
         .collect::<Vec<_>>()
         .join(":");
-    vec![
+    let mut env = vec![
         ("CNI_COMMAND".into(), cmd.as_str().into()),
         ("CNI_CONTAINERID".into(), t.container_id.into()),
         ("CNI_NETNS".into(), t.netns.into()),
         ("CNI_IFNAME".into(), t.ifname.into()),
         ("CNI_PATH".into(), path),
-    ]
+    ];
+    // Only when the caller supplied it: an empty `CNI_ARGS` is not the same as
+    // an absent one to every plugin, so we never send a blank.
+    if let Some(args) = t.args {
+        env.push(("CNI_ARGS".into(), args.into()));
+    }
+    env
 }
 
 /// Builds the stdin JSON for a plugin: its config, with the list's `cniVersion`/`name`
@@ -502,11 +517,13 @@ pub fn add(
     container_id: &str,
     netns: &str,
     ifname: &str,
+    args: Option<&str>,
 ) -> Result<CniResult> {
     let target = Target {
         container_id,
         netns,
         ifname,
+        args,
     };
     let mut prev: Option<CniResult> = None;
     for plugin in &net.plugins {
@@ -525,10 +542,13 @@ pub fn del(
     netns: &str,
     ifname: &str,
 ) -> Result<()> {
+    // DEL carries no `CNI_ARGS`: the pod-identity keys exist for ADD, where a
+    // plugin resolves the endpoint's labels; teardown keys off the container id.
     let target = Target {
         container_id,
         netns,
         ifname,
+        args: None,
     };
     let mut first_err: Option<Error> = None;
     for plugin in net.plugins.iter().rev() {
@@ -678,12 +698,13 @@ pub fn attach_named_netns(
     name: &str,
     container_id: &str,
     ifname: &str,
+    args: Option<&str>,
 ) -> Result<String> {
     crate::run_ok("ip", &["netns", "del", name]); // leftovers of a previous attempt
     crate::run("ip", &["netns", "add", name])?;
     crate::run_ok("ip", &["-n", name, "link", "set", "lo", "up"]);
     let path = named_netns_path(name);
-    match add(net, &plugin_dirs(), container_id, &path, ifname) {
+    match add(net, &plugin_dirs(), container_id, &path, ifname, args) {
         Ok(r) => Ok(r.ips.first().map(|i| i.address.clone()).unwrap_or_default()),
         Err(e) => {
             let _ = del(net, &plugin_dirs(), container_id, &path, ifname);
@@ -922,6 +943,7 @@ mod tests {
             container_id: "abc123",
             netns: "/proc/42/ns/net",
             ifname: "eth0",
+            args: None,
         };
         let env = build_env(Command_::Add, t, &dirs);
         let get = |k: &str| {
@@ -935,6 +957,27 @@ mod tests {
         assert_eq!(get("CNI_NETNS"), "/proc/42/ns/net");
         assert_eq!(get("CNI_IFNAME"), "eth0");
         assert_eq!(get("CNI_PATH"), "/opt/cni/bin:/usr/lib/cni");
+        // No args → no CNI_ARGS at all (an empty one is not the same as absent).
+        assert!(env.iter().all(|(k, _)| k != "CNI_ARGS"));
+    }
+
+    /// With pod-identity args, `CNI_ARGS` carries them verbatim — this is what
+    /// lets Cilium/Calico map the sandbox to its Kubernetes pod and resolve a
+    /// real identity instead of leaving it in `reserved:init`.
+    #[test]
+    fn build_env_carries_cni_args_when_present() {
+        let dirs = vec![PathBuf::from("/opt/cni/bin")];
+        let args = "K8S_POD_NAMESPACE=kube-system;K8S_POD_NAME=coredns-abc;\
+                    K8S_POD_INFRA_CONTAINER_ID=cri-deadbeef";
+        let t = Target {
+            container_id: "cri-deadbeef",
+            netns: "/run/netns/cri-deadbeef",
+            ifname: "eth0",
+            args: Some(args),
+        };
+        let env = build_env(Command_::Add, t, &dirs);
+        let cni_args = env.iter().find(|(k, _)| k == "CNI_ARGS").map(|(_, v)| v);
+        assert_eq!(cni_args.map(String::as_str), Some(args));
     }
 
     #[test]
@@ -1139,7 +1182,7 @@ esac
         let net = parse_config(r#"{"cniVersion":"1.0.0","name":"t","plugins":[{"type":"faux"}]}"#)
             .unwrap();
         let dirs = vec![bindir.clone()];
-        let r = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap();
+        let r = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0", None).unwrap();
         assert_eq!(r.ips[0].address, "10.9.9.9/24");
         assert_eq!(r.ips[0].gateway, "10.9.9.1");
         // DEL is best-effort and returns Ok.
@@ -1188,7 +1231,7 @@ esac
             })
             .to_string();
             let net = parse_config(&json).unwrap();
-            let err = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap_err();
+            let err = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0", None).unwrap_err();
             assert!(err.to_string().contains("not a path"), "{typ:?}: {err}");
             std::fs::write(conf.join("10-t.conflist"), &json).unwrap();
             let r = readiness(&conf, &dirs);
