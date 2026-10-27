@@ -346,23 +346,38 @@ impl ImageService for NodeApi {
 
     async fn push_image(
         &self,
-        _req: Request<PushImageRequest>,
+        req: Request<PushImageRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ImageService", "PushImage"))
+        let req = req.into_inner();
+        blocking("image push", move || {
+            crate::image_ops::push_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn build_image(
         &self,
-        _req: Request<BuildImageRequest>,
+        req: Request<BuildImageRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ImageService", "BuildImage"))
+        let req = req.into_inner();
+        blocking("image build", move || {
+            crate::image_ops::build_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn scan_image(
         &self,
-        _req: Request<ScanImageRequest>,
+        req: Request<ScanImageRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ImageService", "ScanImage"))
+        let req = req.into_inner();
+        blocking("image scan", move || {
+            crate::image_ops::scan_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 
