@@ -201,6 +201,127 @@ async fn the_container_lifecycle_runs_end_to_end_over_grpc() {
         "the logs did not carry the container's output: {seen:?}"
     );
 
+    // ---- Exec: run `echo` inside the running container; its stdout and a
+    // zero exit code come back on the bidirectional stream.
+    {
+        use delonix_node_api::proto::v1::{exec_request, exec_response, ExecRequest, ExecStart};
+        let start = ExecRequest {
+            frame: Some(exec_request::Frame::Start(ExecStart {
+                container: name.into(),
+                namespace: "default".into(),
+                command: vec!["echo".into(), "hello-from-exec".into()],
+                ..Default::default()
+            })),
+        };
+        let mut resp = c
+            .exec(tokio_stream::iter(vec![start]))
+            .await
+            .expect("Exec over gRPC")
+            .into_inner();
+        let (mut out, mut code) = (Vec::new(), None);
+        while let Ok(Some(frame)) = resp.message().await {
+            match frame.frame {
+                Some(exec_response::Frame::Stdout(b)) => out.extend_from_slice(&b),
+                Some(exec_response::Frame::Stderr(b)) => {
+                    eprintln!("exec stderr → {}", String::from_utf8_lossy(&b).trim_end())
+                }
+                Some(exec_response::Frame::ExitCode(c)) => code = Some(c),
+                None => {}
+            }
+        }
+        let text = String::from_utf8_lossy(&out);
+        eprintln!("exec echo → stdout={:?} exit={:?}", text.trim_end(), code);
+        assert!(
+            text.contains("hello-from-exec"),
+            "exec stdout missing: {text:?}"
+        );
+        assert_eq!(code, Some(0), "exec of `echo` did not exit 0");
+    }
+
+    // ---- Exec: a non-zero exit propagates as the `exit_code` frame.
+    {
+        use delonix_node_api::proto::v1::{exec_request, exec_response, ExecRequest, ExecStart};
+        let start = ExecRequest {
+            frame: Some(exec_request::Frame::Start(ExecStart {
+                container: name.into(),
+                namespace: "default".into(),
+                command: vec!["sh".into(), "-c".into(), "exit 7".into()],
+                ..Default::default()
+            })),
+        };
+        let mut resp = c
+            .exec(tokio_stream::iter(vec![start]))
+            .await
+            .expect("Exec over gRPC")
+            .into_inner();
+        let mut code = None;
+        while let Ok(Some(frame)) = resp.message().await {
+            if let Some(exec_response::Frame::ExitCode(c)) = frame.frame {
+                code = Some(c);
+            }
+        }
+        eprintln!("exec `sh -c 'exit 7'` → exit={code:?}");
+        assert_eq!(code, Some(7), "exec exit code did not propagate");
+    }
+
+    // ---- Exec with a tty: a real pseudo-terminal is allocated (the command
+    // sees `/dev/pts/N`), and a `Resize` frame reaches the master. Output is
+    // merged onto `stdout` (a tty has no separate stderr).
+    {
+        use delonix_node_api::proto::v1::{
+            exec_request, exec_response, ExecRequest, ExecStart, TerminalSize,
+        };
+        let frames = vec![
+            ExecRequest {
+                frame: Some(exec_request::Frame::Start(ExecStart {
+                    container: name.into(),
+                    namespace: "default".into(),
+                    // Give the resize a moment to land before `stty` reads it.
+                    command: vec![
+                        "sh".into(),
+                        "-c".into(),
+                        "sleep 0.3; echo size=$(stty size); tty".into(),
+                    ],
+                    tty: true,
+                    ..Default::default()
+                })),
+            },
+            ExecRequest {
+                frame: Some(exec_request::Frame::Resize(TerminalSize {
+                    rows: 30,
+                    cols: 100,
+                })),
+            },
+        ];
+        let mut resp = c
+            .exec(tokio_stream::iter(frames))
+            .await
+            .expect("Exec (tty) over gRPC")
+            .into_inner();
+        let (mut out, mut code) = (Vec::new(), None);
+        while let Ok(Some(frame)) = resp.message().await {
+            match frame.frame {
+                Some(exec_response::Frame::Stdout(b)) => out.extend_from_slice(&b),
+                Some(exec_response::Frame::Stderr(b)) => {
+                    panic!("a tty exec must not emit a stderr frame: {b:?}")
+                }
+                Some(exec_response::Frame::ExitCode(c)) => code = Some(c),
+                None => {}
+            }
+        }
+        let text = String::from_utf8_lossy(&out);
+        eprintln!("exec tty → {:?} exit={:?}", text.trim_end(), code);
+        assert!(
+            text.contains("/dev/pts/"),
+            "the tty exec did not run under a pseudo-terminal: {text:?}"
+        );
+        assert!(
+            text.contains("size=30 100"),
+            "the Resize frame did not reach the pty master: {text:?}"
+        );
+        assert_eq!(code, Some(0), "tty exec did not exit 0");
+    }
+
     // ---- Stop: graceful, then the record says it is no longer running.
     let stopped = c
         .stop_container(StopContainerRequest {

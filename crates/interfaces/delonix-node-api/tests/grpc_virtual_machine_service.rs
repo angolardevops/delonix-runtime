@@ -303,8 +303,7 @@ async fn virtual_machine_service_routes_resolve_over_rest() {
 
 /// `VirtualMachineService.Console` is in the contract and not served yet —
 /// the same "unserved RPC of a served service" answer every other
-/// not-yet-wired verb in this socket gives (`ContainerService.Exec`'s
-/// sibling, `NetworkService.ConnectContainer`'s).
+/// not-yet-wired verb in this socket gives (`NetworkService.ConnectContainer`'s).
 #[tokio::test]
 async fn console_is_not_served_yet() {
     let (_sock_dir, sock) = short_sock();

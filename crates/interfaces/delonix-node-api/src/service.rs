@@ -641,9 +641,10 @@ impl ContainerService for NodeApi {
 
     async fn exec(
         &self,
-        _req: Request<tonic::Streaming<ExecRequest>>,
+        req: Request<tonic::Streaming<ExecRequest>>,
     ) -> Result<Response<Self::ExecStream>, Status> {
-        Err(unserved("ContainerService", "Exec"))
+        let stream = crate::container_exec::serve(node::state_root(), req.into_inner()).await?;
+        Ok(Response::new(Box::pin(stream)))
     }
 
     type LogsStream =
