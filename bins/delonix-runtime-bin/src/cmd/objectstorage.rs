@@ -425,12 +425,24 @@ fn materialize(doc: &ManifestDoc) -> Result<ObjectStorageRecord> {
             write_credentials_secret(
                 &secret_name,
                 &Credentials {
-                    access_key: user.access_key,
-                    secret_key: user.secret_key,
+                    access_key: user.access_key.clone(),
+                    secret_key: user.secret_key.clone(),
                     endpoint: endpoint.clone(),
                     bucket: spec.bucket.clone(),
                 },
             )?;
+            // Create the declared bucket over S3, as the tenant's own identity
+            // (so the tenant owns it). An empty bucket holds no tenant data, so
+            // the engine stays on the right side of ADR-0081's boundary. This
+            // needs a reachable S3 endpoint to PUT against; without one declared
+            // the bucket is the tenant's to create with the handed-back keys,
+            // the prior behaviour. Idempotent: a re-apply of an existing bucket
+            // is not an error.
+            if let Some(ep) = &endpoint {
+                gateway()
+                    .create_bucket(&spec.bucket, &user.access_key, &user.secret_key, ep)
+                    .map_err(rgw_error)?;
+            }
             record.uid = Some(uid);
             record.endpoint = endpoint;
             record.max_size = quota.as_ref().and_then(|q| q.max_size.clone());
@@ -467,10 +479,21 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let name = &doc.metadata.name;
         let rec = materialize(doc)?;
         match rec.backend.as_str() {
+            BACKEND_CEPH_RGW if rec.endpoint.is_some() => println!(
+                "objectstorage/{name}: {}",
+                super::po::tf(
+                    "provisioned S3 user '{uid}' and bucket '{bucket}', credentials in secret/{secret}",
+                    &[
+                        ("uid", rec.uid.as_deref().unwrap_or("")),
+                        ("bucket", &rec.bucket),
+                        ("secret", &rec.credentials_secret_out),
+                    ],
+                )
+            ),
             BACKEND_CEPH_RGW => println!(
                 "objectstorage/{name}: {}",
                 super::po::tf(
-                    "provisioned S3 user '{uid}', credentials in secret/{secret} (bucket '{bucket}')",
+                    "provisioned S3 user '{uid}', credentials in secret/{secret} (declare an endpoint to create bucket '{bucket}', or create it with the handed-back keys)",
                     &[
                         ("uid", rec.uid.as_deref().unwrap_or("")),
                         ("secret", &rec.credentials_secret_out),

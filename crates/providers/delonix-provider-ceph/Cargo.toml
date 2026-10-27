@@ -14,6 +14,14 @@ repository.workspace = true
 delonix-storage = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# A bucket is created by an S3 PUT, which `radosgw-admin` cannot do — the one
+# place this crate speaks the gateway's data-plane protocol instead of shelling
+# out to a native tool. AWS Signature V2 (HMAC-SHA1 + base64), signed against an
+# RFC 1123 `Date`; `http://` endpoint, no TLS backend pulled in by default.
+reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots"] }
+ring = { workspace = true }
+base64 = { workspace = true }
+httpdate = { workspace = true }
 
 [dev-dependencies]
 delonix-storage = { workspace = true, features = ["test-support"] }

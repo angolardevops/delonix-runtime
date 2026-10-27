@@ -152,6 +152,9 @@ chacha20poly1305 = "0.10"
 getrandom = "0.2"
 ring = "0.17"
 base64 = "0.22"
+# RFC 1123 date formatting for the S3 Signature V2 `Date` header (RGW bucket
+# creation). Tiny, no_std-friendly, already in the tree via hyper.
+httpdate = "1"
 zstd = "0.13"
 # Kernel interfaces
 rustix = "1.1"

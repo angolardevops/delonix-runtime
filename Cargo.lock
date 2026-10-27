@@ -1025,7 +1025,11 @@ dependencies = [
 name = "delonix-provider-ceph"
 version = "5.1.1"
 dependencies = [
+ "base64 0.22.1",
  "delonix-storage",
+ "httpdate",
+ "reqwest 0.12.28",
+ "ring",
  "serde",
  "serde_json",
 ]
