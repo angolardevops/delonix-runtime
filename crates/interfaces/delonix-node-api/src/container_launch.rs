@@ -27,6 +27,8 @@
 //! continuous health check — are REFUSED (`UNIMPLEMENTED`), never silently
 //! dropped: a container that came up missing what it was created with is the
 //! degradation this engine refuses elsewhere (see [`crate::network_ops::create_with`]).
+//! Volume/bind `mounts` ARE served (translated to the `-v` strings the shared
+//! `resolve_mounts` reads); only published ports still need the slirp path.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -36,7 +38,7 @@ use tonic::Status;
 use crate::network_ops::status_of;
 use crate::operations::{self, Begun};
 use crate::proto::v1::{
-    Container, ContainerSpec, CreateContainerRequest, Operation, RestartMode,
+    mount, Container, ContainerSpec, CreateContainerRequest, Operation, RestartMode,
     StartContainerRequest, WaitContainerRequest, WaitContainerResponse,
 };
 
@@ -236,6 +238,32 @@ pub fn spec_to_run_opts(
                 )))
             }
         };
+    }
+
+    // ---- mounts: `Mount` → the `-v` string `resolve_mounts` reads (`source:
+    // target[:ro]`). A named volume and a host bind take the same shape; which it
+    // is comes from the `source` oneof. An empty target or a missing source is
+    // refused here, before the record exists — never dropped in silence.
+    for (i, m) in spec.mounts.iter().enumerate() {
+        if m.target.is_empty() {
+            return Err(Status::invalid_argument(format!(
+                "CreateContainer: spec.mounts[{i}].target is required"
+            )));
+        }
+        let source = match &m.source {
+            Some(mount::Source::Volume(v)) if !v.is_empty() => v.clone(),
+            Some(mount::Source::HostPath(p)) if !p.is_empty() => p.clone(),
+            _ => {
+                return Err(Status::invalid_argument(format!(
+                    "CreateContainer: spec.mounts[{i}] needs a non-empty volume or host_path source"
+                )))
+            }
+        };
+        let mut spec_str = format!("{source}:{}", m.target);
+        if m.read_only {
+            spec_str.push_str(":ro");
+        }
+        o.volumes.push(spec_str);
     }
 
     Ok(o)
@@ -660,6 +688,57 @@ mod tests {
             let err = spec_to_run_opts(&req("a", s.clone()), &s).err().unwrap();
             assert_eq!(err.code(), tonic::Code::Unimplemented, "{}", err.message());
         }
+    }
+
+    #[test]
+    fn mounts_become_the_dash_v_strings_a_named_volume_and_a_host_bind() {
+        use crate::proto::v1::{mount, Mount};
+        let mut s = spec("alpine");
+        s.mounts = vec![
+            Mount {
+                source: Some(mount::Source::Volume("data".into())),
+                target: "/var/lib/data".into(),
+                read_only: false,
+            },
+            Mount {
+                source: Some(mount::Source::HostPath("/srv/cfg".into())),
+                target: "/etc/cfg".into(),
+                read_only: true,
+            },
+        ];
+        let o = spec_to_run_opts(&req("web", s.clone()), &s).unwrap();
+        assert_eq!(o.volumes, ["data:/var/lib/data", "/srv/cfg:/etc/cfg:ro"]);
+    }
+
+    #[test]
+    fn a_mount_without_target_or_source_is_refused() {
+        use crate::proto::v1::{mount, Mount};
+        let mut s = spec("alpine");
+        s.mounts = vec![Mount {
+            source: Some(mount::Source::Volume("data".into())),
+            target: String::new(),
+            read_only: false,
+        }];
+        assert_eq!(
+            spec_to_run_opts(&req("a", s.clone()), &s)
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+        let mut s2 = spec("alpine");
+        s2.mounts = vec![Mount {
+            source: None,
+            target: "/x".into(),
+            read_only: false,
+        }];
+        assert_eq!(
+            spec_to_run_opts(&req("a", s2.clone()), &s2)
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
     }
 
     #[test]
