@@ -18,6 +18,7 @@ delonix-volume = { workspace = true }
 delonix-provider-btrfs = { workspace = true }
 delonix-provider-lvm = { workspace = true }
 delonix-provider-zfs = { workspace = true }
+delonix-provider-ceph = { workspace = true }
 libc = { workspace = true }
 serde_yaml = { workspace = true }
 

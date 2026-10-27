@@ -1843,6 +1843,163 @@ paths:
                         application/problem+json:
                             schema:
                                 $ref: '#/components/schemas/Problem'
+    /v1/storage/ceph/status:
+        get:
+            tags:
+                - StorageService
+            description: |-
+                The RADOS cluster's health as this node sees it. `pool` names a storage
+                 pool from the allowlist whose client identity (conf, cephx user) to read
+                 it with; empty uses the node's default Ceph configuration.
+            operationId: StorageService_GetCephStatus
+            parameters:
+                - name: pool
+                  in: query
+                  description: |-
+                    A storage pool from the allowlist, for its client identity. Empty = the
+                     node's default `/etc/ceph/ceph.conf` as `client.admin`.
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.CephStatus'
+                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
+    /v1/storage/objectstore/buckets:
+        get:
+            tags:
+                - StorageService
+            description: The buckets the object gateway holds, or those of one tenant (`uid`).
+            operationId: StorageService_ListObjectStoreBuckets
+            parameters:
+                - name: uid
+                  in: query
+                  description: Empty = every bucket; otherwise one tenant's.
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListObjectStoreBucketsResponse'
+                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
+    /v1/storage/objectstore/buckets/{bucket}:
+        get:
+            tags:
+                - StorageService
+            description: How full one bucket is.
+            operationId: StorageService_GetObjectStoreBucket
+            parameters:
+                - name: bucket
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ObjectStoreBucket'
+                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
+    /v1/storage/objectstore/users:
+        post:
+            tags:
+                - StorageService
+            description: Provisions (or reads back) a tenant's S3 identity on the gateway.
+            operationId: StorageService_CreateObjectStoreUser
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreateObjectStoreUserRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ObjectStoreUser'
+                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
+    /v1/storage/pools/{pool}/cephfs-subvolumes:
+        get:
+            tags:
+                - StorageService
+            description: The CephFS subvolumes a `cephfs` storage pool holds.
+            operationId: StorageService_ListCephfsSubvolumes
+            parameters:
+                - name: pool
+                  in: path
+                  description: A `cephfs` storage pool's name in the allowlist.
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListCephfsSubvolumesResponse'
+                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
+    /v1/storage/pools/{pool}/rbd-images:
+        get:
+            tags:
+                - StorageService
+            description: The RBD images a `ceph-rbd` storage pool holds.
+            operationId: StorageService_ListRbdImages
+            parameters:
+                - name: pool
+                  in: path
+                  description: A `ceph-rbd` storage pool's name in the allowlist.
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListRbdImagesResponse'
+                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
 components:
     schemas:
         Problem:
@@ -2023,6 +2180,29 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/delonix.node.v1.Link'
+        delonix.node.v1.CephStatus:
+            type: object
+            properties:
+                health:
+                    type: string
+                    description: '"HEALTH_OK" | "HEALTH_WARN" | "HEALTH_ERR". Empty when unreadable.'
+                fsid:
+                    type: string
+                mons:
+                    type: integer
+                    format: uint32
+                osds_up:
+                    type: integer
+                    format: uint32
+                osds_in:
+                    type: integer
+                    format: uint32
+                pools:
+                    type: integer
+                    format: uint32
+                reachable:
+                    type: boolean
+                    description: False when the cluster could not be reached — the other fields are then zero.
         delonix.node.v1.CloudInit:
             type: object
             properties:
@@ -2234,6 +2414,13 @@ components:
                 spec:
                     $ref: '#/components/schemas/delonix.node.v1.NetworkSpec'
                 request_id:
+                    type: string
+        delonix.node.v1.CreateObjectStoreUserRequest:
+            type: object
+            properties:
+                uid:
+                    type: string
+                display_name:
                     type: string
         delonix.node.v1.CreatePodRequest:
             type: object
@@ -2482,6 +2669,13 @@ components:
                  resource without building a URI by hand. In the contract, not invented by the REST
                  side — an extra JSON key the OpenAPI did not declare would make the published schema
                  lie. The REST encoding also mirrors each link in an RFC 8288 `Link` header.
+        delonix.node.v1.ListCephfsSubvolumesResponse:
+            type: object
+            properties:
+                subvolumes:
+                    type: array
+                    items:
+                        type: string
         delonix.node.v1.ListContainersResponse:
             type: object
             properties:
@@ -2514,6 +2708,13 @@ components:
                     items:
                         $ref: '#/components/schemas/delonix.node.v1.Link'
                     description: '"self", and "next" while there is another page.'
+        delonix.node.v1.ListObjectStoreBucketsResponse:
+            type: object
+            properties:
+                buckets:
+                    type: array
+                    items:
+                        type: string
         delonix.node.v1.ListOperationsResponse:
             type: object
             properties:
@@ -2548,6 +2749,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/delonix.node.v1.Link'
+        delonix.node.v1.ListRbdImagesResponse:
+            type: object
+            properties:
+                images:
+                    type: array
+                    items:
+                        type: string
         delonix.node.v1.ListSnapshotsResponse:
             type: object
             properties:
@@ -2681,6 +2889,29 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/delonix.node.v1.Link'
+        delonix.node.v1.ObjectStoreBucket:
+            type: object
+            properties:
+                name:
+                    type: string
+                owner:
+                    type: string
+                objects:
+                    type: string
+                size_bytes:
+                    type: string
+        delonix.node.v1.ObjectStoreUser:
+            type: object
+            properties:
+                uid:
+                    type: string
+                display_name:
+                    type: string
+                access_key:
+                    type: string
+                secret_key:
+                    type: string
+                    description: The secret is returned once, at creation — the tenant stores it.
         delonix.node.v1.Operation:
             type: object
             properties:
@@ -3218,5 +3449,6 @@ tags:
     - name: OperationService
     - name: PodService
     - name: StackService
+    - name: StorageService
     - name: VirtualMachineService
     - name: VolumeService

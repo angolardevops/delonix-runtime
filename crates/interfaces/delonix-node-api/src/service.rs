@@ -8,6 +8,7 @@ use tonic::{Request, Response, Status};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
+use crate::proto::v1::storage_service_server::{StorageService, StorageServiceServer};
 use crate::proto::v1::virtual_machine_service_server::{
     VirtualMachineService, VirtualMachineServiceServer,
 };
@@ -20,6 +21,12 @@ use crate::proto::v1::{
 use crate::proto::v1::{
     CancelOperationRequest, GetOperationRequest, ListOperationsRequest, ListOperationsResponse,
     WatchOperationRequest,
+};
+use crate::proto::v1::{
+    CephStatus, CreateObjectStoreUserRequest, GetCephStatusRequest, GetObjectStoreBucketRequest,
+    ListCephfsSubvolumesRequest, ListCephfsSubvolumesResponse, ListObjectStoreBucketsRequest,
+    ListObjectStoreBucketsResponse, ListRbdImagesRequest, ListRbdImagesResponse, ObjectStoreBucket,
+    ObjectStoreUser,
 };
 use crate::proto::v1::{
     ConnectContainerRequest, Container, CreateNetworkRequest, DeleteNetworkRequest,
@@ -283,6 +290,71 @@ impl VolumeService for NodeApi {
 }
 
 #[tonic::async_trait]
+impl StorageService for NodeApi {
+    async fn get_ceph_status(
+        &self,
+        req: Request<GetCephStatusRequest>,
+    ) -> Result<Response<CephStatus>, Status> {
+        let req = req.into_inner();
+        blocking("ceph status", move || crate::storage::ceph_status(&req))
+            .await?
+            .map(Response::new)
+    }
+
+    async fn list_rbd_images(
+        &self,
+        req: Request<ListRbdImagesRequest>,
+    ) -> Result<Response<ListRbdImagesResponse>, Status> {
+        let req = req.into_inner();
+        blocking("rbd images", move || crate::storage::list_rbd_images(&req))
+            .await?
+            .map(Response::new)
+    }
+
+    async fn list_cephfs_subvolumes(
+        &self,
+        req: Request<ListCephfsSubvolumesRequest>,
+    ) -> Result<Response<ListCephfsSubvolumesResponse>, Status> {
+        let req = req.into_inner();
+        blocking("cephfs subvolumes", move || {
+            crate::storage::list_cephfs_subvolumes(&req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_object_store_buckets(
+        &self,
+        req: Request<ListObjectStoreBucketsRequest>,
+    ) -> Result<Response<ListObjectStoreBucketsResponse>, Status> {
+        let req = req.into_inner();
+        blocking("rgw buckets", move || crate::storage::list_buckets(&req))
+            .await?
+            .map(Response::new)
+    }
+
+    async fn get_object_store_bucket(
+        &self,
+        req: Request<GetObjectStoreBucketRequest>,
+    ) -> Result<Response<ObjectStoreBucket>, Status> {
+        let req = req.into_inner();
+        blocking("rgw bucket", move || crate::storage::get_bucket(&req))
+            .await?
+            .map(Response::new)
+    }
+
+    async fn create_object_store_user(
+        &self,
+        req: Request<CreateObjectStoreUserRequest>,
+    ) -> Result<Response<ObjectStoreUser>, Status> {
+        let req = req.into_inner();
+        blocking("rgw user", move || crate::storage::create_user(&req))
+            .await?
+            .map(Response::new)
+    }
+}
+
+#[tonic::async_trait]
 impl VirtualMachineService for NodeApi {
     async fn get_virtual_machine(
         &self,
@@ -541,6 +613,10 @@ pub fn router() -> axum::Router {
             &format!("/{}/*rest", VirtualMachineServiceServer::<NodeApi>::NAME),
             VirtualMachineServiceServer::new(NodeApi),
         )
+        .route_service(
+            &format!("/{}/*rest", StorageServiceServer::<NodeApi>::NAME),
+            StorageServiceServer::new(NodeApi),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
@@ -611,6 +687,9 @@ async fn rest(
             }
             "VirtualMachineService" => {
                 transcode::dispatch_virtual_machine_service(&NodeApi, route.rpc, input).await
+            }
+            "StorageService" => {
+                transcode::dispatch_storage_service(&NodeApi, route.rpc, input).await
             }
             _ => Err(transcode::not_served(route)),
         }

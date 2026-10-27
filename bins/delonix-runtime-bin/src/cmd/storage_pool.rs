@@ -131,11 +131,16 @@ pub fn register_drivers() {
                 run.clone(),
                 mounts.clone(),
             )),
-            Arc::new(delonix_provider_lvm::LvmThinDriver::new(run, mounts)),
+            Arc::new(delonix_provider_lvm::LvmThinDriver::new(run.clone(), mounts.clone())),
         ];
         for d in drivers {
             // An id that is a literal cannot be empty, and the four differ;
             // the only refusals there are.
+            let _ = delonix_storage::registry::register(d);
+        }
+        // Ceph (ADR-0081): the `ceph-rbd` and `cephfs` drivers reach the
+        // cluster through the same `Run` the local drivers use.
+        for d in delonix_provider_ceph::drivers(run, mounts) {
             let _ = delonix_storage::registry::register(d);
         }
     });

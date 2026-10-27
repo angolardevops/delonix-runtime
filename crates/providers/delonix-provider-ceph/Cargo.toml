@@ -1,0 +1,22 @@
+[package]
+name = "delonix-provider-ceph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Native Ceph support (ADR-0081): the `ceph-rbd` and `cephfs` storage pool
+# drivers, and the RGW object-store port. Every backend is reached by running
+# the native Ceph client tools (`ceph`, `rbd`, `rados`, `radosgw-admin`) through
+# the storage `Run` port — the shape the zfs/lvm/btrfs drivers already have —
+# never by linking librados.
+[dependencies]
+delonix-storage = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+delonix-storage = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

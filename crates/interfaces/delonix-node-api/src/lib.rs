@@ -90,6 +90,7 @@ pub mod page;
 pub mod providers;
 pub mod selector;
 mod service;
+pub mod storage;
 pub mod transcode;
 pub mod vm_ops;
 pub mod vms;
