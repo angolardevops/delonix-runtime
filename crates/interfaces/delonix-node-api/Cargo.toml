@@ -14,6 +14,7 @@ repository.workspace = true
 
 [dependencies]
 delonix-compute = { workspace = true }
+delonix-oci = { workspace = true }
 delonix-node = { workspace = true }
 delonix-model = { workspace = true }
 delonix-vm = { workspace = true }

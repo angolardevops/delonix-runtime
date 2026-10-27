@@ -534,15 +534,22 @@ impl ContainerService for NodeApi {
         .map(Response::new)
     }
 
-    // ---- lifecycle write-path + stats + logs/exec: next passes of this slice.
-    // The methods exist in the contract; until they are plumbed to the engine
-    // they answer `unserved` (501 / UNIMPLEMENTED), the same as a VM `Console`.
+    // ---- lifecycle write-path + stats + logs. `UpdateContainer` and `Exec`
+    // are the two the contract still carries unserved here (own passes).
 
     async fn create_container(
         &self,
-        _req: Request<CreateContainerRequest>,
+        req: Request<CreateContainerRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ContainerService", "CreateContainer"))
+        let req = req.into_inner();
+        blocking("container create", move || {
+            let root = node::state_root();
+            let images = delonix_oci::ImageStore::open(&root)
+                .map_err(|e| crate::network_ops::status_of(&e.into()))?;
+            crate::container_launch::create_in(&root, &images, &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn update_container(
@@ -566,9 +573,14 @@ impl ContainerService for NodeApi {
 
     async fn start_container(
         &self,
-        _req: Request<StartContainerRequest>,
+        req: Request<StartContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("ContainerService", "StartContainer"))
+        let req = req.into_inner();
+        blocking("container start", move || {
+            crate::container_launch::start_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn stop_container(
@@ -597,9 +609,14 @@ impl ContainerService for NodeApi {
 
     async fn wait_container(
         &self,
-        _req: Request<WaitContainerRequest>,
+        req: Request<WaitContainerRequest>,
     ) -> Result<Response<WaitContainerResponse>, Status> {
-        Err(unserved("ContainerService", "WaitContainer"))
+        let req = req.into_inner();
+        blocking("container wait", move || {
+            crate::container_launch::wait_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn stats(
@@ -783,6 +800,7 @@ const MUTATIONS: &[&str] = &[
     "CreateSnapshot",
     "RestoreSnapshot",
     "DeleteSnapshot",
+    "CreateContainer",
     "DeleteContainer",
 ];
 

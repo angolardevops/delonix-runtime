@@ -6,9 +6,9 @@
 //! are synchronous and answer with the updated `Container` (the resource, like
 //! a VM `Pause`/`Resume`); `Delete` answers with an [`Operation`] persisted in
 //! the ledger before the work starts, replayable by `request_id`, exactly as
-//! [`crate::network_ops::delete_in`] does. `StartContainer` and
-//! `CreateContainer` need image/rootfs resolution and spec lowering and are a
-//! later pass; until then they stay `unserved`.
+//! [`crate::network_ops::delete_in`] does. `StartContainer`/`CreateContainer`
+//! (image/rootfs resolution, spec lowering, the fork-safe launch) live in their
+//! own module, [`crate::container_launch`].
 
 use std::path::Path;
 

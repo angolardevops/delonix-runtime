@@ -610,7 +610,6 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         }
     };
     for (method, path) in [
-        ("POST", "/v1/namespaces/default/containers/web:start"),
         ("POST", "/v1/namespaces/default/networks/lab:connect"),
         ("POST", "/v1/images:pull"),
         ("GET", "/v1/events:watch"),
@@ -623,6 +622,12 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         assert_eq!(v["grpc_status"], 12, "{v}");
         assert_eq!(v["instance"], path, "{v}");
     }
+    // `StartContainer` (`:start`) is served now: the custom verb resolves and
+    // the container read-path refuses a container nothing ever created with
+    // 404 (DX-4000), decided before any launch — not the 501 of an unserved
+    // route.
+    let (status, _, v) = call("POST", "/v1/namespaces/default/containers/web:start", "").await;
+    assert_eq!((status, v["dx"].as_str()), (404, Some("DX-4000")), "{v}");
     // `ListContainers` is served now: the container read-path answers 200 with
     // a (possibly empty) list, read from the process's state root — unlike the
     // routes above, which are still in the contract and not plumbed yet.
