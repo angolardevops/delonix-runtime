@@ -188,11 +188,40 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .await
         .expect_err("a network is removed in default");
     assert_eq!(delete.code(), tonic::Code::InvalidArgument);
+    // ConnectContainer is served now: an empty request is rejected for its
+    // missing network/container (INVALID_ARGUMENT), not the 501 of an unserved
+    // route.
     let connect = nets
         .connect_container(delonix_node_api::proto::v1::ConnectContainerRequest::default())
         .await
-        .expect_err("not served yet");
-    assert_eq!(connect.code(), tonic::Code::Unimplemented);
+        .expect_err("network and container are required");
+    assert_eq!(connect.code(), tonic::Code::InvalidArgument);
+    // Pinning an address is in the contract and not served on this path.
+    let pinned = nets
+        .connect_container(delonix_node_api::proto::v1::ConnectContainerRequest {
+            network: "backend".into(),
+            container: "web".into(),
+            ipv4_address: "10.0.0.5".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("pinning an address is unimplemented");
+    assert_eq!(pinned.code(), tonic::Code::Unimplemented);
+
+    // PodService.CreatePod/DeletePod are served now: each refuses its empty
+    // identity before any re-exec, not the 501 of an unserved route.
+    let mut podsvc =
+        delonix_node_api::proto::v1::pod_service_client::PodServiceClient::new(channel.clone());
+    let create = podsvc
+        .create_pod(delonix_node_api::proto::v1::CreatePodRequest::default())
+        .await
+        .expect_err("a pod needs a name and a spec");
+    assert_eq!(create.code(), tonic::Code::InvalidArgument);
+    let delete = podsvc
+        .delete_pod(delonix_node_api::proto::v1::DeletePodRequest::default())
+        .await
+        .expect_err("a pod delete needs a name");
+    assert_eq!(delete.code(), tonic::Code::InvalidArgument);
 
     // The operation record, over gRPC: an id nothing was ever given is NOT_FOUND.
     let mut ops =
@@ -610,10 +639,6 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         }
     };
     for (method, path) in [
-        ("POST", "/v1/namespaces/default/networks/lab:connect"),
-        // PodService read is served; CreatePod/DeletePod are not plumbed yet.
-        ("POST", "/v1/namespaces/default/pods"),
-        ("DELETE", "/v1/namespaces/default/pods/web"),
         ("GET", "/v1/events:watch"),
         // A stream is served over gRPC; the REST encoding does not carry one.
         ("GET", "/v1/operations/op-1:watch"),
@@ -660,9 +685,23 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         ("POST", "/v1/stacks/dd:plan", r#"{"manifest":""}"#),
         ("POST", "/v1/stacks/dd:apply", r#"{"manifest":""}"#),
         ("POST", "/v1/stacks/dd:destroy", r#"{"manifest":""}"#),
+        // NetworkService.ConnectContainer is served: an empty container is
+        // refused before any re-exec, not the 501 of an unserved route.
+        (
+            "POST",
+            "/v1/namespaces/default/networks/lab:connect",
+            r#"{"container":""}"#,
+        ),
+        // PodService.CreatePod is served: an empty name is refused before the
+        // manifest is rendered.
+        ("POST", "/v1/namespaces/default/pods", r#"{"name":""}"#),
     ] {
         let (status, _, v) = call(method, path, body).await;
-        assert_eq!((status, v["grpc_status"].as_i64()), (400, Some(3)), "{method} {path}: {v}");
+        assert_eq!(
+            (status, v["grpc_status"].as_i64()),
+            (400, Some(3)),
+            "{method} {path}: {v}"
+        );
     }
     assert!(v["images"].is_array(), "{v}");
     // The network mutations are served. This router answers from the

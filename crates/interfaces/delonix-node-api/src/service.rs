@@ -241,16 +241,26 @@ impl NetworkService for NodeApi {
 
     async fn connect_container(
         &self,
-        _req: Request<ConnectContainerRequest>,
+        req: Request<ConnectContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("NetworkService", "ConnectContainer"))
+        let req = req.into_inner();
+        blocking("network connect", move || {
+            crate::network_ops::connect_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn disconnect_container(
         &self,
-        _req: Request<DisconnectContainerRequest>,
+        req: Request<DisconnectContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("NetworkService", "DisconnectContainer"))
+        let req = req.into_inner();
+        blocking("network disconnect", move || {
+            crate::network_ops::disconnect_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 
@@ -410,20 +420,30 @@ impl PodService for NodeApi {
     }
 
     // Create (from a `kind: Pod` manifest) and Delete (removing every member)
-    // are in the contract and not served on the node API yet (DX-6001) —
-    // `delonix pod create` / removing the members does it.
+    // re-exec the CLI that owns the pod construction — the same fork-safe seam
+    // Start/Exec use. Both answer with a terminal Operation.
     async fn create_pod(
         &self,
-        _req: Request<CreatePodRequest>,
+        req: Request<CreatePodRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("PodService", "CreatePod"))
+        let req = req.into_inner();
+        blocking("pod create", move || {
+            crate::pod_ops::create_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn delete_pod(
         &self,
-        _req: Request<DeletePodRequest>,
+        req: Request<DeletePodRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("PodService", "DeletePod"))
+        let req = req.into_inner();
+        blocking("pod delete", move || {
+            crate::pod_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 

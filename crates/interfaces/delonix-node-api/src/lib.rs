@@ -92,6 +92,7 @@ pub mod image_ops;
 pub mod images;
 pub mod network_ops;
 pub mod networks;
+pub mod pod_ops;
 pub mod pods;
 pub mod stacks;
 pub mod node;
