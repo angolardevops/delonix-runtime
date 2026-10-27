@@ -611,7 +611,7 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
     };
     for (method, path) in [
         ("POST", "/v1/namespaces/default/networks/lab:connect"),
-        ("POST", "/v1/images:pull"),
+        ("POST", "/v1/images:push"),
         ("GET", "/v1/events:watch"),
         // A stream is served over gRPC; the REST encoding does not carry one.
         ("GET", "/v1/operations/op-1:watch"),
@@ -635,10 +635,20 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
     assert_eq!(status, 200, "ListContainers is served: {v}");
     assert!(v["containers"].is_array(), "{v}");
     // `ListImages` is served now: the image read-path answers 200 with a
-    // (possibly empty) list, read from the process's image store. Its mutations
-    // (`:pull` above) are still in the contract and not plumbed yet.
+    // (possibly empty) list, read from the process's image store. `:push` above
+    // is still in the contract and not plumbed yet.
     let (status, _, v) = call("GET", "/v1/images", "").await;
     assert_eq!(status, 200, "ListImages is served: {v}");
+    // `PullImage`/`DeleteImage` are served now: they refuse an empty reference
+    // with 400 (INVALID_ARGUMENT, DX-4002) — decided before any operation,
+    // not the 501 of an unserved route.
+    for (method, path, body) in [
+        ("POST", "/v1/images:pull", r#"{"reference":""}"#),
+        ("POST", "/v1/images:delete", r#"{"reference":""}"#),
+    ] {
+        let (status, _, v) = call(method, path, body).await;
+        assert_eq!((status, v["grpc_status"].as_i64()), (400, Some(3)), "{method} {path}: {v}");
+    }
     assert!(v["images"].is_array(), "{v}");
     // The network mutations are served. This router answers from the
     // process's state root, so only what they refuse before touching anything

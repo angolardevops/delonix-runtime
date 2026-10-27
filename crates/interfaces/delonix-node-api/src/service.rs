@@ -318,21 +318,30 @@ impl ImageService for NodeApi {
         .map(Response::new)
     }
 
-    // Mutations (pull/delete/push/build/scan) are in the contract and this
-    // engine does not serve them on the node API yet — `delonix pull`/`rmi`/
-    // `build`/`push`/`scan` do.
+    // Pull (re-exec of `delonix pull`) and Delete (in-process `ImageStore`
+    // remove) are served. Push/build/scan stay unserved (501, DX-6001).
     async fn pull_image(
         &self,
-        _req: Request<PullImageRequest>,
+        req: Request<PullImageRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ImageService", "PullImage"))
+        let req = req.into_inner();
+        blocking("image pull", move || {
+            crate::image_ops::pull_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn delete_image(
         &self,
-        _req: Request<DeleteImageRequest>,
+        req: Request<DeleteImageRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("ImageService", "DeleteImage"))
+        let req = req.into_inner();
+        blocking("image delete", move || {
+            crate::image_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn push_image(
