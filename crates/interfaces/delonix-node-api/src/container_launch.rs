@@ -22,13 +22,15 @@
 //! `Wait` polls the record (liveness-reconciled) until it leaves `Running`, with
 //! a ceiling so a client cannot hold a worker forever.
 //!
-//! Fields the node API does not serve on this path yet — ports (need the
-//! container's own slirp wired in), custom networks, pods, secret delivery, a
-//! continuous health check — are REFUSED (`UNIMPLEMENTED`), never silently
-//! dropped: a container that came up missing what it was created with is the
-//! degradation this engine refuses elsewhere (see [`crate::network_ops::create_with`]).
-//! Volume/bind `mounts` ARE served (translated to the `-v` strings the shared
-//! `resolve_mounts` reads); only published ports still need the slirp path.
+//! Fields the node API does not serve on this path yet — custom networks, pods,
+//! secret delivery, a continuous health check — are REFUSED (`UNIMPLEMENTED`),
+//! never silently dropped: a container that came up missing what it was created
+//! with is the degradation this engine refuses elsewhere (see
+//! [`crate::network_ops::create_with`]). Volume/bind `mounts` AND published
+//! `ports` ARE served: mounts become the `-v` strings `resolve_mounts` reads,
+//! ports become the `-p` strings the record carries (`c.ports`) so the re-exec'd
+//! `delonix start` publishes them through the container's own slirp — the same
+//! rootless path `delonix run -p` takes.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -38,7 +40,7 @@ use tonic::Status;
 use crate::network_ops::status_of;
 use crate::operations::{self, Begun};
 use crate::proto::v1::{
-    mount, Container, ContainerSpec, CreateContainerRequest, Operation, RestartMode,
+    mount, Container, ContainerSpec, CreateContainerRequest, Operation, Protocol, RestartMode,
     StartContainerRequest, WaitContainerRequest, WaitContainerResponse,
 };
 
@@ -108,12 +110,6 @@ pub fn spec_to_run_opts(
         ));
     }
     // Not served on this path yet — refused, never silently ignored.
-    if !spec.ports.is_empty() {
-        return Err(not_served_yet(
-            "spec.ports (published ports need the container's own slirp)",
-            "`delonix run -p`",
-        ));
-    }
     if !spec.networks.is_empty() {
         return Err(not_served_yet(
             "spec.networks (a custom network attach)",
@@ -266,6 +262,40 @@ pub fn spec_to_run_opts(
         o.volumes.push(spec_str);
     }
 
+    // ---- published ports: `PortMapping` → the `-p` string the record carries
+    // (`[addr:]hostPort:containerPort[/proto]`). With `net = "host"` and no pod
+    // (the defaults above), a record carrying ports routes through the
+    // container's OWN slirp at start — `start_container` builds `Launch` from
+    // `c.ports` and the rootless runtime runs `slirp_add_hostfwd` per spec. The
+    // record is filled in `create_work` (build_record omits it); here we only
+    // validate and canonicalise, reusing the engine's own publish parser so a
+    // malformed spec is refused before an operation exists, and the bind address
+    // is persisted (so it survives a restart) exactly as the CLI stores it.
+    for (i, p) in spec.ports.iter().enumerate() {
+        if p.container_port <= 0 || p.container_port > 65535 {
+            return Err(Status::invalid_argument(format!(
+                "CreateContainer: spec.ports[{i}].container_port must be 1..=65535"
+            )));
+        }
+        let proto = match Protocol::try_from(p.protocol) {
+            Ok(Protocol::Udp) => "/udp",
+            _ => "", // tcp is the default
+        };
+        let raw = match (p.host_ip.is_empty(), p.host_port) {
+            (false, hp) if hp != 0 => format!("{}:{}:{}{proto}", p.host_ip, hp, p.container_port),
+            (false, _) => format!("{}::{}{proto}", p.host_ip, p.container_port),
+            (true, hp) if hp != 0 => format!("{hp}:{}{proto}", p.container_port),
+            (true, _) => format!("{}{proto}", p.container_port),
+        };
+        let bad = |e: delonix_sdn::Error| {
+            Status::invalid_argument(format!("CreateContainer: spec.ports[{i}] '{raw}': {e}"))
+        };
+        for one in delonix_sdn::expand_publish_range(&raw).map_err(bad)? {
+            o.ports
+                .push(delonix_sdn::normalize_publish_spec(&one).map_err(bad)?);
+        }
+    }
+
     Ok(o)
 }
 
@@ -375,6 +405,14 @@ fn create_work(
         namespace.clone(),
     )?;
     let mut c = delonix_compute::run::build_record(o, resolved.record)?;
+    // `build_record` carries the net INTENT (`c.net_mode`) but NOT the published
+    // ports — the CLI's `cmd_run` fills `c.ports` after it, and so must we, or a
+    // container created with `-p` comes up with nothing published (the same
+    // silent degradation mounts had). With `net = "host"` and no pod/custom
+    // network, the re-exec'd `delonix start` routes these through the container's
+    // own slirp. `o.ports` is already validated/canonicalised by
+    // `spec_to_run_opts`.
+    c.ports = o.ports.clone();
     // `build_record` carries the labels; annotations are the request's, kept on
     // the record so a reader sees what it was created with.
     for (k, v) in &req.annotations {
@@ -673,10 +711,9 @@ mod tests {
 
     #[test]
     fn fields_not_served_on_this_path_are_refused_not_dropped() {
-        use crate::proto::v1::{HealthCheck, NetworkAttachment, PortMapping, SecretRef};
+        use crate::proto::v1::{HealthCheck, NetworkAttachment, SecretRef};
         type Mutate = Box<dyn Fn(&mut ContainerSpec)>;
         let cases: Vec<Mutate> = vec![
-            Box::new(|s| s.ports = vec![PortMapping::default()]),
             Box::new(|s| s.networks = vec![NetworkAttachment::default()]),
             Box::new(|s| s.pod = "p1".into()),
             Box::new(|s| s.secrets = vec![SecretRef::default()]),
@@ -708,6 +745,54 @@ mod tests {
         ];
         let o = spec_to_run_opts(&req("web", s.clone()), &s).unwrap();
         assert_eq!(o.volumes, ["data:/var/lib/data", "/srv/cfg:/etc/cfg:ro"]);
+    }
+
+    #[test]
+    fn ports_become_the_dash_p_strings_canonicalised_with_a_bind_address() {
+        use crate::proto::v1::PortMapping;
+        let mut s = spec("alpine");
+        s.ports = vec![
+            PortMapping {
+                host_ip: String::new(),
+                host_port: 8080,
+                container_port: 80,
+                protocol: Protocol::Tcp as i32,
+            },
+            PortMapping {
+                host_ip: "127.0.0.1".into(),
+                host_port: 5433,
+                container_port: 5432,
+                protocol: Protocol::Udp as i32,
+            },
+        ];
+        let o = spec_to_run_opts(&req("web", s.clone()), &s).unwrap();
+        // normalize_publish_spec resolves the bind address (default 127.0.0.1)
+        // and the proto, so the record carries the canonical, restart-stable form.
+        assert_eq!(o.ports.len(), 2);
+        assert!(o.ports[0].ends_with("8080:80/tcp"), "{}", o.ports[0]);
+        assert!(o.ports[0].starts_with("127.0.0.1:"), "{}", o.ports[0]);
+        assert_eq!(o.ports[1], "127.0.0.1:5433:5432/udp");
+        // net stays "host": ports + no custom network/pod = the own-slirp path.
+        assert_eq!(o.net, "host");
+    }
+
+    #[test]
+    fn a_port_with_a_bad_container_port_is_refused() {
+        use crate::proto::v1::PortMapping;
+        let mut s = spec("alpine");
+        s.ports = vec![PortMapping {
+            host_ip: String::new(),
+            host_port: 8080,
+            container_port: 0,
+            protocol: 0,
+        }];
+        assert_eq!(
+            spec_to_run_opts(&req("a", s.clone()), &s)
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
     }
 
     #[test]
