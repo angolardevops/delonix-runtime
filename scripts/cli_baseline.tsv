@@ -164,6 +164,9 @@
 ~	network vip-pool clear
 ~	network vip-pool set
 ~	network vip-pool show
+~	object-storage inspect
+~	object-storage ls
+~	object-storage rm
 ~	plan
 ~	pod attach
 ~	pod cp

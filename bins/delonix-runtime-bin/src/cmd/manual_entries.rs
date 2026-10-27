@@ -3113,6 +3113,43 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["container run", "volume create", "volume snapshot", "dashboard"],
     },
     Entry {
+        path: "object-storage",
+        group: "Storage",
+        examples: &[
+            ("what object stores exist, with their backend and bucket", "delonix object-storage ls"),
+            ("the endpoint and credentials Secret of one", "delonix object-storage inspect media"),
+            ("remove one: its S3 identity, its Secret and its record", "delonix object-storage rm media"),
+        ],
+        see_also: &["object-storage ls", "object-storage rm", "secret ls", "apply"],
+    },
+    Entry {
+        path: "object-storage ls",
+        group: "Inspect",
+        examples: &[
+            ("every object store, with backend, bucket and credentials Secret", "delonix object-storage ls"),
+            ("as JSON, for a backup job or a monitoring script", "delonix object-storage ls -o json"),
+        ],
+        see_also: &["object-storage inspect", "object-storage rm", "secret ls"],
+    },
+    Entry {
+        path: "object-storage inspect",
+        group: "Inspect",
+        examples: &[
+            ("the backend, bucket, endpoint and credentials Secret of one store", "delonix object-storage inspect media"),
+            ("the same, as JSON", "delonix object-storage inspect media -o json"),
+        ],
+        see_also: &["object-storage ls", "secret inspect"],
+    },
+    Entry {
+        path: "object-storage rm",
+        group: "Lifecycle",
+        examples: &[
+            ("remove it: its generated Secret, its record, and the S3 identity on the gateway (cephRgw)", "delonix object-storage rm media"),
+            ("and delete the buckets/objects the S3 user still owns too (destructive)", "delonix object-storage rm media --purge"),
+        ],
+        see_also: &["object-storage ls", "secret rm"],
+    },
+    Entry {
         path: "volume create",
         group: "Lifecycle",
         examples: &[

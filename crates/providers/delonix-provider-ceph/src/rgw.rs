@@ -153,6 +153,21 @@ impl Rgw {
             other => Err(map_fail(other)),
         }
     }
+
+    /// Removes a tenant's S3 identity. `purge` also deletes the buckets and
+    /// objects it still owns; WITHOUT it the gateway refuses a user that still
+    /// owns data — so a caller never destroys a tenant's objects by accident.
+    /// A user that is already gone is success (idempotent teardown).
+    pub fn remove_user(&self, uid: &str, purge: bool) -> RgwResult<()> {
+        let mut parts = vec!["user", "rm", "--uid", uid];
+        if purge {
+            parts.push("--purge-data");
+        }
+        match self.call(&parts) {
+            Answer::Ok(_) | Answer::Missing(_) => Ok(()),
+            other => Err(map_fail(other)),
+        }
+    }
 }
 
 /// The first key pair of a `radosgw-admin user {create,info}` document.

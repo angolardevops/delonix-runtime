@@ -34,13 +34,13 @@
 
 | superfície | folhas | A | B | C | D | E | fonte do denominador |
 |---|---:|---:|---:|---:|---:|---:|---|
-| cli | **302** | 272 | 22 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
-| node-api | **59** | 15 | 0 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
+| cli | **305** | 272 | 25 | 0 | 0 | 8 | `scripts/cli_baseline.tsv` (gate `rc=0`) |
+| node-api | **65** | 15 | 6 | 15 | 29 | 0 | `proto/delonix/node/v1/*.proto` (`rpc <Name>`) |
 | mgmt-api | **32** | 1 | 6 | 19 | 6 | 0 | `delonix-mgmt/src/lib.rs` (`.route("…"`) |
 | mcp | **15** | 0 | 5 | 10 | 0 | 0 | `delonix-mcp/src/lib.rs` (`name = "<tool>"`) |
 | cri | **34** | 24 | 3 | 5 | 2 | 0 | `delonix-cri/proto/api.proto` (`rpc <Name>`) |
-| kinds | **130** | 41 | 50 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 26 kinds × 5 verbos |
-| **total** | **572** | **353** | **86** | **57** | **60** | **16** | — |
+| kinds | **135** | 41 | 55 | 8 | 23 | 8 | `kinds.rs` `FACTS` — 27 kinds × 5 verbos |
+| **total** | **586** | **353** | **100** | **57** | **60** | **16** | — |
 
 <!-- folhas:counts:end -->
 

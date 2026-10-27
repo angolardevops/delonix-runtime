@@ -20,6 +20,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 
 use delonix_model::{Error, Result};
@@ -27,6 +28,7 @@ use delonix_state::{JsonStore, Secret, SecretStore};
 
 use super::kinds as k;
 use super::manifest::{self, ManifestDoc};
+use super::output;
 use super::util::state_root;
 
 /// The two accepted `spec.backend` values.
@@ -300,15 +302,20 @@ fn rgw_error(e: delonix_provider_ceph::RgwError) -> Error {
 /// Reached through `radosgw-admin` as `client.admin`, exactly as the node API's
 /// `StorageService::CreateObjectStoreUser` does — this is the same call,
 /// in-process.
-fn provision_rgw_user(uid: &str, display: &str) -> Result<delonix_provider_ceph::RgwUser> {
+/// The node's object gateway, reached through `radosgw-admin` as `client.admin`
+/// — the same resolution the node API's `gateway()` uses (`CEPH_CONF` when set,
+/// else the system default the tools find on their own).
+fn gateway() -> delonix_provider_ceph::Rgw {
     let run: Arc<dyn delonix_storage::exec::Run> = Arc::new(delonix_volume::pool_exec::SystemRun);
-    // The node's default `ceph.conf` when `CEPH_CONF` points at one, else the
-    // system default the tools find on their own — the same resolution the node
-    // API's `gateway()` uses.
     let conf = std::env::var_os("CEPH_CONF").map(std::path::PathBuf::from);
     delonix_provider_ceph::Rgw::new(run, conf)
-        .ensure_user(uid, display)
-        .map_err(rgw_error)
+}
+
+/// Provisions (idempotently) the tenant's S3 identity on the node's gateway.
+/// Exactly what the node API's `StorageService::CreateObjectStoreUser` does —
+/// this is the same call, in-process.
+fn provision_rgw_user(uid: &str, display: &str) -> Result<delonix_provider_ceph::RgwUser> {
+    gateway().ensure_user(uid, display).map_err(rgw_error)
 }
 
 /// The credentials a consumer needs, written into a generated `kind: Secret`.
@@ -486,6 +493,168 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
             Err(_) => ("no".into(), "-".into()),
         },
         Err(e) => ("?".into(), e.to_string()),
+    }
+}
+
+// --------------------------------------------------------------------- CLI
+//
+// Imperative lifecycle alongside the declarative Kind: `ls`/`inspect` read the
+// node records, and `rm` is the explicit teardown the Kind defers (its FACTS
+// row is `teardown: false`, so `stack destroy`/`--prune` never removes an
+// object store — this is the "remove one on purpose" path `no_teardown_reason`
+// points at, done in one step instead of two manual commands).
+
+/// `delonix objectstorage` — list, inspect and remove object stores.
+#[derive(Subcommand)]
+pub enum ObjectStorageCmd {
+    /// List the object stores.
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        format: output::OutputFormat,
+    },
+    /// Details of an object store (backend, bucket, endpoint, credentials Secret).
+    Inspect {
+        name: String,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        format: output::OutputFormat,
+    },
+    /// Remove an object store: its generated Secret and its record, plus the S3 identity on the gateway (cephRgw).
+    Rm {
+        name: String,
+        /// Also delete the buckets and objects the S3 user still owns (cephRgw) — destructive; without it the gateway refuses a user that still holds data.
+        #[arg(long)]
+        purge: bool,
+    },
+}
+
+/// A record as the CLI shows it — the fields a human/`jq` reads, never the
+/// internal `last_applied`/`owner` bookkeeping.
+#[derive(Serialize)]
+struct ObjectStorageView {
+    name: String,
+    backend: String,
+    bucket: String,
+    endpoint: Option<String>,
+    region: Option<String>,
+    #[serde(rename = "credentialsSecret")]
+    credentials_secret: String,
+    owner: Option<String>,
+}
+
+impl ObjectStorageView {
+    fn of(r: &ObjectStorageRecord) -> Self {
+        Self {
+            name: r.name.clone(),
+            backend: r.backend.clone(),
+            bucket: r.bucket.clone(),
+            endpoint: r.endpoint.clone(),
+            region: r.region.clone(),
+            credentials_secret: r.credentials_secret_out.clone(),
+            owner: r.owner.clone(),
+        }
+    }
+}
+
+pub fn run(action: ObjectStorageCmd) -> Result<()> {
+    match action {
+        ObjectStorageCmd::Ls { format } => {
+            let mut rows: Vec<ObjectStorageView> =
+                store()?.list()?.iter().map(ObjectStorageView::of).collect();
+            rows.sort_by(|a, b| a.name.cmp(&b.name));
+            match format {
+                output::OutputFormat::Json => output::print_json(&rows)?,
+                output::OutputFormat::Table => {
+                    // Fixed-width header printed with the same widths as the
+                    // rows below; the columns are literals by nature.
+                    #[allow(clippy::print_literal)]
+                    {
+                        println!(
+                            "{:<20} {:<9} {:<18} {:<28} {:<16} {}",
+                            "NAME", "BACKEND", "BUCKET", "ENDPOINT", "SECRET", "OWNER"
+                        );
+                    }
+                    for r in &rows {
+                        println!(
+                            "{:<20} {:<9} {:<18} {:<28} {:<16} {}",
+                            r.name,
+                            r.backend,
+                            r.bucket,
+                            r.endpoint.as_deref().unwrap_or("-"),
+                            r.credentials_secret,
+                            r.owner.as_deref().unwrap_or("-"),
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        ObjectStorageCmd::Inspect { name, format } => {
+            let r = store()?.load(&name).map_err(|_| {
+                Error::NotFound(super::po::tf(
+                    "no object store '{name}'",
+                    &[("name", &name)],
+                ))
+            })?;
+            let view = ObjectStorageView::of(&r);
+            match format {
+                output::OutputFormat::Json => output::print_json(std::slice::from_ref(&view))?,
+                output::OutputFormat::Table => {
+                    println!("Name:     {}", view.name);
+                    println!("Backend:  {}", view.backend);
+                    println!("Bucket:   {}", view.bucket);
+                    println!("Endpoint: {}", view.endpoint.as_deref().unwrap_or("-"));
+                    if let Some(region) = &view.region {
+                        println!("Region:   {region}");
+                    }
+                    println!("Secret:   {}", view.credentials_secret);
+                    println!("Owner:    {}", view.owner.as_deref().unwrap_or("-"));
+                }
+            }
+            Ok(())
+        }
+        ObjectStorageCmd::Rm { name, purge } => {
+            let store = store()?;
+            let r = store.load(&name).map_err(|_| {
+                Error::NotFound(super::po::tf(
+                    "no object store '{name}'",
+                    &[("name", &name)],
+                ))
+            })?;
+            // cephRgw: the S3 identity and the generated Secret are OURS to
+            // remove. external: the endpoint and the referenced Secret belong
+            // to whoever declared them — only the local record goes.
+            if r.backend == BACKEND_CEPH_RGW {
+                if let Some(uid) = &r.uid {
+                    gateway().remove_user(uid, purge).map_err(|e| match e {
+                        delonix_provider_ceph::RgwError::Undetermined(m) if m.contains("buckets") => {
+                            Error::Invalid(super::po::tf(
+                                "object store '{name}': the S3 user still owns data — re-run with `--purge` to delete its buckets and objects too ({msg})",
+                                &[("name", &name), ("msg", &m)],
+                            ))
+                        }
+                        other => rgw_error(other),
+                    })?;
+                }
+                SecretStore::open(state_root())?.remove(&r.credentials_secret_out)?;
+            }
+            store.remove(&name)?;
+            println!(
+                "objectstorage/{name}: {}",
+                match r.backend.as_str() {
+                    BACKEND_CEPH_RGW => super::po::tf(
+                        "removed (S3 user '{uid}', secret/{secret}, record)",
+                        &[
+                            ("uid", r.uid.as_deref().unwrap_or("")),
+                            ("secret", &r.credentials_secret_out),
+                        ],
+                    ),
+                    _ => super::po::t("removed (record only — the external store and its Secret are left as they were)").to_string(),
+                }
+            );
+            Ok(())
+        }
     }
 }
 
