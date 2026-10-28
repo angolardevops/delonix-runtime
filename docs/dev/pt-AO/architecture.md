@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:8971e6d8e948183d79f2bbe407c6ab968e80aeb06a1bfa68a7149c83768b66e9 -->
+<!-- translated-from: architecture.md sha256:b872b0cce1c2e30395b5a8fbc9308452401f7604679bc14355faa18027840c13 -->
 # Arquitectura
 
 **Antes de leres:** [Estrutura do projecto](project-structure.md) (onde as coisas estão), [IaaS e cloud native](iaas-and-cloud-native.md) (o lugar e os princípios do motor) e [Introdução ao cloud native](cloud-native-primer.md) (os mecanismos que as figuras nomeiam).
@@ -356,7 +356,7 @@ network namespace do host.
 | shim de logs | `fork` dentro do `spawn`, a correr `log_shim` | o container |
 | `slirp4netns` por-container | `delonix_sdn::slirp_attach`, chamado como o hook `on_started` | a netns do container; órfãos colhidos por `reap_orphan_slirp` |
 | pin | `infra::start_pin` arranca `delonix netns pin`; `infra::pin_main` cria os namespaces de user, net e mount dentro do processo (`crates/adapters/delonix-sdn/src/pin_userns.rs`) e dorme | a infra; o seu pid é `ingress/holder.pid` e nunca muda |
-| control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | reiniciável; serve o socket de controlo, o DNS (`dns_server_main`), Router Advertisements (`ra_sender_main`) e DHCP por-bridge (`dhcp_serve`) |
+| control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | reiniciável; serve o socket de controlo, o DNS (`dns_server_main`), o DHCP por-bridge (`dhcp_serve`) e — só sob `DELONIX_ENABLE_IPV6=1` — os Router Advertisements (`ra_sender_main`). O conjunto de threads é `control_plane_threads`; ser reiniciável é o que permite que o gate dos RA seja uma simples condição e não um reconciliador |
 | `slirp4netns` único | `infra::start_slirp` (`tap0` para dentro da netns do pin, `--api-socket`) | a infra |
 | proxy de ingress L7 | `cmd/ingress_proxy.rs::spawn_proxy` através de `infra::infra_join_argv` | enquanto existir um `HTTPRoute`/`Ingress` ou uma rota `--expose`; recarrega rotas em `SIGHUP` |
 | `cloud-hypervisor` | `delonix_vm::launch_vmm`, corrido através do argv de junção da infra | a VM |

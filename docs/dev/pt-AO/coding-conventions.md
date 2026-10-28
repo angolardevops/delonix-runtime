@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:50b85758b88cf149781f761a5c92e9c36da32dde808de1be682545215de8f6cd -->
+<!-- translated-from: coding-conventions.md sha256:cdc355999424c8f178844432476c24ee51d98f4628c86cf5b3d42d1a50cac621 -->
 # Convenções de código
 
 **Antes de leres:** [Introdução ao Rust](rust-primer.md), [Arquitectura](architecture.md) e [As crates](crates.md) — as regras abaixo referem-se a camadas, portas e crates pelo nome.
@@ -216,8 +216,11 @@ comentário `// why` ao lado, como farias para qualquer outra excepção (vê [�
   chamadores internos em **todo** o workspace. **Decidido**: `docs/cli-stability.md` § «Como uma
   quebra é feita». Os grupos listados como estáveis nesse ficheiro só podem quebrar numa release
   major.
-- **Um comando alcançável por vários caminhos tem de estar ligado em todos eles** (por exemplo
-  `vm pull` / `image vm pull` / `image --vm pull`). **Decidido**: `CONTRIBUTING.md`; vê
+- **Um comando alcançável por vários caminhos tem de estar ligado em todos eles** — mas prefere UM
+  caminho em vez de vários quando a tarefa é o ciclo de vida de um único recurso. `vm pull` /
+  `image vm pull` / `image --vm pull` eram três desses caminhos, mantidos em sincronia à mão; foram
+  fundidos num único grupo aninhado, `vm image <verb>` (a reestruturação da CLI do AGENTS.md, Sprint
+  9). **Decidido**: `CONTRIBUTING.md`; vê
   [Fluxo de contribuição](contributing-workflow.md#adding-or-changing-a-cli-command).
 - **As mudanças de folhas actualizam a linha de base da CLI** (`scripts/cli-tree.sh --update`) no
   mesmo commit. **Imposto (gate)**: vê [Fluxo de contribuição](contributing-workflow.md#adding-or-changing-a-cli-command).

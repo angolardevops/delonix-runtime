@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:1bdc6dc5407aca36b67bfc85db87ae040be56261e156204a812ada36979bcc8a -->
+<!-- translated-from: microvm-setup.md sha256:b766ad79d4aa4ccff1f2fd32d4ec05fe39fa030e097326ddc51d54148ad5737e -->
 # Construir microVMs
 
 **Antes de leres:** [Preparar o ambiente](environment.md), [Clonar, compilar e testar](build-and-test.md), a [secção de virtualização do Manual de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), e a Parte 2 de [Delonixfile e VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
@@ -115,7 +115,7 @@ nomeia-os quando um build falha:
 
    ```bash
    mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run
-   XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix image vm build --network …
+   XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix vm image build --network …
    ```
 
    e, se ainda falhar, um passt actual **primeiro no `PATH`** (o instalador constrói um em
@@ -250,7 +250,7 @@ há código para ele.
 ## 3. Imagens
 
 As imagens de VM vivem no `VmImageStore` (`cmd/vmimage.rs`) em `<DELONIX_ROOT>/vm-images/`: um qcow2
-mais um registo JSON de metadados (`VmImage`) por imagem. O `delonix image vm ls` lista-as com `TYPE`
+mais um registo JSON de metadados (`VmImage`) por imagem. O `delonix vm image ls` lista-as com `TYPE`
 (cloud-init / appliance) e `DEFAULTS` (vCPU/memória registados).
 
 ### Imagens oficiais
@@ -263,34 +263,33 @@ mais um registo JSON de metadados (`VmImage`) por imagem. O `delonix image vm ls
 | `base` | `ghcr.io/angolardevops/delonix-vm-base` | SO base com o motor `delonix`, sem Kubernetes (p. ex. `ubuntu-24.04`) |
 | `appliances` | `ghcr.io/angolardevops/delonix-vm-appliances` | appliances de fabricantes, sem cloud-init |
 
+> As imagens douradas de VM vivem sob a org **`angolardevops`** (pacotes públicos), por design — distintas da imagem do motor do produto em `ghcr.io/ngolacloud/delonix`. Os nomes dos repositórios vêm de `OFFICIAL_REPOS` em `cmd/vmimage.rs`; as duas orgs não são uma incoerência.
+
 ```bash
-delonix vm ls-remote                 # tags of the Kubernetes golden repo
-delonix vm ls-remote --no-k8s        # tags of the base repo
-delonix vm pull                      # the official Kubernetes golden
-delonix vm pull --no-k8s             # the official base image
-delonix vm pull <oci-ref> --name <local-name>
+delonix vm image ls-remote                 # tags of the Kubernetes golden repo
+delonix vm image ls-remote --no-k8s        # tags of the base repo
+delonix vm image pull                      # the official Kubernetes golden
+delonix vm image pull --no-k8s             # the official base image
+delonix vm image pull <oci-ref> --name <local-name>
 ```
 
 As imagens são artefactos OCI de blob único; o pull verifica os digests do manifesto e do blob e
-repõe os metadados a partir das annotations do manifesto. Os mesmos verbos existem como
-`delonix image vm pull/ls-remote/push`.
+repõe os metadados a partir das annotations do manifesto.
 **Nota:** um `vm create` sem `--disk` e sem imagem local descarrega a imagem dourada oficial, por
 isso precisa de rede.
 
 ### Construir a receita dourada
 
-`delonix vm build -t <tag>` (o mesmo comando que `delonix image vm build`; os dois partilham um só conjunto de
-argumentos) sem `vm.yaml` nem `VMfile` no contexto corre a receita embutida. Os exemplos abaixo usam a grafia
-`image vm`:
+`delonix vm image build -t <tag>` sem `vm.yaml` nem `VMfile` no contexto corre a receita embutida:
 
 ```bash
 # Kubernetes node, packages fetched and verified on the HOST, guest offline
-delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
+delonix vm image build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
 # no Kubernetes: just the engine, rootless-ready
-delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
+delonix vm image build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
 ```
 
-Flags relevantes (consulta `image vm build --help` para os defaults): `--distro ubuntu|debian|rocky|fedora`,
+Flags relevantes (consulta `vm image build --help` para os defaults): `--distro ubuntu|debian|rocky|fedora`,
 `--ubuntu-release`, `--debian-release`, `--rocky-release`, `--fedora-release` (release **e** build,
 p. ex. `42-1.1`), `--k8s-version`, `--offline`, `--no-k8s`, `--extra-package`, `--extra-run`,
 `--cri-bin`, `--delonix-bin`, `--root-password` (sem ela nenhuma conta tem password),
@@ -306,11 +305,11 @@ validados** (notas da release v4.2.0). Os builds de imagem são só amd64
 ### Converter e importar
 
 ```bash
-delonix vm convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
+delonix vm image convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
+delonix vm image import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 ```
 
-O `vm convert` achata (sem cadeia de backing); `--compress` só é aceite para `qcow2` e `vmdk`. O
+O `vm image convert` achata (sem cadeia de backing); `--compress` só é aceite para `qcow2` e `vmdk`. O
 `import --appliance` regista `cloud_init: false`: o `vm create` passa então a não anexar **nenhum**
 seed e recusa `--hostname`/`--ssh-key`/`--user-data` pelo nome, porque o convidado nunca os leria.
 Os scripts de build de appliances vivem em `scripts/appliances/`.

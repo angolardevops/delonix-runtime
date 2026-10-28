@@ -1,4 +1,4 @@
-<!-- translated-from: contributing-workflow.md sha256:7a27cf21c3440859aaa70b55740a2566cfff13b0f365c965900c98be188a10db -->
+<!-- translated-from: contributing-workflow.md sha256:b58928c2e1e424cc6e4ec7ba7bd630e5bef3652e854a8956534cfc7fbffd428f -->
 # Fluxo de contribuição
 
 **Antes de leres:** [Clonar, construir e testar](build-and-test.md#the-gates-ci-runs) (os gates) e [Convenções de código](coding-conventions.md) (o que os revisores verificam).
@@ -31,15 +31,23 @@ desconhecimento. O registo por extenso vive em [`AGENTS.md`](../../../AGENTS.md)
 
 ## Um worktree por tarefa
 
+> **Modelo de branches e ciclo de vida:** as regras canónicas — de que branch uma mudança parte, como
+> aterra, e como é limpa — vivem em [Processo de engenharia](engineering-process.md). Em resumo:
+> `develop` é a linha de integração, `main` é a linha publicada;
+> `feat/chore/refactor/perf/docs/test/ci/build` partem de `origin/develop`, `fix/bug/hotfix` partem
+> de `origin/main`. O `python3 scripts/gitflow.py` (ou `make gitflow ARGS="…"`) corre o fluxo. Esta
+> secção é só a higiene de worktree que se aplica seja qual for a base.
+
 Várias pessoas e ferramentas trabalham muitas vezes no mesmo clone ao mesmo tempo. Editar numa
 checkout partilhada já custou trabalho real aqui: edições absorvidas no commit de outra pessoa, o
 `HEAD` a mudar de branch a meio de uma tarefa, e um `cargo test` verde numa árvore suja que não
 provava que o `HEAD` compilava. Por isso cada tarefa tem o seu próprio worktree git e a sua branch,
-criados a partir de `origin/main`:
+criados a partir da base que a sua classificação selecciona:
 
 ```bash
-git fetch origin
-git worktree add -b <topic>/<task> <workspace>/.worktrees/delonix-runtime/<task> origin/main
+git fetch origin --prune
+# base is origin/develop for feat/chore/…, origin/main for fix/bug/hotfix
+git worktree add -b <prefix>/<task> <workspace>/.worktrees/delonix-runtime/<task> origin/<base>
 cd <workspace>/.worktrees/delonix-runtime/<task>
 ```
 
@@ -58,13 +66,18 @@ cd <workspace>/.worktrees/delonix-runtime/<task>
 - **Faz rebase, não merge**, quando o teu push for rejeitado por divergência: `git pull --rebase`.
   O histórico é linear.
 - **Quando a tarefa estiver feita, remove as duas coisas**, o worktree e a branch — a branch
-  sobrevive ao `worktree remove`, e é assim que as branches obsoletas se acumulam:
+  sobrevive ao `worktree remove`, e é assim que as branches obsoletas se acumulam. Prova primeiro que
+  o conteúdo já está em `develop` (`git cherry develop <branch>`), depois usa `-d` (nunca `-D`, que
+  esconderia commits não integrados):
 
   ```bash
   git worktree remove <path>
-  git branch -D <topic>/<task>
-  git worktree list
+  git branch -d <prefix>/<task>
+  git worktree prune
   ```
+
+  O `python3 scripts/gitflow.py cleanup <branch> --execute` faz exactamente isto e recusa quando o
+  trabalho ainda não está integrado ou a árvore está suja.
 
 ## Alinhamento da versão
 
@@ -167,15 +180,22 @@ actual estão em [`docs/adr/README.md`](../../adr/README.md): um ficheiro por de
 
 ## Acrescentar ou mudar um comando da CLI
 
-- **Liga todos os pontos de entrada.** Vários comandos são alcançáveis por mais de um caminho (por
-  exemplo `delonix vm pull` e `delonix image vm pull`). Muda-os todos, e depois verifica cada um com
-  o binário que construíste — incluindo a completação da shell, porque a declaração `clap` que
-  editaste pode não ser a que o caminho do utilizador analisa. O motor de completação pode ser
-  sondado directamente; `_CLAP_COMPLETE_INDEX` é a posição da palavra a completar:
+- **Liga todos os pontos de entrada.** Quando a mesma tarefa é genuinamente alcançável por mais de
+  um caminho (os tradutores de compose/pod/API-Docker que confluem todos num só `RunOpts` são o
+  exemplo vivo), muda cada um deles, e depois verifica cada um com o binário que construíste —
+  incluindo a completação da shell, porque a declaração `clap` que editaste pode não ser a que o
+  caminho do utilizador analisa. O motor de completação pode ser sondado directamente;
+  `_CLAP_COMPLETE_INDEX` é a posição da palavra a completar:
 
   ```bash
-  COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix image vm ''
+  COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix vm image ''
   ```
+
+  **Prefere um único ponto de entrada em vez de vários quando a tarefa é o ciclo de vida de um único
+  recurso.** `delonix vm pull`/`image vm pull`/`image --vm pull` eram três definições independentes
+  do mesmo comando, mantidas em sincronia à mão — a fonte recorrente exactamente da deriva que este
+  ponto avisa. Foram fundidas num único grupo aninhado, `delonix vm image <verb>` (a reestruturação
+  da CLI do AGENTS.md, Sprint 9); essa consolidação é o que há a copiar, não a duplicação que fechou.
 - **Valida contra o binário**, não contra o código-fonte: `./target/debug/delonix <group> <command> --help`
   e uma execução real com os state roots isolados (ver [Clonar, compilar e testar](build-and-test.md#isolating-the-engines-state)).
 - **Actualiza a linha de base da CLI** (`scripts/cli-tree.sh --update`) no mesmo commit quando

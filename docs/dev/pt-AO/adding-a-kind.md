@@ -1,4 +1,4 @@
-<!-- translated-from: adding-a-kind.md sha256:8efb7affc6ae1e813bc29c234a856c1d66d405e01f157324f10dc3f2de4d657f -->
+<!-- translated-from: adding-a-kind.md sha256:8f062a5ce433402c048423a1b86c904b734b114f58a93f6e0f9cbd864dda1891 -->
 # Acrescentar um Kind
 
 **Antes de leres:** [Convenções de código](coding-conventions.md), [Arquitectura](architecture.md) e [Os crates](crates.md#delonix-stack) — esta página assume que sabes o que o `delonix-stack` possui e porque é que o planeamento é puro.
