@@ -107,6 +107,7 @@ Start at the root and follow the dependencies inward:
 | `LICENSE` | Apache-2.0 licence of the project. | Never, in practice. | — |
 | `CHANGELOG.md` | Keep a Changelog: the frozen `delonix-runtime` history (v1.0.0–v5.1.1) and the Delonix 0.x transition, consolidated from `docs/releases/*`. | Each release and the identity transition. | `docs/releases/`, `VERSIONING.md` |
 | `VERSIONING.md` | The two version lines (frozen `delonix-runtime` 1..5, Delonix 0.x), the pre-1.0 compatibility policy, and the `5.1.1 → 0.1.0` re-base handled by `scripts/version_gate.py`. | When the compatibility policy or the version-line rule changes. | `scripts/version_gate.py`, `CHANGELOG.md` |
+| `MIGRATION.md` | Migrating to the Delonix line: for users, what `5.1.1 → 0.1.0` changes vs preserves and how to update; for maintainers, the GitHub transfer runbook. | The identity transition; revised when the migration path changes. | `VERSIONING.md`, `CHANGELOG.md` |
 | `.clinerules` | Pointer file for the Cline assistant: "the rules are in `AGENTS.md`". Its crate count is stale; `AGENTS.md` and [The crates](crates.md) are authoritative. | Rarely. | — |
 | `.cursorrules` | Same pointer, for Cursor. | Rarely. | — |
 
