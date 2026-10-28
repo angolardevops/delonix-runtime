@@ -12,7 +12,11 @@
 > Decisão e trade-offs: [ADR-0078](adr/0078-selectable-pod-network-profiles.md).
 
 Medido a **2026-10-15**, contra o commit base `67a0ba97`, no host de
-desenvolvimento (Linux 7.0.0-38-generic, cgroup v2, KVM).
+desenvolvimento (Linux 7.0.0-38-generic, cgroup v2, KVM). Esta é a linha **v5.1.1**
+(ver o `delonix://5.1.1` da etapa L7); é o mesmo motor que hoje embarca como
+**0.1.0** (rebrand de versão, sem mudança de código de rede). **Baseline histórica:
+os perfis não foram re-medidos contra a tag 0.1.0** — re-medir a matriz de rede é
+bancada nova (ver §5, B13).
 
 ## 1. Versões fixadas
 
@@ -430,9 +434,11 @@ mantém o perfil experimental e fica escrito nesta página com o resultado.
    fronteira mantém-se: rede dos pods (esta página), rede e firewall das VMs
    (`guia-rede.md`), VIP do apiserver (o HAProxy que o `cluster kubeadm`
    provisiona), e Services `LoadBalancer` (não entregue).
-10. **O `critest` não foi remedido** nesta sessão; o `docs/cri-conformance.md`
-    continua a ser do 2026-08-25 e a listar 3 falhas de mount propagation que o
-    código actual já trata (`Bidirectional`→`rshared`). Remedir é pendência.
+10. **O `critest` não foi remedido** nesta sessão (2026-10-15). **Entretanto
+    remedido a 2026-10-24** na v5.1.1 → **84/20** (`84 Passed · 20 Failed · 18
+    Skipped`, critest v1.36.0); o `docs/cri-conformance.md` foi actualizado e já
+    não lista o 79/103 de 2026-08-25 como número corrente. Ver
+    `reports/cri-conformance-2026-10-24/`.
 
 ## 6.1. Nota de método: porque é que estas conclusões não dependem do binário em disco
 
