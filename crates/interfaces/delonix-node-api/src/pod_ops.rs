@@ -24,7 +24,7 @@ use tonic::Status;
 
 use crate::operations::{self, Begun};
 use crate::proto::v1::{
-    ContainerSpec, CreatePodRequest, DeletePodRequest, Operation, PodSpec, Protocol,
+    mount, ContainerSpec, CreatePodRequest, DeletePodRequest, Mount, Operation, PodSpec, Protocol,
 };
 
 /// The node.v1 pod name is the internal id `pod-<name>`; the CLI verbs take the
@@ -70,9 +70,8 @@ fn reject_unsupported(member: &str, spec: &ContainerSpec) -> Result<(), Status> 
     if spec.resources.is_some() {
         return unimpl("resources");
     }
-    if !spec.mounts.is_empty() {
-        return unimpl("mounts");
-    }
+    // `mounts` is served: see [`Volumes`] — each becomes a pod-level `volumes[]`
+    // entry and a member `volumeMounts[]` reference.
     if !spec.networks.is_empty() {
         return unimpl("networks");
     }
@@ -105,6 +104,84 @@ fn reject_unsupported(member: &str, spec: &ContainerSpec) -> Result<(), Status> 
         return unimpl("pod");
     }
     Ok(())
+}
+
+/// Accumulates the pod-level `volumes[]` from every member's docker-style
+/// `mounts`. A proto [`Mount`] carries its source inline (a named volume or a
+/// host path), but the `kind: Pod` form needs a NAMED pod-level volume that each
+/// member's `volumeMount` then references. We create one pod volume per distinct
+/// source — so two members that mount the same volume share one entry, and thus
+/// the same data — and name them `vol-N` in first-appearance order, so the same
+/// request renders the same document (the operation is fingerprinted on it).
+#[derive(Default)]
+struct Volumes {
+    /// Source key (`v:<name>` / `h:<path>`) → the `vol-N` name already assigned.
+    names: std::collections::HashMap<String, String>,
+    /// The pod-level `volumes[]` objects, in first-appearance order.
+    list: Vec<serde_json::Value>,
+}
+
+impl Volumes {
+    /// The pod-volume name a member's `volumeMount` references for `m`, creating
+    /// the pod-level `volumes[]` entry the first time a source is seen. A named
+    /// volume becomes the delonix `source:` extension; a host path becomes
+    /// `hostPath`. An empty target or a missing source is refused here, before
+    /// the operation exists — never dropped in silence.
+    fn name_for(&mut self, member: &str, idx: usize, m: &Mount) -> Result<String, Status> {
+        if m.target.is_empty() {
+            return Err(Status::invalid_argument(format!(
+                "CreatePod: container '{member}' mounts[{idx}].target is required"
+            )));
+        }
+        let (key, source) = match &m.source {
+            Some(mount::Source::Volume(v)) if !v.is_empty() => {
+                (format!("v:{v}"), serde_json::json!({ "source": v }))
+            }
+            Some(mount::Source::HostPath(p)) if !p.is_empty() => (
+                format!("h:{p}"),
+                serde_json::json!({ "hostPath": { "path": p } }),
+            ),
+            _ => {
+                return Err(Status::invalid_argument(format!(
+                    "CreatePod: container '{member}' mounts[{idx}] needs a non-empty volume or \
+                     host_path source"
+                )))
+            }
+        };
+        if let Some(name) = self.names.get(&key) {
+            return Ok(name.clone());
+        }
+        let name = format!("vol-{}", self.list.len());
+        let mut obj = serde_json::Map::new();
+        obj.insert("name".into(), name.clone().into());
+        if let serde_json::Value::Object(fields) = source {
+            obj.extend(fields);
+        }
+        self.list.push(serde_json::Value::Object(obj));
+        self.names.insert(key, name.clone());
+        Ok(name)
+    }
+
+    /// The member's `volumeMounts[]`: each `mount` as a `{name, mountPath,
+    /// readOnly?}` reference to the pod-level volume `name_for` assigned.
+    fn mounts_json(
+        &mut self,
+        member: &str,
+        spec: &ContainerSpec,
+    ) -> Result<Vec<serde_json::Value>, Status> {
+        let mut out = Vec::with_capacity(spec.mounts.len());
+        for (i, m) in spec.mounts.iter().enumerate() {
+            let name = self.name_for(member, i, m)?;
+            let mut vm = serde_json::Map::new();
+            vm.insert("name".into(), name.into());
+            vm.insert("mountPath".into(), m.target.clone().into());
+            if m.read_only {
+                vm.insert("readOnly".into(), true.into());
+            }
+            out.push(serde_json::Value::Object(vm));
+        }
+        Ok(out)
+    }
 }
 
 /// The ports of a member as the manifest's `PodPort` list (`containerPort`
@@ -147,7 +224,12 @@ fn env_json(spec: &ContainerSpec) -> Vec<serde_json::Value> {
 
 /// Renders one member to its `PodContainer` manifest object. `name` is the
 /// member's name; `entrypoint`→`command` and `command`→`args` (k8s spelling).
-fn member_json(name: &str, spec: &ContainerSpec) -> serde_json::Value {
+/// `vols` accumulates the pod-level `volumes[]` each member's `mounts` need.
+fn member_json(
+    name: &str,
+    spec: &ContainerSpec,
+    vols: &mut Volumes,
+) -> Result<serde_json::Value, Status> {
     let mut m = serde_json::Map::new();
     if !name.is_empty() {
         m.insert("name".into(), name.into());
@@ -170,7 +252,11 @@ fn member_json(name: &str, spec: &ContainerSpec) -> serde_json::Value {
     if !ports.is_empty() {
         m.insert("ports".into(), ports.into());
     }
-    serde_json::Value::Object(m)
+    let mounts = vols.mounts_json(name, spec)?;
+    if !mounts.is_empty() {
+        m.insert("volumeMounts".into(), mounts.into());
+    }
+    Ok(serde_json::Value::Object(m))
 }
 
 /// Renders the `CreatePod` request to a `kind: Pod` manifest (YAML). Refuses
@@ -202,6 +288,7 @@ fn render_manifest(req: &CreatePodRequest) -> Result<String, Status> {
         ));
     }
     let mut members = Vec::with_capacity(spec.containers.len());
+    let mut vols = Volumes::default();
     for nc in &spec.containers {
         let cs = nc
             .spec
@@ -213,7 +300,7 @@ fn render_manifest(req: &CreatePodRequest) -> Result<String, Status> {
             ));
         }
         reject_unsupported(&nc.name, cs)?;
-        members.push(member_json(&nc.name, cs));
+        members.push(member_json(&nc.name, cs, &mut vols)?);
     }
 
     let mut metadata = serde_json::Map::new();
@@ -236,6 +323,9 @@ fn render_manifest(req: &CreatePodRequest) -> Result<String, Status> {
 
     let mut pod_spec = serde_json::Map::new();
     pod_spec.insert("containers".into(), members.into());
+    if !vols.list.is_empty() {
+        pod_spec.insert("volumes".into(), vols.list.into());
+    }
     if spec.share_process_namespace {
         pod_spec.insert("shareProcessNamespace".into(), true.into());
     }
@@ -464,5 +554,76 @@ mod tests {
         assert!(doc.contains("containerPort: 80"));
         assert!(doc.contains("hostPort: 8080"));
         assert!(doc.contains("protocol: tcp"));
+    }
+
+    #[test]
+    fn mounts_render_as_pod_volumes_and_member_volume_mounts() {
+        use crate::proto::v1::{mount, Mount};
+        let mut m = member("main", "busybox");
+        m.spec.as_mut().unwrap().mounts = vec![
+            Mount {
+                source: Some(mount::Source::Volume("data".into())),
+                target: "/var/lib/data".into(),
+                read_only: false,
+            },
+            Mount {
+                source: Some(mount::Source::HostPath("/srv/cfg".into())),
+                target: "/etc/cfg".into(),
+                read_only: true,
+            },
+        ];
+        let doc = render_manifest(&create_req("web", vec![m])).unwrap();
+        // Pod-level volumes[]: a named-volume source (delonix `source:`) and a hostPath.
+        assert!(doc.contains("volumes:"));
+        assert!(doc.contains("source: data"));
+        assert!(doc.contains("hostPath:"));
+        assert!(doc.contains("path: /srv/cfg"));
+        // Per-member volumeMounts[] referencing them; read_only carried through.
+        assert!(doc.contains("volumeMounts:"));
+        assert!(doc.contains("mountPath: /var/lib/data"));
+        assert!(doc.contains("mountPath: /etc/cfg"));
+        assert!(doc.contains("readOnly: true"));
+        // `mounts` is no longer refused by reject_unsupported.
+    }
+
+    #[test]
+    fn the_same_source_in_two_members_shares_one_pod_volume() {
+        use crate::proto::v1::{mount, Mount};
+        let named = |target: &str| Mount {
+            source: Some(mount::Source::Volume("shared".into())),
+            target: target.into(),
+            read_only: false,
+        };
+        let mut a = member("writer", "busybox");
+        a.spec.as_mut().unwrap().mounts = vec![named("/data")];
+        let mut b = member("reader", "busybox");
+        b.spec.as_mut().unwrap().mounts = vec![named("/mnt/data")];
+        let doc = render_manifest(&create_req("web", vec![a, b])).unwrap();
+        // One pod-level entry for `shared`, referenced by both members' mounts.
+        assert_eq!(doc.matches("source: shared").count(), 1);
+        assert_eq!(doc.matches("name: vol-0").count(), 3); // the volume + two mounts
+        assert!(doc.contains("mountPath: /data"));
+        assert!(doc.contains("mountPath: /mnt/data"));
+    }
+
+    #[test]
+    fn a_mount_without_target_or_source_is_refused() {
+        use crate::proto::v1::{mount, Mount};
+        let mut no_target = member("main", "busybox");
+        no_target.spec.as_mut().unwrap().mounts = vec![Mount {
+            source: Some(mount::Source::Volume("data".into())),
+            target: String::new(),
+            read_only: false,
+        }];
+        let err = render_manifest(&create_req("web", vec![no_target])).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let mut no_source = member("main", "busybox");
+        no_source.spec.as_mut().unwrap().mounts = vec![Mount {
+            source: None,
+            target: "/data".into(),
+            read_only: false,
+        }];
+        let err = render_manifest(&create_req("web", vec![no_source])).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }
