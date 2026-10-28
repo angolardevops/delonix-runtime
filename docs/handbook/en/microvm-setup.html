@@ -535,6 +535,9 @@ a JSON metadata record (<code>VmImage</code>) per image. <code>delonix vm image 
 </tr>
 </tbody>
 </table></div>
+<blockquote>
+<p>The golden VM images live under the <strong><code>angolardevops</code></strong> org (public packages), by design — distinct from the product engine image at <code>ghcr.io/ngolacloud/delonix</code>. The repository names come from <code>OFFICIAL_REPOS</code> in <code>cmd/vmimage.rs</code>; the two orgs are not a mismatch.</p>
+</blockquote>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix vm image ls-remote                 # tags of the Kubernetes golden repo
 delonix vm image ls-remote --no-k8s        # tags of the base repo
 delonix vm image pull                      # the official Kubernetes golden
