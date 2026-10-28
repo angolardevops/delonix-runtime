@@ -3607,11 +3607,15 @@ mod tests {
         let config =
             br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#;
         let id = store.cas().write(config).unwrap();
-        let blobs: [&[u8]; 3] = [
-            &[0x1f, 0x8b, 0x08, 0x00, 1, 2, 3],
-            &[0x28, 0xb5, 0x2f, 0xfd, 9, 9],
-            b"plain-tar-bytes",
-        ];
+        // A zstd layer is deliberately NOT among these: `push_to_registry`
+        // publishes the OCI TWIN of the manifest (a Docker v2s2 shape carrying
+        // OCI layer types is a non-conformant hybrid podman/skopeo reject —
+        // GAP-OCI-IMG-1), and `to_oci_manifest` refuses a zstd layer by name
+        // rather than relabel it on a guess. The magic-number detection of zstd
+        // and that refusal each have their own test (`detects_layer_compression`,
+        // `a_zstd_or_foreign_layer_is_refused_by_name`); this one proves the
+        // gzip + plain-tar round trip a push actually carries, end to end.
+        let blobs: [&[u8]; 2] = [&[0x1f, 0x8b, 0x08, 0x00, 1, 2, 3], b"plain-tar-bytes"];
         let layers: Vec<String> = blobs
             .iter()
             .map(|b| store.cas().write(b).unwrap())
@@ -3630,7 +3634,6 @@ mod tests {
         assert_eq!(m["config"]["size"], config.len());
         let want = [
             "application/vnd.docker.image.rootfs.diff.tar.gzip",
-            "application/vnd.oci.image.layer.v1.tar+zstd",
             "application/vnd.oci.image.layer.v1.tar",
         ];
         for (i, l) in m["layers"].as_array().unwrap().iter().enumerate() {
