@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:50b85758b88cf149781f761a5c92e9c36da32dde808de1be682545215de8f6cd -->
+<!-- translated-from: coding-conventions.md sha256:cdc355999424c8f178844432476c24ee51d98f4628c86cf5b3d42d1a50cac621 -->
 # 编码规范
 
 **阅读前须知：** [Rust 入门](rust-primer.md)、[架构](architecture.md) 和 [crate 一览](crates.md) —— 下面的规则会按名称引用层（layer）、端口（port）和 crate。
@@ -107,7 +107,7 @@
   - `describe` 面向人（kubectl 风格），`inspect` 是给脚本用的 JSON。**已决定**：AGENTS.md § "Output: `ls` estilo docker, `describe` estilo kubectl"。
   - 在 Docker 已有对应概念的地方，标志的顺序和名字要照搬 Docker：`network connect <NETWORK> <CONTAINER>`、`-p [hostIp:]hostPort:containerPort`、`volume create --driver … --opt k=v`。**已决定**：AGENTS.md § Sprint 5 和 6。
 - **不兼容的改动要干净利落地切断，不留别名。** 旧的写法必须以 `unrecognized subcommand` 失败，绝不能悄悄地做别的事情。在你切断之前，先在**整个** workspace 里 grep 一遍内部调用者。**已决定**：`docs/cli-stability.md` § "Como uma quebra é feita"。该文件里列为稳定的那些组，只能在大版本发布时才允许破坏兼容。
-- **一个从多条路径都能到达的命令，必须在所有路径上都接好**（例如 `vm pull` / `image vm pull` / `image --vm pull`）。**已决定**：`CONTRIBUTING.md`；见[贡献流程](contributing-workflow.md#adding-or-changing-a-cli-command)。
+- **一个从多条路径都能到达的命令，必须在所有路径上都接好**——但当这件事是单个资源的生命周期时，宁可只留一条路径而不是好几条。`vm pull` / `image vm pull` / `image --vm pull` 曾经就是这样三条路径，靠手工保持同步；它们已被收拢进一个嵌套组 `vm image <verb>`（AGENTS.md 里 CLI 重构的 Sprint 9）。**已决定**：`CONTRIBUTING.md`；见[贡献流程](contributing-workflow.md#adding-or-changing-a-cli-command)。
 - **叶子命令的变动要在同一个提交里更新 CLI 基线**（`scripts/cli-tree.sh --update`）。**强制（门禁）**：见[贡献流程](contributing-workflow.md#adding-or-changing-a-cli-command)。
 
 ### 3.6 Kind、API 组和清单字段

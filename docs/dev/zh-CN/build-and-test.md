@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:5df2927c11b5bdb95b1685c335d2e369105a0e3a9b320e19ee8d44658d4bb917 -->
+<!-- translated-from: build-and-test.md sha256:aca63246c9740801871e24b9b94cc8462d220da49b68db5d649e022e53b31768 -->
 # 克隆、构建与测试
 
 **阅读之前：** [准备你的环境](environment.md)：固定的工具链、`protoc`，以及一台能通过其检查的主机。
@@ -112,7 +112,7 @@ command -v delonix                  # which `delonix` your shell would run inste
 （`crates/contexts/delonix-node/src/dispatch.rs` 里的 `cli_bin`）来找到 CLI。
 **把同一次构建产出的这五个二进制程序放在一起**；混用你的构建和一个发布版会被拒绝，或者会跑一些你本不打算测试的代码。
 
-`delonix cluster kubeadm` 和 `delonix image vm build` 用它们自己的顺序去找
+`delonix cluster kubeadm` 和 `delonix vm image build` 用它们自己的顺序去找
 `delonix-cri`（`bins/delonix-runtime-bin/src/cmd/vmimage.rs` 里的
 `resolve_cri_bin`）：`--cri-bin`，然后是 `delonix` 同目录下，然后——如果当前目录在一个源码 checkout 里面——是一次 `cargo build --release -p delonix-cri`，只有到最后才会去下载已发布的产物。
 
@@ -316,7 +316,7 @@ cargo test -p <crate> -- --ignored <test-name>
 | `cli-surface` | `python3 scripts/docs_cli_gate.py` | 当前文档里引用的某条 `delonix …` 命令，在这个二进制程序的命令树里并不存在 |
 | `clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 任何警告 |
 | `test` | `cargo build --workspace --locked && cargo test --workspace --locked --no-fail-fast` | 任何一个测试失败 |
-| `test` | `mkdir -p /tmp/t && TMPDIR=/tmp/t cargo test --workspace --locked --no-fail-fast && python3 scripts/tmp_roots_gate.py --dir /tmp/t --list` | 测试在它们的临时目录里留下了不属于 `scripts/tmp_roots_baseline.json` 中已知债务的东西——一个新的泄漏、某个已知泄漏变多了，或者某个已知泄漏变少了却没有降低基线（`--update`）。基线是托管运行器留下的内容，而泄漏可能取决于宿主机（一个在缺少 `qemu-img` 时提前返回的测试曾经跳过了它的清理）。自从这笔债务还清以来基线就是空的：测试把它的临时目录放在一个在 `Drop` 时删除它的守卫里（`tempfile::TempDir`），这样删除在提前 `return` 和断言失败时也会执行；所以本地运行请用 `--list` 来对比 |
+| `test` | `mkdir -p ~/.cache/t && ls -A /tmp > ~/.cache/before.txt && TMPDIR=~/.cache/t cargo test --workspace --locked --no-fail-fast; python3 scripts/tmp_roots_gate.py --dir ~/.cache/t --list; python3 scripts/tmp_roots_gate.py --dir /tmp --before ~/.cache/before.txt --list` | 测试在 `/tmp` 里留下了任何新东西（一个 Unix 套接字的短路径就落在那里，位于 `TMPDIR` 之外），或者在它们的临时目录里留下了不属于 `scripts/tmp_roots_baseline.json` 中已知债务的东西——一个新的泄漏、某个已知泄漏变多了，或者某个已知泄漏变少了却没有降低基线（`--update`）。基线是托管运行器留下的内容，而泄漏可能取决于宿主机（一个在缺少 `qemu-img` 时提前返回的测试曾经跳过了它的清理）。自从这笔债务还清以来基线就是空的：测试把它的临时目录放在一个在 `Drop` 时删除它的守卫里（`tempfile::TempDir`），这样删除在提前 `return` 和断言失败时也会执行；所以本地运行请用 `--list` 来对比 |
 | `deny` | `cargo deny check advisories licenses sources` | 一条 RUSTSEC 安全公告、一个不被允许的许可证或来源（`deny.toml`） |
 | `docs` | `cargo build --release -p delonix-runtime-bin && python3 docs/gen.py && git diff --exit-code -- docs/` | 已提交的站点内容，和这个二进制程序生成器产出的内容不一致 |
 | `docs` | `./target/release/delonix stack apply -f examples/<file>.yaml --dry-run` 与 `./target/release/delonix stack validate -f examples/<file>.yaml` | 某个已发布的示例用了一种已废弃的写法，或者含有未解析的引用 |

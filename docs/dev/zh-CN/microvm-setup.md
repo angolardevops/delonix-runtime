@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:1bdc6dc5407aca36b67bfc85db87ae040be56261e156204a812ada36979bcc8a -->
+<!-- translated-from: microvm-setup.md sha256:b766ad79d4aa4ccff1f2fd32d4ec05fe39fa030e097326ddc51d54148ad5737e -->
 # 构建 microVM
 
 **阅读之前：**[准备你的环境](environment.md)、[克隆、构建与测试](build-and-test.md)、[云原生入门中的虚拟化一节](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init)，以及[Delonixfile 与 VMfile](delonixfile-and-vmfile.md#part-2-vmfile)的第 2 部分。
@@ -92,7 +92,7 @@ id -nG | tr ' ' '\n' | grep -x kvm   # your user must be in the kvm group
 
    ```bash
    mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run
-   XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix image vm build --network …
+   XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix vm image build --network …
    ```
 
    如果这样还不行，就让一个较新的 passt**排在 `PATH` 最前面**（安装脚本会把一个这样的版本
@@ -225,7 +225,7 @@ OpenStack 后端**仅仅是提议阶段**（[ADR-0039](../../adr/0039-openstack-
 
 虚拟机镜像存放在 `VmImageStore`（`cmd/vmimage.rs`）里，位于
 `<DELONIX_ROOT>/vm-images/` 之下：每个镜像一个 qcow2 加一条 JSON 元数据记录
-（`VmImage`）。`delonix image vm ls` 会把它们列出来，带上 `TYPE`（cloud-init / appliance）
+（`VmImage`）。`delonix vm image ls` 会把它们列出来，带上 `TYPE`（cloud-init / appliance）
 和 `DEFAULTS`（记录下来的 vCPU/内存）。
 
 ### 官方镜像
@@ -238,33 +238,33 @@ OpenStack 后端**仅仅是提议阶段**（[ADR-0039](../../adr/0039-openstack-
 | `base` | `ghcr.io/angolardevops/delonix-vm-base` | 带 `delonix` 引擎的基础操作系统，不含 Kubernetes（例如 `ubuntu-24.04`） |
 | `appliances` | `ghcr.io/angolardevops/delonix-vm-appliances` | 厂商 appliance，不含 cloud-init |
 
+> 黄金虚拟机镜像存放在 **`angolardevops`** 这个组织下（公开的 package），这是刻意为之——与位于 `ghcr.io/ngolacloud/delonix` 的产品引擎镜像有所区分。仓库名称来自 `cmd/vmimage.rs` 里的 `OFFICIAL_REPOS`；这两个组织并不是弄错了。
+
 ```bash
-delonix vm ls-remote                 # tags of the Kubernetes golden repo
-delonix vm ls-remote --no-k8s        # tags of the base repo
-delonix vm pull                      # the official Kubernetes golden
-delonix vm pull --no-k8s             # the official base image
-delonix vm pull <oci-ref> --name <local-name>
+delonix vm image ls-remote                 # tags of the Kubernetes golden repo
+delonix vm image ls-remote --no-k8s        # tags of the base repo
+delonix vm image pull                      # the official Kubernetes golden
+delonix vm image pull --no-k8s             # the official base image
+delonix vm image pull <oci-ref> --name <local-name>
 ```
 
 镜像是单 blob 的 OCI artifact；拉取时会校验 manifest 和 blob 的摘要，并从 manifest 的
-annotation 里还原出元数据。同样这几个动词也以 `delonix image vm pull/ls-remote/push` 的
-形式存在。**注意：**不带 `--disk` 又没有本地镜像的 `vm create` 会下载官方的黄金镜像，因此
+annotation 里还原出元数据。**注意：**不带 `--disk` 又没有本地镜像的 `vm create` 会下载官方的黄金镜像，因此
 需要联网。
 
 ### 构建黄金配方
 
-`delonix vm build -t <tag>`（和 `delonix image vm build` 是同一个命令；两者共用同一套参数）
-在上下文里既没有 `vm.yaml` 也没有 `VMfile` 时，会运行内置配方。下面的例子用的是
-`image vm` 这种写法：
+`delonix vm image build -t <tag>` 在上下文里既没有 `vm.yaml` 也没有 `VMfile` 时，会运行内置
+配方：
 
 ```bash
 # Kubernetes node, packages fetched and verified on the HOST, guest offline
-delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
+delonix vm image build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
 # no Kubernetes: just the engine, rootless-ready
-delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
+delonix vm image build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
 ```
 
-相关参数（默认值请查 `image vm build --help`）：`--distro ubuntu|debian|rocky|fedora`、
+相关参数（默认值请查 `vm image build --help`）：`--distro ubuntu|debian|rocky|fedora`、
 `--ubuntu-release`、`--debian-release`、`--rocky-release`、`--fedora-release`（release **和**
 build 两部分，例如 `42-1.1`）、`--k8s-version`、`--offline`、`--no-k8s`、`--extra-package`、
 `--extra-run`、`--cri-bin`、`--delonix-bin`、`--root-password`（不给它，任何账户都不会有
@@ -279,11 +279,11 @@ profile、启动构建出来的镜像，以及 appliance 构建器，都**还没
 ### 转换与导入
 
 ```bash
-delonix vm convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
+delonix vm image convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
+delonix vm image import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 ```
 
-`vm convert` 会拍平磁盘（没有 backing chain）；`--compress` 只在目标是 `qcow2` 或 `vmdk` 时
+`vm image convert` 会拍平磁盘（没有 backing chain）；`--compress` 只在目标是 `qcow2` 或 `vmdk` 时
 才被接受。`import --appliance` 会记录下 `cloud_init: false`：这样一来 `vm create` 就**不会**
 再挂载 seed，并且会按名字拒绝 `--hostname`/`--ssh-key`/`--user-data`，因为客户机根本不会
 去读它们。Appliance 的构建脚本放在 `scripts/appliances/` 里。

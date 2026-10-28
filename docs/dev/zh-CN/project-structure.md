@@ -1,4 +1,4 @@
-<!-- translated-from: project-structure.md sha256:72090abc93d3d1a938f4e0aaa8e4ac853968342a4dbc53305ba2aefbd49a4e87 -->
+<!-- translated-from: project-structure.md sha256:429dd3f81c099f0c54e6d026741f16a99e2c6f1bdda5b1f3656d5d806f68739e -->
 # 项目结构
 
 **阅读之前：**[克隆、构建与测试](build-and-test.md) —— 你已经有一份能构建的 checkout，也知道
@@ -70,6 +70,7 @@
 │   ├── dev/                      this handbook (English + translations)
 │   ├── discovery/                dated investigations (historical)
 │   ├── handbook/                 this handbook as HTML — generated
+│   ├── labs/                      executable first-contact labs (prepare/run/verify/cleanup)
 │   ├── releases/                 release notes, one per version (historical)
 │   ├── roadmap/                  improvement-programme traceability matrix
 │   ├── runtime/                  dated runtime discovery (historical)
@@ -150,12 +151,15 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 | `docs/dev/` | 本贡献者手册：英文 Markdown 源文件，带 `pt-AO/` 和 `fr-FR/` 翻译，翻译带有 `translated-from` 哈希。`dev-docs:begin`/`dev-docs:end` 标记之间的区域由 `scripts/dev_docs.py` **生成**；其余部分是手写的。 | 手册维护者；生成的区域跟随代码变化，在发布时刷新。 | [发布文档](publishing-docs.md) |
 | `docs/providers/` | `capability-matrix.md`，声明式的 provider 能力矩阵（ADR-0050），由 `delonix provider matrix` **生成**；`delonix-runtime-bin` 里有一个测试，在它与实际输出不一致时会失败。 | 一个声明变化之后运行 `delonix provider matrix > docs/providers/capability-matrix.md`。 | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `docs/discovery/` | 编号、带日期的调查与计划（清单、附带原始结果文件的 spike）。历史记录——不要重写；写一份新的。 | 在结构性变化之前进行调查的人。 | `docs/adr/` |
+| `docs/launch/` | 发布叙事（`why-delonix.md`）：产品定位与一句话卖点，每一个数字都是在一台真实宿主机上测量出来的，每一个上限都被点名。是引言和落地页文案的来源。 | 为一次 launch 或发布修订定位的人。 | [发布文档](publishing-docs.md) |
 | `docs/handbook/` | 本手册作为一个网站（`en/`、`pt-AO/`、`fr-FR/`、`zh-CN/`、`index.html`），由 `scripts/dev_docs_site.py` 从 `docs/dev/` **生成**。绝不要编辑 HTML。 | `docs/dev/` 变化之后、以及发布时，用 `python3 scripts/dev_docs_site.py` 重新生成。 | [发布文档](publishing-docs.md) |
+| `docs/labs/` | 可执行的初次接触实验室：每个实验室一个目录（`lab-N/`），其中有 `prepare`/`run`/`verify`/`cleanup` 几步 shell 脚本，共享一个 `_lib/common.sh`，每一步都断言一个**功能性**结果（HTTP 200、真实的 cgroup `memory.max`），否则就大声失败。`docs/labs.html` 页面由 `docs/gen.py` **生成**，把这些内嵌为双语的实验室片段。 | 任何新增或修订一个实验室的人；改各步脚本以及 `docs/gen.py` 里的编辑说明文字，然后重新生成。 | [发布文档](publishing-docs.md) |
 | `docs/proxmox/` | Proxmox VE 的 API 覆盖矩阵（ADR-0049）：`api-<ver>.routes.json`，从某个节点的 `apidoc.js` 中提取出的一个命名版本的 schema，附带其溯源信息（抓取日期、sha256），以及 `matrix-<ver>.md`，由它以及 provider crate 调用的路由**生成**。绝不要编辑这份矩阵。 | 一条路由加进 `delonix-proxmox` 之后运行 `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown > docs/proxmox/matrix-9.2.2.md`；schema 只在测量了一个新版本时才更新。 | `docs/adr/0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.md` |
 | `docs/releases/` | 发布说明，每个发布一份 `v<version>.md`。一次发布提交必须自己新增一份（`version_gate.py`）。历史记录——不要重写过去的说明。 | 发布提交本身。 | [贡献流程](contributing-workflow.md) |
 | `docs/roadmap/` | 一个改进项目的可追溯性矩阵，其中每一个单元格都引用了一次测量，或者写着「未测量」。 | 维护者，随着条目被测量或关闭。 | — |
 | `docs/runtime/` | 带日期的运行时调查（现状、crate 依赖图、目标与现实的对比）。历史记录：里面的 crate 名称是后来重命名之前的。 | 不再更新；被[架构](architecture.md)和[各个 crate](crates.md)取代。 | [架构](architecture.md) |
 | `docs/schema/` | `v1/delonix.json`，清单的 JSON Schema，从代码**生成**（ADR-0007）；以及 `v1/providers.json`，节点 providers 文件的 JSON Schema（ADR-0054）。 | 一个清单类型变化时运行 `delonix manifest schema > docs/schema/v1/delonix.json`；providers 文件变化时运行 `delonix provider config schema > docs/schema/v1/providers.json`。 | `docs/adr/0007-generated-manifest-schema.md`、`docs/adr/0054-provider-configuration-file.md` |
+| `docs/testing/` | 每一个公共表面及其证明计划的叶子清单：`folhas-inventario.md`（今天证明了什么、由哪次测量证明）、`folhas.tsv`（每个叶子一行，它的类别 `A`–`E` 以及证据或理由，由 `scripts/folhas_gate.py` 读取）、`plano-folhas.md`（每个叶子必须有的用例）和 `lab-requisitos.md`（尚未证明的叶子所需的实验室基础设施）。分母是从代码推导出来的，绝不是从表格里。 | 任何证明一个叶子的人：在同一个提交里提升它的类别和基线（`python3 scripts/folhas_gate.py --update`）。 | `docs/testing/folhas-inventario.md` |
 
 ## 工具、CI 与打包（scripts/、.github/、dist/、editors/、examples/、reports/、third_party/、.ai/）
 
@@ -165,7 +169,7 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 | `.github/` | `workflows/ci.yml`（每次 push 和对 `main` 的 PR 都跑的所有门禁）、`chaos.yml`（混沌测试装置）、`release.yml`（手动触发，`gh workflow run release.yml -f tag=vX.Y.Z`）、`vm-image.yml` 和 `vm-appliances.yml`（手动的镜像发布），再加上 `CODEOWNERS`、issue 和 PR 模板，以及给 GitHub Copilot 用的一份指针文件。 | 维护者；新增一个门禁时，要在这里加，并在手册里记录下来。 | [克隆、构建与测试](build-and-test.md)、[发布文档](publishing-docs.md) |
 | `dist/` | `delonix-cri.service`，CRI 服务器用的 systemd unit（同时也嵌在二进制程序里）。 | 改动 `delonix-cri` 在 systemd 下如何运行的人。 | [云原生标准](cloud-native-standards.md) |
 | `editors/` | VMfile 语法高亮：`vim/`（ftdetect + syntax）和 `vscode/`（语言配置 + TextMate 语法）。 | 改动 VMfile 语法的人。 | [Delonixfile 与 VMfile](delonixfile-and-vmfile.md) |
-| `examples/` | 每个 Kind 的示例清单、一个多文件的网络实验室（`lab-rede/`），以及一个小的完整项目（`delonix-temp/`）。CI 的 `docs` 作业会 dry-run 每一个 `examples/*.yaml`，所以一个已废弃或已损坏的示例会让构建失败。 | 每一个新增或改变某个 Kind 的功能。 | [Delonixfile 与 VMfile](delonixfile-and-vmfile.md) |
+| `examples/` | 按 API 分组放在子文件夹里的示例清单（`compute/`、`networking/`、`gateway/`、`storage/`、`artifact/`、`core/`、`security/`、`gitops/`、`cluster/`），每个 Kind 一个双语文件；外加 `_labs/`（一个多文件的网络实验室 `lab-rede/`、一个 `compose-webapp/` 示例，以及一个小的完整项目 `delonix-temp/`）。CI 的 `docs` 作业会遍历整棵树并 dry-run 每一个清单（跳过 `_labs/`），所以一个已废弃或已损坏的示例会让构建失败。 | 每一个新增或改变某个 Kind 的功能。 | [Delonixfile 与 VMfile](delonixfile-and-vmfile.md) |
 | `images/` | 每个 VM 镜像一个文件夹：`ubuntu`、`debian`、`rocky`、`fedora`（离线构建的自定义配方）和八个一体机（`opnsense`、`proxmox`、`truenas`、`openstack`、`monitoring`、`carbonio`、`glpi`、`wazuh`），它们的 `vm.yaml` 在 `scripts/appliances/` 中点名一个构建器。每个都有一份 README；`images/README.md` 给它们做了索引，并解释了 `scripts/verify-images.sh`。有一个单元测试（`vmspec::every_shipped_recipe_is_valid_and_complete`）会在某个配方解析失败、或指向一个缺失的文件或构建器时失败。 | 任何新增一个发行版或一体机、或改变 `vm.yaml` schema 的人。 | [Delonixfile 与 VMfile](delonixfile-and-vmfile.md) |
 | `reports/` | 带日期的审计报告：`code-quality/` 和 `production-readiness/<version>/`（清单、差距矩阵、待办列表）。某次审计在某个提交上的历史记录——不要重写；列在里面的东西不会因为被列出来就算实现了。 | 进行一次新审计的人（新增文件）。 | — |
 | `third_party/` | 被 vendor 进来的 `googleapis` proto（`google/api/annotations.proto`、`http.proto`），用于节点契约的 HTTP 映射。Apache-2.0，许可证头保留；来源提交记录在它自己的 `README.md` 里。绝不要在这里编辑。 | 更新被 vendor 进来的 proto 的人，两个文件要来自同一个上游提交。 | `third_party/googleapis/README.md` |
