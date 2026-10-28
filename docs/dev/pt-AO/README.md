@@ -1,5 +1,5 @@
 <!-- translated-from: README.md sha256:bb63e156dd668cde907112c102d5b2e8f1cb53382b74f70ac37d9f16dccade51 -->
-# Delonix Runtime — Manual do Contribuidor
+# Delonix — Manual do Contribuidor
 
 Este manual é para quem quer **mudar o motor**: clonaste o repositório hoje e queres enviar um
 primeiro pull request sem partir o teu host nem o motor. Depois desta página vais saber como o
@@ -13,7 +13,7 @@ O workspace tem **35 crates** e produz **6 binários** (`delonix`, `delonix-cri`
 
 ## O que o motor é — e o que não é
 
-O Delonix Runtime é uma abstracção de execução para **um nó**: corre **containers e microVMs**
+O Delonix é uma abstracção de execução para **um nó**: corre **containers e microVMs**
 e gere a rede e o armazenamento de que eles precisam. É declarativo (Kinds próprios, agrupados por
 `apiVersion` — ver `delonix api-resources`), e fala com os providers (o kernel Linux, libvirt,
 Cloud Hypervisor, Proxmox VE, OPNsense, o CRI do Kubernetes) só através de portas, nunca através de ramos

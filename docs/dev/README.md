@@ -1,4 +1,4 @@
-# Delonix Runtime — Contributor Handbook
+# Delonix — Contributor Handbook
 
 This handbook is for people who want to **change the engine**: you cloned the repository today and
 want to send a first pull request without breaking your host or the engine. After this page you
@@ -13,7 +13,7 @@ The workspace has **35 crates** and ships **6 binaries** (`delonix`, `delonix-cr
 
 ## What the engine is — and what it is not
 
-Delonix Runtime is an execution abstraction for **one node**: it runs **containers and microVMs**
+Delonix is an execution abstraction for **one node**: it runs **containers and microVMs**
 and manages the networking and storage they need. It is declarative (its own Kinds, grouped by
 `apiVersion` — see `delonix api-resources`), and it talks to providers (the Linux kernel, libvirt,
 Cloud Hypervisor, Proxmox VE, OPNsense, the Kubernetes CRI) only through ports, never through

@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:29bfa631d854ca52b0ea6139372f8e307b7921ad31fae6f8d4510b1e41550478 -->
 # IaaS e cloud native — onde o motor encaixa
 
 **Antes de leres:** [Começa aqui](start-here.md#what-delonix-is-5-minutes) (as quatro frases sobre o que é o Delonix). Ainda não precisas de conhecimento de kernel nem de Rust.
@@ -89,7 +89,7 @@ flowchart TB
   CP["IaaS control plane<br/><small>tenancy, scheduling, quotas, billing — NOT this repository</small>"]
   NC["Node-local client<br/><small>control-plane agent, kubelet, operator shell</small>"]
   subgraph NODE["One node"]
-    ENG["Delonix Runtime<br/><small>the engine: containers, microVMs, their network and storage</small>"]
+    ENG["Delonix<br/><small>the engine: containers, microVMs, their network and storage</small>"]
     DOORS["Interfaces<br/><small>CLI, node contract, CRI, MCP</small>"]
     ST[("State root<br/><small>JSON records, image store, volumes</small>")]
     K["Linux kernel<br/><small>namespaces, cgroups v2, nftables, overlayfs</small>"]
@@ -148,7 +148,7 @@ repositório, e nada em `crates/`, `bins/` ou `proto/` pode nomear um. O `script
 
 ### O que é
 
-O Delonix Runtime é a **camada de execução de nó** da figura acima. Num nó, ele:
+O Delonix é a **camada de execução de nó** da figura acima. Num nó, ele:
 
 - corre **containers e microVMs** — containers através de `crates/adapters/delonix-linux`, VMs
   através das implementações registáveis de `VmBackend` em `crates/adapters/delonix-vm`;

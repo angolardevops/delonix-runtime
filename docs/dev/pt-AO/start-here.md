@@ -23,7 +23,7 @@ mandar lá.
 
 ### O que é o Delonix (5 minutos)
 
-O Delonix Runtime é um motor que corre **containers e microVMs num nó**, a par da rede e do
+O Delonix é um motor que corre **containers e microVMs num nó**, a par da rede e do
 armazenamento de que eles precisam. É:
 
 - **declarativo** — descreves recursos com os seus Kinds próprios (`delonix api-resources` lista-os)

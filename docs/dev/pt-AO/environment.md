@@ -1,9 +1,9 @@
-<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
+<!-- translated-from: environment.md sha256:be05e7ccde096c9ce02ed0ac2e209b74dfd4f12d13614fdb052f74a6069bb1e1 -->
 # Preparar o teu ambiente
 
 **Antes de leres:** [Começa aqui](start-here.md#day-0-in-30-minutes) (Dia 0) e [Fundações de Linux](linux-foundations.md) — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.
 
-O Delonix Runtime é **só para Linux**: todos os primitivos que usa — namespaces, cgroups v2, nftables,
+O Delonix é **só para Linux**: todos os primitivos que usa — namespaces, cgroups v2, nftables,
 `pivot_root`, a nova API de mount — vivem no kernel Linux. Consegues *compilar* a maior parte do
 workspace e correr os seus testes de lógica pura em qualquer máquina Linux com a toolchain abaixo;
 para *correr* containers e exercitar os caminhos ao vivo precisas de um host que cumpra os requisitos

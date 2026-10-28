@@ -19,7 +19,7 @@
 
 ### Delonix 是什么（5 分钟）
 
-Delonix Runtime 是一个在**单个节点上运行容器和 microVM** 的引擎，连同它们所需要的网络和存储。它：
+Delonix 是一个在**单个节点上运行容器和 microVM** 的引擎，连同它们所需要的网络和存储。它：
 
 - **声明式（declarative）**——你用它自己的 Kind 描述资源（`delonix api-resources` 会列出它们），
   引擎负责规划（plan）并应用（apply）差异；

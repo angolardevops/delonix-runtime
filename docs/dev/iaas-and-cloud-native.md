@@ -87,7 +87,7 @@ flowchart TB
   CP["IaaS control plane<br/><small>tenancy, scheduling, quotas, billing — NOT this repository</small>"]
   NC["Node-local client<br/><small>control-plane agent, kubelet, operator shell</small>"]
   subgraph NODE["One node"]
-    ENG["Delonix Runtime<br/><small>the engine: containers, microVMs, their network and storage</small>"]
+    ENG["Delonix<br/><small>the engine: containers, microVMs, their network and storage</small>"]
     DOORS["Interfaces<br/><small>CLI, node contract, CRI, MCP</small>"]
     ST[("State root<br/><small>JSON records, image store, volumes</small>")]
     K["Linux kernel<br/><small>namespaces, cgroups v2, nftables, overlayfs</small>"]
@@ -145,7 +145,7 @@ and nothing in `crates/`, `bins/` or `proto/` is allowed to name one. `scripts/a
 
 ### What it is
 
-Delonix Runtime is the **node execution layer** of the picture above. On one node it:
+Delonix is the **node execution layer** of the picture above. On one node it:
 
 - runs **containers and microVMs** — containers through `crates/adapters/delonix-linux`, VMs
   through the registrable `VmBackend` implementations in `crates/adapters/delonix-vm`;
