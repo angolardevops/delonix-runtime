@@ -241,7 +241,7 @@ FROM ubuntu:24.04: official delonix base delonix-vm-base:ubuntu-24.04 (local)
 **`RUN` corre sem rede por omissão**, de propósito: um build que vai à internet dá
 uma imagem diferente conforme o dia em que correu. Para instalar pacotes há
 `--network` — que **neste host não funciona** (ver
-[Armadilhas](#vm-build---network-esbarra-no-host)).
+[Armadilhas](#vm-image-build---network-esbarra-no-host)).
 
 ---
 
