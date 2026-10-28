@@ -8,7 +8,7 @@ you only want to
 [user documentation site](https://ngolacloud.github.io/delonix/) instead.
 
 <!-- dev-docs:begin crate-count -->
-The workspace has **34 crates** and ships **6 binaries** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).
+The workspace has **35 crates** and ships **6 binaries** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).
 <!-- dev-docs:end crate-count -->
 
 ## What the engine is — and what it is not

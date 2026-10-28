@@ -7,7 +7,7 @@ pull request。读完本页后，你会知道本手册的编排顺序，以及�
 [用户文档网站](https://ngolacloud.github.io/delonix/) 开始。
 
 <!-- dev-docs:begin crate-count -->
-工作区共有 **34 个 crate**，产出 **6 个二进制**（`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`）。
+工作区共有 **35 个 crate**，产出 **6 个二进制**（`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`）。
 <!-- dev-docs:end crate-count -->
 
 ## 引擎是什么——以及它不是什么
