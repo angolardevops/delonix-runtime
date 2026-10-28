@@ -3227,16 +3227,28 @@ EXAMPLES_EN = {
 CSS = """
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
---tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
---tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+--out-ink:#4a5563;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#9da7b3;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#9da7b3;--tok-head:#ff9a5a;--tok-sep:#9da7b3;
+--tag-ok-bg:#d8f3dc;--tag-ok-fg:#1b4332;--tag-mid-bg:#fff3bf;--tag-mid-fg:#5c4a00;
+--tag-no-bg:#ffe3e3;--tag-no-fg:#7a1420;
+--warn-border:#e03131;--warn-bg:#fff0f0;--warn-fg:#c92a2a}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
 --bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--out-ink:#aeb8c6;
 --tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
---tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e;
+--tag-ok-bg:#0f3d24;--tag-ok-fg:#8fe3ac;--tag-mid-bg:#453800;--tag-mid-fg:#ffe066;
+--tag-no-bg:#4a1015;--tag-no-fg:#ffa8a8;
+--warn-border:#e5484d;--warn-bg:#3a1414;--warn-fg:#ff8787}}
 :root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
 --bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--out-ink:#aeb8c6;
 --tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
---tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e;
+--tag-ok-bg:#0f3d24;--tag-ok-fg:#8fe3ac;--tag-mid-bg:#453800;--tag-mid-fg:#ffe066;
+--tag-no-bg:#4a1015;--tag-no-fg:#ffa8a8;
+--warn-border:#e5484d;--warn-bg:#3a1414;--warn-fg:#ff8787}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
@@ -3301,7 +3313,7 @@ pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .tok-sep{color:var(--tok-sep)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
 .ex .out,div.out{margin-top:.4rem}
-.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--out-ink);
 padding:.7rem 1rem;font-size:.82rem}
 .ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
 margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
@@ -3325,15 +3337,13 @@ padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
 .pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
 padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
 .tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
-.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
-.tag.no{background:#ffe3e3;color:#7a1420}
-@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
-.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.tag.ok{background:var(--tag-ok-bg);color:var(--tag-ok-fg)}
+.tag.mid{background:var(--tag-mid-bg);color:var(--tag-mid-fg)}
+.tag.no{background:var(--tag-no-bg);color:var(--tag-no-fg)}
 .callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
 background:var(--accent-soft)}
-.callout.warn{border-color:#e03131;background:#fff0f0}
-.callout.warn b{color:#c92a2a}
-@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout.warn{border-color:var(--warn-border);background:var(--warn-bg)}
+.callout.warn b{color:var(--warn-fg)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
@@ -3342,7 +3352,32 @@ aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transfo
 aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
 aside.toc a:hover{color:var(--accent);text-decoration:none}
 @media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
-@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+/* Hambúrguer: escondido no desktop; a lista de nav está sempre visível. */
+.nav-toggle{display:none;appearance:none;border:1px solid var(--line);background:var(--bg);
+color:var(--ink);border-radius:8px;width:30px;height:30px;flex-shrink:0;align-items:center;
+justify-content:center;cursor:pointer;font-size:1.05rem;line-height:1}
+.nav-toggle:hover{border-color:var(--accent)}
+/* Botão de cópia: sobre o fundo do código (SEMPRE escuro) nos dois temas. */
+pre.has-copy{position:relative}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;appearance:none;cursor:pointer;
+border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--code-ink);
+border-radius:6px;padding:.16rem .5rem;font-size:.72rem;font-weight:600;line-height:1.4;
+opacity:0;transition:opacity .15s,background .15s,color .15s,border-color .15s}
+pre.has-copy:hover .copy-btn,.copy-btn:focus-visible{opacity:1}
+.copy-btn:hover{background:rgba(255,255,255,.16)}
+.copy-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.copy-btn.ok{opacity:1;background:rgba(63,185,80,.22);border-color:#3fb950;color:#7ee787}
+.copy-btn.err{opacity:1;background:rgba(248,81,73,.22);border-color:#f85149;color:#ffa8a8}
+.copy-btn.ok::after{content:" \\2713"}
+.copy-btn.err::after{content:" \\2717"}
+@media (hover:none){.copy-btn{opacity:1}}
+@media (max-width:840px){.layout{display:block}
+nav.side{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:.8rem 1rem;
+border-right:none;border-bottom:1px solid var(--line)}
+nav.side .brand{margin-bottom:0}
+.nav-toggle{display:inline-flex}
+.nav-links{display:none;margin-top:.8rem;max-height:70vh;overflow-y:auto}
+nav.side.open .nav-links{display:block}
 main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 """
 
@@ -3438,13 +3473,16 @@ def sidebar(active, depth=0):
 <span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
 <span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+<button class="nav-toggle" type="button" aria-controls="nav-links" aria-expanded="false" aria-label="Menu de navegação / Navigation menu" title="Menu">☰</button>
 </div></div>
+<div class="nav-links" id="nav-links">
 {doc_html}
 <h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
 {cmd_html}
 <h5>{bi('span', 'Projecto', 'Project')}</h5>
 <a href="https://github.com/ngolacloud/delonix">GitHub</a>
 <a href="https://github.com/ngolacloud/delonix/releases">Releases</a>
+</div>
 </nav>"""
 
 
@@ -3596,8 +3634,73 @@ function initLangToggle(){
   });
 }
 
+function initNavToggle(){
+  var btn=document.querySelector('.nav-toggle'),nav=document.querySelector('nav.side');
+  if(!btn||!nav)return;
+  btn.addEventListener('click',function(){
+    var open=nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded',open?'true':'false');
+  });
+  // No mobile, fechar o menu ao seguir um link.
+  nav.addEventListener('click',function(e){
+    if(e.target.closest('#nav-links a')&&matchMedia('(max-width:840px)').matches){
+      nav.classList.remove('open');btn.setAttribute('aria-expanded','false');
+    }
+  });
+}
+
+function legacyCopy(text){
+  try{
+    var ta=document.createElement('textarea');
+    ta.value=text;ta.setAttribute('readonly','');
+    ta.style.position='fixed';ta.style.top='-9999px';ta.style.left='-9999px';
+    document.body.appendChild(ta);ta.focus();ta.select();
+    var ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  }catch(e){return false;}
+}
+function flashCopy(btn,ok){
+  btn.classList.remove('ok','err');
+  btn.classList.add(ok?'ok':'err');
+  clearTimeout(btn._copyT);
+  btn._copyT=setTimeout(function(){btn.classList.remove('ok','err');},1600);
+}
+function isCommandPre(pre,code){
+  // Só blocos de COMANDO: nunca .out (resultados) nem .help (--help), nem YAML.
+  if(pre.closest('.out'))return false;
+  if(pre.parentElement&&pre.parentElement.classList.contains('help'))return false;
+  var text=code.textContent;
+  if(/^apiVersion:|\\nkind:\\s/.test(text))return false;
+  return !!(pre.closest('.ex')||/^(delonix|dlx)\\b/.test(text.trim()));
+}
+function initCopyButtons(){
+  document.querySelectorAll('main pre > code').forEach(function(code){
+    var pre=code.parentElement;
+    if(!isCommandPre(pre,code))return;
+    if(pre.querySelector('.copy-btn'))return;
+    pre.classList.add('has-copy');
+    var btn=document.createElement('button');
+    btn.type='button';
+    btn.className='copy-btn';
+    btn.setAttribute('aria-label','Copiar comando / Copy command');
+    btn.innerHTML='<span class="lang-pt">Copiar</span><span class="lang-en">Copy</span>';
+    btn.addEventListener('click',function(){
+      var text=code.textContent;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(
+          function(){flashCopy(btn,true);},
+          function(){flashCopy(btn,legacyCopy(text));});
+      }else{
+        flashCopy(btn,legacyCopy(text));
+      }
+    });
+    pre.appendChild(btn);
+  });
+}
+
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();initLangToggle();buildToc();highlightAll();
+  initThemeToggle();initLangToggle();initNavToggle();buildToc();highlightAll();initCopyButtons();
 });
 })();</script>"""
 
