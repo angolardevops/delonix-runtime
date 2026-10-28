@@ -65,7 +65,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 | Conformidade medida | CRI/OCI/rede "medido na v5.1.1" | `network-compatibility.md:124`; `dev/plano-conformidade-oci-cri.md` (+ handbook 4 idiomas); `testing/folhas-inventario.md:17,316,544` | Re-medir na 0.1.0 ou marcar histórico explícito | 🟠 | Nova medição datada |
 | Versão anómala | ✅ **FEITO** — `Delonix 0.53.0` já corrigido em commit anterior da Secção 2 (não reaparece em `comparacao-medida.md`) | `comparacao-medida.md` | — | 🟠 | grep `0.53.0` = 0 ✅ |
 | Fronteira de contrato | ✅ **FEITO (Secção 2)** — 4 notas reenquadradas p/ "na linha 0.1.0" (5.1.x nomeada como baseline histórica na 1ª) | `cli-stability.md:75,131,140,150` → `estabilidade.html` | Reenquadrado p/ 0.1.0 | 🟠 | — |
-| Resíduo de marca | 346× "Delonix Runtime" como nome de produto (handbook 4 idiomas) | `handbook/**/*.html` | Substituir por "Delonix" na próxima regeneração do handbook | 🟢 | grep "Delonix Runtime" no handbook = 0 |
+| Resíduo de marca | ✅ **FEITO** — 345× "Delonix Runtime"→"Delonix" (gerador `dev_docs_site.py` + 24 em `docs/dev/**/*.md`, 4 idiomas); crate/binário `delonix-runtime(-bin)` preservado; handbook regenerado | `dev_docs_site.py`; `docs/dev/**/*.md` | Substituído p/ "Delonix" | 🟢 | grep "Delonix Runtime" no handbook = **0** ✅ |
 | Extensão VS Code | ✅ **VERIFICADO (Secção 2)** — vive em `angolardevops/delonix-vscode` (**público**); `ngolacloud/delonix-vscode` → **404**. Referência correcta, sem alteração | GitHub API | — (confirmado) | 🟢 | `angolardevops` público ✅ |
 | Título duplicado | `<title>Delonix Engine · Delonix Engine</title>` | `index.html:6` | Corrigir template em `gen.py` | 🟢 | Ver `<title>` |
 | Metadados ausentes | Sem `<base>`, `canonical`, `og:`/`twitter:` em todo o site | `index.html` só tem `viewport`+`title` | Acrescentar meta (base `ngolacloud.github.io/delonix`) | 🟢 | Ver `<head>` |
@@ -112,7 +112,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 
 **🟠 Média:** ✅ imagens golden `angolardevops` (verificado público, por design — Sec 2); proveniência 5.1.1→0.1.0 (labs ✅ reetiquetados Sec 11; conformidade por re-medir); ✅ `Delonix 0.53.0` (corrigido); ✅ fronteira de contrato reenquadrada p/ 0.1.0 (Sec 2); ✅ botão de cópia (Sec 8); ✅ `--help` EN-only rotulado (Sec 9); ✅ taglines EN (Sec 9); ✅ `<html lang>` (Sec 9); ✅ âncoras guia-vm (Sec 9; manual traduzido adiado); ⏳ traduções stale do manual (adiado, Sec 9); ✅ FirewallPolicy/Tunnel na tagline (Sec 10); ✅ env vars de desenho (Sec 12).
 
-**🟢 Baixa:** 346× "Delonix Runtime" no handbook *(por fazer, regeneração do handbook)*; ✅ título duplicado (Sec 16); ✅ metadados (Sec 16); ✅ zh-CN na landing (Sec 3); ✅ labs ligados (Sec 3); ✅ nav mobile (Sec 5); ✅ cores fora de tokens (Sec 6).
+**🟢 Baixa:** ✅ 345× "Delonix Runtime"→"Delonix" no handbook (feito); ✅ título duplicado (Sec 16); ✅ metadados (Sec 16); ✅ zh-CN na landing (Sec 3); ✅ labs ligados (Sec 3); ✅ nav mobile (Sec 5); ✅ cores fora de tokens (Sec 6).
 
 ## Mapeamento para o backlog (frentes seguintes, uma sessão cada)
 
