@@ -250,3 +250,33 @@ VMfile and cloud-init/user-data.
 - Older framework majors fall outside `-v`; users who need them edit the manifest by hand.
 - Templates are larger; each carries its own tests, so a regression in a template is caught
   by running that template's own `make check`.
+
+## Addendum (2026-10-28) — `rust` and `wordpress` added after this ADR
+
+The Context above measured **eleven** templates against `9eb2a14d` (2026-09-30); the number
+is left as measured. Two templates were added afterwards and the binary now embeds **thirteen**
+(`delonix init -t list`): `wordpress` (infrastructure/ERP class, alongside `odoo`) and
+**`rust`** (application class, commit `ae93270e`, axum/tokio reference service). This addendum
+brings `rust` under the contract without rewriting the historical measurement.
+
+`rust` honours **D1** (a small complete service: notes capability, live/ready health,
+webhooks in the Standard Webhooks format, OpenTelemetry, OpenAPI, its own tests) and **D12**
+(ships `VMfile`, `vm.yaml`, `cloud-init/user-data`; `template.meta` has `vm_support=yes`). Its
+generated `Cargo.toml` carries an empty `[workspace]` so `cargo build`/`cargo test` work in the
+generated directory with no edits. Secrets are rendered fresh (`__SECRET_<NAME>__` → random),
+never committed, and `.env` is never overwritten — as D3 requires.
+
+D7 row for `rust` (toolchain = Rust edition 2021, MSRV from `rust-version`):
+
+| template | default `-v` | accepted | runtime |
+|---|---|---|---|
+| rust (axum/tokio) | 1.90 | 1.89, 1.90 | edition 2021, MSRV = `-v` |
+
+**Verification (this host, 2026-10-28, binary `9177cd6c9`).** `delonix init -t rust` into an
+empty directory generated the full project; `cargo build` compiled it clean (303 deps, debug);
+the binary started, listened on `0.0.0.0:8000` with structured JSON logs, and
+`GET /api/v1/health/live` returned **HTTP 200**. Robustness, non-interactive (no TTY): an
+invalid `--name` is refused with `DX-1000` before any file is written (0 files on disk); a
+repeat run is idempotent (`nothing to do`); a directory holding a foreign file switches to
+adopt mode and leaves that file intact. Not yet run through `scripts/init-ci.sh`'s clean-room
+CI (D11) nor `--up`/VM build (D10/D12) for `rust` — those remain to be measured.
