@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-standards.md sha256:f44ace1187e1f3e99b620e7efca82fb47e35f5889bfd9e831a924bf7ea7c4c24 -->
+<!-- translated-from: cloud-native-standards.md sha256:03b24fe646c330c5610fac780bb582618e4c045753949fecac6f03f9f6176e12 -->
 # 云原生标准，逐层展开
 
 **阅读前须知：** [云原生入门](cloud-native-primer.md)（引擎如何使用每一种机制）和[架构](architecture.md)（下面点名的那些 crate）。这是一页参考资料：只读你会碰到的那一节标准。
@@ -571,6 +571,38 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
   都重新计算；昂贵的字段（磁盘遍历）在后台刷新，这样抓取本身就能保持快速。
 - 两个处理函数服务的都是
   `application/openmetrics-text; version=1.0.0; charset=utf-8`。
+- **按工作负载的争用系列**（仅 `delonix-mgmt`；`crates/adapters/delonix-telemetry/src/workload.rs`,
+  由 `crates/adapters/delonix-linux/src/pressure.rs` 读取）。它们回答"这个工作负载有没有拿到
+  它的限制所承诺的 CPU 和内存？"，每一个正在运行的容器或虚拟机对应一组系列，打上标签
+  `kind`（`container`/`vm`）、`id` 和 `name`，而绝不按进程：
+
+  | 指标（前缀 `delonix_`） | 类型 | 来源 | 额外标签 |
+  |---|---|---|---|
+  | `workload_cpu_periods_total` | counter | `cpu.stat` `nr_periods` | |
+  | `workload_cpu_throttled_periods_total` | counter | `cpu.stat` `nr_throttled` | |
+  | `workload_cpu_throttled_seconds_total` | counter | `cpu.stat` `throttled_usec` | |
+  | `workload_pressure_avg10_percent` | gauge | `{cpu,memory,io}.pressure` `avg10` | `resource`, `stall` (`some`/`full`) |
+  | `workload_pressure_stall_seconds_total` | counter | `{cpu,memory,io}.pressure` `total` | `resource`, `stall` |
+  | `workload_memory_oom_events_total` | counter | `memory.events.local` (else `memory.events`) `oom` | |
+  | `workload_memory_oom_kills_total` | counter | `memory.events.local` (else `memory.events`) `oom_kill` | |
+  | `workload_series_unavailable` | gauge, always 1 | | `group`, `reason` |
+
+  这一切都只是对工作负载自己 cgroup 目录里文件的纯读取：不需要新的特权，不需要子进程。
+  **宿主机无法提供的文件给出的是没有系列，而绝不是一个零**，并且一条
+  `workload_series_unavailable{group,reason}` 样本会说明原因。`group` 是 `cpu_throttle`、
+  `cpu_pressure`、`memory_pressure`、`io_pressure`、`memory_events` 之一；`reason` 是
+  `cgroup_missing`、`not_cgroup_v2`（cgroup v1）、`file_missing`（控制器未委派、PSI 未编译
+  进内核或 `cgroup_disable=pressure`）、`psi_disabled`（`psi=0`）、`unreadable`、`incomplete`
+  （文件存在但缺少那些字段）和 `shared_cgroup` 之一。内核不写入的地方 `full` 就是缺失的
+  （老内核上的 `cpu.pressure`）。
+- **虚拟机。** 引擎不为 VMM 创建任何 cgroup，VMM 运行在它的启动器当时所在的那个 cgroup
+  里。因此，只有当 VMM 是它那个 cgroup 里唯一的进程时（比如一个给每个域各一个 scope 的
+  hypervisor），一个虚拟机的系列才会被导出；否则它们就是缺失的，带
+  `reason="shared_cgroup"`，因为一个共享 cgroup 的数字并不是这个虚拟机的。**偷取时间
+  （steal time）不会被导出**：它是一个客户机侧的计数器（客户机里的 `/proc/stat`，来自
+  半虚拟化时钟），而宿主机上最接近的等价物——`/proc/<pid>/task/*/schedstat` 里 VMM 线程的
+  运行队列延迟——是一个不同的量（它还会把非 vCPU 的线程算进去，并且在线程退出时不是单调
+  的），所以把它当作 steal 来呈现会造成误导。要在客户机内部采集 steal。
 
 **合规状态／缺口。** 没有记录跑过任何一次 `promtool check metrics`。那些昂贵的
 仪表值（gauge）最多可能滞后一个刷新周期；`AGENTS.md` 里的记录解释了为什么要这样

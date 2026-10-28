@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:8971e6d8e948183d79f2bbe407c6ab968e80aeb06a1bfa68a7149c83768b66e9 -->
+<!-- translated-from: architecture.md sha256:b872b0cce1c2e30395b5a8fbc9308452401f7604679bc14355faa18027840c13 -->
 # Architecture
 
 **Avant de lire :** [Structure du projet](project-structure.md) (où se trouvent les choses), [IaaS et cloud native](iaas-and-cloud-native.md) (la place et les principes du moteur) et [Initiation au cloud native](cloud-native-primer.md) (les mécanismes que les figures nomment).
@@ -88,7 +88,7 @@ Ce ne sont pas des conventions ; `scripts/arch_fitness.py` impose la moitié str
 | Des ratchets qui ne peuvent que baisser (listés ci-dessous) — par ex. des crates de bibliothèque qui ré-exécutent le binaire du moteur lui-même, des `println!` dans des bibliothèques, des écritures dans l’environnement du processus, des adapters qui importent l’`Error` partagé comme s’il était le leur, un crate de context qui exécute un programme externe (`Command::new` sous `crates/contexts/`, base de référence 0) | les motifs de ratchet (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, `CONTEXT_SPAWNS`, …), base de référence dans `scripts/arch_baseline.json` |
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` maintient **6 cliquets de dette** (référence dans `scripts/arch_baseline.json`) :
+`scripts/arch_fitness.py` keeps **6 debt ratchets** (baseline in `scripts/arch_baseline.json`):
 
 - `self_exec_sites`
 - `library_prints`
@@ -360,7 +360,7 @@ dehors du holder, sur `virbr0` dans le network namespace de l’hôte.
 | shim de logs | `fork` à l’intérieur de `spawn`, exécutant `log_shim` | le container |
 | `slirp4netns` par container | `delonix_sdn::slirp_attach`, appelé comme le hook `on_started` | la netns du container ; les orphelins sont collectés par `reap_orphan_slirp` |
 | pin | `infra::start_pin` démarre `delonix netns pin` ; `infra::pin_main` crée les namespaces user, net et mount dans le processus (`crates/adapters/delonix-sdn/src/pin_userns.rs`) et dort | l’infra ; son pid est `ingress/holder.pid` et ne change jamais |
-| control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | redémarrable ; sert le socket de contrôle, le DNS (`dns_server_main`), les Router Advertisements (`ra_sender_main`) et le DHCP par bridge (`dhcp_serve`) |
+| control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | redémarrable ; sert le socket de contrôle, le DNS (`dns_server_main`), le DHCP par bridge (`dhcp_serve`) et — uniquement sous `DELONIX_ENABLE_IPV6=1` — les Router Advertisements (`ra_sender_main`). La liste des threads est `control_plane_threads` ; être redémarrable est ce qui permet au gate des RA d’être une simple condition et non un réconciliateur |
 | `slirp4netns` unique | `infra::start_slirp` (`tap0` dans la netns du pin, `--api-socket`) | l’infra |
 | proxy d’ingress L7 | `cmd/ingress_proxy.rs::spawn_proxy` via `infra::infra_join_argv` | tant qu’un `HTTPRoute`/`Ingress` ou une route `--expose` existe ; recharge les routes sur `SIGHUP` |
 | `cloud-hypervisor` | `delonix_vm::launch_vmm`, exécuté via l’argv de jonction de l’infra | la VM |
@@ -443,7 +443,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 La couche à laquelle appartient chaque crate, et la direction dans laquelle il peut dépendre :
 
 <!-- dev-docs:begin layers -->
-| Couche | Peut dépendre de |
+| Layer | May depend on |
 |---|---|
 | Foundation | foundation |
 | Contexts | foundation, contexts |
@@ -452,17 +452,17 @@ La couche à laquelle appartient chaque crate, et la direction dans laquelle il 
 | Interfaces | foundation, contexts, adapters, providers |
 | Binaries | foundation, contexts, adapters, providers, interfaces |
 
-Exceptions déclarées (chacune nomme la phase de l'ADR-0040 qui la supprime) :
+Declared exceptions (each one names the ADR-0040 phase that removes it):
 
-- `delonix-linux` → `delonix-state` — supprimée en **P4a**
-- `delonix-mcp` → `delonix-mgmt` — supprimée en **P5**
-- `delonix-oci` → `delonix-state` — supprimée en **P4**
-- `delonix-scanner` → `delonix-oci` — supprimée en **P4**
-- `delonix-sdn` → `delonix-state` — supprimée en **P4**
-- `delonix-vm` → `delonix-provider-cloud-hypervisor` — supprimée en **P5**
-- `delonix-vm` → `delonix-provider-libvirt` — supprimée en **P5**
-- `delonix-vm` → `delonix-state` — supprimée en **P5**
-- `delonix-volume` → `delonix-state` — supprimée en **P4**
+- `delonix-linux` → `delonix-state` — removed in **P4a**
+- `delonix-mcp` → `delonix-mgmt` — removed in **P5**
+- `delonix-oci` → `delonix-state` — removed in **P4**
+- `delonix-scanner` → `delonix-oci` — removed in **P4**
+- `delonix-sdn` → `delonix-state` — removed in **P4**
+- `delonix-vm` → `delonix-provider-cloud-hypervisor` — removed in **P5**
+- `delonix-vm` → `delonix-provider-libvirt` — removed in **P5**
+- `delonix-vm` → `delonix-state` — removed in **P5**
+- `delonix-volume` → `delonix-state` — removed in **P4**
 <!-- dev-docs:end layers -->
 
 ### Où en est la restructuration
@@ -513,7 +513,7 @@ aujourd’hui :
   `crates/contexts/delonix-compute/src/vm_provider.rs`, P4b tranche 1), et `delonix-vm`
   l’implémente pour les deux backends locaux (`LocalVmProvider`,
   `crates/adapters/delonix-vm/src/provider.rs`) en réutilisant son `create_with`/`stop`/`start`
-  existant. Le **#517** (P4b tranche 2) a déplacé le port `VmBackend` et ses types dans le context
+  existant plutôt qu’une seconde orchestration. Le **#517** (P4b tranche 2) a déplacé le port `VmBackend` et ses types dans le context
   de compute (`vm_backend.rs`, `vm_error.rs`, `vm_firewall.rs`) ; `delonix-vm` réexporte chaque nom,
   et `delonix-proxmox` dépend désormais de `delonix-compute` au lieu de `delonix-vm` : il remet à
   la racine de composition un `BackendRegistration` (`registration()`), que
@@ -692,7 +692,7 @@ pour répondre « est-ce que A dépend de B », et lisez les figures par couche 
 comprendre pourquoi.
 
 <!-- dev-docs:begin crates-graph -->
-**Légende** — une boîte par crate, regroupées par couche ; une flèche `A --> B` signifie *A dépend de B*. Rouge : binaires · blanc à bordure rouge : interfaces · blanc : contextes et adaptateurs · gris : providers · bleu : fondation.
+**Legend** — one box per crate, grouped by layer; an arrow `A --> B` means *A depends on B*. Red: binaries · white with red border: interfaces · white: contexts and adapters · grey: providers · blue: foundation.
 
 ```mermaid
 flowchart TB

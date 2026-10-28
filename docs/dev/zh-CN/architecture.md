@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:8971e6d8e948183d79f2bbe407c6ab968e80aeb06a1bfa68a7149c83768b66e9 -->
+<!-- translated-from: architecture.md sha256:b872b0cce1c2e30395b5a8fbc9308452401f7604679bc14355faa18027840c13 -->
 # 架构
 
 **阅读之前：** [项目结构](project-structure.md)（各部分位于何处）、[IaaS 与云原生](iaas-and-cloud-native.md)（引擎的位置与原则），以及[云原生入门](cloud-native-primer.md)（各图所命名的机制）。
@@ -347,7 +347,7 @@ pin、control 与 uplink 分别是 `crates/adapters/delonix-sdn/src/infra.rs` �
 | log shim | `spawn` 内部的 `fork`，运行 `log_shim` | 容器本身 |
 | 每容器一个的 `slirp4netns` | `delonix_sdn::slirp_attach`，作为 `on_started` 钩子被调用 | 容器的 netns；孤儿进程由 `reap_orphan_slirp` 回收 |
 | pin | `infra::start_pin` 启动 `delonix netns pin`；`infra::pin_main` 在进程内创建用户、网络与挂载命名空间（`crates/adapters/delonix-sdn/src/pin_userns.rs`）然后休眠 | 整个基础设施的生命周期；它的 pid 就是 `ingress/holder.pid`，且永不改变 |
-| control | `infra::start_control`（`nsenter -t <pin> -U -m -n -- delonix netns control`）→ `infra::control_main` | 可重启；提供控制 socket、DNS（`dns_server_main`）、路由器通告 Router Advertisement（`ra_sender_main`）以及每网桥一个的 DHCP（`dhcp_serve`） |
+| control | `infra::start_control`（`nsenter -t <pin> -U -m -n -- delonix netns control`）→ `infra::control_main` | 可重启；提供控制 socket、DNS（`dns_server_main`）、每网桥一个的 DHCP（`dhcp_serve`），以及——仅在 `DELONIX_ENABLE_IPV6=1` 下——路由器通告 Router Advertisement（`ra_sender_main`）。线程名册是 `control_plane_threads`；正是「可重启」这一点，才让 RA 门禁可以是一个普通的条件判断，而不是一个协调器（reconciler） |
 | 单一的 `slirp4netns` | `infra::start_slirp`（`tap0` 接入 pin 的 netns，带 `--api-socket`） | 整个基础设施的生命周期 |
 | L7 入口代理 | `cmd/ingress_proxy.rs::spawn_proxy`，通过 `infra::infra_join_argv` | 只要存在一个 `HTTPRoute`/`Ingress` 或 `--expose` 路由；收到 `SIGHUP` 时重新加载路由 |
 | `cloud-hypervisor` | `delonix_vm::launch_vmm`，通过基础设施的 join argv 运行 | 该虚拟机的生命周期 |

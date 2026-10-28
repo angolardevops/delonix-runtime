@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-standards.md sha256:f44ace1187e1f3e99b620e7efca82fb47e35f5889bfd9e831a924bf7ea7c4c24 -->
+<!-- translated-from: cloud-native-standards.md sha256:03b24fe646c330c5610fac780bb582618e4c045753949fecac6f03f9f6176e12 -->
 # Padrões cloud native, camada a camada
 
 **Antes de leres:** [Introdução ao cloud native](cloud-native-primer.md) (como o motor usa cada mecanismo) e [Arquitectura](architecture.md) (os crates nomeados abaixo). Esta é uma página de referência: lê a secção do padrão que te toca.
@@ -568,6 +568,39 @@ tipos de métrica estáveis, depressa o suficiente para o timeout do scrape.
   `metrics`). Os campos baratos são calculados a cada scrape; os caros (percorrer o disco) são
   actualizados em background para os scrapes continuarem rápidos.
 - Os dois handlers servem `application/openmetrics-text; version=1.0.0; charset=utf-8`.
+- **Séries de contenção por workload** (só no `delonix-mgmt`; `crates/adapters/delonix-telemetry/src/workload.rs`,
+  lidas por `crates/adapters/delonix-linux/src/pressure.rs`). Respondem a "este workload recebeu o
+  CPU e a memória que os seus limites prometeram?", um conjunto de séries por container ou VM a
+  correr, rotulado com `kind` (`container`/`vm`), `id` e `name`, e nunca por processo:
+
+  | Métrica (prefixo `delonix_`) | Tipo | Fonte | Rótulos extra |
+  |---|---|---|---|
+  | `workload_cpu_periods_total` | contador | `cpu.stat` `nr_periods` | |
+  | `workload_cpu_throttled_periods_total` | contador | `cpu.stat` `nr_throttled` | |
+  | `workload_cpu_throttled_seconds_total` | contador | `cpu.stat` `throttled_usec` | |
+  | `workload_pressure_avg10_percent` | gauge | `{cpu,memory,io}.pressure` `avg10` | `resource`, `stall` (`some`/`full`) |
+  | `workload_pressure_stall_seconds_total` | contador | `{cpu,memory,io}.pressure` `total` | `resource`, `stall` |
+  | `workload_memory_oom_events_total` | contador | `memory.events.local` (senão `memory.events`) `oom` | |
+  | `workload_memory_oom_kills_total` | contador | `memory.events.local` (senão `memory.events`) `oom_kill` | |
+  | `workload_series_unavailable` | gauge, sempre 1 | | `group`, `reason` |
+
+  Tudo isto são simples leituras de ficheiros no directório de cgroup do próprio workload: nenhum
+  privilégio novo, nenhum subprocesso. **Um ficheiro que o host não consiga fornecer não dá série
+  nenhuma, nunca um zero**, e uma amostra `workload_series_unavailable{group,reason}` diz porquê.
+  `group` é um de `cpu_throttle`, `cpu_pressure`, `memory_pressure`, `io_pressure`, `memory_events`;
+  `reason` é um de `cgroup_missing`, `not_cgroup_v2` (cgroup v1), `file_missing` (controlador não
+  delegado, PSI compilado fora ou `cgroup_disable=pressure`), `psi_disabled` (`psi=0`), `unreadable`,
+  `incomplete` (ficheiro presente mas sem os campos) e `shared_cgroup`. `full` está ausente onde o
+  kernel não o escreve (`cpu.pressure` em kernels mais antigos).
+- **VMs.** O motor não cria nenhum cgroup para um VMM, que corre no cgroup em que o seu lançador
+  estava. As séries de uma VM são, portanto, exportadas só quando o VMM é o único processo do seu
+  cgroup (por exemplo um hypervisor que dá a cada domínio um scope); caso contrário, estão ausentes
+  com `reason="shared_cgroup"`, porque os números de um cgroup partilhado não são os da VM. **O steal
+  time não é exportado**: é um contador do lado do convidado (`/proc/stat` no convidado, a partir do
+  relógio paravirtual), e o equivalente mais próximo do host, o atraso na run-queue das threads do
+  VMM em `/proc/<pid>/task/*/schedstat`, é uma quantidade diferente (conta também threads que não são
+  vCPU e não é monótono quando as threads saem), por isso apresentá-lo como steal induziria em erro.
+  Recolhe o steal dentro do convidado.
 
 **Estado de conformidade / lacunas.** Não está registada nenhuma corrida de
 `promtool check metrics`. Os gauges caros podem estar desactualizados até um intervalo de

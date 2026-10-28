@@ -1,4 +1,4 @@
-<!-- translated-from: crates.md sha256:c952168a8d193157afed44910bad62135d9e99905052a41a7323ed0cb25580c7 -->
+<!-- translated-from: crates.md sha256:af72635fc57c488b382a65194b935e907b034ba89e2e34e778982b5da9a2d4fd -->
 # Les crates
 
 **Avant de lire :** [Architecture](architecture.md), surtout [Les couches et la direction autorisée](architecture.md#layers-and-the-allowed-direction).
@@ -502,6 +502,7 @@ hooks venant de l’appelant.
 | `run_host` | `HostRuntime`, l’implémentation du port `RunHost` |
 | `regulate`, `resource_advice`, `workload_view` | pression sur les ressources, conseil de l’hôte, vue demandé-vs-imposé |
 | `usage` | un échantillon des compteurs cumulatifs d’un workload (`cgroup_sample`, `process_sample`), ce qui n’a pas pu être lu étant nommé dans `Unmeasured` au lieu d’être rapporté comme zéro — ce que renvoie le `workload.usage` du MCP |
+| `pressure` | série de contention d’un workload lue depuis ses fichiers cgroup v2 : throttling de `cpu.stat`, `*.pressure` (PSI), OOM de `memory.events` ; analyseurs purs, et un `Why` par groupe qui n’a pas pu être lu (`read_cgroup`, `vmm_cgroup`) |
 | `provider_report` | la réponse du provider Linux au catalogue de capacités pour les containers et les pods |
 
 **Principale API publique**
@@ -878,6 +879,7 @@ compile pas un client OTLP (doc du crate).
 |---|---|
 | `telemetry` | `init` — subscriber `fmt`, plus OTLP quand configuré |
 | `metrics` | compteurs/jauges Prometheus et `encode` |
+| `workload` | série de contention par workload (`WorkloadSeries`), rendue au moment du scrape par un collecteur |
 
 **Principale API publique**
 
@@ -885,6 +887,7 @@ compile pas un client OTLP (doc du crate).
 |---|---|---|
 | `telemetry::init` | appelé une fois au début de chaque binaire | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` |
 | `metrics::encode` | exposition texte pour `/metrics` | `crates/adapters/delonix-telemetry/src/metrics.rs:encode` |
+| `metrics::publish_workloads` | remplace l’instantané par workload avant un scrape | `crates/adapters/delonix-telemetry/src/metrics.rs:publish_workloads` |
 
 **Parle à.** Aucun crate du moteur. Export OTLP vers un collecteur quand
 configuré.
@@ -1265,7 +1268,7 @@ appartiennent au contrat de nœud de l’ADR-0040/0041 plutôt qu’à ces route
 | Module | Responsabilité |
 |---|---|
 | `lib.rs` | `serve_blocking`, le routeur `axum`, les handlers, `run_cli` |
-| `dashstats` | `DashSummary`, `collect` (comptes, mémoire, réseau, disque), délais, publication de métriques |
+| `dashstats` | `DashSummary`, `collect` (comptes, mémoire, réseau, disque), `collect_workload_series` (throttling/pressure/OOM par workload), délais, publication de métriques |
 
 **Principale API publique**
 

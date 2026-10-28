@@ -1,4 +1,4 @@
-<!-- translated-from: start-here.md sha256:804d7303c6ce153f6f63c27382cf7f948417f44f348228cebde8ff3c9c280b3c -->
+<!-- translated-from: start-here.md sha256:8856d66d848d173d74b82ad6fc0cf2a0cf5075eccc36151473f4d72704cbde9b -->
 # 从这里开始
 
 这一页会带你从「我刚克隆了这个仓库」走到「我的第一个 pull request 正在被评审」，一步一步来。

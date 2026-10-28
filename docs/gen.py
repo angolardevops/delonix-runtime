@@ -4592,16 +4592,17 @@ estado e remoção</td></tr>
 </table>
 
 <h2>Conformidade — medida, não afirmada</h2>
-<p>«Serve um kubelet» é uma alegação; <strong>79 de 103 specs nomeados</strong> é um facto que
+<p>«Serve um kubelet» é uma alegação; <strong>84 de 104 specs nomeados</strong> é um facto que
 outra pessoa verifica. O <code>delonix-cri</code> é corrido contra o
 <code>critest</code> do <a href="https://github.com/kubernetes-sigs/cri-tools">cri-tools</a>, a
-suite de upstream, e o número é publicado:</p>
-<pre><code>Ran 103 of 122 Specs
-79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
-<p>Reproduz com <code>tests/compat/cri-conformance.sh</code>. O detalhe completo do que falha e
-porquê — incluindo o que <em>não</em> é nosso — está em
+suite de upstream (v1.36.0), e o número é publicado (medido a <strong>2026-10-24</strong> na
+linha v5.1.1, o mesmo motor que hoje embarca como 0.1.0):</p>
+<pre><code>Ran 104 of 122 Specs
+84 Passed | 20 Failed | 18 Skipped        # rootless, cgroup v2</code></pre>
+<p>Reproduz com <code>tests/compat/cri-conformance.sh</code> (ou <code>scripts/critest.sh</code>).
+O detalhe completo do que falha e porquê — incluindo o que <em>não</em> é nosso — está em
 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
-<p>Cerca de metade das falhas restantes não são lacunas do motor: nove são specs de AppArmor, que
+<p>Cerca de metade das falhas restantes não são lacunas do motor: seis são specs de AppArmor, que
 exigem <code>CAP_MAC_ADMIN</code> no user namespace <em>inicial</em> (o Docker e o containerd têm
 exactamente o mesmo limite), e quatro são testes de montagem em que a própria suite não consegue
 montar no host sem root.</p>
@@ -4647,15 +4648,16 @@ status and removal</td></tr>
 </table>
 
 <h2>Conformance — measured, not claimed</h2>
-<p>"Serves a kubelet" is a claim; <strong>79 of 103 named specs</strong> is a fact someone else
+<p>"Serves a kubelet" is a claim; <strong>84 of 104 named specs</strong> is a fact someone else
 can verify. <code>delonix-cri</code> is run against <a href="https://github.com/kubernetes-sigs/cri-tools">cri-tools</a>'
-<code>critest</code>, the upstream suite, and the number is published:</p>
-<pre><code>Ran 103 of 122 Specs
-79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
-<p>Reproduce it with <code>tests/compat/cri-conformance.sh</code>. Full detail on what fails and
-why — including what <em>isn't</em> ours to fix — is in
+<code>critest</code> (v1.36.0), the upstream suite, and the number is published (measured
+<strong>2026-10-24</strong> on the v5.1.1 line, the same engine now shipping as 0.1.0):</p>
+<pre><code>Ran 104 of 122 Specs
+84 Passed | 20 Failed | 18 Skipped        # rootless, cgroup v2</code></pre>
+<p>Reproduce it with <code>tests/compat/cri-conformance.sh</code> (or <code>scripts/critest.sh</code>).
+Full detail on what fails and why — including what <em>isn't</em> ours to fix — is in
 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
-<p>About half of the remaining failures aren't engine gaps: nine are AppArmor specs, which need
+<p>About half of the remaining failures aren't engine gaps: six are AppArmor specs, which need
 <code>CAP_MAC_ADMIN</code> in the <em>initial</em> user namespace (Docker and containerd hit
 exactly the same limit), and four are mount tests where the suite itself can't mount on the host
 without root.</p>

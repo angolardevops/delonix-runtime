@@ -1,4 +1,4 @@
-<!-- translated-from: start-here.md sha256:804d7303c6ce153f6f63c27382cf7f948417f44f348228cebde8ff3c9c280b3c -->
+<!-- translated-from: start-here.md sha256:8856d66d848d173d74b82ad6fc0cf2a0cf5075eccc36151473f4d72704cbde9b -->
 # Começa aqui
 
 Esta página leva-te de «acabei de clonar o repositório» a «o meu primeiro pull request está em

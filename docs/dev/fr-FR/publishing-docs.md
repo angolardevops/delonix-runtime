@@ -1,4 +1,4 @@
-<!-- translated-from: publishing-docs.md sha256:cbfc23fbab090933245166f0c98f167e920b47b6c555e923325a501e70f85133 -->
+<!-- translated-from: publishing-docs.md sha256:ceba43b9e33aa18c483ea2aa87f942b89ddb43d5c9b3f742820082ec7682bd70 -->
 # Publier la documentation
 
 **Avant de lire :** [Flux de contribution](contributing-workflow.md), [Releases et stabilité](releases-and-stability.md) (ce que fait la publication d'une release — la section *Ce qui se passe au moment de la release* de cette page en est la moitié documentation) et la [table généré vs écrit à la main](project-structure.md#generated-vs-hand-written) dans Structure du projet.

@@ -1,11 +1,33 @@
 # Conformidade CRI — resultado medido
 
 > Suite: **cri-tools `critest` v1.36.0** (a de upstream, não uma nossa).
-> Motor: `delonix-cri` **v0.63.1**, **rootless**, host Linux 7.0, cgroup v2.
-> Medido: **2026-08-25**. Reproduzir: `scripts/critest.sh` (ou
-> `tests/compat/cri-conformance.sh`, que corre a mesma suite).
+> **Medição corrente — 2026-10-24.** Motor `delonix-cri` da linha **v5.1.1**
+> (`main @ ab4751ac`), **rootless**, host Linux 7.0, cgroup v2. Esta é a linha de
+> código que hoje embarca como **delonix 0.1.0** — o 0.1.0 é o rebrand de versão
+> da 5.1.1, sem mudança de motor; o número **não** foi re-corrido contra a tag
+> 0.1.0, mas é o mesmo binário em comportamento. Reproduzir: `scripts/critest.sh`
+> (ou `tests/compat/cri-conformance.sh`, a mesma suite).
 
-## Resultado
+## Resultado (2026-10-24)
+
+```
+Ran 104 of 122 Specs in 511.184 seconds
+84 Passed | 20 Failed | 0 Pending | 18 Skipped
+```
+
+> Progressão medida na suite v1.36.0: **79 (2026-08-25) → 84 (2026-10-24)**, com
+> as correcções que entraram depois de Agosto (eviction/`writable_layer`,
+> `ReopenContainerLog` a seguir o inode, e os fixes #18/#19 do `ImageService`).
+> O detalhe das 20 falhas de 2026-10-24, classificadas por área (10 ambiente, 2
+> arquitectura rootless, 1 divergência deliberada, 1 decisão, 1 a investigar, 5
+> gaps reais dos quais 2 já corrigidos), está em
+> `reports/cri-conformance-2026-10-24/00-audit-report.md`.
+
+### Baseline histórica — 2026-08-25 (motor v0.63.1), superada
+
+> O resultado abaixo (**79/103**) é de **2026-08-25**, motor `delonix-cri`
+> **v0.63.1** — vinte versões atrás. Fica como registo da progressão e do
+> detalhe por área; o número corrente é o de cima.
 
 ```
 Ran 103 of 122 Specs in 777.277 seconds

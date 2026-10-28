@@ -319,6 +319,12 @@ O 79/24 é o que o `README.rst`, o `docs/cri.html` e o `docs/gen.py` publicam.
 **defeito do Delonix 3**, funcionalidade em falta 2, divergência deliberada 1,
 **desconhecido 2**.
 
+> **RESOLVIDO (re-medição de 2026-10-24).** O critest v1.36.0 foi re-corrido na
+> v5.1.1 (`main @ ab4751ac`, a linha que hoje embarca como 0.1.0): **84 Passed ·
+> 20 Failed · 18 Skipped** — supera os dois baselines acima. O `docs/cri-conformance.md`
+> e o `docs/gen.py` foram actualizados para este número; a questão aberta #3 abaixo
+> fica fechada. Relatório: `reports/cri-conformance-2026-10-24/00-audit-report.md`.
+
 **O `critest` não é corrido por automação nenhuma**: não aparece no `Makefile`
 nem em nenhum workflow. É uma medição manual.
 
@@ -542,6 +548,8 @@ o `lab.yml` nunca corre um `--test live`: cada caso live é `#[ignore]` e corrid
    as suas 40 operações ou deixá-las como estão até à migração?
 3. **O baseline do CRI contradiz-se** (79/24 publicado vs 82/21 com logs), e
    nenhum é da 5.1.1. Remedir agora e republicar, ou tratar como Fase 5?
+   **FECHADO (2026-10-24):** remedido na v5.1.1 → **84/20** e republicado
+   (`cri-conformance.md`, `gen.py`); ver `reports/cri-conformance-2026-10-24/`.
 4. **A comparação da Fase 5 não corre neste host**: não há `docker` nem
    `podman`, e o `bench_gate.py` **recusa julgar** esta máquina (a baseline é da
    AMD Ryzen 9 8940HX/32 threads; esta é Intel i9-13900H/20 threads). Precisa de
