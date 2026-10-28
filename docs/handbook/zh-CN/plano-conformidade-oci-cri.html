@@ -237,8 +237,8 @@ ferramentas automáticas chamam, não <code>docker run</code> interactivo.</p>
 <tbody>
 <tr>
 <td>CRI — critest v1.36.0</td>
-<td><strong>79/103 é de v0.63 (2026-08) — A RE-MEDIR na v5.1.1</strong> (o dono está a correr critest agora em C2/C3)</td>
-<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a></td>
+<td><strong>RE-MEDIDO 2026-10-24 na v5.1.1 (<code>main @ ab4751ac</code>): 84/104 (<code>84 Passed | 20 Failed \| 18 Skipped</code>)</strong> — supera o 79/103 de v0.63 (2026-08). Linha que hoje embarca como 0.1.0</td>
+<td><code>reports/<wbr>cri-conformance-2026-10-24/<wbr>00-audit-report.<wbr>md</code> · <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a></td>
 </tr>
 <tr>
 <td>OCI Image</td>
@@ -274,8 +274,10 @@ que vários "gaps" estão <strong>stale</strong> — a mount-propagation já fun
 limpo em-processo (G-035), e o <code>tag@digest</code> é formato válido, não bug (G-033). <strong>Este plano é
 conduzido por medições na v5.1.1, não pela matriz v3.1.0.</strong> Um "gap" só entra se REPRODUZIR na v5.1.1.</p>
 </blockquote>
-<p><strong>As 24 falhas do CRI, por área:</strong> AppArmor 9 · Security Context 4 · Mount Propagation 3 ·
-Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mount 1 · OOM 1.</p>
+<p><strong>As 20 falhas do CRI (medição de 2026-10-24), por área:</strong> AppArmor 6 · Mount Propagation 3 ·
+Security Context 3 (HostPID, PodPID, SeccompProfilePath) · Rede 2 · Streaming 2 (portforward) ·
+Image Manager 2 (ambas já corrigidas, #18/#19) · RO-mount 1 · Image Identifier Consistency 1.
+(A repartição antiga — 24 falhas de v0.63, AppArmor 9 — fica no histórico de <code>cri-conformance.md</code>.)</p>
 <h2 id="decisoes-do-dono-2026-10-24">Decisões do dono (2026-10-24)<a class="hanchor" href="#decisoes-do-dono-2026-10-24" aria-label="#">#</a></h2>
 <ol>
 <li><strong>Prioridade: CRI primeiro</strong> (kubelet drop-in — o diferenciador container+VM+k8s).</li>
@@ -286,10 +288,11 @@ Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mo
 </ol>
 <hr />
 <h2 id="track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful">Track C — CRI (PRIORITÁRIO) · gate: re-medir na v5.1.1, depois → ~100/103 em rootful<a class="hanchor" href="#track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful" aria-label="#">#</a></h2>
-<p><strong>Passo zero: re-medir o critest na v5.1.1</strong> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>). O 79/103 é de v0.63 (2026-08) e
-a repartição de falhas abaixo é dessa corrida — pode já não bater. O dono está a correr isto agora
-(worktrees <code>cri-image-repodigests-and-user</code> = C2, <code>cri-portforward-conformance</code> = C3). As fases
-abaixo mantêm-se como mapa das ÁREAS, mas os números (<code>+4</code>, etc.) só valem depois da re-medição.</p>
+<p><strong>Passo zero: re-medir o critest na v5.1.1 — FEITO (2026-10-24): 84/104</strong> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>;
+relatório em <code>reports/cri-conformance-2026-10-24/</code>). O 79/103 era de v0.63 (2026-08); a repartição
+de falhas abaixo foi actualizada para a corrida de 2026-10-24. Os fixes #18/#19 do <code>ImageService</code>
+(C2, worktree <code>cri-image-repodigests-and-user</code>) já entraram; falta portforward (C3,
+<code>cri-portforward-conformance</code>). As fases abaixo mantêm-se como mapa das ÁREAS.</p>
 <p>Cada fase = uma área de falha do critest, com a spec que falha nomeada.</p>
 <div class="tablewrap"><table>
 <thead>
