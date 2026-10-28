@@ -96,9 +96,9 @@ tem como (`-t` é recusado como argumento desconhecido). Conta para o que muda d
 comportamento com `isatty`: cores, barras de progresso, um `read` que espera um terminal.
 Estreito, mas real, e **fazível** — o motor já tem a maquinaria de pty do modo consola.
 
-## Porque a bateria de 2026-08-10 (delonix 0.46.0) foi RETIRADA
+## Porque a bateria de 2026-08-10 foi RETIRADA
 
-A versão anterior desta tabela foi medida a 2026-08-10 contra o **0.46.0**, e os seus números
+A versão anterior desta tabela foi medida a 2026-08-10, e os seus números
 de latência eram: docker **1 406 ms**, podman **1 351 ms**, delonix **640 ms**. Nesta corrida,
 com **os mesmos docker 29.1.3 e podman 4.9.3**, na mesma distro e no mesmo kernel, os três
 deram **208 / 268 / 89 ms** — todos cerca de **6× mais rápidos**.
@@ -133,7 +133,7 @@ fronteira de privilégio nova pelo meio.
 Verificado de passagem, e **não** é bug: o aviso de cgroup delegation vai para **stderr**, não
 polui o stdout. Um `run … | cat` devolve exactamente a saída do container.
 
-## Recontagem de 2026-08-25 (delonix 0.63.1) — feita, e o que a atrasou
+## Recontagem de 2026-08-25 — feita, e o que a atrasou
 
 **À primeira tentativa foi RECUSADA**, e a recusa vale como registo. O host
 tinha `load average` de **55 a 72** em **32 threads** e as corridas cruas deram
@@ -145,7 +145,7 @@ bancada, e é o que retirou a bateria de 2026-08-10. Horas depois, com o host em
 |---|---|
 | Data | **2026-08-25** |
 | Onde | host de desenvolvimento — AMD Ryzen 9 8940HX (32 threads), 31 GiB, kernel 7.0.0-30 |
-| Delonix | **0.63.1** (rootless, root e runtime-dir isolados) |
+| Delonix | rootless, root e runtime-dir isolados |
 | Docker | 29.7.2 · Podman | 4.9.3 |
 | Harness | `scripts/bench.sh` (novo) |
 
@@ -180,8 +180,9 @@ por isso não a nomeio.
 
 ## A tentativa recusada, em detalhe
 
-O motor está na **v0.63.1** e esta tabela é da **v0.1.0**. Uma tabela de
-desempenho que envelheceu várias versões merece ser remedida, e foi tentado.
+Esta tabela é de **2026-08-13**. Uma tabela de desempenho que envelheceu
+semanas merece ser remedida, e foi tentado — a recontagem de **2026-08-25**
+acima.
 
 **Recusou-se, e a recusa é o resultado.** O host de desenvolvimento tinha, no
 momento da tentativa, `load average` de **55 a 72** em **32 threads** — mais do
