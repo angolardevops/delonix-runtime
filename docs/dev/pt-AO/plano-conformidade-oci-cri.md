@@ -1,4 +1,4 @@
-<!-- translated-from: plano-conformidade-oci-cri.md sha256:fd53478c1e7c11c6637436232549328ed2872216e71bd1550ffd75b59d30c549 -->
+<!-- translated-from: plano-conformidade-oci-cri.md sha256:35ac11ec4984e70e413f77818db4be7e42a730675a4d7a00dda58e82dc678af2 -->
 # Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman
 
 > **Objectivo.** Fazer o Delonix passar os **mesmos contratos de interoperabilidade** que o
@@ -21,7 +21,7 @@
 
 | Contrato | Estado | Fonte |
 |---|---|---|
-| CRI — critest v1.36.0 | **79/103 é de v0.63 (2026-08) — A RE-MEDIR na v5.1.1** (o dono está a correr critest agora em C2/C3) | `scripts/critest.sh` |
+| CRI — critest v1.36.0 | **RE-MEDIDO 2026-10-24 na v5.1.1 (`main @ ab4751ac`): 84/104 (`84 Passed \| 20 Failed \| 18 Skipped`)** — supera o 79/103 de v0.63 (2026-08). Linha que hoje embarca como 0.1.0 | `reports/cri-conformance-2026-10-24/00-audit-report.md` · `scripts/critest.sh` |
 | OCI Image | **interop provada na v5.1.1**: delonix→docker **e** delonix→podman + docker→delonix, por digest (IMG-1 corrigido 2026-10-24) | `reports/conformance/A1-oci-image-distribution.md` |
 | OCI Distribution | push/pull cross-engine OK na v5.1.1; suite `distribution-spec` é server-side → **N/A** (Delonix é cliente) | A1 |
 | OCI Runtime — bundle | **v5.1.1**: ociVersion 1.3.0 ✅, seccomp ✅, `runc run` rootless rc=0 ✅ (RT-1/2/3) — `oci-runtime-tool validate` OK | B1/B2 reports |
@@ -34,8 +34,10 @@
 > limpo em-processo (G-035), e o `tag@digest` é formato válido, não bug (G-033). **Este plano é
 > conduzido por medições na v5.1.1, não pela matriz v3.1.0.** Um "gap" só entra se REPRODUZIR na v5.1.1.
 
-**As 24 falhas do CRI, por área:** AppArmor 9 · Security Context 4 · Mount Propagation 3 ·
-Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mount 1 · OOM 1.
+**As 20 falhas do CRI (medição de 2026-10-24), por área:** AppArmor 6 · Mount Propagation 3 ·
+Security Context 3 (HostPID, PodPID, SeccompProfilePath) · Rede 2 · Streaming 2 (portforward) ·
+Image Manager 2 (ambas já corrigidas, #18/#19) · RO-mount 1 · Image Identifier Consistency 1.
+(A repartição antiga — 24 falhas de v0.63, AppArmor 9 — fica no histórico de `cri-conformance.md`.)
 
 ## Decisões do dono (2026-10-24)
 
@@ -49,10 +51,11 @@ Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mo
 
 ## Track C — CRI (PRIORITÁRIO) · gate: re-medir na v5.1.1, depois → ~100/103 em rootful
 
-**Passo zero: re-medir o critest na v5.1.1** (`scripts/critest.sh`). O 79/103 é de v0.63 (2026-08) e
-a repartição de falhas abaixo é dessa corrida — pode já não bater. O dono está a correr isto agora
-(worktrees `cri-image-repodigests-and-user` = C2, `cri-portforward-conformance` = C3). As fases
-abaixo mantêm-se como mapa das ÁREAS, mas os números (`+4`, etc.) só valem depois da re-medição.
+**Passo zero: re-medir o critest na v5.1.1 — FEITO (2026-10-24): 84/104** (`scripts/critest.sh`;
+relatório em `reports/cri-conformance-2026-10-24/`). O 79/103 era de v0.63 (2026-08); a repartição
+de falhas abaixo foi actualizada para a corrida de 2026-10-24. Os fixes #18/#19 do `ImageService`
+(C2, worktree `cri-image-repodigests-and-user`) já entraram; falta portforward (C3,
+`cri-portforward-conformance`). As fases abaixo mantêm-se como mapa das ÁREAS.
 
 Cada fase = uma área de falha do critest, com a spec que falha nomeada.
 
