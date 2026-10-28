@@ -5575,6 +5575,19 @@ def labs_page():
             body.append(f"<h2 id='{anchor}'>{html.escape(title)} "
                         f"<span class='badge'>{html.escape(level)}</span></h2>")
             body.append(html_body)
+        # Só ligamos os labs que têm materiais reais em disco (lab-1..6);
+        # lab-7/lab-8 ainda não têm arnês — evita links quebrados no Pages.
+        if os.path.isdir(os.path.join(ROOT, "labs", anchor)):
+            body.append(bi("p",
+                f"<strong>Materiais:</strong> "
+                f"<a href='labs/{anchor}/README.md'>guia escrito</a> · "
+                f"<a href='labs/{anchor}/lab.sh'>arnês executável</a> "
+                f"(<code>prepare → run → verify → cleanup</code>).",
+                f"<strong>Materials:</strong> "
+                f"<a href='labs/{anchor}/README.md'>written guide</a> · "
+                f"<a href='labs/{anchor}/lab.sh'>runnable harness</a> "
+                f"(<code>prepare → run → verify → cleanup</code>).",
+                cls="note"))
     page("labs.html", "Laboratórios", "\n".join(body))
 
 

@@ -79,9 +79,9 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 | Páginas órfãs | **Nenhuma** — 196/196 alcançáveis de `index.html`; 0 entradas de nav p/ ficheiro inexistente | BFS em `scratchpad/audit.py` | — (sem acção) | — | Re-correr BFS |
 | `guia-vm.html` — índice | 10 âncoras do índice mantêm acentos mas os `id` dos cabeçalhos são ASCII (slugify divergente) | `#1-antes-de-começar` vs `id="1-antes-de-comecar"` (e +9) | Slugify partilhado único em `gen.py` | 🟠 | Clicar nas 10 entradas salta |
 | Manual — `environment-variables` | 12 âncoras cruzadas em EN mas `id` traduzidos (FR/PT-AO/ZH-CN) | `handbook/{fr-FR,pt-AO,zh-CN}/{index,start-here,environment-variables}.html` | Reescrever âncoras ao traduzir cabeçalhos | 🟠 | Clicar nas ligações cruzadas |
-| `comandos/image.html` | `→ vm.html#image`: `vm.html` não emite `id` por subcomando; cai no topo | `comandos/image.html`; `comandos/vm.html` sem `#image` | `id` estável por subcomando nas páginas de `comandos/` | 🟢 | Clicar salta p/ secção |
-| Manual zh-CN | 26 páginas zh-CN ausentes da landing `handbook/index.html` (só no switcher interno) | `dev_docs_site.py` ~819 | Acrescentar `zh-CN/index.html` à landing | 🟢 | Landing lista zh-CN |
-| Labs não ligados | `labs.html` descreve os labs mas **não liga** a `labs/lab-1..6/` (nem releases/discovery/adr) | só 3 não-HTML ligados no site | Ligar labs (parte da Secção 11) | 🟢 | Links a partir de `labs.html` |
+| `comandos/image.html` | ✅ **JÁ RESOLVIDO** — `vm.html` emite `id` por subcomando (`gen.py:3700`, `<h2 id='{sub}'>`); `vm.html#image` existe e resolve | `comandos/vm.html:530` (`id='image'`) | — (nenhuma; era deriva do binário stale) | 🟢 | `vm.html#image` salta p/ `vm image` ✅ |
+| Manual zh-CN | ✅ **FEITO (Secção 3)** — zh-CN acrescentado ao redirect e à lista de links da landing `handbook/index.html` | `dev_docs_site.py:817,820` | zh-CN na landing (redirect `/zh/` + link 简体中文) | 🟢 | Landing lista zh-CN ✅ |
+| Labs não ligados | ✅ **FEITO (Secção 3)** — `labs_page()` liga cada lab (lab-1..6) ao `README.md` + `lab.sh`; lab-7/8 ficam sem link (ainda sem arnês em disco, guardado por `os.path.isdir`) | `gen.py` `labs_page()`; `labs.html` | Bloco "Materiais" por lab com materiais reais | 🟢 | Links a partir de `labs.html` ✅ |
 | Traduções stale | Quase todas PT-AO/FR-FR/ZH-CN marcadas `stale`; `engineering-process.md` **missing** nos 3 | `dev_docs_site.py --status` | Actualizar traduções (Secção 9) | 🟠 | `--status` sem `missing` |
 
 ## D. Correspondência documentação ↔ código
@@ -119,7 +119,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 | Secção do pedido | Entradas da matriz que a alimentam |
 |---|---|
 | 2 — Referências repo/release | Todas as linhas 🔴/🟠 de **B** |
-| 3 — Navegação/redireccionamentos | **C** (zh-CN landing, labs não ligados) |
+| 3 — Navegação/redireccionamentos | ✅ **FEITO** — **C** (zh-CN landing, labs não ligados); `image→vm#image` já resolvia |
 | 4 — Introdução/onboarding | — (reescrita; usar `delonix init` real) |
 | 5 — Layout/largura | nav mobile (**A**) |
 | 6 — Temas/contraste | tokens tema claro, output muted, tags/callouts (**A**) |

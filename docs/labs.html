@@ -222,6 +222,7 @@ own, asserting a <em>functional</em> result (HTTP 200 — not an isolated exit
 code), under <code>docs/labs/lab-1/</code>: <code>prepare → run → verify →
 cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Validated on
 <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
+<p class='note lang-pt'><strong>Materiais:</strong> <a href='labs/lab-1/README.md'>guia escrito</a> · <a href='labs/lab-1/lab.sh'>arnês executável</a> (<code>prepare → run → verify → cleanup</code>).</p><p class='note lang-en'><strong>Materials:</strong> <a href='labs/lab-1/README.md'>written guide</a> · <a href='labs/lab-1/lab.sh'>runnable harness</a> (<code>prepare → run → verify → cleanup</code>).</p>
 <h2 id='lab-2'><span class='lang-pt'>Limites de recursos que pegam mesmo</span><span class='lang-en'>Resource limits that actually take</span> <span class='badge'><span class='lang-pt'>iniciante</span><span class='lang-en'>beginner</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
@@ -292,6 +293,7 @@ if the limit didn't take (<code>memory.max=max</code>) instead of passing
 silently, under <code>docs/labs/lab-2/</code>: <code>prepare → run → verify →
 cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Validated on
 <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
+<p class='note lang-pt'><strong>Materiais:</strong> <a href='labs/lab-2/README.md'>guia escrito</a> · <a href='labs/lab-2/lab.sh'>arnês executável</a> (<code>prepare → run → verify → cleanup</code>).</p><p class='note lang-en'><strong>Materials:</strong> <a href='labs/lab-2/README.md'>written guide</a> · <a href='labs/lab-2/lab.sh'>runnable harness</a> (<code>prepare → run → verify → cleanup</code>).</p>
 <h2 id='lab-3'><span class='lang-pt'>Duas aplicações que se falam por nome</span><span class='lang-en'>Two apps that talk to each other by name</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
@@ -374,6 +376,7 @@ and it <strong>fails loudly</strong> if <code>db</code> is left open to everyone
 "service down" instead of passing silently, under <code>docs/labs/lab-3/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
 Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
+<p class='note lang-pt'><strong>Materiais:</strong> <a href='labs/lab-3/README.md'>guia escrito</a> · <a href='labs/lab-3/lab.sh'>arnês executável</a> (<code>prepare → run → verify → cleanup</code>).</p><p class='note lang-en'><strong>Materials:</strong> <a href='labs/lab-3/README.md'>written guide</a> · <a href='labs/lab-3/lab.sh'>runnable harness</a> (<code>prepare → run → verify → cleanup</code>).</p>
 <h2 id='lab-4'><span class='lang-pt'>Do Dockerfile à imagem, sem daemon</span><span class='lang-en'>From Dockerfile to image, no daemon</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: construir uma imagem e correr o que construíste.</p>
@@ -440,6 +443,7 @@ loudly</strong>, telling "build failed" apart from "healthcheck never passed"
 instead of passing silently, under <code>docs/labs/lab-4/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
 Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p></div>
+<p class='note lang-pt'><strong>Materiais:</strong> <a href='labs/lab-4/README.md'>guia escrito</a> · <a href='labs/lab-4/lab.sh'>arnês executável</a> (<code>prepare → run → verify → cleanup</code>).</p><p class='note lang-en'><strong>Materials:</strong> <a href='labs/lab-4/README.md'>written guide</a> · <a href='labs/lab-4/lab.sh'>runnable harness</a> (<code>prepare → run → verify → cleanup</code>).</p>
 <h2 id='lab-5'><span class='lang-pt'>Uma microVM a sério</span><span class='lang-en'>A real microVM</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
@@ -514,6 +518,7 @@ telling "VM never started" apart from "no IP" apart from "snapshot/restore
 failed", under <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
 (<code>bash docs/labs/lab-5/lab.sh</code>). Validated on <strong>delonix 5.1.1</strong>
 (Linux, libvirt, rootless) on 2026-10-24.</p></div>
+<p class='note lang-pt'><strong>Materiais:</strong> <a href='labs/lab-5/README.md'>guia escrito</a> · <a href='labs/lab-5/lab.sh'>arnês executável</a> (<code>prepare → run → verify → cleanup</code>).</p><p class='note lang-en'><strong>Materials:</strong> <a href='labs/lab-5/README.md'>written guide</a> · <a href='labs/lab-5/lab.sh'>runnable harness</a> (<code>prepare → run → verify → cleanup</code>).</p>
 <h2 id='lab-6'><span class='lang-pt'>A tua própria imagem de VM, com VMfile</span><span class='lang-en'>Your own VM image, with a VMfile</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
@@ -604,6 +609,7 @@ started" apart from "orphan", under <code>docs/labs/lab-6/</code>:
 and points the scaffold's <code>SSHKEY</code> at it. Validated on
 <strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on
 2026-10-24.</p></div>
+<p class='note lang-pt'><strong>Materiais:</strong> <a href='labs/lab-6/README.md'>guia escrito</a> · <a href='labs/lab-6/lab.sh'>arnês executável</a> (<code>prepare → run → verify → cleanup</code>).</p><p class='note lang-en'><strong>Materials:</strong> <a href='labs/lab-6/README.md'>written guide</a> · <a href='labs/lab-6/lab.sh'>runnable harness</a> (<code>prepare → run → verify → cleanup</code>).</p>
 <h2 id='lab-7'><span class='lang-pt'>Kubernetes sem Docker</span><span class='lang-en'>Kubernetes with no Docker</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
 <div class='lang-pt'>
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
