@@ -394,7 +394,7 @@ que muda a cada define).
 ### Declarativo
 
 O `kind: VirtualMachine` (`compute.delonix.io/v1alpha1`) espelha o `vm create`; um exemplo completo
-e anotado é o `examples/vm.yaml`. Um `kind: Workload` com `type: microvm` baixa para uma
+e anotado é o `examples/compute/virtualmachine.yaml`. Um `kind: Workload` com `type: microvm` baixa para uma
 `VirtualMachine` com o backend **forçado** a `cloud-hypervisor`; pedir outro backend é um erro
 ([ADR-0006](../../adr/0006-workload-type-microvm.md)). Os dois foram *corridos* num root de rascunho:
 

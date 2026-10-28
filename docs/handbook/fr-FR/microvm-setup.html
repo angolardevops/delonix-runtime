@@ -716,7 +716,7 @@ que la comptabilité de libvirt ; <code>preserve_snapshots</code> exporte donc 
 domaine, qui change à chaque définition).</p>
 <h3 id="declarative">Déclaratif<a class="hanchor" href="#declarative" aria-label="#">#</a></h3>
 <p><code>kind: VirtualMachine</code> (<code>compute.delonix.io/v1alpha1</code>) reflète <code>vm create</code> ; un exemple complet et
-annoté se trouve dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>. <code>kind: Workload</code> avec <code>type: microvm</code> se réduit à une
+annoté se trouve dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/compute/virtualmachine.yaml" target="_blank" rel="noopener"><code>examples/compute/virtualmachine.yaml</code></a>. <code>kind: Workload</code> avec <code>type: microvm</code> se réduit à une
 <code>VirtualMachine</code> dont le backend est <strong>forcé</strong> à <code>cloud-hypervisor</code> ; demander un autre backend est
 une erreur (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Les deux ont été <em>exécutés</em> dans une
 racine jetable :</p>

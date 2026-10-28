@@ -11,12 +11,13 @@ use std::path::PathBuf;
 /// REST route table (`rest::generate`) is derived from the `google.api.http`
 /// annotation of every RPC, and a route the engine does not serve yet has to
 /// answer 501, not 404.
-const CONTRACT_FILES: [&str; 5] = [
+const CONTRACT_FILES: [&str; 6] = [
     "delonix/node/v1/common.proto",
     "delonix/node/v1/node.proto",
     "delonix/node/v1/compute.proto",
     "delonix/node/v1/infra.proto",
     "delonix/node/v1/operations.proto",
+    "delonix/node/v1/storage.proto",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -391,6 +391,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::POD => Some(crate::cmd::container::POD_SPEC_FIELDS),
         k::VM => Some(crate::cmd::vm::VM_SPEC_FIELDS),
         k::VOLUME => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
+        k::OBJECT_STORAGE => Some(crate::cmd::objectstorage::OBJECT_STORAGE_SPEC_FIELDS),
         k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
         k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
         k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
@@ -482,6 +483,12 @@ fn check_unknown_fields(doc: &ManifestDoc) {
     }
     if doc.kind == k::VOLUME {
         crate::cmd::volume::warn_unknown_nested(doc);
+    }
+    if doc.kind == k::OBJECT_STORAGE {
+        crate::cmd::objectstorage::warn_unknown_nested(doc);
+    }
+    if doc.kind == k::IMAGE {
+        crate::cmd::image::warn_unknown_nested(doc);
     }
     let nested = match doc.kind.as_str() {
         k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
@@ -1320,7 +1327,7 @@ spec: { disk: k8s-golden }
     /// most comfortable kind of lie.
     ///
     /// **What it catches, and what it does not — both measured, not assumed.** Renaming the
-    /// serialization of `NetworkSpec::subnet` (which `examples/network.yaml` sets to
+    /// serialization of `NetworkSpec::subnet` (which `examples/networking/network.yaml` sets to
     /// `10.89.0.0/24`) makes this test FAIL, as it should. Renaming `driver` does NOT, and
     /// the reason is the blind spot: the example sets `driver: bridge`, which is the
     /// DEFAULT, so the second pass loses the key, falls back to the same value and the
@@ -1330,17 +1337,38 @@ spec: { disk: k8s-golden }
     /// NON-default value. A field that every example leaves at its default is not covered
     /// here, and the way to cover it is to set it in an example — which is worth doing for
     /// its own sake, since an example that only shows defaults teaches nothing either.
+    /// Every `.yaml` under `examples/`, walked RECURSIVELY. The examples are
+    /// grouped into per-API-group sub-folders (`compute/`, `networking/`,
+    /// `storage/`, ...), so a flat `read_dir` would see the group DIRECTORIES and
+    /// skip every manifest — turning both guards below vacuously green. Walking the
+    /// tree is what keeps them covering the grouped files.
+    fn all_example_yaml(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                    out.push(p);
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
     #[test]
     fn os_exemplos_publicados_fazem_round_trip_sem_perder_campos() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let mut files = 0usize;
         let mut docs_seen = 0usize;
         let mut kinds = std::collections::BTreeSet::new();
-        for entry in std::fs::read_dir(&dir).expect("examples/ tem de existir") {
-            let path = entry.expect("entrada legivel").path();
-            if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
-                continue;
-            }
+        for path in all_example_yaml(&dir) {
             let text = std::fs::read_to_string(&path).expect("exemplo legivel");
             if !is_delonix_manifest(&text) {
                 continue; // cloud-init e afins: nao sao manifestos deste motor
@@ -1734,11 +1762,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
     fn examples_nao_tem_campos_desconhecidos() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let fields_for = |kind: &str| -> Option<&'static [&'static str]> { spec_fields_for(kind) };
-        for entry in std::fs::read_dir(&dir).expect("examples/ existe") {
-            let path = entry.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
-                continue;
-            }
+        for path in all_example_yaml(&dir) {
             let text = std::fs::read_to_string(&path).unwrap();
             // Distinguish "not a delonix manifest" (cloud-config, without
             // apiVersion — skip) from "it is a manifest and it is BROKEN" (has the
@@ -1857,6 +1881,7 @@ spec: { image: nginx }
             "networkZones" => ("{ vnets: [{ name: prod }] }", "NetworkZone"),
             "storagePools" => ("{ alertPct: 85 }", "StoragePool"),
             "volumes" => ("{}", "Volume"),
+            "objectStorages" => ("{ backend: cephRgw, bucket: media }", "ObjectStorage"),
             "images" => ("{ pull: alpine }", "Image"),
             "apps" => ("{ source: ., image: shop }", "App"),
             "vms" => ("{ disk: base }", "VirtualMachine"),
@@ -2015,23 +2040,23 @@ spec:
     /// example fails here.
     #[test]
     fn the_stack_example_names_every_group() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/stack.yaml");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/core/stack.yaml");
         let text = std::fs::read_to_string(&path).unwrap();
         for (group, _) in super::super::kinds::stack_groups() {
             assert!(
                 text.contains(group),
-                "examples/stack.yaml never mentions '{group}'"
+                "examples/core/stack.yaml never mentions '{group}'"
             );
         }
         for (old, _) in super::super::kinds::STACK_GROUP_ALIASES {
             assert!(
                 text.contains(old),
-                "examples/stack.yaml never mentions the old '{old}'"
+                "examples/core/stack.yaml never mentions the old '{old}'"
             );
         }
         // And the example must itself load: it is the file everyone copies.
-        load_str(&text, "examples/stack.yaml").unwrap();
+        load_str(&text, "examples/core/stack.yaml").unwrap();
     }
 
     #[test]

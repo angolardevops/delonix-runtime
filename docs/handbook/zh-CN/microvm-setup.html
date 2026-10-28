@@ -676,7 +676,7 @@ delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 
 define 它都会变）。</p>
 <h3 id="declarative">声明式<a class="hanchor" href="#declarative" aria-label="#">#</a></h3>
 <p><code>kind: VirtualMachine</code>（<code>compute.delonix.io/v1alpha1</code>）映照着 <code>vm create</code>；一份带完整注释
-的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>。带 <code>type: microvm</code> 的 <code>kind: Workload</code> 会降解为一个
+的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/compute/virtualmachine.yaml" target="_blank" rel="noopener"><code>examples/compute/virtualmachine.yaml</code></a>。带 <code>type: microvm</code> 的 <code>kind: Workload</code> 会降解为一个
 <code>VirtualMachine</code>，后端被<strong>强制</strong>为 <code>cloud-hypervisor</code>；要求换成别的后端是一个错误
 （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>）。下面两个都在一个临时根目录里
 <em>运行过</em>：</p>

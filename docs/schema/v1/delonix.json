@@ -109,6 +109,44 @@
       ],
       "type": "object"
     },
+    "CephRgwBlock": {
+      "description": "`spec.cephRgw` — how to provision the S3 identity on the Ceph gateway.",
+      "properties": {
+        "displayName": {
+          "description": "A human label for the S3 identity. Defaults to the uid.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "description": "The PUBLIC S3 endpoint to expose to consumers (e.g. `http://rgw:80`).\n`radosgw-admin` provisions the identity but does not know the gateway's\npublic URL, so the operator declares it here when there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quota": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuotaBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional ceiling on the tenant's total S3 usage (a user quota on the\ngateway, across all its buckets)."
+        },
+        "uid": {
+          "description": "The S3 user id to provision. Defaults to the document's `metadata.name`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ClusterSpec": {
       "additionalProperties": false,
       "properties": {
@@ -672,6 +710,31 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "ExternalBlock": {
+      "description": "`spec.external` — a foreign, already-running S3-compatible store.",
+      "properties": {
+        "credentialsSecret": {
+          "description": "Name of an existing `kind: Secret` holding `accessKey` and `secretKey`.",
+          "type": "string"
+        },
+        "endpoint": {
+          "description": "The S3 endpoint of the foreign store.",
+          "type": "string"
+        },
+        "region": {
+          "description": "The region, when the store needs one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "endpoint",
+        "credentialsSecret"
+      ],
       "type": "object"
     },
     "ExtraDiskSpec": {
@@ -1879,6 +1942,47 @@
       },
       "type": "object"
     },
+    "ObjectStorageSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: ObjectStorage`.",
+      "properties": {
+        "backend": {
+          "description": "Which store backs this: `cephRgw` (the engine provisions an S3 identity\non the node's Ceph gateway) or `external` (bring your own S3).",
+          "type": "string"
+        },
+        "bucket": {
+          "description": "The bucket name. For `cephRgw` the tenant creates it over S3 with the\nkeys handed back; for `external` it names the bucket on the foreign store.",
+          "type": "string"
+        },
+        "cephRgw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CephRgwBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present for (and only for) `backend: cephRgw`."
+        },
+        "external": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present for (and only for) `backend: external`."
+        }
+      },
+      "required": [
+        "backend",
+        "bucket"
+      ],
+      "type": "object"
+    },
     "Overcommit": {
       "description": "`spec.overcommit`.",
       "properties": {
@@ -2364,6 +2468,27 @@
             {
               "type": "null"
             }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "QuotaBlock": {
+      "description": "`spec.cephRgw.quota` — a user quota on the gateway.",
+      "properties": {
+        "maxObjects": {
+          "description": "Maximum total object count. Omit for no object ceiling.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxSize": {
+          "description": "Maximum total bytes, in the gateway's own spelling (`100G`, `1T`, or a\nbyte count). Omit for no byte ceiling.",
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
@@ -3411,6 +3536,39 @@
               },
               "spec": {
                 "$ref": "#/$defs/NetworkSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "objectStorages": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/ObjectStorageSpec"
               }
             },
             "required": [
@@ -4967,6 +5125,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "ObjectStorage"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "storage.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/ObjectStorageSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Network"
           }
         },
@@ -5550,6 +5733,7 @@
         "NetworkPolicy",
         "NetworkRoute",
         "NetworkZone",
+        "ObjectStorage",
         "Pod",
         "RuntimePolicy",
         "Secret",

@@ -120,6 +120,13 @@ pub struct Tile {
 /// A row of the resource table.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Row {
+    /// Stable resource identity — a container's `id`, a VM's `name`, or the
+    /// name for kinds without their own uid. The TUI keys per-row state
+    /// (the CPU-rate anchor; later, selection preservation) on THIS, never on
+    /// the display `name` or the table position: a reused/duplicate name
+    /// collides the previous CPU sample and yields a wrong delta, and a sort or
+    /// refresh reorders rows so the index is not an identity either.
+    pub id: String,
     pub kind: String,
     pub name: String,
     pub status: String,
@@ -131,9 +138,9 @@ pub struct Row {
     /// `true` = healthy state (Running/present); painted green vs red.
     pub ok: bool,
     /// Raw monotonic `cpu.stat` counter (microseconds), for a Container only.
-    /// NOT a percentage — the TUI keeps the previous sample per row and
-    /// divides the delta by elapsed wall time (see `tui::render`'s
-    /// `cpu_prev`). `None` for non-container kinds and for a stopped
+    /// NOT a percentage — the TUI keeps the previous sample per id and divides
+    /// the delta by elapsed wall time, anchored to the collection tick (see
+    /// `tui::CpuRateTracker`). `None` for non-container kinds and for a stopped
     /// container (no live cgroup to read).
     pub cpu_usage_usec: Option<u64>,
     /// `memory.current` of the container's live cgroup, in bytes.
@@ -409,12 +416,13 @@ impl DashData {
         let want_n = matches!(scope, DashScope::Global | DashScope::Networks);
         let want_s = matches!(scope, DashScope::Global | DashScope::Storage);
         if want_c {
-            for (name, st, img, starttime, _id, usage, net) in &containers {
+            for (name, st, img, starttime, id, usage, net) in &containers {
                 let up = starttime
                     .and_then(super::output::uptime_from_starttime)
                     .map(super::output::fmt_duration_secs)
                     .unwrap_or_else(|| "-".to_string());
                 rows.push(Row {
+                    id: id.clone(),
                     kind: k::CONTAINER.into(),
                     name: name.clone(),
                     status: st.to_string(),
@@ -433,6 +441,7 @@ impl DashData {
         if want_v {
             for v in &vms {
                 rows.push(Row {
+                    id: v.name.clone(),
                     kind: k::VM.into(),
                     name: v.name.clone(),
                     status: v.status.to_string(),
@@ -451,6 +460,7 @@ impl DashData {
         if want_n {
             for n in &networks {
                 rows.push(Row {
+                    id: n.name.clone(),
                     kind: k::NETWORK.into(),
                     name: n.name.clone(),
                     status: n.driver.clone(),
@@ -469,6 +479,7 @@ impl DashData {
         if want_s {
             for vol in &volumes {
                 rows.push(Row {
+                    id: vol.name.clone(),
                     kind: k::VOLUME.into(),
                     name: vol.name.clone(),
                     status: vol.driver.clone(),
@@ -492,6 +503,7 @@ impl DashData {
                     .cloned()
                     .unwrap_or_else(|| img.short_id());
                 rows.push(Row {
+                    id: img.short_id(),
                     kind: k::IMAGE.into(),
                     name,
                     status: img.short_id(),
@@ -790,6 +802,67 @@ mod tui {
         last_updated: Instant,
     }
 
+    /// Turns a monotonic CPU-time counter (`cpu.stat` `usage_usec`,
+    /// microseconds) into a live percentage of one core, keyed by STABLE id.
+    /// Fixes the two things the old inline per-frame code got wrong (audit
+    /// G3/G4):
+    ///
+    ///  * **A rate needs two samples from two DIFFERENT collections.** The
+    ///    counter only advances once per ~1s collection tick, but the draw loop
+    ///    runs every ~200ms frame. The anchor is advanced ONLY in
+    ///    [`Self::observe`] — called exactly once per tick — never per frame.
+    ///    The old code rewrote the anchor every frame, so most frames diffed
+    ///    the counter against itself (→ a flickering 0%) and the first frame
+    ///    after a tick diffed a ~1s delta over ~200ms of wall time (→ a ~5×
+    ///    inflated spike). Between ticks, [`Self::pct_of`] returns the last
+    ///    computed value, held stable.
+    ///  * **Identity is the id, not the display name.** Two resources with the
+    ///    same name (or a name reused after re-creation) would otherwise share
+    ///    one anchor and produce a nonsense delta.
+    ///
+    /// A counter that moves backwards (cgroup recreated / container restarted)
+    /// is a reset, not a spike: the stale percentage is dropped and the next
+    /// tick re-establishes the anchor. Ids absent from a tick are forgotten, so
+    /// a restarted resource never inherits an old anchor.
+    #[derive(Default)]
+    struct CpuRateTracker {
+        anchor: HashMap<String, (Instant, u64)>,
+        pct: HashMap<String, f64>,
+    }
+
+    impl CpuRateTracker {
+        /// Advance the anchors with the fresh `(id, counter)` samples taken at
+        /// `now`. Call EXACTLY once per collection tick.
+        fn observe<'a>(&mut self, now: Instant, samples: impl IntoIterator<Item = (&'a str, u64)>) {
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for (id, cur) in samples {
+                seen.insert(id.to_string());
+                if let Some((t0, u0)) = self.anchor.get(id).copied() {
+                    let micros = now.duration_since(t0).as_micros();
+                    if cur < u0 {
+                        // Counter went backwards → reset. Drop the stale % and
+                        // wait for the next tick to re-anchor (no false spike).
+                        self.pct.remove(id);
+                    } else if micros > 0 {
+                        self.pct
+                            .insert(id.to_string(), (cur - u0) as f64 / micros as f64 * 100.0);
+                    }
+                    // micros == 0 (two samples same instant): keep the previous
+                    // %, do not divide by zero.
+                }
+                self.anchor.insert(id.to_string(), (now, cur));
+            }
+            self.anchor.retain(|k, _| seen.contains(k));
+            self.pct.retain(|k, _| seen.contains(k));
+        }
+
+        /// Last computed percentage of one core for `id`, or `None` until two
+        /// samples exist. May exceed 100% (multi-core). Stable between ticks.
+        fn pct_of(&self, id: &str) -> Option<f64> {
+            self.pct.get(id).copied()
+        }
+    }
+
     pub fn run_interactive(scope: DashScope) -> Result<()> {
         let root = state_root();
         // Cheap-only FIRST snapshot (counts + cgroup memory, no netns reads,
@@ -906,6 +979,85 @@ mod tui {
                 SortKey::Mem => "mem",
             }
         }
+    }
+
+    /// Which text field, if any, is currently capturing keystrokes. `Search`
+    /// (opened with `/`) and `Palette` (opened with `Ctrl+K`) edit the SAME
+    /// raw query string — they differ only in the footer chrome; both feed
+    /// `parse_filter`. `None` means the key stream drives navigation.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Input {
+        None,
+        Search,
+        Palette,
+    }
+
+    /// A parsed filter query: a free-text name substring plus optional
+    /// `kind:`/`state:` predicates. Built by `parse_filter` from the raw
+    /// search/palette text and applied by `matches`.
+    #[derive(Debug, Default, Clone, PartialEq, Eq)]
+    struct Filter {
+        /// Case-folded substring matched against the resource `name` ("" = any).
+        name: String,
+        /// Case-folded exact match against the resource `kind` (`None` = any).
+        kind: Option<String>,
+        /// Case-folded substring matched against the resource `status`
+        /// (`None` = any) — substring, not exact, so `state:failed` still
+        /// matches a rendered "failed (code 2)".
+        state: Option<String>,
+    }
+
+    impl Filter {
+        fn matches(&self, r: &Row) -> bool {
+            if !self.name.is_empty() && !r.name.to_lowercase().contains(&self.name) {
+                return false;
+            }
+            if let Some(k) = &self.kind {
+                if r.kind.to_lowercase() != *k {
+                    return false;
+                }
+            }
+            if let Some(s) = &self.state {
+                if !r.status.to_lowercase().contains(s) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    /// Parses a palette/search query into a [`Filter`], or returns a human
+    /// message naming the problem. A `key:value` token with an UNKNOWN key, or
+    /// ANY token with an empty value, is an ERROR — never silently demoted to
+    /// free text: a typo like `kidn:web` must read as "unknown filter key",
+    /// not as a name search for "kidn:web" that quietly matches nothing.
+    /// Bare tokens (no `:`) accumulate into the name substring. Keys and values
+    /// are case-folded, so `Kind:Container` and `kind:container` are the same.
+    fn parse_filter(q: &str) -> std::result::Result<Filter, String> {
+        let mut f = Filter::default();
+        let mut names: Vec<String> = Vec::new();
+        for tok in q.split_whitespace() {
+            match tok.split_once(':') {
+                Some((key, val)) => {
+                    let key = key.to_lowercase();
+                    let val = val.to_lowercase();
+                    if val.is_empty() {
+                        return Err(po::tf("empty value for '{key}:'", &[("key", &key)]));
+                    }
+                    match key.as_str() {
+                        "kind" => f.kind = Some(val),
+                        "state" | "status" => f.state = Some(val),
+                        "name" => names.push(val),
+                        _ => {
+                            return Err(po::tf("unknown filter key '{key}:'", &[("key", &key)]));
+                        }
+                    }
+                }
+                None => names.push(tok.to_lowercase()),
+            }
+        }
+        f.name = names.join(" ");
+        Ok(f)
     }
 
     /// Up/down/flat comparison of a metric against its previous tick's value
@@ -1030,20 +1182,73 @@ mod tui {
 
         let mut table_state = TableState::default();
         let mut sort_key = SortKey::Name;
-        let mut filter = String::new();
-        let mut searching = false;
-        // Raw `cpu.stat` counters, one previous sample per row (keyed by
-        // "KIND:NAME" — unique because container/VM names are already
-        // unique within their own store) and one for the whole-slice CPU
-        // tile — see `Row::cpu_usage_usec`'s doc comment for why a rate
-        // needs two samples and cannot come out of a single collection.
-        let mut cpu_prev: HashMap<String, (Instant, u64)> = HashMap::new();
-        let mut slice_cpu_prev: Option<(Instant, u64)> = None;
+        // The raw filter text (shared by `/` search and Ctrl+K palette) and
+        // which field, if any, is currently capturing keystrokes.
+        let mut query = String::new();
+        let mut input = Input::None;
+        // Selection is tracked by stable resource `id`, NEVER by table index:
+        // a sort or a refresh reorders rows, so the index is not an identity
+        // (same reasoning as the CPU-rate anchor — see `Row::id`).
+        let mut selected_id: Option<String> = None;
+        // Whether the full-screen detail overlay is open over the list.
+        let mut detail = false;
+        // The result of the last action launched from the overlay, shown as a
+        // line in it until the next keypress — so a failed `stop`/`start`
+        // (e.g. "already running") is never silently swallowed. Cleared when a
+        // new action starts.
+        let mut action_err: Option<String> = None;
+        // A `stop` launched from the overlay runs on a background thread (see
+        // `spawn_stop`); this holds the receiver while it is in flight, with the
+        // action it represents so its `outcome_of` can be applied on completion.
+        // `None` means no action is running off-loop. While it is `Some`, new
+        // action keys are swallowed so a second `stop` can't race the first.
+        let mut pending: Option<(std::sync::mpsc::Receiver<std::result::Result<(), String>>, Action)> =
+            None;
+        // A monotonic frame counter (one per loop iteration, ~5/s at the poll
+        // timeout) driving the in-flight spinner — a wall-clock-independent
+        // animation that keeps changing every redraw, which is exactly what
+        // proves the loop is alive while a `stop` blocks on its SIGKILL budget.
+        let mut frame: u64 = 0;
+        // CPU% is derived from the monotonic `cpu.stat` counter, anchored to
+        // the COLLECTION TICK (not the draw frame) and keyed by stable id —
+        // see `CpuRateTracker` for why both matter. One tracker for the
+        // per-row table, one single-entry tracker for the whole-slice CPU tile.
+        let mut cpu_tracker = CpuRateTracker::default();
+        let mut slice_tracker = CpuRateTracker::default();
         let mut cur_summary: Option<delonix_mgmt::dashstats::DashSummary> = None;
         let mut prev_summary: Option<delonix_mgmt::dashstats::DashSummary> = None;
         let mut slow_age = Duration::from_secs(0);
 
         loop {
+            frame = frame.wrapping_add(1);
+
+            // A background `stop` (if one is running) reports back here without
+            // ever blocking the loop: `try_recv` returns immediately whether or
+            // not the thread has finished. On completion apply the action's
+            // `outcome_of` — close the overlay if the resource is gone, force an
+            // immediate re-collect so the new status shows on the next tick, and
+            // surface any error exactly like the synchronous path does.
+            if let Some((rx, action)) = pending.as_ref() {
+                match rx.try_recv() {
+                    Ok(res) => {
+                        action_err = res.err();
+                        let out = outcome_of(*action);
+                        if !out.keep_detail {
+                            detail = false;
+                        }
+                        if out.recollect {
+                            last = Instant::now() - Duration::from_secs(2);
+                        }
+                        pending = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        action_err = Some(po::t("stop thread exited unexpectedly").to_string());
+                        pending = None;
+                    }
+                }
+            }
+
             // Collect every ~1s (not every frame).
             if last.elapsed() >= Duration::from_secs(1) {
                 let mut summary = delonix_mgmt::dashstats::collect(&root, false, false);
@@ -1073,40 +1278,27 @@ mod tui {
                 if mem_hist.len() > 120 {
                     mem_hist.pop_front();
                 }
+                // Advance the CPU-rate anchors ONCE per tick (the counters only
+                // changed here), keyed by stable id — never per frame below.
+                let tick_now = Instant::now();
+                cpu_tracker.observe(
+                    tick_now,
+                    data.rows
+                        .iter()
+                        .filter_map(|r| r.cpu_usage_usec.map(|c| (r.id.as_str(), c))),
+                );
+                slice_tracker.observe(tick_now, data.cpu_usage_usec.map(|c| ("slice", c)));
                 last = Instant::now();
             }
 
-            // CPU% is TUI-owned state (see `cpu_prev`'s doc comment) —
-            // recomputed every FRAME (not just every tick) so a fast poll
-            // loop doesn't visibly stall the percentage between ticks; the
-            // underlying counters only actually change once per tick.
+            // Read the tick-anchored CPU rates (keyed by stable id, held stable
+            // between ticks). The anchors were advanced ONCE in the tick block
+            // above — never here per frame, which is exactly the bug this
+            // replaces (see `CpuRateTracker`). `now` is still needed below for
+            // the spinner animation.
             let now = Instant::now();
-            let mut cpu_pct: HashMap<String, f64> = HashMap::new();
-            for r in &data.rows {
-                if let Some(cur) = r.cpu_usage_usec {
-                    let key = format!("{}:{}", r.kind, r.name);
-                    if let Some((t0, u0)) = cpu_prev.get(&key).copied() {
-                        let elapsed = now.duration_since(t0);
-                        if elapsed.as_millis() > 0 && cur >= u0 {
-                            let pct = (cur - u0) as f64 / elapsed.as_micros() as f64 * 100.0;
-                            cpu_pct.insert(key.clone(), pct);
-                        }
-                    }
-                    cpu_prev.insert(key, (now, cur));
-                }
-            }
-            let cpu_tile_pct = data.cpu_usage_usec.and_then(|cur| {
-                let pct = slice_cpu_prev.and_then(|(t0, u0)| {
-                    let elapsed = now.duration_since(t0);
-                    if elapsed.as_millis() > 0 && cur >= u0 {
-                        Some((cur - u0) as f64 / elapsed.as_micros() as f64 * 100.0)
-                    } else {
-                        None
-                    }
-                });
-                slice_cpu_prev = Some((now, cur));
-                pct
-            });
+            let cpu_pct: &HashMap<String, f64> = &cpu_tracker.pct;
+            let cpu_tile_pct = slice_tracker.pct_of("slice");
 
             // `cur_summary` is `None` only before the very first tick has
             // run — which cannot happen here (`last` starts 2s in the past,
@@ -1119,19 +1311,29 @@ mod tui {
                 None => Trends::unknown(),
             };
 
-            let needle = filter.to_lowercase();
-            let mut visible: Vec<&Row> = data
-                .rows
-                .iter()
-                .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(&needle))
-                .collect();
-            sort_rows(&mut visible, sort_key, &cpu_pct);
-            if visible.is_empty() {
-                table_state.select(None);
+            // Parse the query every frame. A SYNTAX error (unknown key / empty
+            // value) is surfaced in the footer and the list falls back to
+            // unfiltered — so the user keeps seeing their resources while
+            // fixing a typo, and the mistake is never silently swallowed into a
+            // name search that matches nothing.
+            let (filter, filter_err) = match parse_filter(&query) {
+                Ok(f) => (f, None),
+                Err(e) => (Filter::default(), Some(e)),
+            };
+            let mut visible: Vec<&Row> = data.rows.iter().filter(|r| filter.matches(r)).collect();
+            sort_rows(&mut visible, sort_key, cpu_pct);
+            // Resolve the id-keyed selection to its current index (keeps the
+            // highlight on the same resource across sort/refresh/filter).
+            table_state.select(resolve_selection(&visible, &mut selected_id));
+            // The detail overlay reads the live row by id every frame, so it
+            // tracks refreshed metrics; `None` if that resource has vanished.
+            let detail_row: Option<&Row> = if detail {
+                selected_id
+                    .as_deref()
+                    .and_then(|id| data.rows.iter().find(|r| r.id == id))
             } else {
-                let sel = table_state.selected().unwrap_or(0).min(visible.len() - 1);
-                table_state.select(Some(sel));
-            }
+                None
+            };
 
             let spinner = if collecting.load(Ordering::Relaxed) {
                 const FRAMES: [&str; 4] = ["\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}"];
@@ -1139,6 +1341,16 @@ mod tui {
             } else {
                 ""
             };
+
+            // When a background `stop` is in flight, the overlay shows an
+            // animated "stopping…" line instead of nothing — the frame-driven
+            // spinner changes every redraw, so the user sees the UI is alive and
+            // working through the kill-timeout, not frozen.
+            let busy: Option<String> = pending.as_ref().map(|_| {
+                const FRAMES: [&str; 4] = ["\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}"];
+                let g = FRAMES[(frame % FRAMES.len() as u64) as usize];
+                format!("{g} {}", po::t("stopping… (Ctrl+C to quit)"))
+            });
 
             if let Err(e) = term.draw(|f| {
                 draw(
@@ -1148,9 +1360,14 @@ mod tui {
                     &visible,
                     &mut table_state,
                     sort_key,
-                    &filter,
-                    searching,
-                    &cpu_pct,
+                    &query,
+                    input,
+                    filter_err.as_deref(),
+                    detail,
+                    detail_row,
+                    action_err.as_deref(),
+                    busy.as_deref(),
+                    cpu_pct,
                     cpu_tile_pct,
                     &trends,
                     slow_age,
@@ -1169,62 +1386,120 @@ mod tui {
                         if k.kind != KeyEventKind::Press {
                             continue;
                         }
-                        if searching {
+                        // Ctrl+C quits from ANY mode (even mid-typing).
+                        let ctrl_c = k.code == KeyCode::Char('c')
+                            && k.modifiers.contains(KeyModifiers::CONTROL);
+                        if ctrl_c {
+                            break Ok(());
+                        }
+
+                        // Text-input modes (`/` search, Ctrl+K palette) capture
+                        // typing; both edit the same `query`.
+                        if input != Input::None {
                             match k.code {
                                 KeyCode::Esc => {
-                                    filter.clear();
-                                    searching = false;
+                                    query.clear();
+                                    input = Input::None;
                                 }
-                                KeyCode::Enter => searching = false,
+                                KeyCode::Enter => input = Input::None,
                                 KeyCode::Backspace => {
-                                    filter.pop();
+                                    query.pop();
                                 }
-                                KeyCode::Char(c) => filter.push(c),
+                                KeyCode::Char(c) => query.push(c),
                                 _ => {}
                             }
                             continue;
                         }
-                        let quit = matches!(k.code, KeyCode::Char('q') | KeyCode::Esc)
-                            || (k.code == KeyCode::Char('c')
-                                && k.modifiers.contains(KeyModifiers::CONTROL));
-                        if quit {
+
+                        // `q` quits; Esc now means "close the detail overlay /
+                        // go back", NOT quit — in the list root it is a no-op.
+                        if k.code == KeyCode::Char('q') {
                             break Ok(());
                         }
+                        if k.code == KeyCode::Esc {
+                            detail = false;
+                            action_err = None;
+                            continue;
+                        }
+                        // While the detail overlay is open, a key is either a
+                        // bound per-resource action (run it against the live
+                        // row) or swallowed so stray input can't reorder the
+                        // list behind the overlay.
+                        if detail {
+                            // A background action already in flight owns the
+                            // overlay: swallow every key (except the global
+                            // Ctrl+C / Esc handled above) so a second `stop`
+                            // can't race the first.
+                            if pending.is_some() {
+                                continue;
+                            }
+                            if let (KeyCode::Char(c), Some(r)) = (k.code, detail_row) {
+                                if let Some(action) = action_for(c, &r.kind) {
+                                    let (id, kind) = (r.id.clone(), r.kind.clone());
+                                    if action.runs_in_background() {
+                                        // Hand the slow `stop` to a thread and
+                                        // keep looping — the result is applied
+                                        // by the `try_recv` poll at the top of
+                                        // the loop. Clear any stale error so the
+                                        // "stopping…" line shows cleanly.
+                                        action_err = None;
+                                        pending = Some((spawn_stop(&root, id, kind), action));
+                                        continue;
+                                    }
+                                    action_err = run_action(&mut term, &root, &id, &kind, action)
+                                        .err()
+                                        .map(|e| e.to_string());
+                                    let out = outcome_of(action);
+                                    if !out.keep_detail {
+                                        detail = false;
+                                    }
+                                    if out.recollect {
+                                        // Force the tick block to re-collect on
+                                        // the next iteration so the change shows
+                                        // immediately, not up to a second later.
+                                        last = Instant::now() - Duration::from_secs(2);
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
                         match k.code {
-                            KeyCode::Char('/') => searching = true,
+                            KeyCode::Enter => {
+                                if selected_id.is_some() {
+                                    detail = true;
+                                    action_err = None;
+                                }
+                            }
+                            KeyCode::Char('/') => input = Input::Search,
+                            KeyCode::Char('k') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                                input = Input::Palette;
+                            }
                             KeyCode::Char('s') => sort_key = sort_key.next(),
                             KeyCode::Tab => {
                                 scope = scope.next();
-                                table_state.select(None);
+                                selected_id = None;
                                 last = Instant::now() - Duration::from_secs(2); // force an immediate re-collect for the new scope
                             }
                             KeyCode::BackTab => {
                                 scope = scope.prev();
-                                table_state.select(None);
+                                selected_id = None;
                                 last = Instant::now() - Duration::from_secs(2);
                             }
                             KeyCode::Char(c) if c.is_ascii_digit() => {
                                 if let Some(s) = DashScope::from_digit(c) {
                                     scope = s;
-                                    table_state.select(None);
+                                    selected_id = None;
                                     last = Instant::now() - Duration::from_secs(2);
                                 }
                             }
-                            KeyCode::Down => {
-                                if !visible.is_empty() {
-                                    let n = table_state.selected().unwrap_or(0);
-                                    table_state.select(Some((n + 1).min(visible.len() - 1)));
-                                }
-                            }
-                            KeyCode::Up => {
-                                let n = table_state.selected().unwrap_or(0);
-                                table_state.select(Some(n.saturating_sub(1)));
-                            }
+                            KeyCode::Down => move_selection(&visible, &mut selected_id, 1),
+                            KeyCode::Up => move_selection(&visible, &mut selected_id, -1),
                             KeyCode::Home => {
-                                table_state.select(if visible.is_empty() { None } else { Some(0) })
+                                selected_id = visible.first().map(|r| r.id.clone());
                             }
-                            KeyCode::End if !visible.is_empty() => {
-                                table_state.select(Some(visible.len() - 1));
+                            KeyCode::End => {
+                                selected_id = visible.last().map(|r| r.id.clone());
                             }
                             _ => {}
                         }
@@ -1238,16 +1513,14 @@ mod tui {
 
     /// Sorts the VISIBLE rows in place — always by a stable secondary key
     /// (name) so equal-metric rows don't jitter position between ticks.
-    /// `cpu_pct` is keyed the same way as `render`'s `cpu_prev` (`"KIND:NAME"`).
+    /// `cpu_pct` is keyed by stable resource `id` (same as `CpuRateTracker`).
     fn sort_rows(rows: &mut [&Row], key: SortKey, cpu_pct: &HashMap<String, f64>) {
         rows.sort_by(|a, b| match key {
             SortKey::Name => a.name.cmp(&b.name),
             SortKey::Status => a.status.cmp(&b.status).then_with(|| a.name.cmp(&b.name)),
             SortKey::Cpu => {
-                let ka = format!("{}:{}", a.kind, a.name);
-                let kb = format!("{}:{}", b.kind, b.name);
-                let pa = cpu_pct.get(&ka).copied().unwrap_or(-1.0);
-                let pb = cpu_pct.get(&kb).copied().unwrap_or(-1.0);
+                let pa = cpu_pct.get(&a.id).copied().unwrap_or(-1.0);
+                let pb = cpu_pct.get(&b.id).copied().unwrap_or(-1.0);
                 pb.partial_cmp(&pa)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then_with(|| a.name.cmp(&b.name))
@@ -1258,6 +1531,285 @@ mod tui {
                 .cmp(&a.mem_bytes.unwrap_or(0))
                 .then_with(|| a.name.cmp(&b.name)),
         });
+    }
+
+    /// Resolves the remembered selection (`selected_id`, a stable resource
+    /// `id`) to its CURRENT index in `visible`, keeping the highlight on the
+    /// SAME resource across a sort, a refresh, or a filter change — never on a
+    /// fixed table position, which a reorder would silently move to a different
+    /// row. Side-effects on `selected_id`:
+    /// - empty list → cleared, returns `None`;
+    /// - remembered id still visible → returns its index, id unchanged;
+    /// - remembered id gone (filtered out / resource vanished) or unset → snaps
+    ///   to the first row AND adopts its id, so navigation continues from there.
+    fn resolve_selection(visible: &[&Row], selected_id: &mut Option<String>) -> Option<usize> {
+        if visible.is_empty() {
+            *selected_id = None;
+            return None;
+        }
+        if let Some(id) = selected_id.as_deref() {
+            if let Some(i) = visible.iter().position(|r| r.id == id) {
+                return Some(i);
+            }
+        }
+        *selected_id = Some(visible[0].id.clone());
+        Some(0)
+    }
+
+    /// Moves the selection by `delta` rows within `visible` and records the new
+    /// row's `id` as the remembered selection — the cursor is identity, not an
+    /// index, so the next tick tracks the row it landed on even after a sort.
+    /// Clamps at both ends (no wrap); a no-op on an empty list.
+    fn move_selection(visible: &[&Row], selected_id: &mut Option<String>, delta: i32) {
+        if visible.is_empty() {
+            *selected_id = None;
+            return;
+        }
+        let cur = selected_id
+            .as_deref()
+            .and_then(|id| visible.iter().position(|r| r.id == id))
+            .unwrap_or(0) as i32;
+        let next = (cur + delta).clamp(0, visible.len() as i32 - 1) as usize;
+        *selected_id = Some(visible[next].id.clone());
+    }
+
+    /// A per-resource operation the detail overlay can launch against the real
+    /// `delonix_linux`/`delonix_vm` services. Pure data — the key→action
+    /// mapping (`action_for`) and the post-action UI decision (`outcome_of`)
+    /// are tested without a live engine; only `run_action` touches the host.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Action {
+        /// Tail the container log once, then pause (suspends the TUI).
+        Logs,
+        /// Open an interactive shell inside the container (suspends the TUI).
+        Exec,
+        /// Stop a running container/VM.
+        Stop,
+        /// Start a stopped container/VM.
+        Start,
+        /// Remove the resource (force).
+        Remove,
+        /// Attach to a VM's serial console (suspends the TUI). VM-only — a
+        /// container has no serial port; `exec` is its interactive entry.
+        Console,
+    }
+
+    impl Action {
+        /// Whether this action runs on a background thread (silent, possibly
+        /// slow) instead of on the event-loop thread. Only `Stop` qualifies:
+        /// its SIGKILL budget is seconds of real latency, it touches no
+        /// terminal and prints nothing, so it can run off-loop while the TUI
+        /// keeps drawing. Everything else is either instant (`Start`/`Remove`)
+        /// or owns the terminal (`Logs`/`Exec`/`Console`) and must stay on the
+        /// main thread.
+        fn runs_in_background(self) -> bool {
+            matches!(self, Action::Stop)
+        }
+    }
+
+    /// Maps a keypress to the action it triggers in the detail overlay FOR A
+    /// RESOURCE OF `kind`, or `None` when the key is unbound there. `l`/`x`
+    /// (logs/exec) are container-only — a VM has no log file or `exec`
+    /// namespace to join here; `s`/`S` (start/stop) apply to the two kinds that
+    /// own a lifecycle service; `d` (remove) applies to both. `c` (console)
+    /// attaches to the VM serial port — VM-only, since a container has no
+    /// serial console (`x`/exec is its interactive entry). Kinds without a
+    /// live service in scope here (Network/Volume/Image) get no action — the
+    /// overlay stays a read-only view for them.
+    fn action_for(key: char, kind: &str) -> Option<Action> {
+        let is_container = kind == k::CONTAINER;
+        let has_lifecycle = is_container || kind == k::VM;
+        match key {
+            'l' if is_container => Some(Action::Logs),
+            'x' if is_container => Some(Action::Exec),
+            'S' if has_lifecycle => Some(Action::Stop),
+            's' if has_lifecycle => Some(Action::Start),
+            'd' if has_lifecycle => Some(Action::Remove),
+            'c' if kind == k::VM => Some(Action::Console),
+            _ => None,
+        }
+    }
+
+    /// What the overlay does once an action has run. Removal leaves nothing to
+    /// show, so the overlay closes; a lifecycle change keeps it open (it
+    /// re-reads the live row by id every frame, so the new status appears in
+    /// place). Both force an immediate re-collect so the change is reflected on
+    /// the very next tick rather than up to a second later. The interactive
+    /// actions (logs/exec) only borrowed the terminal — nothing we did changed
+    /// the stores, so no forced re-collect.
+    struct ActionOutcome {
+        keep_detail: bool,
+        recollect: bool,
+    }
+
+    fn outcome_of(action: Action) -> ActionOutcome {
+        match action {
+            Action::Remove => ActionOutcome {
+                keep_detail: false,
+                recollect: true,
+            },
+            Action::Stop | Action::Start => ActionOutcome {
+                keep_detail: true,
+                recollect: true,
+            },
+            Action::Logs | Action::Exec | Action::Console => ActionOutcome {
+                keep_detail: true,
+                recollect: false,
+            },
+        }
+    }
+
+    /// Final kill budget for a container `stop` launched from the overlay.
+    const STOP_TIMEOUT_SECS: u64 = 10;
+
+    /// Runs `body` with the ratatui TUI suspended — raw mode off and back on the
+    /// NORMAL screen — so a child process (an `exec` shell, the log output)
+    /// owns the real terminal and its own `set_raw_mode`/restore does not fight
+    /// ours (see `exec_with`). Always restores the TUI afterwards, even if
+    /// `body` errored, and clears so the next `draw` repaints a clean frame.
+    fn with_suspended<F>(
+        term: &mut Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+        body: F,
+    ) -> Result<()>
+    where
+        F: FnOnce() -> Result<()>,
+    {
+        terminal::disable_raw_mode().ok();
+        execute!(
+            stdout(),
+            terminal::LeaveAlternateScreen,
+            ratatui::crossterm::cursor::Show
+        )
+        .ok();
+        let r = body();
+        terminal::enable_raw_mode().ok();
+        execute!(stdout(), terminal::EnterAlternateScreen).ok();
+        let _ = term.clear();
+        r
+    }
+
+    /// Executes `action` against the resource identified by (`id`, `kind`),
+    /// suspending/resuming the TUI around the ones that own the terminal
+    /// (logs/exec) or print (remove). Lifecycle ops go straight to the silent
+    /// services. Mirrors the CLI verbs' store/secret handling, but NEVER
+    /// `process::exit`s the way `container exec` does — it returns so the TUI
+    /// resumes.
+    fn run_action(
+        term: &mut Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+        root: &std::path::Path,
+        id: &str,
+        kind: &str,
+        action: Action,
+    ) -> Result<()> {
+        match action {
+            Action::Logs => with_suspended(term, || {
+                let (images, store) = super::super::util::open_stores()?;
+                super::super::container::cmd_logs(&images, &store, id, false, None, None, false)?;
+                // Hold the output until the user acknowledges — the resume on
+                // the way out wipes the normal screen on the next frame.
+                use std::io::Write;
+                print!("\n-- end of logs · Enter to return --");
+                stdout().flush().ok();
+                std::io::stdin().read_line(&mut String::new()).ok();
+                Ok(())
+            }),
+            Action::Exec => with_suspended(term, || exec_shell(root, id)),
+            // `Console` attaches to the VM serial port via the SAME code path as
+            // the `vm console` CLI verb (socket bridge for Cloud Hypervisor,
+            // `virsh console` for libvirt), so the overlay and the CLI behave
+            // identically — escape key, stale-session takeover, the boot-log
+            // nudge, all of it. VM-only by construction (`action_for`).
+            Action::Console => with_suspended(term, || {
+                super::super::vm::cmd_console(root, id, None)
+            }),
+            // `Stop` is dispatched off-loop (`spawn_stop`), never here — but the
+            // body lives in `do_stop` so the arm stays exhaustive and the two
+            // callers share one implementation.
+            Action::Stop => do_stop(root, id, kind),
+            Action::Start => with_suspended(term, || {
+                if kind == k::VM {
+                    delonix_vm::start(root, id)?;
+                } else {
+                    let (images, store) = super::super::util::open_stores()?;
+                    super::super::container::cmd_start(&images, &store, id)?;
+                }
+                Ok(())
+            }),
+            Action::Remove => with_suspended(term, || {
+                if kind == k::VM {
+                    delonix_vm::remove_force(root, id)?;
+                    println!("{id}");
+                    Ok(())
+                } else {
+                    let (images, store) = super::super::util::open_stores()?;
+                    super::super::container::cmd_rm(&images, &store, id, true)
+                }
+            }),
+        }
+    }
+
+    /// The silent `stop` of a container or VM, shared by the synchronous
+    /// `run_action` arm and the off-loop `spawn_stop`. Touches no terminal and
+    /// prints nothing — the ONLY reason it is safe to run on a background
+    /// thread while the TUI keeps owning the real terminal.
+    fn do_stop(root: &std::path::Path, id: &str, kind: &str) -> Result<()> {
+        if kind == k::VM {
+            delonix_vm::stop(root, id)?;
+        } else {
+            let (_images, store) = super::super::util::open_stores()?;
+            let mut c = super::super::util::find(&store, id)?;
+            delonix_linux::stop(&store, &mut c, STOP_TIMEOUT_SECS)?;
+        }
+        Ok(())
+    }
+
+    /// Launches `do_stop` on a detached thread and returns the receiver the
+    /// event loop polls (non-blocking) for its result. This is the whole point
+    /// of the async path: a container whose PID1 ignores SIGTERM only dies at
+    /// the `STOP_TIMEOUT_SECS` SIGKILL, and running that inline would freeze the
+    /// TUI for ten seconds — no frames, no spinner, looks hung. Off-loop, the
+    /// loop keeps drawing and the status flips to `stopped` the moment the
+    /// thread reports back. The result carries only a `String` error (the
+    /// `delonix_model::Error` is rendered to text in the thread) so nothing
+    /// non-`Send` has to cross the channel.
+    fn spawn_stop(
+        root: &std::path::Path,
+        id: String,
+        kind: String,
+    ) -> std::sync::mpsc::Receiver<std::result::Result<(), String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let root = root.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = tx.send(do_stop(&root, &id, &kind).map_err(|e| e.to_string()));
+        });
+        rx
+    }
+
+    /// An interactive shell in a running container — `container exec` with no
+    /// command, but RETURNS to the caller instead of `process::exit`ing the way
+    /// the CLI verb does. Resolves vault secrets into the shell's environment
+    /// (same as the CLI path) so the debug shell sees the container's real env.
+    fn exec_shell(root: &std::path::Path, id: &str) -> Result<()> {
+        let (_images, store) = super::super::util::open_stores()?;
+        let c = super::super::util::find(&store, id)?;
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "command -v bash >/dev/null 2>&1 && exec bash || exec sh".to_string(),
+        ];
+        let mut extra_env: Vec<String> = Vec::new();
+        if !c.secret_files && !c.secrets.is_empty() {
+            if let Ok(ss) = delonix_state::SecretStore::open(root) {
+                extra_env.extend(ss.resolve_env(&c.secrets));
+            }
+        }
+        let overrides = delonix_linux::ExecOverrides {
+            extra_env: &extra_env,
+            workdir: None,
+            user: None,
+        };
+        let _code = delonix_linux::exec_with(&c, &command, true, &overrides)?;
+        Ok(())
     }
 
     fn io_err(e: std::io::Error) -> delonix_model::Error {
@@ -1277,8 +1829,13 @@ mod tui {
         visible: &[&Row],
         table_state: &mut TableState,
         sort_key: SortKey,
-        filter: &str,
-        searching: bool,
+        query: &str,
+        input: Input,
+        filter_err: Option<&str>,
+        detail: bool,
+        detail_row: Option<&Row>,
+        action_err: Option<&str>,
+        action_busy: Option<&str>,
         cpu_pct: &HashMap<String, f64>,
         cpu_tile_pct: Option<f64>,
         trends: &Trends,
@@ -1330,27 +1887,180 @@ mod tui {
 
         draw_sparklines(f, root[4], activity_hist, mem_hist);
 
-        let footer = if searching {
-            format!(
-                "  /{filter}\u{2588}   {}",
-                po::t("(Enter: apply · Esc: clear)")
-            )
+        // Footer: while typing (`/` or Ctrl+K) show the editable query with a
+        // caret and either the apply/clear hint or — if the query is currently
+        // invalid — the parse error, in red. A parse error also shows in the
+        // list root (a stale invalid query the user stepped away from). Both
+        // paths render the error: it is SIGNALED, never silently ignored.
+        let footer_line = if input != Input::None {
+            let prefix = if input == Input::Palette {
+                "\u{25B8} "
+            } else {
+                "/"
+            };
+            let (hint, hint_color) = match filter_err {
+                Some(e) => (format!("\u{26A0} {e}"), REDC),
+                None => (
+                    po::t("(Enter: apply · Esc: clear)").to_string(),
+                    Color::DarkGray,
+                ),
+            };
+            Line::from(vec![
+                Span::raw(format!("  {prefix}{query}\u{2588}   ")),
+                Span::styled(hint, Style::default().fg(hint_color)),
+            ])
+        } else if let Some(e) = filter_err {
+            Line::from(Span::styled(
+                format!("  \u{26A0} {e}"),
+                Style::default().fg(REDC),
+            ))
         } else {
-            format!(
-                "  {}",
-                po::tf(
-                    "q/Esc: quit · \u{2191}\u{2193}: select · Tab/1-6: scope · /: search · s: sort ({sort}) · refresh 1s",
-                    &[("sort", sort_key.label())],
-                )
-            )
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                footer,
+            Line::from(Span::styled(
+                format!(
+                    "  {}",
+                    po::tf(
+                        "q: quit · \u{2191}\u{2193}: select · Enter: details · Tab/1-6: scope · /: search · Ctrl+K: filter · s: sort ({sort})",
+                        &[("sort", sort_key.label())],
+                    )
+                ),
                 Style::default().fg(Color::DarkGray),
-            ))),
-            root[5],
-        );
+            ))
+        };
+        f.render_widget(Paragraph::new(footer_line), root[5]);
+
+        // The detail overlay paints LAST, over everything, so it is modal.
+        if detail {
+            draw_detail(f, area, detail_row, action_err, action_busy, cpu_pct);
+        }
+    }
+
+    /// A horizontally+vertically centered sub-rectangle covering `pct_x`×`pct_y`
+    /// percent of `area` — the frame for the detail overlay.
+    fn centered_rect(pct_x: u16, pct_y: u16, area: Rect) -> Rect {
+        let v = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage((100 - pct_y) / 2),
+                Constraint::Percentage(pct_y),
+                Constraint::Percentage((100 - pct_y) / 2),
+            ])
+            .split(area);
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage((100 - pct_x) / 2),
+                Constraint::Percentage(pct_x),
+                Constraint::Percentage((100 - pct_x) / 2),
+            ])
+            .split(v[1])[1]
+    }
+
+    /// The modal detail overlay for the selected resource. `row` is `None` when
+    /// the selected resource has vanished between the keypress and this frame
+    /// (it was deleted/stopped) — the overlay still opens, saying so, so Esc
+    /// has something to close instead of leaving the user stuck.
+    /// The keys the overlay binds for a resource of `kind` — the hint line at
+    /// the foot of the overlay, and the authority on what `action_for` accepts
+    /// (kept in lockstep with it by the `action_for` tests). Empty for kinds
+    /// with no in-scope service (Network/Volume/Image).
+    fn actions_hint(kind: &str) -> &'static str {
+        if kind == k::CONTAINER {
+            "l: logs · x: exec · s: start · S: stop · d: remove"
+        } else if kind == k::VM {
+            "c: console · s: start · S: stop · d: remove"
+        } else {
+            ""
+        }
+    }
+
+    fn draw_detail(
+        f: &mut ratatui::Frame,
+        full: Rect,
+        row: Option<&Row>,
+        action_err: Option<&str>,
+        action_busy: Option<&str>,
+        cpu_pct: &HashMap<String, f64>,
+    ) {
+        let area = centered_rect(60, 60, full);
+        f.render_widget(ratatui::widgets::Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(ORANGE))
+            .title(Span::styled(
+                format!(" {} ", po::t("DETAILS (Esc: back)")),
+                Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
+            ));
+        let mut lines: Vec<Line> = match row {
+            None => vec![Line::from(Span::styled(
+                po::t("resource no longer present"),
+                Style::default().fg(Color::DarkGray),
+            ))],
+            Some(r) => {
+                let kv = |label: &str, value: String| {
+                    Line::from(vec![
+                        Span::styled(format!("{label:>12}  "), Style::default().fg(Color::Gray)),
+                        Span::raw(value),
+                    ])
+                };
+                let cpu = match cpu_pct.get(&r.id) {
+                    Some(p) => format!("{p:.1}%"),
+                    None => "-".to_string(),
+                };
+                let mem = r
+                    .mem_bytes
+                    .map(super::super::output::fmt_size)
+                    .unwrap_or_else(|| "-".to_string());
+                // Field labels stay in English, like the table COLUMN HEADERS
+                // (`draw_table`) — neither is `po::t`-wrapped, on purpose.
+                vec![
+                    kv("NAME", r.name.clone()),
+                    kv("KIND", r.kind.clone()),
+                    kv("ID", r.id.clone()),
+                    Line::from(vec![
+                        Span::styled("      STATUS  ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            r.status.clone(),
+                            Style::default().fg(if r.ok { GREENC } else { REDC }),
+                        ),
+                    ]),
+                    kv("UP", r.up.clone()),
+                    kv("CPU", cpu),
+                    kv("MEM", mem),
+                    kv("I/O R/W", fmt_io_pair(r.io_read_bytes, r.io_write_bytes)),
+                    kv("NET DOWN/UP", fmt_net_pair(r.net_rx_bytes, r.net_tx_bytes)),
+                    kv("INFO", r.extra.clone()),
+                ]
+            }
+        };
+        // Foot of the overlay: the bound actions for this kind (blank line as a
+        // separator), then the last action's error if it failed — surfaced, not
+        // swallowed. `row.kind` drives the hint; a vanished row shows nothing.
+        if let Some(r) = row {
+            let hint = actions_hint(&r.kind);
+            if !hint.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    hint,
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+        // A background action in flight takes precedence over a stale error:
+        // show the animated "stopping…" line (yellow) while it runs; the error
+        // line only appears once no action is pending.
+        if let Some(busy) = action_busy {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                busy.to_string(),
+                Style::default().fg(YELLOWC).add_modifier(Modifier::BOLD),
+            )));
+        } else if let Some(err) = action_err {
+            lines.push(Line::from(Span::styled(
+                err.to_string(),
+                Style::default().fg(REDC),
+            )));
+        }
+        f.render_widget(Paragraph::new(lines).block(block), area);
     }
 
     fn draw_tabs(f: &mut ratatui::Frame, area: Rect, scope: DashScope) {
@@ -1399,11 +2109,26 @@ mod tui {
         for t in tiles {
             all_tiles.push(t.clone());
             if t.label == "MEMORY" {
-                let value = match cpu_tile_pct {
-                    Some(pct) => format!("{pct:.1}%"),
-                    None => "…".to_string(),
+                // Two explicit denominators (audit G5): the primary figure is
+                // "% of one core" (may exceed 100% on a multi-core workload —
+                // never clamped), and the subtitle adds "% of the whole host"
+                // (primary ÷ host cores) when the core count is determinable.
+                // We do NOT invent a cpu.max/quota denominator here.
+                let ncpu = delonix_linux::host_ncpu().max(1);
+                let (value, sub) = match cpu_tile_pct {
+                    Some(pct) => (
+                        format!("{pct:.1}%"),
+                        po::tf(
+                            "of 1 core · {hostpct}% of {n} host cores",
+                            &[
+                                ("hostpct", &format!("{:.1}", pct / ncpu as f64)),
+                                ("n", &ncpu.to_string()),
+                            ],
+                        ),
+                    ),
+                    None => ("…".to_string(), po::t("of 1 core (collecting)").to_string()),
                 };
-                all_tiles.push(tile("CPU", value, "of 1 core (may exceed 100%)"));
+                all_tiles.push(tile("CPU", value, &sub));
             }
         }
 
@@ -1521,8 +2246,7 @@ mod tui {
             .iter()
             .map(|r| {
                 let sc = if r.ok { GREENC } else { REDC };
-                let key = format!("{}:{}", r.kind, r.name);
-                let cpu_cell = match cpu_pct.get(&key) {
+                let cpu_cell = match cpu_pct.get(&r.id) {
                     Some(pct) => {
                         let color = if *pct > 90.0 {
                             REDC
@@ -1698,6 +2422,7 @@ mod tui {
 
         fn row(name: &str, status: &str, mem: Option<u64>) -> Row {
             Row {
+                id: name.into(),
                 kind: k::CONTAINER.into(),
                 name: name.into(),
                 status: status.into(),
@@ -1760,6 +2485,342 @@ mod tui {
             }
             assert!(matches!(k, SortKey::Name));
         }
+
+        // ---- CpuRateTracker (audit G3/G4) ----
+
+        #[test]
+        fn cpu_rate_needs_two_samples() {
+            let mut t = CpuRateTracker::default();
+            t.observe(Instant::now(), [("c1", 1_000_000u64)]);
+            // First collection: an anchor exists but no rate can be computed
+            // yet — never a fabricated 0%.
+            assert_eq!(t.pct_of("c1"), None);
+        }
+
+        #[test]
+        fn cpu_rate_uses_the_tick_interval_not_a_frame() {
+            // THE regression guard for G3: the delta is divided by the interval
+            // between the two COLLECTIONS (1s here), not by a ~200ms draw
+            // frame. 500_000 usec of CPU time over 1_000_000 usec of wall time
+            // is 50%. The old per-frame code divided the same 1s delta by one
+            // frame (~200ms) → ~250%, and showed 0% on the frames in between.
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("c1", 1_000_000u64)]);
+            t.observe(t0 + Duration::from_secs(1), [("c1", 1_500_000u64)]);
+            let p = t.pct_of("c1").expect("rate after two samples");
+            assert!((p - 50.0).abs() < 0.01, "expected ~50%, got {p}");
+        }
+
+        #[test]
+        fn cpu_rate_is_held_stable_between_ticks() {
+            // Re-observing at the SAME instant (what a redundant call within one
+            // tick would look like) must not divide by zero nor change the held
+            // value — the percentage is stable until the next real tick.
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(1);
+            t.observe(t0, [("c1", 0u64)]);
+            t.observe(t1, [("c1", 1_000_000u64)]);
+            let p = t.pct_of("c1");
+            assert!(p.is_some());
+            t.observe(t1, [("c1", 9_000_000u64)]);
+            assert_eq!(t.pct_of("c1"), p, "zero interval must keep the prior %");
+        }
+
+        #[test]
+        fn cpu_rate_keyed_by_id_not_name() {
+            // G4: two resources that could share a display name but have
+            // distinct ids get independent rates — no shared anchor.
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("idA", 0u64), ("idB", 0u64)]);
+            t.observe(
+                t0 + Duration::from_secs(1),
+                [("idA", 1_000_000u64), ("idB", 200_000u64)],
+            );
+            assert!((t.pct_of("idA").unwrap() - 100.0).abs() < 0.01);
+            assert!((t.pct_of("idB").unwrap() - 20.0).abs() < 0.01);
+        }
+
+        #[test]
+        fn cpu_rate_counter_reset_drops_not_spikes() {
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("c", 5_000_000u64)]);
+            t.observe(t0 + Duration::from_secs(1), [("c", 6_000_000u64)]);
+            assert!(t.pct_of("c").is_some());
+            // Counter went backwards (cgroup recreated / restart): drop the
+            // stale %, do not emit a spike.
+            t.observe(t0 + Duration::from_secs(2), [("c", 10_000u64)]);
+            assert_eq!(t.pct_of("c"), None);
+        }
+
+        #[test]
+        fn cpu_rate_forgets_absent_ids() {
+            let mut t = CpuRateTracker::default();
+            let t0 = Instant::now();
+            t.observe(t0, [("c", 1_000_000u64)]);
+            t.observe(t0 + Duration::from_secs(1), [("c", 2_000_000u64)]);
+            assert!(t.pct_of("c").is_some());
+            // Resource gone from this tick → its anchor and % are forgotten, so
+            // a restarted resource cannot inherit a stale anchor.
+            t.observe(
+                t0 + Duration::from_secs(2),
+                std::iter::empty::<(&str, u64)>(),
+            );
+            assert_eq!(t.pct_of("c"), None);
+            assert!(t.anchor.is_empty());
+        }
+
+        // ---- filter parser (Ctrl+K palette) ----
+
+        fn row_k(id: &str, name: &str, kind: &str, status: &str) -> Row {
+            Row {
+                id: id.into(),
+                kind: kind.into(),
+                name: name.into(),
+                status: status.into(),
+                up: "-".into(),
+                extra: String::new(),
+                ok: status == "running",
+                cpu_usage_usec: None,
+                mem_bytes: None,
+                io_read_bytes: None,
+                io_write_bytes: None,
+                net_rx_bytes: None,
+                net_tx_bytes: None,
+            }
+        }
+
+        #[test]
+        fn parse_filter_bare_text_is_a_name_substring() {
+            let f = parse_filter("web").unwrap();
+            assert_eq!(f.name, "web");
+            assert_eq!(f.kind, None);
+            assert_eq!(f.state, None);
+        }
+
+        #[test]
+        fn parse_filter_kind_and_state_predicates() {
+            let f = parse_filter("kind:container state:running").unwrap();
+            assert_eq!(f.kind.as_deref(), Some("container"));
+            assert_eq!(f.state.as_deref(), Some("running"));
+            assert_eq!(f.name, "");
+        }
+
+        #[test]
+        fn parse_filter_is_case_insensitive_on_keys_and_values() {
+            let f = parse_filter("Kind:Container STATUS:Running").unwrap();
+            assert_eq!(f.kind.as_deref(), Some("container"));
+            // `status:` is an accepted alias of `state:`.
+            assert_eq!(f.state.as_deref(), Some("running"));
+        }
+
+        #[test]
+        fn parse_filter_unknown_key_is_an_error_not_free_text() {
+            // A mistyped key must be REJECTED, never demoted to a name search
+            // for "kidn:web" that silently matches nothing.
+            let e = parse_filter("kidn:web").unwrap_err();
+            assert!(e.contains("kidn"), "error should name the bad key: {e}");
+        }
+
+        #[test]
+        fn parse_filter_empty_value_is_an_error() {
+            assert!(parse_filter("kind:").is_err());
+        }
+
+        #[test]
+        fn filter_matches_requires_every_predicate() {
+            let f = parse_filter("kind:container state:running").unwrap();
+            assert!(f.matches(&row_k("a", "web", "Container", "running")));
+            // Wrong kind, wrong state — each independently excludes the row.
+            assert!(!f.matches(&row_k("b", "web", "VM", "running")));
+            assert!(!f.matches(&row_k("c", "web", "Container", "crashed")));
+            // state: is a substring, so a decorated status still matches.
+            let f2 = parse_filter("state:failed").unwrap();
+            assert!(f2.matches(&row_k("d", "job", "Container", "failed (code 2)")));
+        }
+
+        // ---- selection by stable id (not index) ----
+
+        #[test]
+        fn resolve_selection_follows_the_same_id_across_a_reorder() {
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let b = row_k("id-b", "beta", "Container", "running");
+            // Selection points at "beta"; it sits at index 1 in name order.
+            let name_order = vec![&a, &b];
+            let mut sel = Some("id-b".to_string());
+            assert_eq!(resolve_selection(&name_order, &mut sel), Some(1));
+            // After a reorder (now beta first) the SAME id resolves to its new
+            // index — the highlight tracks the resource, not position 1.
+            let reordered = vec![&b, &a];
+            assert_eq!(resolve_selection(&reordered, &mut sel), Some(0));
+            assert_eq!(sel.as_deref(), Some("id-b"));
+        }
+
+        #[test]
+        fn resolve_selection_falls_back_to_first_when_the_id_is_gone() {
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let visible = vec![&a];
+            // Remembered id filtered out / vanished → snap to the first row and
+            // adopt its id so navigation continues from there.
+            let mut sel = Some("id-missing".to_string());
+            assert_eq!(resolve_selection(&visible, &mut sel), Some(0));
+            assert_eq!(sel.as_deref(), Some("id-a"));
+        }
+
+        #[test]
+        fn resolve_selection_clears_on_an_empty_list() {
+            let empty: Vec<&Row> = Vec::new();
+            let mut sel = Some("id-a".to_string());
+            assert_eq!(resolve_selection(&empty, &mut sel), None);
+            assert_eq!(sel, None);
+        }
+
+        #[test]
+        fn move_selection_tracks_by_id_and_clamps_at_the_ends() {
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let b = row_k("id-b", "beta", "Container", "running");
+            let visible = vec![&a, &b];
+            let mut sel = Some("id-a".to_string());
+            move_selection(&visible, &mut sel, 1);
+            assert_eq!(sel.as_deref(), Some("id-b"));
+            // Down at the bottom clamps (no wrap).
+            move_selection(&visible, &mut sel, 1);
+            assert_eq!(sel.as_deref(), Some("id-b"));
+            // Up from the bottom moves back; up at the top clamps.
+            move_selection(&visible, &mut sel, -1);
+            assert_eq!(sel.as_deref(), Some("id-a"));
+            move_selection(&visible, &mut sel, -1);
+            assert_eq!(sel.as_deref(), Some("id-a"));
+        }
+
+        // ---- overlay actions: key→action mapping + post-action state ----
+
+        #[test]
+        fn action_for_maps_container_keys() {
+            use Action::*;
+            let c = k::CONTAINER;
+            assert_eq!(action_for('l', c), Some(Logs));
+            assert_eq!(action_for('x', c), Some(Exec));
+            assert_eq!(action_for('s', c), Some(Start));
+            assert_eq!(action_for('S', c), Some(Stop));
+            assert_eq!(action_for('d', c), Some(Remove));
+            // A container has no serial console (`exec` is its interactive
+            // entry) — `c` is VM-only.
+            assert_eq!(action_for('c', c), None);
+            // Unbound key → no action (swallowed by the overlay).
+            assert_eq!(action_for('z', c), None);
+        }
+
+        #[test]
+        fn action_for_restricts_vm_to_lifecycle_remove_and_console() {
+            use Action::*;
+            let v = k::VM;
+            // A VM has no in-overlay log file or exec namespace.
+            assert_eq!(action_for('l', v), None);
+            assert_eq!(action_for('x', v), None);
+            // But it owns a lifecycle service.
+            assert_eq!(action_for('s', v), Some(Start));
+            assert_eq!(action_for('S', v), Some(Stop));
+            assert_eq!(action_for('d', v), Some(Remove));
+            // ...and a serial console — VM-only, the one interactive action a
+            // VM has in the overlay.
+            assert_eq!(action_for('c', v), Some(Console));
+        }
+
+        #[test]
+        fn only_stop_runs_in_the_background() {
+            use Action::*;
+            // `Stop` is the lone off-loop action: slow (SIGKILL budget), silent,
+            // no terminal. Everything else is instant or owns the terminal, so
+            // it must stay on the event-loop thread.
+            assert!(Stop.runs_in_background());
+            for a in [Logs, Exec, Start, Remove, Console] {
+                assert!(!a.runs_in_background(), "{a:?} must not run off-loop");
+            }
+        }
+
+        #[test]
+        fn action_for_gives_read_only_kinds_no_actions() {
+            // Network/Volume/Image have no live service wired here: every key
+            // is unbound, so the overlay stays a pure read-only view.
+            for kind in [k::NETWORK, k::VOLUME, k::IMAGE] {
+                for key in ['l', 'x', 's', 'S', 'd', 'c'] {
+                    assert_eq!(action_for(key, kind), None, "{kind}/{key}");
+                }
+            }
+        }
+
+        #[test]
+        fn actions_hint_matches_what_action_for_accepts() {
+            // The hint line is the documented surface; it must not promise a
+            // key `action_for` rejects, nor hide one it accepts.
+            for kind in [k::CONTAINER, k::VM, k::NETWORK, k::VOLUME, k::IMAGE] {
+                let hint = actions_hint(kind);
+                for key in ['l', 'x', 's', 'S', 'd', 'c'] {
+                    let in_hint = hint.contains(&format!("{key}:"));
+                    let bound = action_for(key, kind).is_some();
+                    assert_eq!(in_hint, bound, "{kind}/{key}: hint={hint:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn outcome_closes_only_on_removal_and_recollects_on_state_change() {
+            // Removal: nothing left to show → close, and re-collect so the row
+            // disappears next tick.
+            let o = outcome_of(Action::Remove);
+            assert!(!o.keep_detail);
+            assert!(o.recollect);
+            // Lifecycle: the resource stays → keep the overlay, re-collect to
+            // refresh the status in place.
+            for a in [Action::Stop, Action::Start] {
+                let o = outcome_of(a);
+                assert!(o.keep_detail);
+                assert!(o.recollect);
+            }
+            // Interactive: we only borrowed the terminal, changed no store → no
+            // forced re-collect, overlay stays. The VM console is interactive
+            // too — same contract.
+            for a in [Action::Logs, Action::Exec, Action::Console] {
+                let o = outcome_of(a);
+                assert!(o.keep_detail);
+                assert!(!o.recollect);
+            }
+        }
+
+        #[test]
+        fn state_reconstructs_after_a_remove() {
+            // The loop re-collects after an action; model the data a `remove`
+            // leaves behind and check the overlay/selection reconstruct the way
+            // the real loop does: the acted row is gone, selection snaps to a
+            // surviving row (its id adopted), and the by-id detail lookup for
+            // the removed resource yields None (overlay shows "no longer
+            // present").
+            let a = row_k("id-a", "alfa", "Container", "running");
+            let b = row_k("id-b", "beta", "Container", "running");
+            let acted = "id-a";
+
+            // Pre-action view: both rows present, selection on the acted one.
+            let before = vec![&a, &b];
+            let mut sel = Some(acted.to_string());
+            assert_eq!(resolve_selection(&before, &mut sel), Some(0));
+
+            // Post-remove re-collect: the acted row is no longer in the data.
+            let after = vec![&b];
+            // The by-id detail lookup for the removed resource is now empty.
+            assert!(after.iter().find(|r| r.id == acted).is_none());
+            // Selection reconstructs onto the survivor and adopts its id.
+            assert_eq!(resolve_selection(&after, &mut sel), Some(0));
+            assert_eq!(sel.as_deref(), Some("id-b"));
+
+            // And if that was the last resource, it clears cleanly.
+            let empty: Vec<&Row> = Vec::new();
+            assert_eq!(resolve_selection(&empty, &mut sel), None);
+            assert_eq!(sel, None);
+        }
     }
 }
 
@@ -1773,6 +2834,7 @@ mod tests {
             tiles: vec![tile("CONTAINERS", "2/3", "running / total")],
             rows: vec![
                 Row {
+                    id: "web".into(),
                     kind: "Container".into(),
                     name: "web".into(),
                     status: "running".into(),
@@ -1787,6 +2849,7 @@ mod tests {
                     net_tx_bytes: Some(8192),
                 },
                 Row {
+                    id: "db".into(),
                     kind: "Container".into(),
                     name: "db".into(),
                     status: "crashed".into(),

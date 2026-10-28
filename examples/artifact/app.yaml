@@ -1,0 +1,83 @@
+# ============================================================================
+# kind: App — construir a imagem de uma aplicação a partir do código-fonte
+#             com Cloud Native Buildpacks, sem Dockerfile
+# kind: App — build an application image from source with Cloud Native
+#             Buildpacks, no Dockerfile
+#
+# PT: `image` é o ÚNICO campo obrigatório — a tag que a imagem construída recebe
+#     no ImageStore LOCAL. `source` (default ".") é relativo ao directório onde
+#     CORRES o comando (não a este ficheiro), a mesma convenção do `build.context`
+#     de `kind: Image`. `builder` escolhe como o stack é construído: `auto`
+#     (detecta o stack — go.mod, package.json, requirements.txt, … — e usa o
+#     builder Paketo), `heroku` (a família Heroku), ou a referência de uma imagem
+#     builder própria — e UM builder próprio TORNA `runImage` OBRIGATÓRIO (o motor
+#     não lê o `builder.toml` de um builder alheio para adivinhar a sua run image;
+#     recusar é a resposta honesta). Sem cache de build: cada apply reconstrói.
+# EN: `image` is the ONLY required field — the tag the built image gets in the
+#     LOCAL ImageStore. `source` (default ".") is relative to where you RUN the
+#     command (not to this file), the same convention `kind: Image`'s
+#     `build.context` uses. `builder` selects how the stack is built: `auto`
+#     (detect the stack — go.mod, package.json, requirements.txt, … — and use the
+#     Paketo builder), `heroku` (the Heroku family), or a custom builder image
+#     reference — and a custom builder MAKES `runImage` REQUIRED (the engine does
+#     not read a custom builder's `builder.toml` to guess its run image; refusing
+#     is the honest answer). No build cache: every apply rebuilds.
+#
+# PT: Aplicar:  delonix stack apply -f examples/artifact/app.yaml
+# EN: Apply:    delonix stack apply -f examples/artifact/app.yaml
+# ============================================================================
+
+# ── 1. auto — stack detectado automaticamente (builder Paketo) ───────────────
+#      auto — auto-detected stack (Paketo builder)
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-auto
+  labels:
+    app: shop
+spec:
+  source: .                          # PT: directório a construir; relativo ao CWD, não a este ficheiro | EN: directory to build; relative to CWD, not this file
+  builder: auto                      # PT: auto | heroku | <ref de imagem builder> (default auto) | EN: auto | heroku | <builder image ref> (default auto)
+  image: shop-auto:latest            # PT: OBRIGATÓRIO — tag da imagem construída no store local | EN: REQUIRED — tag of the built image in the local store
+
+# ── 2. heroku — a família de builders Heroku ─────────────────────────────────
+#      heroku — the Heroku builder family
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-heroku
+spec:
+  source: .
+  builder: heroku
+  image: shop-heroku:latest
+
+# ── 3. custom — uma imagem builder própria (exige runImage) ──────────────────
+#      custom — a custom builder image (requires runImage)
+# PT: `runImage` é obrigatório aqui (omiti-lo é erro) e sem sentido com
+#     auto/heroku — o motor só o lê neste caso.
+# EN: `runImage` is required here (omitting it is an error) and meaningless with
+#     auto/heroku — the engine only reads it in this case.
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-custom
+spec:
+  source: .                          # PT: qualquer directório com o código (ex. ./services/shop); apply (e --dry-run) recusa um inexistente | EN: any directory holding the source (e.g. ./services/shop); apply (and --dry-run) refuse one that does not exist
+  builder: registry.example.com/buildpacks/builder-jammy-base:latest
+  runImage: registry.example.com/buildpacks/run-jammy-base:latest
+  image: shop-custom:1.0.0
+
+# ── 4. defaults — só a tag da imagem é obrigatória ───────────────────────────
+#      defaults — only the image tag is mandatory
+# PT: source assume ".", builder assume "auto".
+# EN: source defaults to ".", builder to "auto".
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-defaults
+spec:
+  image: shop-defaults:latest

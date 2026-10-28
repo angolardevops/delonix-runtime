@@ -67,6 +67,9 @@ pub const NETWORK_ZONE: &str = "NetworkZone";
 /// resource: it names a pool of the allowlist, never a device or a path.
 pub const STORAGE_POOL: &str = "StoragePool";
 pub const VOLUME: &str = "Volume";
+/// An S3-compatible object store (ADR-0081): either provisioned on the node's
+/// Ceph Object Gateway, or a reference to a foreign S3 store.
+pub const OBJECT_STORAGE: &str = "ObjectStorage";
 pub const IMAGE: &str = "Image";
 pub const APP: &str = "App";
 pub const VM: &str = "VirtualMachine";
@@ -420,6 +423,24 @@ const FACTS: &[KindFacts] = &[
         // A plain volume is global and a `share:` one is scoped by namespace,
         // so this is the one Kind whose answer comes from the DOCUMENT.
         namespaced: Namespaced::PerDocument,
+        presence: Presence::Registry,
+    },
+    KindFacts {
+        kind: OBJECT_STORAGE,
+        plural: "objectstorages",
+        short: &[],
+        api_version: "storage.delonix.io/v1alpha1",
+        domain: Domain::Storage,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "objectStorages",
+        converges: true,
+        // An object store holds a tenant's S3 data; removing it because a
+        // manifest stopped naming it would orphan buckets and objects. Removal
+        // is explicit — `no_teardown_reason` (cmd/stack.rs) names how. Same
+        // reasoning as Image/App just below.
+        teardown: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     KindFacts {

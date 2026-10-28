@@ -85,7 +85,7 @@ KindFacts {
 
 - `manifest.rs` 里的 **`stack_group_sample`** —— 这个分组里一个子项最简的 `spec`，以及它
   最终落地成的 Kind；`every_stack_group_loads` 会遍历每一个分组，遇到没有样例的就失败。
-- **`examples/stack.yaml`** —— 必须提到这个分组；否则 `the_stack_example_names_every_group`
+- **`examples/core/stack.yaml`** —— 必须提到这个分组；否则 `the_stack_example_names_every_group`
   会失败。这个文件同时也是用户站点 Kinds 页面所展示的内容。
 - `schema.rs` 里的 **`every_stack_group_is_typed_against_its_kinds_own_spec`** —— 分组里的
   条目要按 Kind 自己的 spec 来做类型校验，所以这个 Kind 得先有 `TYPED_KINDS` 分支（见下一节）
@@ -246,7 +246,7 @@ actual(_docs: …)`）不该出现在这份清单里。
 2. 一个带 `JsonSchema` 的 spec 结构体；`TYPED_KINDS` 和 `manifest_schema`（`schema.rs`）
    里的分支 —— 或者在 `untyped_hint` 里说明为什么没有。
 3. `manifest.rs` —— `filled_spec`（`spec_with_defaults`）里的分支、`spec_fields_for` 里的
-   分支，以及 `stack_group_sample` 里的样例；分组要写进 `examples/stack.yaml`。
+   分支，以及 `stack_group_sample` 里的样例；分组要写进 `examples/core/stack.yaml`。
 4. `stack.rs` —— `desired_of`、`actual_of`、`converge_and_stamp`、`stamp_all`、
    `destroy_one`、`presence` 里的分支，以及 `run_layers` 里调用该 Kind 自己 `apply(docs)`
    的那一层。

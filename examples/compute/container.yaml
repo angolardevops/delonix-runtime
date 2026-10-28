@@ -1,0 +1,312 @@
+# ============================================================================
+# kind: Container — o workload do dia-a-dia (formas plana e agrupada)
+# kind: Container — the everyday workload (flat and grouped shapes)
+#
+# PT: `image` é o ÚNICO campo obrigatório; tudo o resto tem default. Os campos
+#     podem escrever-se achatados no topo de `spec` (forma histórica) OU
+#     agrupados por tema (resources/network/security/storage/env/limits) — as
+#     duas formas descrevem o mesmo contentor e são aceites. ATENÇÃO: o default
+#     de `restartPolicy` é "no" (não reinicia).
+# EN: `image` is the ONLY required field; everything else has a default. Fields
+#     may be written flat at the top of `spec` (historic form) OR grouped by
+#     concern (resources/network/security/storage/env/limits) — both shapes
+#     describe the same container and are accepted. NOTE: the default of
+#     `restartPolicy` is "no" (never restarts).
+#
+# PT: A forma k8s (`spec.containers[]`) num `kind: Container` é obsoleta — para
+#     isso usa `kind: Pod` (ver compute/pod.yaml).
+# EN: The k8s shape (`spec.containers[]`) on a `kind: Container` is a sunset form
+#     — use `kind: Pod` for that (see compute/pod.yaml).
+#
+# PT: Aplicar:   delonix stack apply -f examples/compute/container.yaml
+# EN: Apply:     delonix stack apply -f examples/compute/container.yaml
+# ============================================================================
+
+# ── 1. mínimo — só o campo obrigatório ──────────────────────────────────────
+#      minimal — the only mandatory field
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: minimal
+spec:
+  image: alpine:3.20          # PT: único campo obrigatório | EN: the only required field
+
+# ── 2. forma agrupada com os defaults à vista ───────────────────────────────
+#      grouped shape with the defaults made explicit
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web
+spec:
+  image: nginx:alpine         # PT: obrigatório | EN: required
+  command: []                 # PT: substitui o CMD da imagem, ex. ["nginx","-g","daemon off;"] | EN: overrides the image CMD
+  entrypoint: null            # PT: substitui o ENTRYPOINT ("" limpa-o) | EN: overrides the ENTRYPOINT ("" clears it)
+  user: null                  # PT: UID/GID ou nome, ex. "1000:1000" | EN: UID/GID or name, e.g. "1000:1000"
+  hostname: null              # PT: hostname do contentor (default: o nome) | EN: container hostname (default: the name)
+  detach: true                # PT: corre em segundo plano (um manifesto é declarativo) | EN: run in the background
+  restartPolicy: "no"         # PT: no (default) | on-failure[:max] | always | unless-stopped | EN: no (default) | on-failure[:max] | always | unless-stopped
+  addHost: []                 # PT: entradas extra em /etc/hosts, `nome:ip` | EN: extra /etc/hosts entries, `name:ip`
+
+  resources:                  # PT: limites cgroup v2 | EN: cgroup v2 limits
+    memory: max               # PT: 64M | 2G | max (sem tecto) | EN: 64M | 2G | max (no cap)
+    cpus: "1.0"               # PT: núcleos de CPU | EN: CPU cores
+    cpuWeight: null           # PT: peso relativo de CPU sob contenção (1-10000) | EN: relative CPU weight under contention (1-10000)
+    cpuset: null              # PT: fixar a CPUs, ex. "0-3" | EN: pin to CPUs, e.g. "0-3"
+    ioWeight: null            # PT: peso relativo de I/O | EN: relative I/O weight
+
+  network:
+    name: host                # PT: host | none | <rede criada por `network create`> | EN: host | none | <a network from `network create`>
+    ports: []                 # PT: ["8080:80"] — dá ao contentor netns próprio + NAT slirp | EN: ["8080:80"] — gives its own netns + slirp NAT
+    expose: null              # PT: porta HTTP a auto-registar no proxy L7 (ver kind: Gateway) | EN: HTTP port to auto-register in the L7 proxy
+    alias: []                 # PT: aliases DNS na rede | EN: DNS aliases on the network
+    knows: []                 # PT: restringe a resolução de nomes a estes contentores | EN: restrict name resolution to these containers
+    rateBps: null             # PT: limite de débito de saída (ex. "10mbit"), só com rede própria | EN: egress rate limit, custom network only
+    rateBurst: null           # PT: rajada para rateBps | EN: burst for rateBps
+
+  security:
+    privileged: false         # PT: todas as caps, seccomp off — só workloads de confiança | EN: all caps, seccomp off — trusted only
+    readOnly: false           # PT: rootfs só-leitura (escritas vão p/ tmpfs/volumes) | EN: read-only rootfs
+    capAdd: []                # PT: ["NET_ADMIN"] | EN: ["NET_ADMIN"]
+    capDrop: []               # PT: ["MKNOD"] | EN: ["MKNOD"]
+    securityOpt: []           # PT: ["seccomp=unconfined","apparmor=<perfil>"] | EN: ["seccomp=unconfined","apparmor=<profile>"]
+    apparmor: null            # PT: perfil AppArmor | EN: AppArmor profile
+    selinux: null             # PT: contexto SELinux | EN: SELinux context
+    userns: false             # PT: força o user namespace subuid (default-on em rootless) | EN: force the subuid userns (default-on in rootless)
+    hostPid: false            # PT: partilha o PID namespace do host | EN: share the host PID namespace
+    hostIpc: false            # PT: partilha o IPC namespace do host | EN: share the host IPC namespace
+    detect: false             # PT: seccomp em modo-log — descobre os syscalls do workload | EN: seccomp in log mode — discover syscalls
+
+  storage:
+    volumes: []               # PT: ["data:/var/lib","/host/path:/dentro:ro"] | EN: ["data:/var/lib","/host/path:/inside:ro"]
+    tmpfs: []                 # PT: ["/scratch"] | EN: ["/scratch"]
+
+  env:
+    vars: []                  # PT: ["KEY=value"] | EN: ["KEY=value"]
+    files: []                 # PT: ["./.env"] | EN: ["./.env"]
+    secrets: []               # PT: nomes de secret do cofre (ver `delonix secret`); injectados como env | EN: vault secret names, injected as env
+    secretFiles: false        # PT: true → secrets em /run/secrets/<nome> em vez de env | EN: true → secrets to /run/secrets/<name> instead of env
+
+  limits:
+    devices: []               # PT: ["/dev/fuse"] | EN: ["/dev/fuse"]
+    gpus: null                # PT: all | nvidia | dri | EN: all | nvidia | dri
+    ulimit: []                # PT: ["nofile=1024:2048"] | EN: ["nofile=1024:2048"]
+    sysctl: []                # PT: ["net.core.somaxconn=1024"] | EN: ["net.core.somaxconn=1024"]
+
+  labels: []                  # PT: ["tier=frontend"] | EN: ["tier=frontend"]
+  logDriver: null             # PT: json | cri | EN: json | cri
+
+# ── 3. recursos de apoio para os cenários completos abaixo ───────────────────
+#      supporting resources for the full scenarios below
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: app-net
+spec:
+  driver: bridge
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: app-secret
+spec:
+  stringData:
+    DB_PASSWORD: change-me-example   # PT: injectado como env (ou /run/secrets/, ver secretFiles) | EN: injected as env (or /run/secrets/, see secretFiles)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: app-data
+spec:
+  driver: local
+---
+# PT: um contentor-par, para `knows:` ter algo a resolver.
+# EN: a peer container so `knows:` has something to resolve.
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: peer
+spec:
+  image: busybox:latest
+  command: ["sleep", "infinity"]
+  network: app-net
+
+# ── 4. forma plana completa — todos os campos no topo de spec ────────────────
+#      full flat — every field at the top level of spec
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: full-flat
+  namespace: default                  # PT: namespace de isolamento | EN: isolation namespace
+  labels:                             # PT: labels de metadata (o motor junta as suas delonix.io/*) | EN: metadata labels (engine adds its own delonix.io/*)
+    tier: frontend
+  annotations:
+    example.delonix.io/purpose: full-spec-demo
+spec:
+  image: nginx:alpine                 # PT: OBRIGATÓRIO (puxado se faltar) | EN: REQUIRED (pulled if missing)
+  detach: true                        # PT: corre em segundo plano | EN: run in the background
+  command: ["nginx", "-g", "daemon off;"]   # PT: substitui o CMD da imagem | EN: overrides the image CMD
+  entrypoint: /docker-entrypoint.sh   # PT: substitui o ENTRYPOINT ("" limpa-o) | EN: overrides the ENTRYPOINT ("" clears it)
+  user: "101:101"                     # PT: uid[:gid] ou nome a correr | EN: uid[:gid] or user name to run as
+  hostname: full-flat-host            # PT: hostname (default: o nome) | EN: hostname (default: the name)
+  restartPolicy: on-failure:3         # PT: no | on-failure[:max] | always | unless-stopped (alias legado `restart`) | EN: no | on-failure[:max] | always | unless-stopped (legacy alias `restart`)
+  addHost:                            # PT: entradas extra em /etc/hosts, `nome:ip` | EN: extra /etc/hosts entries, `name:ip`
+    - legacy-api:10.0.0.9
+  labels:                             # PT: labels do contentor `chave=valor` (nível spec, distinto de metadata.labels) | EN: container labels `key=value` (spec-level, distinct from metadata.labels)
+    - tier=frontend
+    - team=platform
+
+  # --- rede / network ---
+  network: app-net                    # PT: host | none | <rede própria> (própria => netns na SDN) | EN: host | none | <custom network> (custom => own netns on the SDN)
+  ports:                              # PT: publica host:contentor[/proto]; [hostIp:] e gamas também | EN: publish host:container[/proto]; [hostIp:] and ranges too
+    - "127.0.0.1:18080:80"
+    - "18443:443/tcp"
+    - "19000-19002:9000-9002"
+  expose: 80                          # PT: auto-registar esta porta HTTP no proxy L7 (precisa de rede própria) | EN: auto-register this HTTP port in the L7 proxy (needs a custom network)
+  networkAlias:                       # PT: nomes DNS extra na rede própria | EN: extra DNS names on the custom network
+    - web
+    - frontend
+  knows:                              # PT: restringe o que este contentor alcança a estes pares (Dependency dirigida) | EN: restrict reach to these peers (directed Dependency)
+    - peer
+  netBps: 10mbit                      # PT: limite de débito de saída (precisa de rede própria) | EN: egress rate limit (needs a custom network)
+  netBurst: 20mbit                    # PT: rajada para netBps | EN: burst for netBps
+
+  # --- recursos (cgroup v2) / resources (cgroup v2) ---
+  memory: 256M                        # PT: 64M | 2G | max | EN: 64M | 2G | max
+  cpus: "0.5"                         # PT: núcleos de CPU | EN: CPU cores
+  cpuWeight: "200"                    # PT: peso relativo de CPU sob contenção (1-10000) | EN: relative CPU weight under contention (1-10000)
+  cpuset: "0"                         # PT: fixar a CPUs (precisa do controlador cpuset delegado) | EN: pin to CPUs (needs the cpuset controller delegated)
+  ioWeight: "100"                     # PT: peso relativo de I/O de bloco | EN: relative block-I/O weight
+  cgroupParent:                       # PT: cgroup intermédio partilhado que limita um GRUPO de contentores | EN: shared intermediate cgroup bounding a GROUP of containers
+    name: app-tier                    # PT: um segmento de caminho seguro | EN: a single safe path segment
+    memoryMax: "1073741824"           # PT: tecto agregado de memória (bytes) | EN: aggregate memory ceiling (bytes)
+    cpus: "2"                         # PT: núcleos de CPU agregados | EN: aggregate CPU cores
+    pidsMax: "512"                    # PT: tecto agregado de processos | EN: aggregate process ceiling
+
+  # --- segurança / security ---
+  readOnly: true                      # PT: rootfs só-leitura | EN: read-only rootfs
+  capDrop: ["ALL"]                    # PT: capabilities a largar | EN: capabilities to drop
+  capAdd: ["NET_BIND_SERVICE"]        # PT: capabilities a repor | EN: capabilities to add back
+  securityOpt:                        # PT: opções de segurança estilo docker | EN: docker-style security options
+    - no-new-privileges
+  userns: true                        # PT: força o user namespace subuid (já default em rootless) | EN: force the subuid userns (already default in rootless)
+
+  # --- armazenamento / storage ---
+  volumes:                            # PT: volume nomeado ou bind mount; :ro opcional | EN: named volume or bind mount; optional :ro
+    - app-data:/var/lib/app
+    - /etc/hostname:/etc/host-name:ro
+  tmpfs:                              # PT: montagens em memória | EN: in-memory mounts
+    - /tmp
+    - /run/cache
+
+  # --- ambiente / environment ---
+  env:                                # PT: lista KEY=value | EN: KEY=value list
+    - TZ=Africa/Luanda
+    - LOG_LEVEL=info
+  secret:                             # PT: nomes de secret do cofre, injectados como env (ou ficheiros, abaixo) | EN: vault secret names, injected as env (or files, below)
+    - app-secret
+  secretFiles: false                  # PT: true => secrets em /run/secrets/<chave> em vez de env | EN: true => secrets as /run/secrets/<key> instead of env
+
+  # --- outros limites / misc limits ---
+  ulimit:
+    - nofile=1024:2048
+  sysctl:
+    - net.core.somaxconn=1024
+  logDriver: json                     # PT: json | cri | EN: json | cri
+
+# ── 5. forma agrupada completa — os mesmos campos, por tema ──────────────────
+#      full grouped — the same fields, organised by concern
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: full-grouped
+spec:
+  image: nginx:alpine
+  detach: true
+  command: ["nginx", "-g", "daemon off;"]
+  entrypoint: /docker-entrypoint.sh
+  user: "101:101"
+  hostname: full-grouped-host
+  restartPolicy: always
+  addHost: ["legacy-api:10.0.0.9"]
+  labels: ["tier=frontend"]
+  logDriver: json
+
+  resources:                          # PT: limites cgroup v2 | EN: cgroup v2 limits
+    memory: 256M
+    cpus: "0.5"
+    cpuWeight: "200"
+    cpuset: "0"
+    ioWeight: "100"
+    cgroupParent:
+      name: app-tier-grouped
+      memoryMax: "1073741824"
+      cpus: "2"
+      pidsMax: "512"
+
+  network:                            # PT: um mapa aqui (uma string é a forma plana) | EN: a mapping here (a plain string is the flat form)
+    name: app-net                     # PT: host | none | <rede própria> | EN: host | none | <custom network>
+    ports: ["18081:80"]
+    expose: 80                        # PT: auto-registar no proxy L7 | EN: auto-register in the L7 proxy
+    alias: [web-grouped]              # PT: => networkAlias | EN: => networkAlias
+    knows: [peer]
+    rateBps: 10mbit                   # PT: => netBps | EN: => netBps
+    rateBurst: 20mbit                 # PT: => netBurst | EN: => netBurst
+
+  security:
+    privileged: false                 # PT: true => todas as caps, seccomp off (só confiança) | EN: true => all caps, seccomp off (trusted only)
+    readOnly: true
+    capAdd: ["NET_BIND_SERVICE"]
+    capDrop: ["ALL"]
+    securityOpt: ["no-new-privileges"]
+    userns: true
+    hostPid: false                    # PT: partilha o pid namespace do HOST | EN: share the HOST pid namespace
+    hostIpc: false                    # PT: partilha o ipc namespace do HOST | EN: share the HOST ipc namespace
+    detect: false                     # PT: seccomp em modo-log | EN: seccomp in log mode
+
+  storage:
+    volumes: ["app-data:/var/lib/app"]
+    tmpfs: ["/tmp"]
+
+  env:                                # PT: env agrupado (vars/files/secrets/secretFiles) | EN: grouped env (vars/files/secrets/secretFiles)
+    vars: ["TZ=Africa/Luanda"]
+    files: []                         # PT: ["./.env"] — ficheiros env lidos no apply | EN: ["./.env"] — env files read at apply time
+    secrets: [app-secret]
+    secretFiles: true                 # PT: secrets em /run/secrets/<chave> | EN: secrets as /run/secrets/<key>
+
+  limits:
+    ulimit: ["nofile=1024:2048"]
+    sysctl: ["net.core.somaxconn=1024"]
+    devices: ["/dev/null:/dev/fuse-demo"]   # PT: nós de dispositivo extra | EN: extra device nodes
+
+# ── 6. env como mapa KEY: value (o que escrevem utilizadores de compose/k8s) ──
+#      env as a plain KEY: value mapping (what compose/k8s users write)
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: env-map
+spec:
+  image: busybox:latest
+  command: ["sleep", "infinity"]
+  env:
+    POSTGRES_USER: app
+    POSTGRES_PASSWORD: example-only
+    PORT: 8080                        # PT: não-strings são convertidas a string | EN: non-strings are stringified
+
+# ── 7. primeiro plano — detach false bloqueia o apply até o processo sair ─────
+#      foreground — detach false blocks apply until the process exits
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: foreground
+spec:
+  image: busybox:latest
+  command: ["echo", "hello"]
+  detach: false
+  restartPolicy: "no"

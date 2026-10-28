@@ -9813,8 +9813,26 @@ msgstr "nenhum recurso corresponde ao filtro"
 msgid "(Enter: apply · Esc: clear)"
 msgstr "(Enter: aplica · Esc: limpa)"
 
-msgid "q/Esc: quit · ↑↓: select · Tab/1-6: scope · /: search · s: sort ({sort}) · refresh 1s"
-msgstr "q/Esc: sair · ↑↓: seleccionar · Tab/1-6: âmbito · /: procurar · s: ordenar ({sort}) · refresh 1s"
+msgid "q: quit · ↑↓: select · Enter: details · Tab/1-6: scope · /: search · Ctrl+K: filter · s: sort ({sort})"
+msgstr "q: sair · ↑↓: seleccionar · Enter: detalhe · Tab/1-6: âmbito · /: procurar · Ctrl+K: filtrar · s: ordenar ({sort})"
+
+msgid "unknown filter key '{key}:'"
+msgstr "chave de filtro desconhecida '{key}:'"
+
+msgid "empty value for '{key}:'"
+msgstr "valor vazio para '{key}:'"
+
+msgid "DETAILS (Esc: back)"
+msgstr "DETALHE (Esc: voltar)"
+
+msgid "resource no longer present"
+msgstr "recurso já não existe"
+
+msgid "stopping… (Ctrl+C to quit)"
+msgstr "a parar… (Ctrl+C para sair)"
+
+msgid "stop thread exited unexpectedly"
+msgstr "a tarefa de paragem terminou inesperadamente"
 
 # net l4guard (CLI wiring for the ingress-wide L4 DDoS guard)
 msgid "Ingress-wide L4 DDoS guard (per-source connection rate + concurrent cap)."
@@ -17023,3 +17041,46 @@ msgstr "Namespace de isolamento do(s) alvo(s). Um nome SIMPLES é resolvido dent
 
 msgid "Emit a ROOTLESS bundle: add a user namespace and the current user's uid/gid mappings (container root -> your uid, then the delegated subuids), so `runc`/`crun` run it without root. Without it the bundle has no mappings and only runs as real root (`runc` refuses it rootless with \"requires user namespaces\"). The mappings are specific to THIS user, so the bundle is tied to this host's `/etc/subuid`"
 msgstr "Emite um bundle ROOTLESS: adiciona um user namespace e os mapeamentos uid/gid do utilizador atual (root do container -> o teu uid, depois os subuids delegados), para que o `runc`/`crun` o corram sem root. Sem ele o bundle não tem mapeamentos e só corre como root real (o `runc` recusa-o rootless com \"requires user namespaces\"). Os mapeamentos são específicos DESTE utilizador, por isso o bundle fica preso ao `/etc/subuid` deste host"
+
+
+msgid "S3-compatible object stores: ls/inspect/rm."
+msgstr "Object stores compatíveis com S3: ls/inspect/rm."
+
+msgid "List the object stores."
+msgstr "Lista os object stores."
+
+msgid "Details of an object store (backend, bucket, endpoint, credentials Secret)."
+msgstr "Detalhes de um object store (backend, bucket, endpoint, Secret de credenciais)."
+
+msgid "Remove an object store: its generated Secret and its record, plus the S3 identity on the gateway (cephRgw)."
+msgstr "Remove um object store: o Secret gerado e o seu registo, mais a identidade S3 no gateway (cephRgw)."
+
+msgid "Also delete the buckets and objects the S3 user still owns (cephRgw) — destructive; without it the gateway refuses a user that still holds data."
+msgstr "Apaga também os buckets e objectos que o utilizador S3 ainda possui (cephRgw) — destrutivo; sem isto o gateway recusa um utilizador que ainda tem dados."
+
+msgid "what object stores exist, with their backend and bucket"
+msgstr "que object stores existem, com o seu backend e bucket"
+
+msgid "the endpoint and credentials Secret of one"
+msgstr "o endpoint e o Secret de credenciais de um"
+
+msgid "remove one: its S3 identity, its Secret and its record"
+msgstr "remove um: a sua identidade S3, o seu Secret e o seu registo"
+
+msgid "every object store, with backend, bucket and credentials Secret"
+msgstr "todos os object stores, com backend, bucket e Secret de credenciais"
+
+msgid "the backend, bucket, endpoint and credentials Secret of one store"
+msgstr "o backend, bucket, endpoint e Secret de credenciais de um store"
+
+msgid "the same, as JSON"
+msgstr "o mesmo, em JSON"
+
+msgid "remove it: its generated Secret, its record, and the S3 identity on the gateway (cephRgw)"
+msgstr "remove-o: o Secret gerado, o seu registo, e a identidade S3 no gateway (cephRgw)"
+
+msgid "and delete the buckets/objects the S3 user still owns too (destructive)"
+msgstr "e apaga também os buckets/objectos que o utilizador S3 ainda possui (destrutivo)"
+
+msgid "S3-compatible object stores (buckets): ls/inspect/rm."
+msgstr "Object stores (buckets) compatíveis com S3: ls/inspect/rm."

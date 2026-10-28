@@ -271,7 +271,7 @@ container como o Docker faria.
 * **Não reconcilia continuamente por omissão.** Converge quando lhe chamas.
   A metade pull existe desde 2026-10-12 e é opt-in: uma `kind: GitOpsSource`
   ([ADR-0021](adr/0021-gitops-pull-reconciler.md),
-  `examples/full-gitopssource.yaml`) nomeia um repositório, uma ref e um
+  `examples/gitops/gitopssource.yaml`) nomeia um repositório, uma ref e um
   caminho, e com `sync.automated: true` um temporizador systemd corre UMA
   passagem e sai — o motor continua sem daemon. `delonix gitops reconcile`
   corre uma passagem à mão, `delonix gitops status` diz o commit que cada fonte

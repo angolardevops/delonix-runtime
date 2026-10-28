@@ -90,7 +90,7 @@ O grupo tem depois de ser provado de ponta a ponta, em `bins/delonix-runtime-bin
 
 - `manifest.rs`, **`stack_group_sample`** — a `spec` mínima de um filho do grupo e o Kind em que
   aterra; o `every_stack_group_loads` percorre todo grupo e falha num sem amostra.
-- **`examples/stack.yaml`** — tem de mencionar o grupo; o `the_stack_example_names_every_group`
+- **`examples/core/stack.yaml`** — tem de mencionar o grupo; o `the_stack_example_names_every_group`
   falha senão. Este ficheiro é também o que a página de Kinds do site do utilizador mostra.
 - `schema.rs`, **`every_stack_group_is_typed_against_its_kinds_own_spec`** — os itens do grupo são
   tipados contra a própria spec do Kind, por isso o Kind precisa do seu braço em `TYPED_KINDS`
@@ -260,7 +260,7 @@ Para um Kind que se comporta como o `Service` (primário, converge, tem teardown
 2. Uma struct de spec com `JsonSchema`; um braço em `TYPED_KINDS` e em `manifest_schema`
    (`schema.rs`) — ou uma entrada em `untyped_hint` a explicar porque não.
 3. `manifest.rs` — um braço em `filled_spec` (`spec_with_defaults`), um braço em
-   `spec_fields_for`, e uma amostra em `stack_group_sample`; o grupo em `examples/stack.yaml`.
+   `spec_fields_for`, e uma amostra em `stack_group_sample`; o grupo em `examples/core/stack.yaml`.
 4. `stack.rs` — braços em `desired_of`, `actual_of`, `converge_and_stamp`, `stamp_all`,
    `destroy_one`, `presence`, e uma camada em `run_layers` a chamar o próprio `apply(docs)` do
    Kind.

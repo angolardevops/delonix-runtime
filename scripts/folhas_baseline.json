@@ -3,18 +3,18 @@
   "surfaces": {
     "cli": {
       "proved": 272,
-      "leaves": 302,
+      "leaves": 305,
       "A": 272,
-      "B": 22,
+      "B": 25,
       "C": 0,
       "D": 0,
       "E": 8
     },
     "node-api": {
       "proved": 15,
-      "leaves": 59,
+      "leaves": 65,
       "A": 15,
-      "B": 0,
+      "B": 6,
       "C": 15,
       "D": 29,
       "E": 0
@@ -48,9 +48,9 @@
     },
     "kinds": {
       "proved": 41,
-      "leaves": 130,
+      "leaves": 135,
       "A": 41,
-      "B": 50,
+      "B": 55,
       "C": 8,
       "D": 23,
       "E": 8

@@ -22,6 +22,7 @@ members = [
     "crates/providers/delonix-provider-lvm",
     "crates/providers/delonix-provider-zfs",
     "crates/providers/delonix-provider-btrfs",
+    "crates/providers/delonix-provider-ceph",
     "crates/interfaces/delonix-mcp",
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
@@ -71,6 +72,7 @@ delonix-provider-cloud-hypervisor = { path = "crates/providers/delonix-provider-
 delonix-provider-lvm = { path = "crates/providers/delonix-provider-lvm" }
 delonix-provider-zfs = { path = "crates/providers/delonix-provider-zfs" }
 delonix-provider-btrfs = { path = "crates/providers/delonix-provider-btrfs" }
+delonix-provider-ceph = { path = "crates/providers/delonix-provider-ceph" }
 delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }

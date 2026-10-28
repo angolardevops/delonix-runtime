@@ -120,6 +120,13 @@ fn driver_for(id: &str) -> Option<Arc<dyn StoragePoolDriver>> {
         delonix_provider_lvm::ID => Some(Arc::new(LvmThinDriver::new(run(), mounts))),
         delonix_provider_zfs::ID => Some(Arc::new(ZfsDriver::new(run(), mounts))),
         delonix_provider_btrfs::ID => Some(Arc::new(BtrfsDriver::new(run(), None, true))),
+        // Ceph (ADR-0081): making and destroying a volume is the helper's;
+        // making the RADOS pool / CephFS is the cluster administrator's, so
+        // there is no `admin_for` arm for these.
+        delonix_provider_ceph::rbd::ID => Some(Arc::new(delonix_provider_ceph::RbdDriver::new(run()))),
+        delonix_provider_ceph::cephfs::ID => {
+            Some(Arc::new(delonix_provider_ceph::CephFsDriver::new(run(), mounts)))
+        }
         _ => None,
     }
 }

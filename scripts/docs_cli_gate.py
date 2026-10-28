@@ -129,8 +129,8 @@ def code_regions(path: Path) -> list[str]:
     elif suffix in {".md", ".markdown"}:
         for m in re.finditer(r"^```.*?^```", text, re.S | re.M):
             regions.append(m.group(0))
-        # Indented code blocks (4 spaces), not just fences: `examples/
-        # nas-vm-sdn-ch.md` writes every command that way and slipped past the
+        # Indented code blocks (4 spaces), not just fences: `docs/
+        # guia-nas-vm-sdn-ch.md` writes every command that way and slipped past the
         # first version of this gate entirely.
         for m in re.finditer(r"(?:^(?: {4}|\t).*\n)+", text, re.M):
             regions.append(m.group(0))

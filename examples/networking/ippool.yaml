@@ -1,0 +1,43 @@
+# ============================================================================
+# kind: IPPool (ADR-0046, D3) — um livro de reservas de endereços de HOST
+# kind: IPPool (ADR-0046, D3) — a reservation ledger of HOST addresses
+#
+# PT: Endereços que as rotas reivindicam. Uma rota com `spec.pool: <nome>` segura
+#     UM endereço do pool enquanto estiver declarada, fica alcançável nesse endereço
+#     em vez de loopback, e (com `hosts: [host]`) tem os seus nomes apontados para
+#     ele no /etc/hosts do operador. O livro é observável: `delonix get ippools`,
+#     `delonix describe ippools <nome>`. Um pool não pode ser removido, nem os seus
+#     endereços encolher sob uma lease, enquanto uma rota segura um endereço —
+#     remove ou muda a rota primeiro.
+# EN: Addresses that routes claim. A route with `spec.pool: <name>` holds ONE address
+#     of the pool for as long as it is declared, is reachable on that address instead
+#     of loopback, and (with `hosts: [host]`) has its names pointed at it in the
+#     operator's /etc/hosts. The ledger is observable: `delonix get ippools`,
+#     `delonix describe ippools <name>`. A pool cannot be removed, nor its addresses
+#     shrink under a lease, while a route holds an address — remove or change the
+#     route first.
+#
+# PT: Campos spec: addresses (um endereço, uma gama `a-b`, ou um CIDR — IPv4 apenas;
+#     um CIDR mais largo que /31 deixa de fora rede e broadcast), announce
+#     (`local` default: o endereço TEM de já estar numa interface deste host, o
+#     apply confere; `l2` é planeado e recusado), interface (só com `announce: l2`).
+# EN: spec fields: addresses (a single address, a range `a-b`, or a CIDR — IPv4 only;
+#     a CIDR wider than /31 leaves out network and broadcast), announce (`local`
+#     default: the address MUST already be on an interface of this host, the apply
+#     checks it; `l2` is planned and refused), interface (only with `announce: l2`).
+#
+# PT: 127.0.0.10-12 usam-se aqui porque todo o 127/8 está no loopback e não precisa
+#     de setup. Aplicar:  delonix stack apply -f examples/networking/ippool.yaml
+# EN: 127.0.0.10-12 are used here because every 127/8 address is on the loopback and
+#     needs no setup. Apply:  delonix stack apply -f examples/networking/ippool.yaml
+# ============================================================================
+
+# ── 1. local — uma gama já presente no loopback ──────────────────────────────
+#      local — a range already present on the loopback
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: IPPool
+metadata: { name: edge }
+spec:
+  addresses: ["127.0.0.10-127.0.0.12"]   # PT: um endereço, uma gama `a-b`, ou um CIDR | EN: a single address, a range `a-b`, or a CIDR
+  announce: local                        # PT: local (default): o endereço já está numa interface | EN: local (default): the address is already on an interface

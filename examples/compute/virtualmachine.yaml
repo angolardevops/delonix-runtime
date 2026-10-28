@@ -1,0 +1,325 @@
+# ============================================================================
+# kind: VirtualMachine — uma VM declarativa (libvirt / Cloud Hypervisor / Proxmox)
+# kind: VirtualMachine — a declarative VM (libvirt / Cloud Hypervisor / Proxmox)
+#
+# PT: `disk` (imagem base do store de VM, ou um caminho qcow2/raw) é obrigatório,
+#     salvo quando a imagem é CONSTRUÍDA de um VMfile (`spec.build`). Tudo o que
+#     é neutro ao hipervisor pode escrever-se achatado no topo de `spec` OU
+#     agrupado (resources/network/boot/cloudInit); o que só UM hipervisor entende
+#     vai em `provider: { type, spec }`. Imagem base: `delonix vm image ls`.
+# EN: `disk` (a base image from the VM store, or a qcow2/raw path) is required
+#     unless the image is BUILT from a VMfile (`spec.build`). Everything
+#     hypervisor-neutral may be written flat at the top of `spec` OR grouped
+#     (resources/network/boot/cloudInit); what only ONE hypervisor understands
+#     goes under `provider: { type, spec }`. Base image: `delonix vm image ls`.
+#
+# PT: Aplicar:   delonix stack apply -f examples/compute/virtualmachine.yaml
+# EN: Apply:     delonix stack apply -f examples/compute/virtualmachine.yaml
+# ============================================================================
+
+# ── 1. recursos de apoio — um Volume 9p, um Volume NAS e uma Network ─────────
+#      supporting resources — a 9p Volume, a NAS Volume and a Network
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: vm-data                       # PT: partilhado para o guest por virtio-9p (backend libvirt) | EN: shared into the guest over virtio-9p (libvirt backend)
+spec:
+  driver: local
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: dados-nas                     # PT: um volume de rede (NAS) montado na VM por 9p | EN: a network (NAS) volume mounted into the VM via 9p
+spec:
+  nfs:
+    server: 10.0.0.5
+    share: /mnt/pool/dados
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: vm-net                        # PT: a rede SDN a que o tap da VM se liga (backend CH) | EN: the SDN network the VM's tap joins (CH backend)
+spec:
+  driver: bridge
+
+# ── 2. forma agrupada com os defaults à vista ───────────────────────────────
+#      grouped shape with the defaults made explicit
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: node1
+spec:
+  disk: k8s-golden              # PT: obrigatório — qcow2/raw base (faz-se um overlay por VM) | EN: required — base qcow2/raw (an overlay is made per VM)
+  restartPolicy: null           # PT: no | on-failure | always | EN: no | on-failure | always
+
+  resources:
+    vcpus: 2
+    memory: 2G                  # PT: "2G" | "1024M" (sufixo "…i" k8s aceite) | EN: "2G" | "1024M" (a "…i" suffix is accepted, k8s-style)
+    hugepages: false
+    cpuAffinity: null           # PT: fixar vCPUs, ex. "8-15" | EN: pin vCPUs, e.g. "8-15"
+
+  network:
+    name: vm-net                # PT: rede de ingresso do tap da VM | EN: ingress network for the VM's tap
+    mode: null                  # PT: só libvirt: user | nat | bridge | EN: libvirt only: user | nat | bridge
+    bridge: null                # PT: bridge do host / rede libvirt | EN: host bridge / libvirt network
+    staticIp: null              # PT: modo nat libvirt: reserva DHCP na rede libvirt | EN: libvirt nat mode: DHCP reservation on the libvirt network
+
+  # PT: Mecanismo de arranque: firmware (imagens cloud, default) OU kernel directo — escolhe um.
+  # EN: Boot mechanism: firmware (cloud images, the default) OR a direct kernel — pick one.
+  boot:
+    firmware: null              # PT: caminho de firmware UEFI (típico em imagens cloud) | EN: UEFI firmware path (typical for cloud images)
+    kernel: null                # PT: arranque por kernel directo (alternativa a firmware) | EN: direct kernel boot (alternative to firmware)
+    initrd: null                # PT: initramfs para o kernel directo | EN: initramfs for direct kernel boot
+    cmdline: null               # PT: cmdline do kernel para o arranque directo | EN: kernel cmdline for direct boot
+
+  # PT: cloud-init — paridade com `vm create`; gera-se um seed ISO NoCloud a menos que dês um pronto em `seed`.
+  # EN: cloud-init — full parity with `vm create`; a NoCloud seed ISO is auto-generated unless you hand it one via `seed`.
+  cloudInit:
+    seed: null                  # PT: caminho de um ISO NoCloud pronto (anula os campos abaixo) | EN: path to a prebuilt NoCloud ISO (overrides the fields below)
+    hostname: null              # PT: hostname aplicado no 1º arranque | EN: hostname applied on first boot
+    sshKeys: []                 # PT: chaves públicas: "ssh-ed25519 AAAA…" ou "@/caminho" | EN: authorized public keys: "ssh-ed25519 AAAA…" or "@/path"
+    userData: null              # PT: user-data cloud-init teu (path/@path) — substitui o gerado | EN: your own cloud-init user-data (path/@path) — replaces the generated one
+
+  # PT: O hipervisor e o que só ele entende. `type` escolhe o provider (omitir o bloco = default); o key que o type não tem é recusado.
+  # EN: The hypervisor and what only it understands. `type` picks the provider (omit the block = default); a key the type lacks is refused.
+  provider:
+    type: libvirt                # PT: cloud-hypervisor | libvirt | proxmox | EN: cloud-hypervisor | libvirt | proxmox
+    spec:                        # PT: libvirt: paridade XML, tudo opcional | EN: libvirt: full XML parity, all optional
+      machine: null                 # PT: tipo de máquina (default q35) | EN: machine type (default q35)
+      cpuModel: null                # PT: host-passthrough (default) | host-model | modelo nomeado | EN: host-passthrough (default) | host-model | a named model
+      cpuTopology: null             # PT: { sockets: 1, cores: 4, threads: 2 } | EN: { sockets: 1, cores: 4, threads: 2 }
+      tpm: false                    # PT: TPM 2.0 emulado | EN: add an emulated TPM 2.0
+      video: null                   # PT: virtio | qxl | vga | none | EN: virtio | qxl | vga | none
+      bootOrder: []                 # PT: ex. [cdrom, hd] | EN: e.g. [cdrom, hd]
+      extraDisks: []                # PT: [{ source, bus, format, readOnly }] | EN: [{ source, bus, format, readOnly }]
+      extraNics: []                 # PT: [{ type, source, model }] | EN: [{ type, source, model }]
+      xmlOverlay: []                # PT: fragmentos <device> XML crus (manifestos de confiança) | EN: raw <device> XML fragments (trusted manifests only)
+      xml: null                     # PT: <domain> XML completo, usado tal e qual | EN: full <domain> XML, used verbatim
+
+  devices: []                   # PT: passthrough VFIO PCI (caminhos sysfs) — CH + libvirt | EN: VFIO PCI passthrough (sysfs paths) — CH + libvirt
+  volumes: []                   # PT: montagens 9p de um Volume: [{ name, mountPath, readOnly }] | EN: 9p mounts from a Volume: [{ name, mountPath, readOnly }]
+  vnc: false                    # PT: consola gráfica (só backend libvirt) | EN: graphical console (libvirt backend only)
+
+# ── 3. forma plana completa — todos os campos do backend libvirt ─────────────
+#      full flat — every field the libvirt backend understands
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: full-flat
+  namespace: default                  # PT: namespace de isolamento (imposto só no backend CH) | EN: isolation namespace (enforced on the CH backend only)
+spec:
+  disk: delonix-vm-base:ubuntu-24.04  # PT: imagem base: nome no store de VM, ou caminho (overlay por VM) | EN: base image: a name in the VM store, or a path (overlay per VM)
+  provider: { type: libvirt }         # PT: cloud-hypervisor | libvirt | proxmox (omitir = auto) | EN: cloud-hypervisor | libvirt | proxmox (omit = auto)
+  restartPolicy: always               # PT: no | on-failure | always | EN: no | on-failure | always
+  vcpus: 4                            # PT: omitido => default da imagem, senão 1 | EN: omitted => the image's default, else 1
+  memory: 4G                          # PT: "512M" | "2G" | "2Gi" | EN: "512M" | "2G" | "2Gi"
+  hugepages: false                    # PT: apoiar a RAM do guest com hugepages | EN: back guest RAM with hugepages
+  cpuAffinity: "0-3"                  # PT: fixar vCPUs a CPUs do host | EN: pin vCPUs to host CPUs
+  network: vm-net                     # PT: nome de rede SDN (`ingress` é o default embutido) | EN: SDN network name (`ingress` is the built-in default)
+  netMode: nat                        # PT: só libvirt: user | nat | bridge (`nat` dá IP observável) | EN: libvirt only: user | nat | bridge (`nat` gives an observable IP)
+  ip: 192.168.122.50                  # PT: IP estático: reserva DHCP na rede libvirt (só modo nat) | EN: static IP: DHCP reservation on the libvirt network (nat mode only)
+  vnc: true                           # PT: consola gráfica (só backend libvirt) | EN: graphical console (libvirt backend only)
+  devices:                            # PT: passthrough VFIO PCI, caminho sysfs | EN: VFIO PCI passthrough, sysfs path
+    - /sys/bus/pci/devices/0000:01:00.0
+
+  # PT: cloud-init: gera-se um seed ISO NoCloud destes campos salvo se der `seed`.
+  # EN: cloud-init: a NoCloud seed ISO is generated from these unless `seed` is given.
+  hostname: full-flat                 # PT: hostname aplicado no 1º arranque | EN: hostname applied on first boot
+  sshKeys:                            # PT: chaves públicas: "ssh-ed25519 AAAA…" ou "@/caminho.pub" | EN: public keys: "ssh-ed25519 AAAA…" or "@/path.pub"
+    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example"
+  userData: "@/etc/delonix/examples/user-data.yaml"   # PT: user-data teu (path/@path); substitui o gerado | EN: your own user-data (path/@path); replaces the generated one
+
+  # PT: volumes partilhados para o guest por virtio-9p (`kind: Volume`, por nome)
+  # EN: volumes shared into the guest over virtio-9p (`kind: Volume`, by name)
+  volumes:
+    - name: vm-data
+      mountPath: /mnt/data            # PT: onde o guest o monta | EN: where the guest mounts it
+      readOnly: false
+
+  # PT: knobs avançados do libvirt / EN: advanced libvirt knobs
+  machine: q35                        # PT: tipo de máquina (default q35) | EN: machine type (default q35)
+  cpuModel: host-passthrough          # PT: host-passthrough (default) | host-model | modelo | EN: host-passthrough (default) | host-model | a model
+  cpuTopology: { sockets: 1, cores: 2, threads: 2 }
+  tpm: true                           # PT: TPM 2.0 emulado | EN: emulated TPM 2.0
+  video: virtio                       # PT: virtio | qxl | vga | none | EN: virtio | qxl | vga | none
+  bootOrder: [hd, cdrom]              # PT: ordem de dispositivos de arranque | EN: OS boot device order
+  extraDisks:                         # PT: discos extra além do overlay + seed | EN: extra disks beyond the main overlay + seed
+    - source: /var/lib/libvirt/images/extra.qcow2
+      device: disk                    # PT: disk (default) | cdrom | EN: disk (default) | cdrom
+      bus: virtio                     # PT: virtio (default) | sata | scsi | ide | EN: virtio (default) | sata | scsi | ide
+      format: qcow2                   # PT: qcow2 (default) | raw | EN: qcow2 (default) | raw
+      readOnly: false
+      target: vdb                     # PT: dev de destino explícito (auto se omitido) | EN: explicit target dev (auto when omitted)
+  extraNics:                          # PT: interfaces de rede extra além da primária | EN: extra NICs beyond the primary one
+    - type: network                   # PT: network (rede libvirt) | bridge (host) | user | EN: network (libvirt network) | bridge (host) | user
+      source: default
+      model: virtio                   # PT: virtio (default) | e1000 | … | EN: virtio (default) | e1000 | …
+      mac: "52:54:00:12:34:56"        # PT: MAC fixo (aleatório se omitido) | EN: fixed MAC (random when omitted)
+  libvirtXmlOverlay:                  # PT: fragmentos <device> crus injectados antes de </devices> (SÓ confiança) | EN: raw <device> fragments injected before </devices> (TRUSTED only)
+    - "<rng model='virtio'><backend model='random'>/dev/urandom</backend></rng>"
+
+# ── 4. forma agrupada completa — os mesmos knobs, por tema ───────────────────
+#      full grouped — the same knobs, organised by concern
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: full-grouped
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  restartPolicy: on-failure
+  devices: []                         # PT: passthrough VFIO (fica no topo) | EN: VFIO passthrough (stays top-level)
+  volumes:                            # PT: montagens 9p (fica no topo) | EN: 9p mounts (stays top-level)
+    - { name: vm-data, mountPath: /mnt/data, readOnly: true }
+  vnc: true                           # PT: fica no topo | EN: stays top-level
+
+  resources:
+    vcpus: 2
+    memory: 2G
+    hugepages: false
+    cpuAffinity: "0-1"
+
+  network:                            # PT: um mapa aqui (uma string é a forma plana) | EN: a mapping here (a plain string is the flat form)
+    name: vm-net
+    mode: nat                         # PT: => netMode | EN: => netMode
+    staticIp: 192.168.122.51          # PT: => ip (modo nat) | EN: => ip (nat mode)
+    # bridge: br0                      # PT: => bridge (host bridge, modo bridge) — ver `bridge-vm` | EN: => bridge (host bridge, bridge mode) — see `bridge-vm`
+
+  cloudInit:
+    hostname: full-grouped
+    sshKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example"]
+    userData: "@/etc/delonix/examples/user-data.yaml"
+    # seed: /path/seed.iso             # PT: seed pronto — ver `prebuilt-seed` | EN: prebuilt seed — see `prebuilt-seed`
+
+  provider:                           # PT: o hipervisor e o que só ele entende | EN: the hypervisor and what only it understands
+    type: libvirt
+    spec:
+      machine: q35
+      cpuModel: host-model
+      cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+      tpm: false
+      video: qxl
+      bootOrder: [hd]
+      extraDisks:
+        - { source: /var/lib/libvirt/images/scratch.raw, format: raw, bus: sata }
+      extraNics:
+        - { type: bridge, source: br0, model: e1000 }
+      xmlOverlay:
+        - "<memballoon model='virtio'/>"
+      # xml: "<domain …>"              # PT: <domain> inteiro, tal e qual — ver `raw-domain` | EN: whole <domain>, verbatim — see `raw-domain`
+
+# ── 5. modo bridge — a VM liga-se a uma bridge do host (incompatível com ip estático, que é só-nat)
+#      bridge mode — the VM attaches to a host bridge (mutually exclusive with a static ip, which is nat-only)
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: bridge-vm
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  provider: { type: libvirt }
+  netMode: bridge
+  bridge: br0                         # PT: bridge do host / rede libvirt a que ligar | EN: host bridge / libvirt network to attach to
+  vcpus: 2
+  memory: 2G
+
+# ── 6. arranque por kernel directo (alternativa ao firmware) — Cloud Hypervisor
+#      direct-kernel boot (alternative to firmware) — Cloud Hypervisor
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: direct-kernel
+spec:
+  disk: delonix-vm-base:fedora-42
+  provider: { type: cloud-hypervisor }
+  network: vm-net
+  kernel: /var/lib/delonix/kernels/vmlinuz-6.14.0     # PT: arranque por kernel directo | EN: direct kernel boot
+  initrd: /var/lib/delonix/kernels/initramfs-6.14.0.img
+  cmdline: "console=ttyS0 root=/dev/vda1 rw"          # PT: linha de comando do kernel | EN: kernel command line
+  vcpus: 2
+  memory: 2G
+
+# ── 7. firmware UEFI explícito (modo habitual de uma imagem cloud) — Cloud Hypervisor
+#      explicit UEFI firmware (the usual way to boot a cloud image) — Cloud Hypervisor
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: firmware-boot
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  provider: { type: cloud-hypervisor }
+  network: vm-net
+  firmware: /usr/local/share/delonix/CLOUDHV.fd       # PT: caminho de firmware UEFI | EN: UEFI firmware path
+  vcpus: 2
+  memory: 2G
+
+# ── 8. seed cloud-init pronto — substitui o gerado (hostname/sshKeys/userData não se põem)
+#      prebuilt cloud-init seed — replaces the generated one (hostname/sshKeys/userData not set)
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: prebuilt-seed
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  seed: /var/lib/delonix/seeds/prebuilt-seed.iso      # PT: ISO NoCloud entregue ao guest tal e qual | EN: NoCloud ISO handed to the guest as-is
+
+# ── 9. escape hatch — o <domain> XML libvirt inteiro, usado tal e qual (SÓ confiança)
+#      escape hatch — the whole libvirt <domain> XML, used verbatim (TRUSTED only)
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: raw-domain
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  provider:
+    type: libvirt
+    spec:
+      xml: |
+        <domain type='kvm'>
+          <name>raw-domain</name>
+          <memory unit='MiB'>1024</memory>
+          <vcpu>1</vcpu>
+          <os><type arch='x86_64' machine='q35'>hvm</type></os>
+        </domain>
+
+# ── 10. o disco é CONSTRUÍDO de um VMfile (spec.build) — incompatível com `disk`
+#       the disk is BUILT from a VMfile (spec.build) — mutually exclusive with `disk`
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: built-disk
+spec:
+  build:
+    context: .                        # PT: contexto do build, relativo à pasta DESTE manifesto (default ".") | EN: build context, relative to THIS manifest's folder (default ".")
+    file: VMfile                      # PT: o VMfile (default <context>/VMfile) | EN: the VMfile (default <context>/VMfile)
+    tag: built-disk:latest            # PT: tag da imagem produzida, depois usada como disco (default <name>:latest) | EN: tag of the produced image, used as the VM's disk (default <name>:latest)
+    compress: true                    # PT: comprimir o resultado em zstd (default true) | EN: zstd-compress the result (default true)
+    network: false                    # PT: dar acesso de rede ao build (default false: reprodutível) | EN: give the build network access (default false: reproducible)
+  vcpus: 2
+  memory: 2G
+
+# ── 11. volumes 9p de um NAS — storage a uma VM sem escrever cloud-init nem XML
+#       9p volumes from a NAS — storage for a VM without writing cloud-init or XML
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: app-vm
+spec:
+  disk: k8s-golden           # PT: imagem base (qcow2/raw) | EN: base image (qcow2/raw)
+  vcpus: 2
+  memory: 2G
+  # PT: só o backend libvirt materializa 9p; o apply escolhe-o quando há volumes (CH não suporta 9p).
+  # EN: only the libvirt backend materializes 9p; apply selects it when there are volumes (CH has no 9p).
+  volumes:
+    - name: dados-nas        # PT: o kind: Volume NAS declarado no topo | EN: the NAS kind: Volume declared at the top
+      mountPath: /mnt/dados  # PT: onde a VM o monta | EN: where the VM mounts it
+      readOnly: false

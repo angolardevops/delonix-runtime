@@ -196,6 +196,7 @@ SOURCE_FILES = {
     "vm": "vm.rs",
     "systemcontainer": "system_container.rs",
     "volume": "volume.rs",
+    "bucket": "objectstorage.rs",
     "network": "network.rs",
     "stack": "stack.rs",
     "compose": "compose.rs",
@@ -240,6 +241,19 @@ def source_link_html(name):
 # ---------------------------------------------------------------- conteúdo
 
 GROUPS = {
+    "bucket": {
+        "title": "delonix bucket",
+        "tagline": "Armazenamento de objectos S3 (buckets): ls, inspect, rm.",
+        "intro": """Lado imperativo do <code>kind: ObjectStorage</code> (ADR-0081): lista, inspecciona
+e remove os object stores que o <code>stack apply</code> provisiona. Dois backends: <code>cephRgw</code>
+provisiona uma identidade S3 de tenant no Ceph Object Gateway do nó e escreve as chaves num
+<code>kind: Secret</code> gerado (<code>&lt;nome&gt;-s3</code>); <code>external</code> aponta para um S3
+que já corres, com credenciais de um Secret teu. Um workload consome os dois da mesma forma:
+endpoint + accessKey/secretKey lidos do Secret. O <code>rm</code> é o teardown explícito — a linha
+<code>teardown: false</code> da tabela de Kinds impede que um <code>destroy</code>/<code>--prune</code>
+apague um object store e orfane os buckets.""",
+        "subs": {},
+    },
     "init": {
         "title": "delonix init",
         "tagline": "Começa o projecto CERTO para este directório — detecta, explica-se, e delega.",
@@ -391,7 +405,7 @@ a apontar para <code>exec -it</code>.</p>"""},
 um trait <code>ComputeDriver</code> despacha por nome para o motor de containers ou de VMs, para
 geres os dois como uma coisa só. A <strong>criação é declarativa</strong> — <code>kind: Workload</code>
 num manifesto (<code>spec.type: container|vm|pod|microvm</code>) baixa para o Kind respectivo no
-<code>manifest::load</code>; ver <a href="../kinds.html">Kinds</a> e <code>examples/workload.yaml</code>.""",
+<code>manifest::load</code>; ver <a href="../kinds.html">Kinds</a> e <code>examples/compute/workload.yaml</code>.""",
         "subs": {
             "ls": {"examples": [
                 ("Containers E VMs numa só tabela", "delonix workload ls"),
@@ -426,7 +440,7 @@ partilhada — cada container mantém a sua própria árvore de processos; é a 
         "subs": {
             "create": {"examples": [
                 ("Criar um pod (web + sidecar que fala por localhost) de um manifesto",
-                 "delonix pod create -f examples/pod-multi.yaml"),
+                 "delonix pod create -f examples/compute/pod.yaml"),
             ], "notes": """<p>Idempotente (<em>garante-presente</em>): se o pod já tem containers, não
 faz nada. Também se pode aplicar pelo <code>delonix stack apply</code> (grupo <code>pods:</code> no
 <code>kind: Stack</code>) e pré-visualizar com <code>--dry-run</code>. Se a criação de um membro
@@ -1691,6 +1705,17 @@ VERBATIM da flag, para os dois nunca poderem divergir.""",
 # parte em vez de dentro de `GROUPS` para não obrigar a tocar em 26 entradas
 # grandes já existentes; `group_page` funde os dois por chave.
 GROUPS_EN = {
+    "bucket": {
+        "tagline": "S3 object storage (buckets): ls, inspect, rm.",
+        "intro": """The imperative side of <code>kind: ObjectStorage</code> (ADR-0081): list, inspect
+and remove the object stores that <code>stack apply</code> provisions. Two backends: <code>cephRgw</code>
+provisions a tenant S3 identity on the node's Ceph Object Gateway and writes its keys into a
+generated <code>kind: Secret</code> (<code>&lt;name&gt;-s3</code>); <code>external</code> points at an S3
+you already run, with credentials from a Secret you provide. A workload consumes either the same
+way: endpoint + accessKey/secretKey from the Secret. <code>rm</code> is the explicit teardown — the
+Kind's <code>teardown: false</code> row stops a <code>destroy</code>/<code>--prune</code> from deleting
+an object store and orphaning its buckets.""",
+    },
     "container": {
         "tagline": "Container lifecycle: run, ps, start, stop, rm, exec, logs, inspect, stats, apply.",
         "intro": """The <code>container</code> group is the runtime's everyday surface — the
@@ -1708,7 +1733,7 @@ Abstraction Layer: a <code>ComputeDriver</code> trait dispatches by name to eith
 or the VM engine, so you can manage both as one thing. <strong>Creation stays declarative</strong>
 — a <code>kind: Workload</code> in a manifest (<code>spec.type: container|vm|pod|microvm</code>)
 lowers to the matching Kind in <code>manifest::load</code>; see
-<a href="../kinds.html">Kinds</a> and <code>examples/workload.yaml</code>.""",
+<a href="../kinds.html">Kinds</a> and <code>examples/compute/workload.yaml</code>.""",
     },
     "pod": {
         "tagline": "Real multi-container pods (create, logs, exec) — N containers as one unit.",
@@ -4620,126 +4645,113 @@ CHEAT_TASKS_EN = [
 # Kinds do manifesto — cada um com um template COMPLETO e funcional (lido dos
 # `examples/*.yaml`, que são a referência canónica com todos os campos + defaults).
 KINDS_DOC = [
-    ("Secret", "secret.yaml", "Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/"
+    ("Secret", "core/secret.yaml", "Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/"
      "<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do "
      "container em texto — são resolvidos no arranque a partir do NOME."),
-    ("Pod", "pod.yaml", "O schema de Pod do Kubernetes (<code>spec.containers[]</code>) — portas/env/resources/"
+    ("Pod", "compute/pod.yaml", "O schema de Pod do Kubernetes (<code>spec.containers[]</code>) — portas/env/resources/"
      "securityContext/volumeMounts estruturados. O MESMO schema continua aceite num <code>kind: Container</code>, "
      "com aviso, e <strong>não é reescrito de propósito</strong>: um <code>kind: Container</code> chamado "
      "<code>web</code> cria um container <code>web</code>, este cria a netns <code>pod-web</code> cujo membro é "
      "<code>web-c0</code> — renomear um workload nas costas de quem o escreveu partiria o DNS e os backends de "
-     "HTTPRoute."),
-    ("Workload", "workload.yaml", "UM objecto declarativo para os dois tipos de computação: "
+     "HTTPRoute. O MESMO ficheiro mostra também o pod REAL multi-container: N containers a partilhar "
+     "<strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong>, "
+     "geridos com <code>delonix pod create/ls/describe/rm/logs</code>."),
+    ("Workload", "compute/workload.yaml", "UM objecto declarativo para os dois tipos de computação: "
      "<code>spec.type: container | vm | pod | microvm</code> + o bloco com o mesmo nome. Baixa para o Kind "
      "correspondente no load — não redefine um único campo, por isso não pode divergir dele."),
-    ("Dependency", "dependency.yaml", "Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é "
+    ("Dependency", "networking/dependency.yaml", "Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é "
      "bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. "
      "É açúcar reduzido no load para <code>kind: NetworkPolicy</code> — sem dataplane novo. Várias dependências "
      "para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência)."),
-    ("NetworkRoute", "netroute.yaml", "O grau ACIMA do <code>Dependency</code>: aquele liga dois WORKLOADS, este "
+    ("NetworkRoute", "networking/networkroute.yaml", "O grau ACIMA do <code>Dependency</code>: aquele liga dois WORKLOADS, este "
      "liga duas REDES — isoladas por omissão. Uma rota diz que o pacote PODE atravessar; <strong>nunca</strong> diz "
      "que é PERMITIDO — quem decide isso continua a ser o <code>FirewallPolicy</code>/<code>Dependency</code> em "
      "cada extremidade. São duas perguntas em série (há caminho? → é aceite?), por isso são dois Kinds e não um "
      "campo <code>routes:</code> dentro de <code>Network</code>. Dirigida (<code>from</code> inicia, o retorno "
      "flui; <code>to</code> nunca inicia de volta); custo constante, não cresce com o número de redes."),
-    ("NetworkPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
-     "direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta."),
-    ("Ingress", "ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
+    ("Ingress", "gateway/ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
      "compilado para o proxy embutido. Limitações herdadas: um só certificado (sem SNI) e "
      "<code>pathType: Exact</code> tratado como prefixo."),
-    ("Stack", "stack.yaml", "Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, "
+    ("Stack", "core/stack.yaml", "Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, "
      "em ordem de dependência — o Stack não sobrevive ao load, tudo o resto vê os filhos."),
-    ("KubernetesCluster", "cluster-ssh.yaml", "Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de "
+    ("KubernetesCluster", "cluster/kubernetescluster.yaml", "Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de "
      "estado: cada passo tem um <code>check</code>, por isso nunca dessincroniza. Ver também "
      "<code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind)."),
-    ("Network", "network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
-     "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje."),
-    ("Volume", "volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para "
-     "armazenamento de REDE (NFS/SMB/WebDAV) o MESMO Kind leva um bloco <code>nfs:</code>/"
-     "<code>cifs:</code>/<code>webdav:</code> — ver <code>storage.yaml</code>."),
-    ("Volume com bloco de rede", "storage.yaml", "Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/"
-     "Nextcloud), estilo PersistentVolume do k8s — o bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> "
-     "de um <code>kind: Volume</code>. A password vem do cofre (<code>passwordSecret</code>); montar precisa de "
-     "CAP_SYS_ADMIN. <strong>O <code>kind: Storage</code> ainda carrega</strong>, reescrito nisto com aviso de "
-     "depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store."),
-    ("Image", "image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. "
+    ("Network", "networking/network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
+     "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje. "
+     "O MESMO Kind absorve também a zona de SDN do próprio Proxmox VE (o antigo <code>kind: NetworkZone</code>, "
+     "dobrado aqui): realizada pelo provider de zonas configurado (<code>DELONIX_PROXMOX_*</code>)."),
+    ("Volume", "storage/volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. O "
+     "MESMO Kind cobre armazenamento de REDE (NFS/SMB/WebDAV, com um bloco <code>nfs:</code>/<code>cifs:</code>/"
+     "<code>webdav:</code> — o antigo <code>kind: Storage</code>, hoje reescrito nisto com aviso de depreciação) e "
+     "fatias ISOLADAS com quota própria (bloco <code>share:</code> — o antigo <code>kind: ShareVolume</code>, "
+     "vários container/vm/pod a partilhar um export sem se verem). O mesmo ficheiro mostra os três cenários."),
+    ("Image", "artifact/image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. "
      "As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix vm image build</code>."),
-    ("VirtualMachine", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
+    ("VirtualMachine", "compute/virtualmachine.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
      "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
-    ("Container", "container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
+    ("Container", "compute/container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
      "têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites."),
-    ("Pod", "pod-multi.yaml", "Um pod REAL multi-container: N containers a partilhar as namespaces do pod (mesmo "
-     "schema <code>spec.containers[]</code> do <code>kind: Container</code>, mas com N containers). Partilham "
-     "<strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong> "
-     "(hostname). A namespace de PID (<code>shareProcessNamespace</code>) é follow-up. Gere-se com "
-     "<code>delonix pod create/ls/describe/rm/logs</code>."),
-    ("FirewallPolicy (as duas direcções)", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
+    ("FirewallPolicy (as duas direcções)", "networking/networkpolicy.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
      "NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
      "default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é "
      "<code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o "
      "mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que "
      "correu bem."),
-    ("HTTPRoute", "httproute.yaml", "Reverse-proxy L7/HTTP embutido — routing por <code>Host</code> + prefixo de "
+    ("HTTPRoute", "gateway/httproute.yaml", "Reverse-proxy L7/HTTP embutido — routing por <code>Host</code> + prefixo de "
      "<code>path</code> para containers backend. TLS termina no proxy (self-signed ou <code>secretRef</code>); "
      "reload a quente por SIGHUP."),
-    ("Gateway", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
+    ("Gateway", "gateway/gateway.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
      "sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 "
      "escuta: uma URL pública, routing por Host do lado de lá para vários backends."),
-    ("Volume com bloco share", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de outro volume "
-     "(tipicamente um com bloco de rede) — vários container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se "
-     "verem. Cada fatia é um subdirectório real do mount pai, registado como o seu próprio volume; consome-se "
-     "com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor. <strong>O "
-     "<code>kind: ShareVolume</code> deixou de existir</strong>: é o MESMO <code>kind: Volume</code> com um "
-     "bloco <code>share:</code>."),
-    ("App", "app.yaml", "Build por Cloud Native Buildpacks (Paketo/Heroku), sem Dockerfile: aponta para o código "
+    ("App", "artifact/app.yaml", "Build por Cloud Native Buildpacks (Paketo/Heroku), sem Dockerfile: aponta para o código "
      "e o motor detecta a linguagem, constrói e deixa a imagem no store local."),
-    ("Service", "service.yaml", "Um CONJUNTO de containers escolhido por label e publicado como vários registos DNS "
+    ("Service", "networking/service.yaml", "Um CONJUNTO de containers escolhido por label e publicado como vários registos DNS "
      "<code>A</code> sob <code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>, em round-robin. Sem VIP e sem "
      "daemon."),
-    ("NetworkAccessRule", "network-access-rule.yaml", "UMA regra de firewall INCREMENTAL por documento: várias regras "
+    ("NetworkAccessRule", "networking/networkaccessrule.yaml", "UMA regra de firewall INCREMENTAL por documento: várias regras "
      "para o mesmo container acumulam, e cada uma sai sozinha quando o documento sai do manifesto."),
-    ("RuntimePolicy", "full-runtimepolicy.yaml", "O tecto de admissão do PRÓPRIO nó (grupo "
+    ("RuntimePolicy", "security/runtimepolicy.yaml", "O tecto de admissão do PRÓPRIO nó (grupo "
      "<code>security.delonix.io</code>): recusar <code>--privileged</code>, rede do host, <code>:latest</code>, "
      "registos fora da lista, passthrough de dispositivos numa VM. É o mesmo <code>policy.json</code> que "
      "<code>container run</code> e <code>vm create</code> já consultam antes de criar seja o que for. Singleton do "
      "nó: um manifesto declara no máximo um. Converge como qualquer Kind, mas tirá-lo do manifesto "
      "<strong>não</strong> o remove — só <code>delonix policy unset</code> o faz."),
-    ("IPPool", "full-ippool.yaml", "Um livro de reservas de endereços DO HOST que as rotas reclamam: uma rota com "
+    ("IPPool", "networking/ippool.yaml", "Um livro de reservas de endereços DO HOST que as rotas reclamam: uma rota com "
      "<code>spec.pool</code> segura UM endereço do pool enquanto for declarada e responde nesse endereço em vez do "
      "loopback. Só IPv4; com <code>announce: local</code> o endereço já tem de estar numa interface deste host. Um "
      "pool com um endereço reservado não se remove nem encolhe."),
-    ("NetworkZone", "networkzone.yaml", "Uma zona da SDN do próprio Proxmox VE e as vnets dentro dela. O documento "
-     "não nomeia a infraestrutura: realiza-o o provider de zonas configurado (hoje um nó Proxmox registado por "
-     "<code>DELONIX_PROXMOX_*</code>); sem nenhum, o <code>apply</code> recusa. Sem actualização no lugar: o "
-     "<code>apply</code> garante as vnets listadas, e o teardown remove as vnets, depois a zona."),
-    ("NetworkGateway", "networkgateway.yaml", "Aliases e regras de filtro numa firewall de perímetro (ADR-0051), "
+    ("NetworkGateway", "networking/networkgateway.yaml", "Aliases e regras de filtro numa firewall de perímetro (ADR-0051), "
      "hoje o OPNsense, registado por <code>DELONIX_OPNSENSE_URL</code> e um par key/secret de API. Aliases entram "
      "antes das regras e saem depois delas; a identidade de uma regra é a sua <code>description</code>. Uma "
      "alteração ao spec é remover e voltar a aplicar."),
+    ("ObjectStorage", "storage/objectstorage.yaml", "Armazenamento de objectos compatível com S3 (ADR-0081). Dois "
+     "backends, consumidos da MESMA forma (endpoint + accessKey/secretKey lidos de um Secret): <code>cephRgw</code> "
+     "provisiona uma identidade S3 de tenant no Ceph Object Gateway do nó e escreve as chaves num Secret gerado "
+     "(<code>&lt;nome&gt;-s3</code>); <code>external</code> aponta para um S3 que já corres, com credenciais de um "
+     "Secret teu."),
+    ("StoragePool", "storage/storagepool.yaml", "Usar uma storage pool que o administrador JÁ declarou no allowlist "
+     "do nó (<code>/etc/delonix/storage-pools.yaml</code>): o driver e o que a suporta (btrfs/zfs/lvm-thin/"
+     "directório/ceph) vêm de LÁ e só de lá. Este Kind diz apenas «este nó usa a pool X, com este tecto de "
+     "sobre-alocação» — device/path/comando são recusados pelo NOME. O motor nunca cria nem destrói uma pool; "
+     "tirar o Kind só deixa de a usar. Alocam-se volumes nela com um <code>kind: Volume</code> que traz "
+     "<code>pool: &lt;nome&gt;</code>."),
+    ("GitOpsSource", "gitops/gitopssource.yaml", "Um repositório git de onde o nó reconcilia (ADR-0021). Aplicar "
+     "escreve um registo e, com <code>sync.automated: true</code>, um timer systemd; cada disparo corre UMA "
+     "passagem e termina: fetch do ref → resolve a commit → verifica a assinatura → lê o YAML sob <code>path</code> "
+     "→ guarda → planeia → aplica. Um commit que não carrega, falha a guarda, ou planeia uma acção bloqueada por "
+     "<code>safety</code> deixa o stack a correr intacto. <code>reconcile</code> corre uma passagem à mão; "
+     "<code>suspend</code>/<code>resume</code> param e retomam as passagens."),
+    ("SystemContainer", "compute/systemcontainer.yaml", "Um userland inteiro como UMA unidade num nó provider "
+     "(ADR-0058) — NÃO é um <code>kind: Container</code>: sem exec, logs nem exit status. A parte genérica "
+     "(image/entrypoint/env/memory/cores/rootfs) é a intenção; o que só o nó Proxmox entende — a folga de swap e "
+     "a bridge/VLAN do nó — vive inline em <code>provider.spec</code> (ADR-0071). O motor puxa a imagem, nunca o "
+     "provider."),
 ]
 
-# For each base example above, the `full-<kind>.yaml` file showing EVERY option of
-# the Kind (the base is the working minimum; this is the reference).
-KINDS_FULL = {
-    "secret.yaml": "full-secret.yaml",
-    "pod.yaml": "full-pod.yaml",
-    "workload.yaml": "full-workload.yaml",
-    "dependency.yaml": "full-dependency.yaml",
-    "netroute.yaml": "full-networkroute.yaml",
-    "firewallpolicy.yaml": "full-networkpolicy.yaml",
-    "ingress.yaml": "full-ingress.yaml",
-    "cluster-ssh.yaml": "full-kubernetescluster.yaml",
-    "network.yaml": "full-network.yaml",
-    "volume.yaml": "full-volume.yaml",
-    "image.yaml": "full-image.yaml",
-    "vm.yaml": "full-virtualmachine.yaml",
-    "container.yaml": "full-container.yaml",
-    "httproute.yaml": "full-httproute.yaml",
-    "tunnel.yaml": "full-gateway.yaml",
-    "app.yaml": "full-app.yaml",
-    "service.yaml": "full-service.yaml",
-    "network-access-rule.yaml": "full-networkaccessrule.yaml",
-}
+# Cada Kind é agora UM único ficheiro de exemplo (em examples/<grupo>/<kind>.yaml)
+# que já traz o cenário mínimo E o completo com todos os campos. Deixou de haver
+# um par simples→full, por isso a antiga tabela KINDS_FULL desapareceu.
 
 # Tradução EN das intros do `KINDS_DOC` (mesma ordem/tamanho — o YAML em si
 # vem sempre de `examples/*.yaml`, ficheiros reais, e não se traduz).
@@ -4752,7 +4764,10 @@ KINDS_DOC_EN = [
     "<code>kind: Container</code>, with a warning, and is <strong>deliberately not rewritten for you</strong>: "
     "a <code>kind: Container</code> named <code>web</code> creates a container <code>web</code>, this creates "
     "the pod netns <code>pod-web</code> whose member is <code>web-c0</code> — renaming a workload behind your "
-    "back would break DNS and HTTPRoute backends.",
+    "back would break DNS and HTTPRoute backends. The SAME file also shows the REAL multi-container pod: N "
+    "containers sharing <strong>netns</strong> (same IP, reachable via <code>localhost</code>), "
+    "<strong>IPC</strong> and <strong>UTS</strong>, managed with "
+    "<code>delonix pod create/ls/describe/rm/logs</code>.",
     "ONE declarative object for both kinds of compute: "
     "<code>spec.type: container | vm | pod | microvm</code> plus the block with that same name. Lowers to the "
     "matching Kind on load — it doesn't redefine a single field, so it can never drift from it.",
@@ -4768,9 +4783,6 @@ KINDS_DOC_EN = [
     "one <code>routes:</code> field inside <code>Network</code>. Directed (<code>from</code> initiates, the "
     "return flows; <code>to</code> never initiates back); constant cost, doesn't grow with the number of "
     "networks.",
-    "Per-container L4 firewall, k8s NetworkPolicy-style, with the "
-    "direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other "
-    "intact.",
     "L7 Ingress in the <code>networking.k8s.io/v1</code> shape (host/path → backend), "
     "compiled to the built-in proxy. Inherited limitations: one certificate only (no SNI) and "
     "<code>pathType: Exact</code> treated as a prefix.",
@@ -4781,26 +4793,21 @@ KINDS_DOC_EN = [
     "file: every step has a <code>check</code>, so it can never drift. See also "
     "<code>cluster-vm.yaml</code> (provisions the VMs) and <code>cluster-kind.yaml</code> (kind mode).",
     "A user network. Containers join it with <code>--net &lt;name&gt;</code>; "
-    "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today.",
-    "A named local volume — the data survives <code>container rm</code>. For "
-    "NETWORK storage (NFS/SMB/WebDAV) the SAME Kind takes an <code>nfs:</code>/<code>cifs:</code>/"
-    "<code>webdav:</code> block — see <code>storage.yaml</code>.",
-    "A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), "
-    "k8s PersistentVolume-style — the <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block of a "
-    "<code>kind: Volume</code>. The password comes from the vault (<code>passwordSecret</code>); mounting needs "
-    "CAP_SYS_ADMIN. <strong><code>kind: Storage</code> still loads</strong>, rewritten into this with a "
-    "deprecation warning — the two described the same mount two ways and landed in the same store.",
+    "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today. "
+    "The SAME Kind also absorbs a Proxmox VE SDN zone (the former <code>kind: NetworkZone</code>, folded in "
+    "here): realized by the configured zone provider (<code>DELONIX_PROXMOX_*</code>).",
+    "A named local volume — the data survives <code>container rm</code>. The SAME Kind covers "
+    "NETWORK storage (NFS/SMB/WebDAV, with an <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block — "
+    "the former <code>kind: Storage</code>, now rewritten into this with a deprecation warning) and ISOLATED, "
+    "individually-quota'd slices (a <code>share:</code> block — the former <code>kind: ShareVolume</code>, "
+    "several container/vm/pod sharing one export without seeing each other). The one file shows all three "
+    "scenarios.",
     "Pre-pulls (or builds) an image before the containers that depend on it. Golden VM images "
     "have no Kind of their own — they're built with <code>delonix vm image build</code>.",
     "A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. "
     "It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.",
     "The everyday workload. Only <code>image</code> is required; every other field "
     "has a default. Covers networking, storage, resources (cgroup v2), secrets, security, devices and limits.",
-    "A REAL multi-container pod: N containers sharing the pod's namespaces (the same "
-    "<code>spec.containers[]</code> schema as <code>kind: Container</code>, but with N containers allowed). "
-    "They share <strong>netns</strong> (same IP, reachable via <code>localhost</code>), <strong>IPC</strong> "
-    "and <strong>UTS</strong> (hostname). The PID namespace (<code>shareProcessNamespace</code>) is a "
-    "follow-up. Managed with <code>delonix pod create/ls/describe/rm/logs</code>.",
     "Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each "
     "document is the desired state of one direction for one target container — allowlist + default-deny, "
     "idempotent.",
@@ -4810,12 +4817,6 @@ KINDS_DOC_EN = [
     "Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no "
     "account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the "
     "L7 proxy listens: one public URL, Host-based routing on the other end to several backends.",
-    "An ISOLATED, individually-quota'd slice of another volume (typically one with a "
-    "network block) — several container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. "
-    "Each slice is a real subdirectory of the parent mount, registered as its own volume; consumed with "
-    "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side. <strong>"
-    "<code>kind: ShareVolume</code> no longer exists</strong>: it's the SAME <code>kind: Volume</code> with a "
-    "<code>share:</code> block.",
     "Build with Cloud Native Buildpacks (Paketo/Heroku), no Dockerfile: point it at the source and the engine "
     "detects the language, builds, and leaves the image in the local store.",
     "A SET of containers picked by label and published as several DNS <code>A</code> records under "
@@ -4832,13 +4833,29 @@ KINDS_DOC_EN = [
     "address of the pool for as long as it is declared, and answers on that address instead of loopback. IPv4 "
     "only; with <code>announce: local</code> the address must already be on an interface of this host. A pool "
     "with a leased address cannot be removed or shrunk.",
-    "A zone of Proxmox VE's own SDN and the vnets inside it. The document never names the infrastructure: the "
-    "configured zone provider realizes it (today a Proxmox node registered through <code>DELONIX_PROXMOX_*</code>); "
-    "with none, <code>apply</code> refuses. No update in place: <code>apply</code> ensures the listed vnets, and "
-    "teardown removes the vnets, then the zone.",
     "Aliases and filter rules on a perimeter firewall (ADR-0051), today OPNsense, registered through "
     "<code>DELONIX_OPNSENSE_URL</code> and an API key/secret pair. Aliases go in before rules and come out after "
     "them; a rule's identity is its <code>description</code>. A spec change is a remove and re-apply.",
+    "S3-compatible object storage (ADR-0081). Two backends, consumed the SAME way (endpoint + "
+    "accessKey/secretKey read from a Secret): <code>cephRgw</code> provisions a tenant S3 identity on the node's "
+    "Ceph Object Gateway and writes its keys into a generated Secret (<code>&lt;name&gt;-s3</code>); "
+    "<code>external</code> points at a foreign S3 you already run, with credentials from a Secret you provide.",
+    "Use a storage pool the administrator has ALREADY declared in the node's allowlist "
+    "(<code>/etc/delonix/storage-pools.yaml</code>): its driver and backing (btrfs/zfs/lvm-thin/directory/ceph) "
+    "come from THERE and there only. This Kind only says «this node uses pool X, with this over-allocation "
+    "ceiling» — device/path/command are refused by NAME. The engine never creates or destroys a pool; dropping "
+    "the Kind just stops using it. Allocate volumes on it with a <code>kind: Volume</code> carrying "
+    "<code>pool: &lt;name&gt;</code>.",
+    "A git repository this node reconciles from (ADR-0021). Applying writes a record and, with "
+    "<code>sync.automated: true</code>, a systemd timer; each fire runs ONE pass and exits: fetch the ref → "
+    "resolve to a commit → verify the signature → read the YAML under <code>path</code> → guard → plan → apply. "
+    "A commit that fails to load, fails the guard, or plans a <code>safety</code>-blocked action leaves the "
+    "running stack untouched. <code>reconcile</code> runs a pass by hand; <code>suspend</code>/<code>resume</code> "
+    "stop and restart the passes.",
+    "A whole userland run as one unit on a provider node (ADR-0058) — NOT a <code>kind: Container</code>: no "
+    "exec, logs or exit status. The generic part (image/entrypoint/env/memory/cores/rootfs) is the intent; what "
+    "only the Proxmox node understands — the swap allowance and the node bridge/VLAN — lives inline in "
+    "<code>provider.spec</code> (ADR-0071). The engine pulls the image, never the provider.",
 ]
 
 
@@ -5996,22 +6013,15 @@ def kinds_page():
         anchor = "-".join(kind.lower().split())
         body.append(f"<h2 id='{anchor}'>{html.escape(kind)}</h2>")
         body.append(bi('p', intro, intro_en))
+        # One file per Kind now, grouped by API group under examples/<group>/.
+        # That single file already carries both the minimal and the fully
+        # commented scenario, so there is no separate "full-" file to embed.
         path = os.path.join(ROOT, "..", "examples", fname)
         try:
             yaml = open(path).read().strip()
         except OSError:
             yaml = f"# (exemplo em falta: examples/{fname})"
         body.append(f"<pre><code>{html.escape(yaml)}</code></pre>")
-        full = KINDS_FULL.get(fname)
-        if full:
-            try:
-                full_yaml = open(os.path.join(ROOT, "..", "examples", full)).read().strip()
-            except OSError:
-                full_yaml = f"# (exemplo em falta: examples/{full})"
-            summary = bi("span", f"Todas as possibilidades — examples/{full}",
-                         f"Every option — examples/{full}")
-            body.append(f"<details><summary>{summary}</summary>"
-                        f"<pre><code>{html.escape(full_yaml)}</code></pre></details>")
     page("kinds.html", "Kinds do manifesto", "\n".join(body))
 
 
@@ -6082,7 +6092,7 @@ temperatura ACTUAL de qualquer cidade (via <a href="https://open-meteo.com/">Ope
 API key) e serve uma página que actualiza sozinha a cada 30s. O objectivo é percorrer o ciclo
 completo do Delonix num só projecto pequeno: <code>build</code> multi-stage → <code>container
 run</code> → expor à internet com <code>tunnel</code>. Os ficheiros completos estão em
-<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/delonix-temp"><code>examples/delonix-temp/</code></a>
+<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/_labs/delonix-temp"><code>examples/_labs/delonix-temp/</code></a>
 — <code>git clone</code> e segue os passos abaixo tal como estão.</p>
 
 <h2>1. A app</h2>
@@ -6134,7 +6144,7 @@ ENV PYTHONUNBUFFERED=1
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]</code></pre>
 
 <h2>2. Build</h2>
-<pre><code>cd examples/delonix-temp
+<pre><code>cd examples/_labs/delonix-temp
 delonix build -t delonix-temp:1 .</code></pre>
 <div class="out"><pre><code>Collecting fastapi==0.115.0 (from -r requirements.txt (line 1))
 ...
@@ -6177,8 +6187,8 @@ Abrir a URL num browser mostra a página <em>Delonix Temp</em> a actualizar-se s
 <p><b>Ir mais longe:</b> com mais de um serviço, mete o <a href="comandos/httproute.html"><code>kind:
 HTTPRoute</code></a> à frente (routing por <code>Host</code>/path para vários containers) e aponta
 o <code>tunnel</code> para a PORTA DO PROXY em vez de directamente ao container — uma só URL
-pública, tantos backends quantos precisares. Ver <code>examples/httproute.yaml</code> +
-<code>examples/tunnel.yaml</code>.</p>
+pública, tantos backends quantos precisares. Ver <code>examples/gateway/httproute.yaml</code> +
+<code>examples/gateway/gateway.yaml</code>.</p>
 </div>
 
 <h2>Arrumar</h2>
@@ -6205,7 +6215,7 @@ temperature of any city (via <a href="https://open-meteo.com/">Open-Meteo</a>, n
 serves a page that refreshes itself every 30s. The goal is to walk the full Delonix cycle in one
 small project: multi-stage <code>build</code> → <code>container
 run</code> → expose to the internet with <code>tunnel</code>. The complete files are in
-<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/delonix-temp"><code>examples/delonix-temp/</code></a>
+<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/_labs/delonix-temp"><code>examples/_labs/delonix-temp/</code></a>
 — <code>git clone</code> it and follow the steps below exactly as they are.</p>
 
 <h2>1. The app</h2>
@@ -6257,7 +6267,7 @@ ENV PYTHONUNBUFFERED=1
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]</code></pre>
 
 <h2>2. Build</h2>
-<pre><code>cd examples/delonix-temp
+<pre><code>cd examples/_labs/delonix-temp
 delonix build -t delonix-temp:1 .</code></pre>
 <div class="out"><pre><code>Collecting fastapi==0.115.0 (from -r requirements.txt (line 1))
 ...
@@ -6300,8 +6310,8 @@ Opening the URL in a browser shows the <em>Delonix Temp</em> page updating itsel
 <p><b>Going further:</b> with more than one service, put <a href="comandos/httproute.html"><code>kind:
 HTTPRoute</code></a> in front (routing by <code>Host</code>/path to several containers) and point
 <code>tunnel</code> at the PROXY'S PORT instead of directly at the container — one public URL, as
-many backends as you need. See <code>examples/httproute.yaml</code> +
-<code>examples/tunnel.yaml</code>.</p>
+many backends as you need. See <code>examples/gateway/httproute.yaml</code> +
+<code>examples/gateway/gateway.yaml</code>.</p>
 </div>
 
 <h2>Cleanup</h2>

@@ -88,7 +88,7 @@ The group then has to be proved end to end, in `bins/delonix-runtime-bin/src/cmd
 
 - `manifest.rs`, **`stack_group_sample`** — the minimal `spec` of one child in the group and the
   Kind it lands as; `every_stack_group_loads` walks every group and fails on one without a sample.
-- **`examples/stack.yaml`** — must mention the group; `the_stack_example_names_every_group`
+- **`examples/core/stack.yaml`** — must mention the group; `the_stack_example_names_every_group`
   fails otherwise. This file is also what the user site's Kinds page shows.
 - `schema.rs`, **`every_stack_group_is_typed_against_its_kinds_own_spec`** — the group's items
   are typed against the Kind's own spec, so the Kind needs its `TYPED_KINDS` branch (next
@@ -251,7 +251,7 @@ For a Kind that behaves like `Service` (primary, converges, has teardown, namesp
 2. A spec struct with `JsonSchema`; a branch in `TYPED_KINDS` and in `manifest_schema`
    (`schema.rs`) — or an entry in `untyped_hint` explaining why not.
 3. `manifest.rs` — an arm in `filled_spec` (`spec_with_defaults`), an arm in `spec_fields_for`,
-   and a sample in `stack_group_sample`; the group in `examples/stack.yaml`.
+   and a sample in `stack_group_sample`; the group in `examples/core/stack.yaml`.
 4. `stack.rs` — branches in `desired_of`, `actual_of`, `converge_and_stamp`, `stamp_all`,
    `destroy_one`, `presence`, and a layer in `run_layers` calling the Kind's own `apply(docs)`.
 5. `reconcile.rs` — a `hot_fields` entry naming the fields that converge live.

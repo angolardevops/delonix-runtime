@@ -23,6 +23,7 @@ delonix-storage = { workspace = true }
 delonix-provider-btrfs = { workspace = true }
 delonix-provider-lvm = { workspace = true }
 delonix-provider-zfs = { workspace = true }
+delonix-provider-ceph = { workspace = true }
 delonix-net-rules = { workspace = true }
 delonix-telemetry = { workspace = true }
 delonix-linux = { workspace = true }

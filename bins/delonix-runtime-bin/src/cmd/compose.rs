@@ -569,7 +569,7 @@ struct ComposeFile {
     /// Top-level `name:` — the project name. It was in `SUPPORTED_TOP` (so
     /// the matrix and `migrate assess` called it served) and no field read it:
     /// every project was named after its directory, whatever the file said.
-    /// Found by running the `examples/compose-webapp` sample. Precedence is
+    /// Found by running the `examples/_labs/compose-webapp` sample. Precedence is
     /// the specification's: `-p` > `name:` > the directory.
     name: Option<String>,
     #[serde(default)]
@@ -3128,7 +3128,7 @@ fn extra_networks(
 /// **Without this no service could.** The containers are named
 /// `<project>-<service>` and the internal DNS answers container names, so
 /// `DATABASE_HOST: db` — the way every compose file in the world addresses a
-/// dependency — did not resolve. Measured on `examples/compose-webapp`: the web
+/// dependency — did not resolve. Measured on `examples/_labs/compose-webapp`: the web
 /// service reported Postgres and Redis unreachable and the worker crashed on
 /// `getaddrinfo`, with every container `Up`.
 ///
@@ -3624,7 +3624,7 @@ fn load_compose(files: Vec<PathBuf>) -> Result<(ComposeFile, String, PathBuf, St
 /// re-executed inside the network namespace, from another working directory,
 /// and that pass answered `--env-file .env: No such file or directory` — every
 /// service with an `env_file:` failed to start, measured on the
-/// `examples/compose-webapp` sample. The same class as the relative bind
+/// `examples/_labs/compose-webapp` sample. The same class as the relative bind
 /// sources `anchor_relative_binds` already anchors.
 fn absolute_base_dir(first: &Path, cwd: &Path) -> PathBuf {
     let parent = first.parent().unwrap_or(Path::new(""));
@@ -5154,7 +5154,7 @@ mod tests_unknown_keys {
         // this test is about — but asserting the generic wording for a key that
         // has earned a specific one would pin the worse message in place.
         // `shm_size`/`mem_limit`/`expose` were here and are SERVED since
-        // 2026-10-11 (the `examples/compose-webapp` sample); four keys that
+        // 2026-10-11 (the `examples/_labs/compose-webapp` sample); four keys that
         // are still not read take their place.
         for key in ["init", "stop_signal", "pids_limit", "platform"] {
             let e = err_of(&format!(
@@ -5639,7 +5639,7 @@ volumes:
     }
 }
 
-/// The keys the `examples/compose-webapp` sample uses that were missing on
+/// The keys the `examples/_labs/compose-webapp` sample uses that were missing on
 /// 2026-10-11, and the two defects running it found (`name:` read by nobody,
 /// a second network dropped with a warning).
 #[cfg(test)]

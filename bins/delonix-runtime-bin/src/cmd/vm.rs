@@ -5604,7 +5604,7 @@ fn print_vm_next_steps(
 }
 
 /// local tty (raw mode); libvirt: delegates to `virsh console` (which does it).
-fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Result<()> {
+pub(crate) fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
     if !matches!(vm.status, delonix_model::records::Status::Running) {
         return Err(Error::Invalid(super::po::tf(

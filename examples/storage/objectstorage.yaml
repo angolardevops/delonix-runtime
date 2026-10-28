@@ -1,0 +1,53 @@
+# ============================================================================
+# kind: ObjectStorage — armazenamento de objectos S3 (ADR-0081)
+# kind: ObjectStorage — S3-compatible object storage (ADR-0081)
+#
+# PT: Dois backends. `cephRgw` provisiona uma identidade S3 de tenant no Ceph
+#     Object Gateway do nó e escreve as chaves num Secret gerado (<nome>-s3).
+#     `external` aponta para um S3 que já corres, com credenciais de um Secret teu.
+#     Um workload consome os dois da MESMA forma: endpoint + accessKey/secretKey
+#     lidos do Secret.
+# EN: Two backends. `cephRgw` provisions a tenant S3 identity on the node's Ceph
+#     Object Gateway and writes its keys into a generated Secret (<name>-s3).
+#     `external` points at a foreign S3 you already run, with credentials from a
+#     Secret you provide. A workload consumes either the SAME way: endpoint +
+#     accessKey/secretKey read from the Secret.
+#
+# PT: Aplicar:  delonix stack apply -f examples/storage/objectstorage.yaml
+# EN: Apply:    delonix stack apply -f examples/storage/objectstorage.yaml
+# ============================================================================
+
+# ── 1. cephRgw — provisionar no Ceph Object Gateway do nó ────────────────────
+#      cephRgw — provision on the node's Ceph Object Gateway
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: ObjectStorage
+metadata:
+  name: media
+spec:
+  backend: cephRgw            # PT: provisiona no RGW do nó | EN: provision on the node's RGW
+  bucket: media               # PT: o tenant cria-o por S3 com as chaves abaixo | EN: the tenant creates it over S3 with the keys below
+  cephRgw:
+    uid: media                # PT: id do utilizador S3 (default: metadata.name) | EN: S3 user id (default: metadata.name)
+    displayName: Media store  # PT: rótulo cosmético na identidade S3 | EN: cosmetic label on the S3 identity
+    endpoint: http://rgw.internal:80   # PT: endpoint S3 público exposto aos consumidores | EN: public S3 endpoint exposed to consumers
+    quota:                    # PT: tecto opcional do uso S3 total do tenant | EN: optional ceiling on the tenant's total S3 usage
+      maxSize: 100G           # PT: total de bytes em todos os buckets | EN: total bytes across all buckets
+      maxObjects: 100000      # PT: total de objectos | EN: total object count
+  # PT: No apply, as credenciais ficam em secret/media-s3 (accessKey, secretKey, endpoint, bucket).
+  # EN: On apply, credentials land in secret/media-s3 (accessKey, secretKey, endpoint, bucket).
+
+# ── 2. external — trazer o teu próprio S3 (AWS, MinIO, Backblaze, …) ─────────
+#      external — bring your own S3 (AWS, MinIO, Backblaze, …)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: ObjectStorage
+metadata:
+  name: backups
+spec:
+  backend: external
+  bucket: company-backups
+  external:
+    endpoint: https://s3.eu-west-1.amazonaws.com
+    region: eu-west-1         # PT: só quando o store precisa | EN: only when the store needs one
+    credentialsSecret: aws-s3 # PT: Secret existente com accessKey + secretKey | EN: existing Secret with accessKey + secretKey

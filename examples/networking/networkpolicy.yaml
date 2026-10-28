@@ -1,0 +1,252 @@
+# ============================================================================
+# kind: NetworkPolicy — firewall L4 declarativo (estilo k8s NetworkPolicy)
+# kind: NetworkPolicy — declarative L4 firewall (k8s NetworkPolicy style)
+#
+# PT: A direcção está em `spec.direction` (ingress|egress) e o alcance em
+#     `spec.scope`. Cada documento é o ESTADO DESEJADO de UMA direcção de UM
+#     alvo: aplicar SUBSTITUI as regras dessa direcção (allowlist + default),
+#     deixando a outra intacta — por isso dois documentos para o mesmo
+#     (alvo, direcção) são recusados. `scope: container` (default) actua num
+#     workload; `scope: network` é uma política de SAÍDA de uma rede inteira
+#     (só egress); `scope: vm` é o firewall do nó onde a VM corre (ADR-0052).
+#     Só actua em workloads numa rede SDN custom.
+# EN: Direction is `spec.direction` (ingress|egress) and reach is `spec.scope`.
+#     Each document is the DESIRED STATE of ONE direction of ONE target: applying
+#     it REPLACES that direction's rules (allowlist + default), leaving the other
+#     untouched — so two documents for the same (target, direction) are refused.
+#     `scope: container` (default) acts on a workload; `scope: network` is a whole
+#     network's EGRESS policy (egress only); `scope: vm` is the firewall of the
+#     node the VM runs on (ADR-0052). It only acts on workloads on a custom SDN.
+#
+# PT: NOTA: `kind: Ingress` já NÃO é firewall — é hoje o Ingress L7/HTTP estilo
+#     k8s (host/path→backend, ver examples/gateway/ingress.yaml). E `kind: Egress`
+#     foi REMOVIDO — o load RECUSA-o, nomeando `direction: egress` como substituta:
+#     nenhum modelo conhecido separa entrada de saída em TIPOS, por isso a direcção
+#     é um campo, com uma struct, um validador e um apply só.
+# EN: NOTE: `kind: Ingress` is NO LONGER firewall — it is now the k8s-shaped L7/HTTP
+#     Ingress (host/path→backend, see examples/gateway/ingress.yaml). And `kind: Egress`
+#     was REMOVED — the load REFUSES it, naming `direction: egress` as the replacement:
+#     no known model splits inbound from outbound into TYPES, so direction is a field,
+#     with one struct, one validator and one apply.
+#
+# PT: Campos spec: direction, scope, target, defaultPolicy, rules[], allowCidrs,
+#     fqdnAllowlist, rateLimit. Campos por-regra (scope container/vm): proto,
+#     port, action, from, fromWorkload, to, toWorkload, note. allowCidrs/
+#     fqdnAllowlist/rateLimit só para scope: network.
+# EN: spec fields: direction, scope, target, defaultPolicy, rules[], allowCidrs,
+#     fqdnAllowlist, rateLimit. Per-rule fields (scope container/vm): proto, port,
+#     action, from, fromWorkload, to, toWorkload, note. allowCidrs/fqdnAllowlist/
+#     rateLimit are for scope: network only.
+#
+# PT: Aplicar:  delonix stack apply -f examples/networking/networkpolicy.yaml
+# EN: Apply:    delonix stack apply -f examples/networking/networkpolicy.yaml
+# ============================================================================
+
+# ── 0. Recursos de apoio INLINE — redes e workloads que as políticas protegem
+#      Supporting resources INLINE — networks and workloads the policies protect
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-demo }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-locked }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: db }
+spec:
+  network: sdn-demo            # PT: a firewall L4 só actua em workloads na SDN | EN: the L4 firewall only acts on workloads on the SDN
+  containers:
+    - name: db
+      image: "postgres:16-alpine"
+      env:
+        - { name: POSTGRES_PASSWORD, value: example }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: app }
+spec:
+  network: sdn-demo
+  containers:
+    - name: app
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: cache }
+spec:
+  network: sdn-demo
+  containers:
+    - name: cache
+      image: "redis:7-alpine"
+
+# ── 1. INGRESS allowlist (scope container) — cada forma de regra ingress ─────
+#      INGRESS allowlist (scope container) — every ingress-side rule form
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: db-inbound }
+spec:
+  direction: ingress           # PT: ingress (entrada) | egress (saída) | EN: ingress (inbound) | egress (outbound)
+  scope: container             # PT: container (default): `target` é um workload | EN: container (default): `target` is a workload name
+  target: db                   # PT: o workload que a política protege | EN: the workload the policy protects
+  defaultPolicy: deny          # PT: allow | deny quando nenhuma regra casa (default scope container: deny) | EN: allow | deny when no rule matches (default for scope container: deny)
+  rules:
+    - proto: tcp               # PT: tcp | udp | any (default any) | EN: tcp | udp | any (default any)
+      port: "5432"             # PT: uma porta | EN: a single port
+      from: 10.219.0.0/16      # PT: CIDR de origem | EN: source CIDR
+      action: allow            # PT: allow (default) | deny | EN: allow (default) | deny
+      note: postgres-from-sdn  # PT: rótulo livre, mostrado nas listagens | EN: free-text label, shown in listings
+    - proto: tcp
+      port: "5432"
+      fromWorkload: app        # PT: origem POR NOME de workload (resolvida ao endereço SDN no apply; sobrevive a restarts). Exclusiva com from/to. | EN: source BY WORKLOAD NAME (resolved to its SDN address at apply; survives restarts). Exclusive with from/to.
+      note: postgres-from-app
+    - proto: udp
+      port: "8000-8100"        # PT: um intervalo de portas n-m | EN: a port range n-m
+      from: 10.219.5.0/24
+      note: udp-range
+    - proto: any               # PT: qualquer protocolo | EN: any protocol
+      port: "*"                # PT: qualquer porta | EN: any port
+      from: 10.219.9.9/32
+      action: deny             # PT: um deny explícito, avaliado pela ordem das regras | EN: an explicit deny, evaluated by rule order
+      note: block-this-host
+
+# ── 2. INGRESS com defaultPolicy allow — só os denies listados actuam ────────
+#      INGRESS with defaultPolicy allow — only the listed denies apply
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: cache-inbound-open }
+spec:
+  direction: ingress
+  target: cache
+  defaultPolicy: allow         # PT: tudo o que não está listado é aceite | EN: everything not listed is accepted
+  rules:
+    - port: "6379"             # PT: proto omitido = any | EN: proto omitted = any
+      from: 203.0.113.0/24
+      action: deny
+      note: no-external-redis
+
+# ── 3. EGRESS allowlist de um workload — CIDR, nome de workload e wildcard ───
+#      EGRESS allowlist for a workload — a CIDR, a workload name and a wildcard
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: app-outbound }
+spec:
+  direction: egress
+  target: app
+  defaultPolicy: deny
+  rules:
+    - proto: udp
+      port: "53"
+      note: dns
+    - proto: tcp
+      port: "443"
+      to: 0.0.0.0/0            # PT: CIDR de destino (o par egress de `from`) | EN: destination CIDR (egress-side counterpart of `from`)
+      note: https-anywhere
+    - proto: tcp
+      port: "5432"
+      toWorkload: db           # PT: destino POR NOME de workload (par egress de fromWorkload) | EN: destination BY WORKLOAD NAME (egress counterpart of fromWorkload)
+      note: postgres-to-db
+
+# ── 4. EGRESS mínimo — sem regras, default deny → sem saída possível ─────────
+#      Minimal EGRESS — no rules, default deny → no outbound possible
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: cache-outbound-locked }
+spec:
+  direction: egress
+  target: cache
+  defaultPolicy: deny
+
+# ── 5. EGRESS por-REDE (scope: network, só egress) — `target` é uma REDE ─────
+#      PER-NETWORK EGRESS (scope: network, egress only) — `target` is a NETWORK
+#
+# PT: Allowlist de CIDR + allowlist de FQDN (aprendida ao vivo do DNS) + rate-limit
+#     L4 global do ingress rootless. É a forma declarativa do `delonix net egress`.
+# EN: CIDR allowlist + FQDN allowlist (learnt live from DNS) + global L4 rate limit
+#     of the rootless ingress. The declarative form of `delonix net egress`.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sdn-locked-egress }
+spec:
+  direction: egress
+  scope: network               # PT: container (default) | network | EN: container (default) | network
+  target: sdn-locked           # PT: nome de uma REDE, não de um workload | EN: a NETWORK name, not a workload
+  defaultPolicy: deny          # PT: allowCidrs/fqdnAllowlist só fazem sentido com deny | EN: allowCidrs/fqdnAllowlist only make sense with deny
+  allowCidrs:                  # PT: destinos permitidos além do DNS | EN: destinations allowed besides DNS
+    - 10.0.0.0/8
+    - 198.51.100.0/24
+  fqdnAllowlist:               # PT: hostnames permitidos (e `*.host`), via DNS-snooping | EN: hostnames allowed (and `*.host`), via DNS snooping
+    - registry.example.com
+    - updates.example.org
+  rateLimit:                   # PT: guarda L4 GLOBAL do ingress rootless (não por rede) | EN: GLOBAL L4 guard of the rootless ingress (not per network)
+    connRate: 100              # PT: novas conexões por segundo | EN: new connections per second allowed
+    connMax: 2000              # PT: conexões concorrentes máximas | EN: maximum concurrent connections
+
+# ── 6. EGRESS por-REDE totalmente aberto (defaultPolicy allow) ───────────────
+#      PER-NETWORK EGRESS fully open (defaultPolicy allow)
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sdn-demo-egress-open }
+spec:
+  direction: egress
+  scope: network
+  target: sdn-demo
+  defaultPolicy: allow
+
+# ── 7. scope: vm — o firewall do nó onde a VM corre (ADR-0052) ───────────────
+#      scope: vm — the firewall of the node the VM runs on (ADR-0052)
+#
+# PT: Hoje é um nó Proxmox; uma VM libvirt/Cloud Hypervisor recusa a política com
+#     a razão. Precisa de um alvo Proxmox registado (DELONIX_PROXMOX_URL/_NODE +
+#     credencial) e do firewall do DATACENTER já ligado (o motor nunca liga esse
+#     interruptor). Regras avaliadas POR ORDEM no nó (first match wins), acima de
+#     qualquer regra posta à mão, que nunca é tocada.
+# EN: Today that is a Proxmox node; a libvirt/Cloud Hypervisor VM refuses the policy
+#     with the reason. Needs a registered Proxmox target (DELONIX_PROXMOX_URL/_NODE
+#     + credential) and the DATACENTER firewall already on (the engine never flips
+#     that switch). Rules are evaluated IN ORDER on the node (first match wins),
+#     above any hand-added rule, which is never touched.
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata: { name: web-vm }
+spec:
+  provider: { type: proxmox }
+  disk: "local-lvm:8"
+  vcpus: 2
+  memory: 2G
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: web-vm-in }
+spec:
+  scope: vm
+  target: web-vm
+  direction: ingress
+  defaultPolicy: deny
+  rules:
+    - { proto: tcp, port: "22", from: 10.0.0.0/8, note: "ssh from the admin network" }
+    - { proto: tcp, port: "443" }
+    - { port: "53", from: 10.0.0.0/8 }   # PT: qualquer protocolo + uma porta = TCP e UDP | EN: any protocol + a port = TCP and UDP
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: web-vm-out }
+spec:
+  scope: vm
+  target: web-vm
+  direction: egress
+  defaultPolicy: allow
+  rules:
+    - { proto: tcp, port: "25", action: deny, note: "no direct mail out" }

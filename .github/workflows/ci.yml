@@ -507,7 +507,11 @@ jobs:
       - name: Nenhum exemplo depreciado, e todas as referências resolvem
         run: |
           rc=0
-          for f in examples/*.yaml; do
+          # Os exemplos estão agrupados por grupo de API em subpastas (compute/,
+          # networking/, …), logo percorre-se a árvore, não um glob plano. `_labs/`
+          # é podado: contém laboratórios, cloud-init e um compose que não são
+          # manifestos deste motor.
+          while IFS= read -r f; do
             # o cloud-config da VM de validação NFS não é um manifesto Delonix
             head -1 "$f" | grep -q '^#cloud-config' && continue
             out=$(./target/release/delonix stack apply -f "$f" --dry-run 2>&1) || {
@@ -518,5 +522,5 @@ jobs:
             fi
             vout=$(./target/release/delonix stack validate -f "$f" 2>&1) || {
               echo "::error file=$f::$f não passa no validate"; echo "$vout" | head -5; rc=1; }
-          done
+          done < <(find examples -path examples/_labs -prune -o -name '*.yaml' -print | sort)
           exit $rc

@@ -342,7 +342,7 @@ column in place (ADR-0045):</p>
 <ul>
 <li><code>manifest.rs</code>, <strong><code>stack_group_sample</code></strong> — the minimal <code>spec</code> of one child in the group and the
   Kind it lands as; <code>every_stack_group_loads</code> walks every group and fails on one without a sample.</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/stack.yaml" target="_blank" rel="noopener"><code>examples/stack.yaml</code></a></strong> — must mention the group; <code>the_stack_example_names_every_group</code>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a></strong> — must mention the group; <code>the_stack_example_names_every_group</code>
   fails otherwise. This file is also what the user site's Kinds page shows.</li>
 <li><code>schema.rs</code>, <strong><code>every_stack_group_is_typed_against_its_kinds_own_spec</code></strong> — the group's items
   are typed against the Kind's own spec, so the Kind needs its <code>TYPED_KINDS</code> branch (next
@@ -486,7 +486,7 @@ resource is the new Kind.</p>
 <li>A spec struct with <code>JsonSchema</code>; a branch in <code>TYPED_KINDS</code> and in <code>manifest_schema</code>
    (<code>schema.rs</code>) — or an entry in <code>untyped_hint</code> explaining why not.</li>
 <li><code>manifest.rs</code> — an arm in <code>filled_spec</code> (<code>spec_with_defaults</code>), an arm in <code>spec_fields_for</code>,
-   and a sample in <code>stack_group_sample</code>; the group in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/stack.yaml" target="_blank" rel="noopener"><code>examples/stack.yaml</code></a>.</li>
+   and a sample in <code>stack_group_sample</code>; the group in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a>.</li>
 <li><code>stack.rs</code> — branches in <code>desired_of</code>, <code>actual_of</code>, <code>converge_and_stamp</code>, <code>stamp_all</code>,
    <code>destroy_one</code>, <code>presence</code>, and a layer in <code>run_layers</code> calling the Kind's own <code>apply(docs)</code>.</li>
 <li><code>reconcile.rs</code> — a <code>hot_fields</code> entry naming the fields that converge live.</li>

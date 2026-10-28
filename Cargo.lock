@@ -917,9 +917,11 @@ dependencies = [
  "delonix-model",
  "delonix-node",
  "delonix-opnsense",
+ "delonix-provider-ceph",
  "delonix-proxmox",
  "delonix-sdn",
  "delonix-state",
+ "delonix-storage",
  "delonix-vm",
  "delonix-volume",
  "http-body-util",
@@ -1020,6 +1022,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-ceph"
+version = "5.1.1"
+dependencies = [
+ "delonix-storage",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "delonix-provider-cloud-hypervisor"
 version = "5.1.1"
 dependencies = [
@@ -1102,6 +1113,7 @@ dependencies = [
  "delonix-opnsense",
  "delonix-powerdns",
  "delonix-provider-btrfs",
+ "delonix-provider-ceph",
  "delonix-provider-lvm",
  "delonix-provider-zfs",
  "delonix-proxmox",
@@ -1226,6 +1238,7 @@ version = "5.1.1"
 dependencies = [
  "delonix-model",
  "delonix-provider-btrfs",
+ "delonix-provider-ceph",
  "delonix-provider-lvm",
  "delonix-provider-zfs",
  "delonix-storage",

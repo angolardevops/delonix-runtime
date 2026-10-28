@@ -1,0 +1,129 @@
+// Delonix node API — storage: the Ceph surfaces of a node (ADR-0081).
+//
+// Status: DRAFT contract for ADR-0040 / ADR-0081.
+//
+// One cluster, four surfaces, read from the node that integrates it:
+//   - RADOS   — the substrate's health (`GetCephStatus`).
+//   - RBD     — the block images a pool holds (`ListRbdImages`).
+//   - CephFS  — the filesystem subvolumes a pool holds (`ListCephfsSubvolumes`).
+//   - RGW     — object storage: a tenant's S3 identity and its buckets.
+//
+// Making and destroying RBD/CephFS volumes is the storage-pool path
+// (`VolumeService` + the privileged helper, ADR-0067); this service is the
+// node's window onto the cluster and the administration RGW owns.
+syntax = "proto3";
+
+package delonix.node.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+
+service StorageService {
+  // The RADOS cluster's health as this node sees it. `pool` names a storage
+  // pool from the allowlist whose client identity (conf, cephx user) to read
+  // it with; empty uses the node's default Ceph configuration.
+  rpc GetCephStatus(GetCephStatusRequest) returns (CephStatus) {
+    option (google.api.http) = {get: "/v1/storage/ceph/status"};
+  }
+  // The RBD images a `ceph-rbd` storage pool holds.
+  rpc ListRbdImages(ListRbdImagesRequest) returns (ListRbdImagesResponse) {
+    option (google.api.http) = {get: "/v1/storage/pools/{pool}/rbd-images"};
+  }
+  // The CephFS subvolumes a `cephfs` storage pool holds.
+  rpc ListCephfsSubvolumes(ListCephfsSubvolumesRequest) returns (ListCephfsSubvolumesResponse) {
+    option (google.api.http) = {get: "/v1/storage/pools/{pool}/cephfs-subvolumes"};
+  }
+  // The buckets the object gateway holds, or those of one tenant (`uid`).
+  rpc ListObjectStoreBuckets(ListObjectStoreBucketsRequest) returns (ListObjectStoreBucketsResponse) {
+    option (google.api.http) = {get: "/v1/storage/objectstore/buckets"};
+  }
+  // How full one bucket is.
+  rpc GetObjectStoreBucket(GetObjectStoreBucketRequest) returns (ObjectStoreBucket) {
+    option (google.api.http) = {get: "/v1/storage/objectstore/buckets/{bucket}"};
+  }
+  // Provisions (or reads back) a tenant's S3 identity on the gateway.
+  rpc CreateObjectStoreUser(CreateObjectStoreUserRequest) returns (ObjectStoreUser) {
+    option (google.api.http) = {
+      post: "/v1/storage/objectstore/users"
+      body: "*"
+    };
+  }
+}
+
+// -------------------------------------------------------------------- RADOS
+
+message GetCephStatusRequest {
+  // A storage pool from the allowlist, for its client identity. Empty = the
+  // node's default `/etc/ceph/ceph.conf` as `client.admin`.
+  string pool = 1;
+}
+
+message CephStatus {
+  // "HEALTH_OK" | "HEALTH_WARN" | "HEALTH_ERR". Empty when unreadable.
+  string health = 1;
+  string fsid = 2;
+  uint32 mons = 3;
+  uint32 osds_up = 4;
+  uint32 osds_in = 5;
+  uint32 pools = 6;
+  // False when the cluster could not be reached — the other fields are then zero.
+  bool reachable = 7;
+}
+
+// ---------------------------------------------------------------------- RBD
+
+message ListRbdImagesRequest {
+  // A `ceph-rbd` storage pool's name in the allowlist.
+  string pool = 1;
+}
+
+message ListRbdImagesResponse {
+  repeated string images = 1;
+}
+
+// ------------------------------------------------------------------- CephFS
+
+message ListCephfsSubvolumesRequest {
+  // A `cephfs` storage pool's name in the allowlist.
+  string pool = 1;
+}
+
+message ListCephfsSubvolumesResponse {
+  repeated string subvolumes = 1;
+}
+
+// ---------------------------------------------------------------------- RGW
+
+message ListObjectStoreBucketsRequest {
+  // Empty = every bucket; otherwise one tenant's.
+  string uid = 1;
+}
+
+message ListObjectStoreBucketsResponse {
+  repeated string buckets = 1;
+}
+
+message GetObjectStoreBucketRequest {
+  string bucket = 1;
+}
+
+message ObjectStoreBucket {
+  string name = 1;
+  string owner = 2;
+  uint64 objects = 3;
+  uint64 size_bytes = 4;
+}
+
+message CreateObjectStoreUserRequest {
+  string uid = 1;
+  string display_name = 2;
+}
+
+message ObjectStoreUser {
+  string uid = 1;
+  string display_name = 2;
+  string access_key = 3;
+  // The secret is returned once, at creation — the tenant stores it.
+  string secret_key = 4;
+}

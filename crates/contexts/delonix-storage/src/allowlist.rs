@@ -45,6 +45,12 @@ pub const DRIVERS: &[(&str, &str)] = &[
     ("btrfs", "P2"),
     ("zfs", "P3"),
     ("lvm-thin", "P4"),
+    // Ceph (ADR-0081): a distributed cluster, not a local pool. `ceph-rbd`
+    // hands out block volumes (RBD images); `cephfs` hands out filesystem
+    // volumes (CephFS subvolumes). RGW object storage is not a pool driver —
+    // it has no volume shape — and lives behind its own port.
+    ("ceph-rbd", "P5"),
+    ("cephfs", "P5"),
 ];
 
 /// The whole file.
@@ -77,6 +83,24 @@ pub struct Entry {
     /// `zfs`: the parent dataset.
     #[serde(default)]
     pub dataset: Option<String>,
+    /// `ceph-rbd`: the RADOS pool that holds the RBD images. `cephfs`: the
+    /// data pool the subvolumes are carved from (optional — the fs's default
+    /// data pool is used when absent).
+    #[serde(default)]
+    pub ceph_pool: Option<String>,
+    /// `cephfs`: the CephFS (file system) volume name the subvolumes live in.
+    #[serde(default)]
+    pub ceph_fs: Option<String>,
+    /// `ceph-rbd`, `cephfs`: the cephx client the engine authenticates as
+    /// (`admin`, `delonix`); the `client.` prefix is not written here. Absent
+    /// = `admin`. The key itself is NEVER here — it is in the keyring beside
+    /// the configuration file, the boundary a manifest cannot cross.
+    #[serde(default)]
+    pub ceph_user: Option<String>,
+    /// `ceph-rbd`, `cephfs`: the `ceph.conf` the client reads (mon addresses,
+    /// fsid). Absent = the system default (`/etc/ceph/ceph.conf`).
+    #[serde(default)]
+    pub ceph_conf: Option<PathBuf>,
     /// What `delonix-storage-helper create-pool` may build the pool from. Read
     /// by that administrative command only, never by the engine.
     #[serde(default)]

@@ -164,6 +164,9 @@
 ~	network vip-pool clear
 ~	network vip-pool set
 ~	network vip-pool show
+~	bucket inspect
+~	bucket ls
+~	bucket rm
 ~	plan
 ~	pod attach
 ~	pod cp

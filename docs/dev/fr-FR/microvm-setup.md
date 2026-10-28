@@ -405,7 +405,7 @@ domaine, qui change à chaque définition).
 ### Déclaratif
 
 `kind: VirtualMachine` (`compute.delonix.io/v1alpha1`) reflète `vm create` ; un exemple complet et
-annoté se trouve dans `examples/vm.yaml`. `kind: Workload` avec `type: microvm` se réduit à une
+annoté se trouve dans `examples/compute/virtualmachine.yaml`. `kind: Workload` avec `type: microvm` se réduit à une
 `VirtualMachine` dont le backend est **forcé** à `cloud-hypervisor` ; demander un autre backend est
 une erreur ([ADR-0006](../../adr/0006-workload-type-microvm.md)). Les deux ont été *exécutés* dans une
 racine jetable :

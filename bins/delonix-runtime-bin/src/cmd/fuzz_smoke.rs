@@ -219,7 +219,7 @@ fn the_manifest_loader_never_panics_on_a_mutated_manifest() {
 
 #[test]
 fn the_compose_reader_never_panics_on_a_mutated_compose_file() {
-    let mut seeds = corpus(&examples_dir().join("compose-webapp"), &[".yaml", ".yml"]);
+    let mut seeds = corpus(&examples_dir().join("_labs/compose-webapp"), &[".yaml", ".yml"]);
     seeds.push(
         b"services:\n  web:\n    image: nginx\n    ports: [\"127.0.0.1:8080:80\", \"80\"]\n    \
           command: sh -c 'echo \"$A\" && sleep 1'\n    environment: {A: b}\n    \

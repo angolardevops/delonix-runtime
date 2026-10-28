@@ -588,3 +588,17 @@ kinds	workloads diff	D	n/a: reporta o filho, nunca o Workload
 kinds	workloads plan	D	n/a: reporta o filho
 kinds	workloads delete	D	recusado com razao (verbs.rs:234)
 kinds	workloads drift	D	n/a: reporta o filho
+cli	bucket ls	B	implementada; provada ao vivo 2026-10-27 contra MicroCeph (sessao), ainda nao em scripts/cli_exec_trace.tsv
+cli	bucket inspect	B	implementada; provada ao vivo 2026-10-27 contra MicroCeph (sessao), ainda nao em scripts/cli_exec_trace.tsv
+cli	bucket rm	B	implementada; provada ao vivo 2026-10-27 (user RGW + Secret + registo removidos), ainda nao em scripts/cli_exec_trace.tsv
+kinds	objectstorages apply	B	kind novo; apply provado ao vivo 2026-10-27 (cephRgw+external), ainda nao conduzido por scripts/e2e.sh
+kinds	objectstorages plan	B	kind novo; plan provado ao vivo 2026-10-27 (recusa DX-1000 + Create/NoOp), ainda nao em scripts/e2e.sh
+kinds	objectstorages diff	B	kind novo; nenhuma corrida real conduz este verbo neste kind
+kinds	objectstorages delete	B	kind novo; teardown=false, remocao explicita via `bucket rm`; nenhuma corrida real conduz este verbo
+kinds	objectstorages drift	B	kind novo; nenhuma corrida real conduz este verbo neste kind
+node-api	GetCephStatus	B	ADR-0081; provada ao vivo na sessao ceph (reports/ceph-live), teste #[ignore] fora do e2e.sh — herdada de feat/ceph-native-storage
+node-api	ListRbdImages	B	ADR-0081; provada ao vivo (reports/ceph-live), teste #[ignore] fora do e2e.sh — herdada de feat/ceph-native-storage
+node-api	ListCephfsSubvolumes	B	ADR-0081; provada ao vivo (reports/ceph-live), teste #[ignore] fora do e2e.sh — herdada de feat/ceph-native-storage
+node-api	ListObjectStoreBuckets	B	ADR-0081; provada ao vivo (reports/ceph-live RGW), teste #[ignore] fora do e2e.sh — herdada de feat/ceph-native-storage
+node-api	GetObjectStoreBucket	B	ADR-0081; provada ao vivo (reports/ceph-live RGW), teste #[ignore] fora do e2e.sh — herdada de feat/ceph-native-storage
+node-api	CreateObjectStoreUser	B	ADR-0081; provada ao vivo (user S3 criado no MicroCeph), teste #[ignore] fora do e2e.sh — herdada de feat/ceph-native-storage
