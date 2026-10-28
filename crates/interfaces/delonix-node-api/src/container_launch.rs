@@ -22,15 +22,17 @@
 //! `Wait` polls the record (liveness-reconciled) until it leaves `Running`, with
 //! a ceiling so a client cannot hold a worker forever.
 //!
-//! Fields the node API does not serve on this path yet — custom networks, pods,
-//! secret delivery, a continuous health check — are REFUSED (`UNIMPLEMENTED`),
-//! never silently dropped: a container that came up missing what it was created
-//! with is the degradation this engine refuses elsewhere (see
-//! [`crate::network_ops::create_with`]). Volume/bind `mounts` AND published
-//! `ports` ARE served: mounts become the `-v` strings `resolve_mounts` reads,
-//! ports become the `-p` strings the record carries (`c.ports`) so the re-exec'd
-//! `delonix start` publishes them through the container's own slirp — the same
-//! rootless path `delonix run -p` takes.
+//! Fields the node API does not serve on this path yet — pods, secret delivery,
+//! a continuous health check, a pinned network address, a second network — are
+//! REFUSED (`UNIMPLEMENTED`), never silently dropped: a container that came up
+//! missing what it was created with is the degradation this engine refuses
+//! elsewhere (see [`crate::network_ops::create_with`]). Volume/bind `mounts`,
+//! published `ports` AND a single custom `network` ARE served: mounts become the
+//! `-v` strings `resolve_mounts` reads; ports become the `-p` strings the record
+//! carries (`c.ports`) so the re-exec'd `delonix start` publishes them through
+//! the container's own slirp; a custom network becomes `c.network`, which
+//! `start_container` attaches the container to — the same rootless paths
+//! `delonix run -p`/`--net` take.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -110,12 +112,6 @@ pub fn spec_to_run_opts(
         ));
     }
     // Not served on this path yet — refused, never silently ignored.
-    if !spec.networks.is_empty() {
-        return Err(not_served_yet(
-            "spec.networks (a custom network attach)",
-            "`delonix run --net`",
-        ));
-    }
     if !spec.pod.is_empty() {
         return Err(not_served_yet("spec.pod (joining a pod)", "`delonix pod`"));
     }
@@ -140,11 +136,43 @@ pub fn spec_to_run_opts(
         argv => Some(argv.to_vec()),
     };
 
+    // The container's PRIMARY network. Empty `spec.networks` = the rootless
+    // default (`host`: shares the host netns, slirp per published port). ONE
+    // attachment names a custom network, joined at start (`start_container`
+    // reads `c.network`, which `create_work` sets). A pinned address, or a
+    // SECOND network, is a `network connect` after start — refused here, not
+    // dropped.
+    let (net, net_aliases) = match spec.networks.as_slice() {
+        [] => ("host".to_string(), Vec::new()),
+        [a] => {
+            if a.network.is_empty() {
+                return Err(Status::invalid_argument(
+                    "CreateContainer: spec.networks[0].network is required",
+                ));
+            }
+            if !a.ipv4_address.is_empty() {
+                return Err(not_served_yet(
+                    "spec.networks[0].ipv4_address (a pinned address)",
+                    "`delonix run --ip` (not on the node API)",
+                ));
+            }
+            (a.network.clone(), a.aliases.clone())
+        }
+        _ => {
+            return Err(not_served_yet(
+                "spec.networks with more than one network",
+                "`delonix network connect` after start",
+            ))
+        }
+    };
+
     let mut o = delonix_compute::RunOpts {
         image: spec.image.clone(),
-        // The default network: the container shares the host's netns (no slirp),
-        // the rootless default when no `-p`/`--net` was asked for.
-        net: "host".to_string(),
+        // `host` (the rootless default: shares the host netns) unless one custom
+        // network was named above — then the record carries it and `start`
+        // attaches the container to it.
+        net,
+        network_alias: net_aliases,
         namespace: Some(requested_namespace(&req.namespace).to_string()),
         entrypoint,
         command: spec.command.clone(),
@@ -413,6 +441,11 @@ fn create_work(
     // own slirp. `o.ports` is already validated/canonicalised by
     // `spec_to_run_opts`.
     c.ports = o.ports.clone();
+    // The custom network the container joins at start (`None` for host/none),
+    // the same the CLI's `create` branch records (container.rs). `build_record`
+    // set `c.net_mode`, the intent; this is the resolved network the re-exec'd
+    // `delonix start` attaches to (`start_container` reads `c.network`).
+    c.network = delonix_compute::preflight::custom_net_name(&o.net);
     // `build_record` carries the labels; annotations are the request's, kept on
     // the record so a reader sees what it was created with.
     for (k, v) in &req.annotations {
@@ -714,7 +747,27 @@ mod tests {
         use crate::proto::v1::{HealthCheck, NetworkAttachment, SecretRef};
         type Mutate = Box<dyn Fn(&mut ContainerSpec)>;
         let cases: Vec<Mutate> = vec![
-            Box::new(|s| s.networks = vec![NetworkAttachment::default()]),
+            // A pinned address and a second network are `network connect` after
+            // start, not a create — still refused.
+            Box::new(|s| {
+                s.networks = vec![NetworkAttachment {
+                    network: "backend".into(),
+                    ipv4_address: "10.0.0.5".into(),
+                    ..Default::default()
+                }]
+            }),
+            Box::new(|s| {
+                s.networks = vec![
+                    NetworkAttachment {
+                        network: "a".into(),
+                        ..Default::default()
+                    },
+                    NetworkAttachment {
+                        network: "b".into(),
+                        ..Default::default()
+                    },
+                ]
+            }),
             Box::new(|s| s.pod = "p1".into()),
             Box::new(|s| s.secrets = vec![SecretRef::default()]),
             Box::new(|s| s.health_check = Some(HealthCheck::default())),
@@ -774,6 +827,32 @@ mod tests {
         assert_eq!(o.ports[1], "127.0.0.1:5433:5432/udp");
         // net stays "host": ports + no custom network/pod = the own-slirp path.
         assert_eq!(o.net, "host");
+    }
+
+    #[test]
+    fn one_custom_network_sets_the_net_and_aliases() {
+        use crate::proto::v1::NetworkAttachment;
+        let mut s = spec("alpine");
+        s.networks = vec![NetworkAttachment {
+            network: "backend".into(),
+            ipv4_address: String::new(),
+            aliases: vec!["db".into(), "primary".into()],
+        }];
+        let o = spec_to_run_opts(&req("web", s.clone()), &s).unwrap();
+        assert_eq!(o.net, "backend");
+        assert_eq!(o.network_alias, ["db", "primary"]);
+        // `custom_net_name` resolves this to the record's `c.network` in create_work.
+        assert_eq!(
+            delonix_compute::preflight::custom_net_name(&o.net).as_deref(),
+            Some("backend")
+        );
+        // host stays host (no custom network).
+        let plain = spec_to_run_opts(&req("w2", spec("alpine")), &spec("alpine")).unwrap();
+        assert_eq!(plain.net, "host");
+        assert_eq!(
+            delonix_compute::preflight::custom_net_name(&plain.net),
+            None
+        );
     }
 
     #[test]
