@@ -15,7 +15,7 @@
 | Porquê numa VM | O host de desenvolvimento **não tem daemon do docker**, e instalá-lo ali seria mexer numa máquina com produção a correr. Sem as três no mesmo sítio, duas colunas seriam `não verificado` e a comparação não valia nada. A VM foi criada pelo próprio motor (`delonix vm create`). |
 | Docker | 29.1.3 (`docker.io` do Ubuntu, daemon `systemd` activo, utilizador no grupo `docker`) |
 | Podman | 4.9.3 (rootless) |
-| Delonix | **0.53.0** (rootless), binário da release oficial da tag, em `/usr/local/bin/delonix` |
+| Delonix | **0.1.0** (rootless), binário da release oficial da tag, em `/usr/local/bin/delonix` |
 
 > **Nota de montagem, e ela importa para a justiça da comparação.** O binário do Delonix tem
 > de estar em `/usr/local/bin/delonix`: a golden aplica-lhe um perfil AppArmor, e com
@@ -31,7 +31,7 @@
 
 ## A tabela
 
-| # | Capacidade | Docker 29.1.3 | Podman 4.9.3 | Delonix 0.53.0 | Como foi medido |
+| # | Capacidade | Docker 29.1.3 | Podman 4.9.3 | Delonix 0.1.0 | Como foi medido |
 |---|---|---|---|---|---|
 | 1 | Daemon residente | **Sim** — `systemctl is-active docker` → `active` | Não — 0 processos | Não — 0 processos | `systemctl is-active docker`; `pgrep -c podman`; `pgrep -cf 'delonix (netns\|serve)'` |
 | 2 | Corre sem privilégio | Não sem o grupo `docker`/daemon: `permission denied … unix:///var/run/docker.sock` | Sim (userns, `id -u` → 0) | Sim (userns, `id -u` → 0) | `sudo -u nobody docker ps`; `<eng> run --rm alpine id -u` |
@@ -180,8 +180,8 @@ por isso não a nomeio.
 
 ## A tentativa recusada, em detalhe
 
-O motor está na **v0.63.1** e esta tabela é da **v0.53.0**. Uma tabela de
-desempenho que envelhece dez versões merece ser remedida, e foi tentado.
+O motor está na **v0.63.1** e esta tabela é da **v0.1.0**. Uma tabela de
+desempenho que envelheceu várias versões merece ser remedida, e foi tentado.
 
 **Recusou-se, e a recusa é o resultado.** O host de desenvolvimento tinha, no
 momento da tentativa, `load average` de **55 a 72** em **32 threads** — mais do

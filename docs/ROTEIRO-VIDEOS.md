@@ -45,7 +45,7 @@ containers e microVMs sem daemon, sem root.
 **Falar:** Instalação — um script, sem sudo (excepto o passo pontual de subuid/subgid na primeira vez).
 
 ```bash
-curl -fsSL https://angolardevops.github.io/delonix-runtime/install.sh | sh
+curl -fsSL https://ngolacloud.github.io/delonix/install.sh | sh
 delonix --version
 ```
 

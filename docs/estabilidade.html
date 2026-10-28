@@ -545,7 +545,7 @@ isso um <code>kind: Contaner</code> validava limpo e um <code>Egress</code> já 
 sublinhada como se fosse erro. Um validador que discorda do motor é pior do que
 nenhum, porque o visto verde é o que as pessoas seguem.</p>
 <p>Aponta o editor e escreve manifestos com completação e validação:</p>
-<pre><code class="language-yaml"># yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://ngolacloud.github.io/delonix/schema/v1/delonix.json
 apiVersion: compute.delonix.io/v1alpha1
 kind: Pod
 metadata: { name: web }
@@ -613,7 +613,7 @@ referência: <code>tokenSecretFile</code>, <code>passwordFile</code>, <code>secr
 <strong><code>delonix provider config validate</code></strong> diz se ele <strong>serve</strong>: um
 <code>defaultProvider</code> ou um <code>networkDefaults</code> sem entrada no ficheiro, um ficheiro
 de token ou de segredo legível por outros utilizadores, uma CA que não existe. Nenhum dos dois contacta um nó.</p>
-<pre><code class="language-yaml"># yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://ngolacloud.github.io/delonix/schema/v1/providers.json
 apiVersion: config.delonix.io/v1
 defaultProvider: libvirt
 providers:
