@@ -1,4 +1,4 @@
-<!-- translated-from: publishing-docs.md sha256:cbfc23fbab090933245166f0c98f167e920b47b6c555e923325a501e70f85133 -->
+<!-- translated-from: publishing-docs.md sha256:ceba43b9e33aa18c483ea2aa87f942b89ddb43d5c9b3f742820082ec7682bd70 -->
 # 发布文档
 
 **阅读之前：** [贡献工作流](contributing-workflow.md)、[发布与稳定性](releases-and-stability.md)（一个被推送的标签会做什么——本页的 *发布时会发生什么* 一节正是它对应的文档说明）以及项目结构页里的[生成 vs 手写对照表](project-structure.md#generated-vs-hand-written)。

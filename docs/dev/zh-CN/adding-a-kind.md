@@ -1,4 +1,4 @@
-<!-- translated-from: adding-a-kind.md sha256:8efb7affc6ae1e813bc29c234a856c1d66d405e01f157324f10dc3f2de4d657f -->
+<!-- translated-from: adding-a-kind.md sha256:8f062a5ce433402c048423a1b86c904b734b114f58a93f6e0f9cbd864dda1891 -->
 # 新增一个 Kind
 
 **阅读之前：**[编码规范](coding-conventions.md)、[架构](architecture.md) 和 [各个 crate](crates.md#delonix-stack) —— 本页假设你已经知道 `delonix-stack` 拥有什么、以及为什么规划（planning）是纯函数式的。

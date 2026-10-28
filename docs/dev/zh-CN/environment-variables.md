@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:637f36d1cd2cce6e51a14bc9fb3a48479d4632e9f6b91e8a65460f02dbdd1833 -->
+<!-- translated-from: environment-variables.md sha256:35cfc324cc068d37dc0f9f8b9458cc39db09a021d1d22f253b8e640f81122e87 -->
 # 环境变量（`DELONIX_*`）
 
 **阅读前须知：** 《克隆、构建与测试》里的[隔离引擎的状态](build-and-test.md#isolating-the-engines-state)。
@@ -26,7 +26,7 @@
 
 | 设置项 | 顺序（排前面的赢） | 在哪里 |
 |---|---|---|
-| CRI 的 socket、capability 上限和模式 | `--addr` / `--cap-ceiling` / `--cap-ceiling-mode` > `DELONIX_CRI_ADDR` / `DELONIX_CRI_CAP_CEILING` / `DELONIX_CRI_CAP_CEILING_MODE` > `unix:///run/delonix-cri.sock` / 无上限 / `reject` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main` |
+| CRI 的 socket、capability 上限和模式 | `--addr` / `--cap-ceiling` / `--cap-ceiling-mode` > `DELONIX_CRI_ADDR` / `DELONIX_CRI_CAP_CEILING` / `DELONIX_CRI_CAP_CEILING_MODE` > `unix:///run/delonix-cri.sock` / 引擎的默认 capability 集合 / `reject` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main` |
 | 管理 API 的 socket | `--addr` > `DELONIX_API_ADDR` > `unix:///run/delonix-mgmt.sock` | `bins/delonix-mgmt-bin/src/main.rs:run` |
 | 节点 API 的 socket | `--addr` > `DELONIX_NODE_API_ADDR` > `unix:///run/delonix-node.sock` | `bins/delonix-node-api-bin/src/main.rs:run` |
 | Docker API 的 socket | `--addr` > `DELONIX_DOCKER_ADDR` > `unix:///run/delonix-docker.sock` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` |
@@ -56,6 +56,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
+| `DELONIX_EDITOR_TIMEOUT` | `scripts/install.sh`（editor-extension 那一节，`editor_cli`） | 安装器对一个 VS Code 系列编辑器发起的每一次调用（`--version` 探测、`--list-extensions`、`--install-extension`）的秒数上限。 | 正整数秒；传给 `timeout -k 5`。未设置：120。 | 这一步是尽力而为的，绝不能让引擎安装卡住：一个打开窗口而不在命令行上作答的编辑器，会在上限用尽时（退出码 124/137）带着一条警告被跳过。在一台编辑器 profile 是冷的慢速宿主机上调高它（这里测得：首次安装进一个全新 profile 要 20 秒）；`--no-editor-plugin` 会整个跳过这一步。 |
 | `DELONIX_PERF_CONF` | `scripts/install.sh`（生成的 `/usr/local/sbin/delonix-performance`） | helper 读取的配置文件路径（`CPU=`/`THP=` flag）。 | 一个文件路径。未设置：`/etc/delonix/performance.conf`。 | 只用于拿一个假的 sysfs 测试这个 helper；`install.sh` 会写真正的那份。 |
 | `DELONIX_PERF_CPU` | `scripts/install.sh`（生成的 `/usr/local/sbin/delonix-performance`） | helper 读写的 CPU sysfs 树的根（governor、EPP）。 | 一个目录路径。未设置：`/sys/devices/system/cpu`。 | 指向一棵假的树，就能在不碰宿主机的情况下测试 `apply`/`revert`。 |
 | `DELONIX_PERF_STATE` | `scripts/install.sh`（生成的 `/usr/local/sbin/delonix-performance`） | helper 保存开机时数值的目录，`revert` 时会用它来恢复。 | 一个目录路径。未设置：`/var/lib/delonix-performance`。 | 跟其他几个一样，只是测试用的替代值。 |
@@ -69,7 +70,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_HOSTS_FILE` | `bins/delonix-runtime-bin/src/cmd/hosts_file.rs:hosts_path` | `HTTPRoute` 上的 `hosts: [host]` 和 `delonix hosts sync` 写入其托管代码块的那个 hosts 文件。 | 一个文件路径；默认 `/etc/hosts`。 | 在一次隔离运行里把它指向一个临时文件，这样真正的 `/etc/hosts` 永远不会被碰到（写它需要 root）。这个代码块是怎么工作的：[名字是怎么到达 `/etc/hosts` 的](service-names-and-hosts.md)。 |
 | `DELONIX_CONSOLE_ESCAPE` | `bins/delonix-runtime-bin/src/cmd/vm.rs:resolve_escape` | 让 `delonix vm console` 脱离的按键。 | 一个控制键，写成 `^X` 或 `X`。默认 `^]`。一个无效的值是错误，而不是回退。 | 给那些打不出 `^]` 的键盘布局用的（比如葡萄牙语键盘）。`-e/--escape` 优先。 |
 | `DELONIX_CRI_ADDR` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main`；由 `bins/delonix-runtime-bin/src/cmd/serve.rs:run` 转发 | CRI 服务端监听的 socket。 | `unix://<path>`。默认 `unix:///run/delonix-cri.sock`。 | `--addr` 优先。kubelet 的 `--container-runtime-endpoint` 必须与之一致。 |
-| `DELONIX_CRI_CAP_CEILING` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main`（`cap_ceiling::CEILING_ENV`，由 `crates/interfaces/delonix-cri/src/cap_ceiling.rs:CapCeiling::parse` 解析）；由 `cmd/serve.rs:run` 转发 | 节点级别的上限，限制任何通过 CRI 创建的容器的 capabilities，`privileged: true` 也不例外。 | 空／未设置或 `all` → 没有上限（行为不变）。`none` → 没有 capability。`default` → 引擎的默认集合。`default,NET_ADMIN,…` → 默认集合加上点名的那些。一份名字列表（`CAP_` 前缀可选，不区分大小写；用逗号、空格或 `;` 分隔）→ 恰好是这些。列表里任何位置出现 `all` 都会生效。一个未知的名字，或者一个只由分隔符组成的值，**会让服务端启动不了**。 | `--cap-ceiling` 优先。只限制 capability：一个特权 pod 依然会拿到不受限的 seccomp 和一个可写的 `/sys`。生效中的上限在 `crictl info`（`capabilityCeiling`）里可见。 |
+| `DELONIX_CRI_CAP_CEILING` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main`（`cap_ceiling::CEILING_ENV`，由 `crates/interfaces/delonix-cri/src/cap_ceiling.rs:CapCeiling::parse` 解析）；由 `cmd/serve.rs:run` 转发 | 节点级别的上限，限制任何通过 CRI 创建的容器的 capabilities，`privileged: true` 也不例外。 | 空／未设置 → `default`：引擎的默认 capability 集合，所以一个要求更多的 pod（`privileged: true`、`capabilities.add: [SYS_ADMIN]`）会被拒绝。`all` → 没有上限，这是一种显式的选择。`none` → 没有 capability。`default` → 引擎的默认集合。`default,NET_ADMIN,…` → 默认集合加上点名的那些。一份名字列表（`CAP_` 前缀可选，不区分大小写；用逗号、空格或 `;` 分隔）→ 恰好是这些。列表里任何位置出现 `all` 都会生效。一个未知的名字，或者一个只由分隔符组成的值，**会让服务端启动不了**。 | `--cap-ceiling` 优先。只限制 capability：一个特权 pod 依然会拿到不受限的 seccomp 和一个可写的 `/sys`。生效中的上限在 `crictl info`（`capabilityCeiling`）里可见。 |
 | `DELONIX_CRI_CAP_CEILING_MODE` | `crates/interfaces/delonix-cri/src/cap_ceiling.rs:CeilingMode::parse`（`MODE_ENV`）；由 `cmd/serve.rs:run` 转发 | 当一个 pod 显式要求的东西超过上限时会发生什么。 | `reject`（默认；也可以是 `enforce` 或空）→ `CreateContainer` 失败，并点名被拒绝的 capability。`clamp`（或 `trim`）→ 削减到上限，并给出警告。一个未知的词**会让服务端启动不了**。 | `--cap-ceiling-mode` 优先。在两种模式下，引擎隐含的默认集合都会被无声地削减到上限。 |
 | `DELONIX_CRI_FROM_SOURCE` | `bins/delonix-runtime-bin/src/cmd/vmimage.rs:locate_cri_bin`（`CRI_FROM_SOURCE_ENV`，由 `cri_from_source_requested` 解析） | 当 `cluster apply` / `cluster kubeadm` 需要一个二进制文件去安装到各个节点上时，选择从 cwd 周围的源码 checkout 编译 `delonix-cri`。 | 只有 `1` 或 `true`（去掉首尾空白后）才会打开它；未设置、空、`0` 或其他任何值都是关闭的。 | 默认关闭，好让装在集群上的 runtime 永远不依赖命令是从哪个目录跑的。没有它的话，顺序是 `--cri-bin`、`delonix` 旁边的那个 `delonix-cri`，然后是正在运行版本的 release 资产，并对照它的 `SHA256SUMS` 校验。来源、路径和 sha256 总会被打印出来。 |
 | `DELONIX_SERVER_FROM_PATH` | `bins/delonix-runtime-bin/src/cmd/serve.rs:exec_server`（`FROM_PATH_ENV`，由 `choose` 决定） | 当运行中的 `delonix` 旁边没有兄弟服务二进制时，选择性允许使用 `PATH` 上找到的那一个（ADR-0075 D2）。 | 仅 `1` 开启；未设置、空、`0` 或其他值均为关闭。 | 默认关闭：不在可执行文件旁边的兄弟二进制来自另一次安装，因为 `scripts/install.sh` 把所有二进制放在同一个 `BIN_DIR`。2026-10-08 实测——`PATH` 上 2026-09-07 的 `delonix-cri` 为 2026-10-08 的 `delonix` 提供服务，三项电池检查失败，看起来像是引擎的错；本应拦住它的版本拒绝运行在被调用方（`delonix_node::dispatch::check_version`），而如此老旧的服务器并不包含它。开启该选项时，解析出的路径会写到 stderr。`beside` 始终优先，因此这绝不会降级一个正确的安装。 |
@@ -79,6 +80,9 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_DOCKER_ADDR` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` | Docker Engine API 切片（`delonix serve docker-api`）的 socket。 | `unix://<path>`（`unix://` 前缀可省略）。默认 `unix:///run/delonix-docker.sock`。 | `--addr` 优先。 |
 | `DELONIX_VM_BACKEND` | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` | 当某条命令没有点名 backend 时，整个会话范围内用的 VM backend。 | 一个 backend 名字（`libvirt`、`cloud-hypervisor`，或者一个已注册的远端 backend，比如 `proxmox`）。空白会被忽略。 | 优先级低于 `--backend` 和镜像自带的 `HYPERVISOR`，高于 `delonix vm default-backend --set` 设的机器级默认值。跟显式选择一样，它会覆盖能力启发式判断，并且如果这个 backend 跑不了这个 VM，可能会在启动很晚的时候才失败。 |
 | `DELONIX_PROVIDERS_CONFIG` | `cmd/providers_config.rs:locate_with` | 节点 providers 文件的路径（ADR-0054），优先于 `$XDG_CONFIG_HOME/delonix/providers.yaml` 和 `/etc/delonix/providers.yaml`。 | 一个路径。 | 必须指向已存在的文件——绝不退回到其他文件。找到的第一个文件就是配置；文件从不合并。无法读取的文件会让不带 `--backend` 的 VM 请求失败，而不是猜测一个 provider。 |
+| `DELONIX_SERVICE_VIP_CIDR` | `crates/adapters/delonix-sdn/src/service_lb.rs:configured_pools` | `kind: Service` 的 `type: VirtualIP` 为单个进程（ADR-0066 D2）所取用的 VIP 池，取代节点的 `<root>/ingress/vip-pool`。 | 一个由 /16 到 /29 之间的私有 IPv4 前缀组成的逗号列表。未设置或为空：用节点的文件。 | 像 `network vip-pool set` 一样校验；无效的值是错误，绝不是「没有池」。holder 永远看不到它：它的拒绝守卫覆盖文件里的池以及每一个记录在案的 VIP。 |
+| `DELONIX_SSH_KNOWN_HOSTS` | `bins/delonix-runtime-bin/src/cmd/remote.rs:conn_args`（`host_key_opts`） | 把 `cluster apply`/`vm migrate` 的 SSH 主机密钥信任固定到一个 known_hosts 文件上，而不是默认的首次使用即信任（TOFU）。 | 一个 `known_hosts` 文件的路径。未设置：`StrictHostKeyChecking=accept-new`（TOFU）。 | 设置它来关上首次接触的 MITM 窗口：`StrictHostKeyChecking=yes` + `UserKnownHostsFile=<path>`，这样一个未知的或改变了的主机密钥会被拒绝，而不是被静默信任。优先于 `DELONIX_SSH_STRICT`。 |
+| `DELONIX_SSH_STRICT` | `bins/delonix-runtime-bin/src/cmd/remote.rs:conn_args`（`host_key_opts`） | 在不指定文件的情况下，对着默认的 `known_hosts` 收紧 SSH 主机密钥检查。 | `1`/`true` → `StrictHostKeyChecking=yes`；未设置/`0`/其他任何值 → `accept-new`（TOFU）。 | 优先级低于 `DELONIX_SSH_KNOWN_HOSTS`。默认保持 `accept-new`，这样对一台从未见过的宿主机做全新 bootstrap 仍然能连上。 |
 | `DELONIX_STORAGE_HELPER_SOCKET` | `crates/contexts/delonix-storage/src/helper.rs:socket_path` | 引擎连接的存储特权辅助程序的套接字（ADR-0067 D3），取代 `/run/delonix-storage-helper.sock`。 | 一个路径。 | 只由引擎读取；辅助程序从不读取它。路径不存在时，驱动需要特权的存储池会以 DX-6206 被拒绝。 |
 | `DELONIX_STORAGE_POOLS_FILE` | `crates/contexts/delonix-storage/src/allowlist.rs:path` | 管理员的存储池许可清单的路径（ADR-0067 D3），取代 `/etc/delonix/storage-pools.yaml`。 | 一个路径。 | 当文件可被其所属组或所有人写入，或既不属于 root 也不属于运行引擎的用户时，文件会被拒绝。文件不存在表示没有声明任何存储池。 |
 | `DELONIX_NO_CGROUP_WARN` | `crates/adapters/delonix-linux/src/lib.rs`（关于缺少 cgroup 委派的警告，以及 `warn_if_unprotected_memory`）、`bins/delonix-runtime-bin/src/cmd/kindmode.rs` | 让「缺少 cgroup 委派」和「容器在任何地方都没有内存上限」这两类警告不再出现。 | 设置（任意值）→ 静默。 | 引擎自己会**设置**它（`cmd/util.rs:silence_cgroup_warning`、`cmd/kindmode.rs`），这样 re-exec 出来的子进程就不会重复父进程已经打印过的警告。自己手动设置它会掩盖一个真实的情况：限制没有被强制执行。 |
@@ -93,22 +97,51 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
 | `DELONIX_FORWARD_POLICY` | `crates/adapters/delonix-sdn/src/infra.rs`（ingress 规则集的构造器） | 把 holder netns 的 `forward` 链从默认拒绝（`policy drop`）改回默认允许。 | `accept` → 默认允许；其他任何值 → 默认拒绝。 | **降低了网络之间的隔离性。** 会记为一条安全警告。见 `AGENTS.md`，*«Bloco 0 do plano 33 (v0.37.1)»*。 |
-| `DELONIX_ALLOW_LINK_LOCAL` | `crates/adapters/delonix-sdn/src/infra.rs`（`fwguard` 链） | 移除对容器流量里 `169.254.0.0/16`（云端 metadata）和 `127.0.0.0/8`（宿主机回环）的无条件丢弃。 | `1` → 允许；其他任何值 → 丢弃。 | **在云端宿主机上暴露实例 metadata 里的凭据。** 安全警告。`AGENTS.md`，*«Bloco 0 do plano 33 (v0.37.1)»*（RF-NET-02）。 |
-| `DELONIX_ALLOW_HOLDER_INGRESS` | `crates/adapters/delonix-sdn/src/infra.rs`（`dlxinput` 链） | 让容器能访问 holder 自己暴露的服务（L7 代理、内部 DNS），超出允许清单（allowlist）的范围。 | `1` → 允许；其他任何值 → 新连接会被丢弃。 | **通过这个代理，一个容器可以越过某个后端自身的 ingress 策略，到达任意 namespace 里任何已注册的后端。** 安全警告。理由在 `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2。 |
-| `DELONIX_ENABLE_IPV6` | `crates/adapters/delonix-sdn/src/infra.rs:ipv6_sdn_enabled` | 重新给 SDN 上的容器分配 IPv6 地址。 | `1` → 启用；其他任何值 → 容器里的 IPv6 被禁用，转发被拒绝。 | **没有任何防火墙规则、namespace 隔离或 `Dependency` 会应用到 IPv6 上**——每一条策略都只针对 IPv4。安全警告。`AGENTS.md`，*«Bloco 0 do plano 33 (v0.37.1)»*。 |
+| `DELONIX_ALLOW_LINK_LOCAL` | `crates/adapters/delonix-sdn/src/infra.rs`（`fwguard` 链） | 移除对容器流量里 `169.254.0.0/16`（云端 metadata）和 `127.0.0.0/8`（宿主机回环）的无条件丢弃。 | `1` → 允许；其他任何值 → 丢弃。 | **在云端宿主机上暴露实例 metadata 里的凭据**——`fwguard` 是**唯一**拒绝 `169.254.0.0/16` 的东西；回环那一半也由 slirp 的 `--disable-host-loopback` 覆盖。安全警告。**是被协调的，不是一次性安装**（见下文）。`AGENTS.md`，*«Bloco 0 do plano 33 (v0.37.1)»*（RF-NET-02）。 |
+| `DELONIX_ALLOW_HOLDER_INGRESS` | `crates/adapters/delonix-sdn/src/infra.rs`（`dlxinput` 链） | 让容器能访问 holder 自己暴露的服务（L7 代理、内部 DNS），超出允许清单（allowlist）的范围。 | `1` → 允许；其他任何值 → 新连接会被丢弃。 | **通过这个代理，一个容器可以越过某个后端自身的 ingress 策略，到达任意 namespace 里任何已注册的后端。** 安全警告。**是被协调的，不是一次性安装**（见下文）。理由在 `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2。 |
+| `DELONIX_ENABLE_IPV6` | `crates/adapters/delonix-sdn/src/infra.rs:ipv6_sdn_enabled` | 重新给 SDN 上的容器分配 IPv6 地址，也是启动 Router Advertisement 发射器（`control_plane_threads`）的那个开关。 | `1` → 启用；其他任何值 → 容器里的 IPv6 被禁用，转发被拒绝，任何网桥上都不发射 RA。 | **没有任何防火墙规则、namespace 隔离或 `Dependency` 会应用到 IPv6 上**——每一条策略都只针对 IPv4。安全警告。`AGENTS.md`，*«Bloco 0 do plano 33 (v0.37.1)»*。 |
 | `DELONIX_ALLOW_UNENFORCED_ISOLATION` | `bins/delonix-runtime-bin/src/cmd/container.rs:refuse_if_namespace_isolation_inert` | 即使内核不过滤 bridge 内部的流量（未加载 `br_netfilter`，或 `bridge-nf-call-iptables=0`），也让具名 namespace 里的工作负载带着告警跑起来。不设置时请求会被拒绝（DX-6305，退出码 69），因为隔离规则装上了却什么都不拦。只有 `1` 才打开。 | `1` → 带着告警跑；其他取值（或未设置）→ 拒绝。 | 隔离规则装上了却什么都不拦。见 [`AGENTS.md`](../../../AGENTS.md) 中 «O isolamento de namespace é INERTE sem `br_netfilter`» 一节。 |
 | `DELONIX_ALLOW_UNENFORCED_LIMITS` | `bins/delonix-runtime-bin/src/cmd/container.rs:preflight_resource_limits`, `crates/providers/delonix-provider-cloud-hypervisor/src/lib.rs:vmm_leaf` | 即使这个会话没有 cgroup 委派，也让 `-m`/`--cpus`/`--cpu-weight` 跑起来；即使容器的 cgroup 缺少 `cpuset`/`io` 控制器，也让 `--cpuset`/`--io-weight`/`--device-*` 跑起来（`preflight_controller_limits`），而不是拒绝（退出码 69）。当 Cloud Hypervisor VM 的 VMM 无法放进承载该 VM CPU 和内存上限的 cgroup 叶子时，也照样启动它，而不是拒绝（DX-6515，退出码 69）。 | 设置（任意值）→ 带着警告不受限地跑。 | 内核根本看不到这些限制。见[cgroup 委派](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced)。 |
+| `DELONIX_MANIFEST_LENIENT` | `bins/delonix-runtime-bin/src/cmd/manifest.rs:manifest_lenient` | 加载一个带有引擎看不懂的字段的 manifest，对那些字段给出警告，而不是在产生任何效果之前就拒绝它（ADR-0069 D1）。 | `1` → 宽松。其他任何值，或未设置 → 一个看不懂的字段会让这个 manifest 被拒绝。 | 给一份为更新的二进制文件写的 manifest 用。一个拼写错误（`memroy:`）也是「看不懂」：最好还是把拼写改对。`stack validate` 总是报告，而不是拒绝。 |
+| `DELONIX_CNI_TIMEOUT_SECS` | `crates/adapters/delonix-sdn/src/cni.rs:invoke` | 一次 CNI 插件调用的截止时间；在截止时间仍在运行的插件会被杀掉并回收。 | 正整数秒。默认 60；一个解析不了的值，或 0，会静默回退到默认值。 | 无论如何，一个插件每个流的输出都被限制在 1 MiB。 |
 | `DELONIX_INSECURE_BESTEFFORT` | `crates/adapters/delonix-linux/src/lib.rs:insecure_besteffort` | 跳过容器 init 和 `exec` 里、`execve` 之前会跑的那个 fail-closed 的封闭性验证（seccomp、capability、`no_new_privs`）。 | 设置（任意值）→ 跳过检查。 | **一个容器可能会以「本应生效却静默没生效」的封闭状态启动。** 引擎在容器自己的环境被应用之前就读取它，所以容器没法为自己设置它。 |
 | `DELONIX_PUBLISH_ADDR` | `crates/adapters/delonix-sdn/src/lib.rs:publish_bind_addr`；由 `bins/delonix-runtime-bin/src/cmd/vm.rs`（`vm reach`）建议 | 当 `-p` 没有点名地址时，已发布端口绑定的宿主机地址。 | 一个 IPv4 地址；不是 IPv4 的值会被忽略。默认 `127.0.0.1`。 | `0.0.0.0` 会把已发布的端口暴露在每一个网卡上。`vm reach` 会建议 libvirt 的网关地址，好让 VM 能连到某个容器而不必把它暴露给局域网。`AGENTS.md`，*«Revisão do flow `-p` ↔ `ingress`/`egress` (2026-07-27)»*。 |
 | `DELONIX_SUBNET_BASE` | `crates/adapters/delonix-sdn/src/lib.rs:default_base` | 强制指定默认网络（`10.<base>.0.0/16`）的第二个八位组。 | 一个 0–255 的整数（不做进一步的范围检查）。未设置：`<root>/net/default-base` 里持久化的值，否则是宿主机上检测到的一个空闲八位组。 | 只用于检测没有发现的冲突。在已经有容器存在之后再改它，会改变默认网络的地址。 |
 | `DELONIX_CNI` | `crates/adapters/delonix-sdn/src/cni.rs:enabled_conf`，被 `crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs`（`RunPodSandbox`）和 `runtime_svc.rs`（`UpdateRuntimeConfig`）消费 | **仅限 rootless 的 CRI：** 通过 CNI 插件链（`/etc/cni/net.d`，插件来自 `CNI_PATH`）给 pod sandbox 联网，跑在网络 holder 里面，而不是用原生 SDN。 | `1` → 开启，并且只在存在一份配置时才生效；其他任何值 → 原生 SDN。 | 当 CRI 以 root 身份运行时没有任何效果：root 身份下总是用节点的 CNI 配置。 |
 | `DELONIX_TRACE_UNPUBLISH` | `crates/adapters/delonix-sdn/src/infra.rs:trace_unpublish` | 记录每一次端口取消发布的函数、端口、pid、父 pid、可执行文件和一份 backtrace。 | `1` 或 `stderr` → 写到 stderr；其他任何值 → 追加到那个文件里。 | 一个诊断工具，未设置时零开销。为 `AGENTS.md` 里 *«RESOLVIDO — as portas publicadas morriam sozinhas»* 那次调查保留。 |
 
+### ingress 守卫是被协调的，不是一次性安装的
+
+`DELONIX_ALLOW_LINK_LOCAL` 和 `DELONIX_ALLOW_HOLDER_INGRESS` 会清空 holder 的两条无条件
+拒绝链 `fwguard` 和 `dlxinput`。两者都会在**每一次**把 ingress 拉起来、或把一个工作负载挂到
+它上面的调用中被读取，这两条链会根据结果被清空重填（`unconditional_guards_script`，由宿主机侧的
+`ensure_unconditional_guards_current` 以及 holder 内部的 `apply_unconditional_guards`
+应用）。有两个后果，都是刻意为之的：
+
+- **这个逃生舱只在它被设置着的时候才成立。** 它不是一个你拨一次就生效的全节点开关：
+  下一次触及 ingress 却*没有*这个变量的 `delonix` 调用，会把拒绝链装回去。为你正在调试的
+  那个 shell、或那个会话，export 它。
+- **去掉它会修复节点。** 不需要 `net netns down`，正在运行的工作负载也不会被打扰——
+  这条链会在活着的 holder 内部被重整到位。
+
+它以前是反过来工作的，而那正是 bug 所在：这些链只由 `ingress_table_ruleset` 发出，
+它唯一的生产调用方构建这个 netns，而重新挂接的路径从不重新加载那份规则集（重新应用它会把
+dispatch 规则再追加一遍——它不带 `flush`）。一个基础设施曾经在某个变量被设置的情况下拉起过
+一次的节点，会在这个 pin 的整个生命周期里一直保持着被清空的链，而这个 pin 按设计永远不重启。
+没有任何东西报告它，也没有什么比一次完整拆除更轻的办法能恢复它。dispatch
+（`ensure_fw_dispatch_current`）和私有出口守卫
+（`ensure_private_egress_guard_current`）早就是这么工作的；现在这两条也对齐了。
+
+一个 per-pin 的标记（`<root>/ingress/guards.<pin>`，保存着被应用的那个脚本的哈希）
+让常见情况免于做无用功：当 holder 已经是请求的形状时，根本不会跑任何 `nft`。
+
 ## 构建与镜像
 
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
 | `DELONIX_INSECURE_REGISTRIES` | `crates/adapters/delonix-oci/src/registry.rs` | 用明文 HTTP 而不是 HTTPS 联系的那些 registry。 | 用逗号分隔的 `host` 或 `host:port` 条目（不区分大小写）。未设置 → 除了已经用 HTTP 的回环 registry 之外，其他地方都用 HTTPS。 | **那些主机的流量和凭据都不经过 TLS 传输。** 是按每个主机明确选择加入（opt-in）的，绝不是一个范围。当到某个 registry 的 HTTPS 连接失败时，错误信息会建议用这个变量并填上那个主机。 |
+| `DELONIX_LAYER_MAX_BYTES` | `crates/adapters/delonix-oci/src/owners.rs:LayerLimits::from_env`（`BYTES_ENV`） | 单个镜像层解压后字节数的上限，在它从解压器里流式吐出时就强制执行（一个很小的 blob 可以膨胀到 TB 级别）。 | 一个正的大小：纯字节数，或带一个二进制后缀 `k`/`m`/`g`/`t`（`512m`、`100g`）。未设置 → 64 GiB。 | 一个超过它的层会在磁盘被填满之前以 `DX-1418` 被拒绝。一个零、空白或解析不了的值会被忽略并给出警告，默认值保持不变：它从不表示「没有上限」。在磁盘很小的节点上调低它；只为一个确实更大的可信镜像才调高它。 |
+| `DELONIX_LAYER_MAX_ENTRIES` | `crates/adapters/delonix-oci/src/owners.rs:LayerLimits::from_env`（`ENTRIES_ENV`） | 单个镜像层中条目数量的上限（「许多空文件」那种变体耗尽的是 inode，而不是字节）。 | 一个正整数，带同样的后缀。未设置 → 4,000,000。 | 同样的拒绝（`DX-1418`），以及对坏值的同样规则。 |
 | `DELONIX_SCAN_ON_PULL` | `bins/delonix-runtime-bin/src/cmd/scan.rs:admission_scan_on_pull` | 在每次 pull 镜像之后应用的 CVE 准入策略。 | 未设置／空 → 关闭。`warn` → 扫描并报告。`low`/`medium`/`high`/`critical` → 发现至少这个严重程度的漏洞时移除镜像并拒绝。一个未知的值会拒绝这次 pull。 | 一个 fail-closed 的门禁：打错字不会把它关掉。一个没有 SBOM 的镜像会带着警告被放行。 |
 | `DELONIX_ADVISORIES` | `bins/delonix-runtime-bin/src/cmd/scan.rs:load_advisories` | `image scan` 用的一份公告数据库文件的路径。 | 一个文件路径。 | 只在 `<root>/advisories.json` 没有已同步的数据库时才会用到；已同步的那份优先。两者都没有的话，会用内嵌的占位数据，并且扫描结果会说明这一点。 |
 | `DELONIX_ADVISORY_FEED` | `bins/delonix-runtime-bin/src/cmd/scan.rs:cmd_scan_update` | `delonix image scan --update` 的数据源。 | 一个 URL 或文件（OSV 格式或原生格式）。 | `--feed` 优先。两者都没有的话，`--update` 会报错，同时点名两者。 |
@@ -225,6 +258,8 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
+| `DELONIX_FUZZ_ITERS` | `bins/delonix-runtime-bin/src/cmd/fuzz_smoke.rs:iterations` | manifest 加载器和 compose 读取器的稳定 fuzz 测试里，每个目标的变异次数。 | 一个正整数。未设置：`1500`（不到一秒，所以这些测试会在每一次 `cargo test` 里跑）。 | 一次活动（campaign）就是同一个测试换一个更大的数字，比如 `DELONIX_FUZZ_ITERS=200000 cargo test -p delonix-runtime-bin fuzz_smoke`。库里的解析器由 `fuzz/` 下的 cargo-fuzz 来 fuzz。 |
+| `DELONIX_FUZZ_SEED` | `bins/delonix-runtime-bin/src/cmd/fuzz_smoke.rs:seed` | 同样这些测试里变异器的种子。 | 一个整数。未设置：一个固定的种子。 | 一个失败的测试会打印它当时用的种子；设置它来复现那个输入。 |
 | `DELONIX_PROXMOX_TEST_URL` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 用来跑实机 backend 测试的 Proxmox 节点。 | `https://<host>:8006`。 | 启用这些测试。它们会创建并销毁一个 VM；只对你自己拥有的节点运行。 |
 | `DELONIX_PROXMOX_TEST_NODE` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 节点名字。 | 默认 `pve`。 | |
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 用密码认证的账号。 | 比如 `root@pam`。必填。 | 这些测试里 TLS 校验是关闭的。 |
@@ -257,6 +292,7 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_OPNSENSE_TEST_URL` | `crates/providers/delonix-opnsense/tests/live.rs:target` | 用来跑实机客户端测试的 OPNsense 设备。 | `https://<host>`。 | 启用这些测试。它们会创建并移除一个别名和一条规则，然后确认这台设备被恢复干净。 |
 | `DELONIX_OPNSENSE_TEST_KEY` | `crates/providers/delonix-opnsense/tests/live.rs:target` | API key。 | 必填。 | |
 | `DELONIX_OPNSENSE_TEST_SECRET` | `crates/providers/delonix-opnsense/tests/live.rs:target` | API secret。 | 必填。 | 这些测试里 TLS 校验是关闭的。 |
+| `DELONIX_LIBVIRT_LIVE_DISK` | `crates/providers/delonix-provider-libvirt/tests/live.rs` | 用来跑 `vm.guest-agent` 实机测试的真实 cloud-init 基础 qcow2。 | 一个文件系统路径。 | 启用这个测试。它会启动一个用完即弃的 `qemu:///system` domain，让 cloud-init 自己安装并启用 `qemu-guest-agent`（不需要 SSH key），并且在退出时销毁/undefine 这个 domain，即使某个断言 panic 了也一样。 |
 | `DELONIX_UPDATE_FIXTURES` | `crates/adapters/delonix-linux/tests/advisor_fixtures.rs:goldens_match_the_rules_as_they_are_today` | 重写 `crates/adapters/delonix-linux/tests/fixtures/advisor/` 里 advisor 的 golden fixture，而不是拿它们做比较。 | 设置（任意值）→ 重写。 | 要和规则的改动放在**同一个** commit 里重新生成。 |
 
 跑实机测试（把占位符换掉；永远不要提交真实凭据）：
@@ -274,6 +310,9 @@ DELONIX_TRUENAS_TEST_PASS='<password>' \
 DELONIX_TRUENAS_TEST_POOL=tank \
   cargo test -p delonix-truenas --test live -- --nocapture
 
+DELONIX_LIBVIRT_LIVE_DISK=/path/to/debian-genericcloud.qcow2 \
+  cargo test -p delonix-provider-libvirt --test live -- --ignored --nocapture
+
 DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 ```
 
@@ -283,7 +322,13 @@ DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 
 - `DELONIX_CRI_SOCKET` —— `bins/delonix-runtime-bin/src/cmd/cluster.rs` 里的一个 Rust 常量，传给 `kubeadm … --cri-socket=`。CRI 服务端监听的那个 socket 是 `DELONIX_CRI_ADDR`。
 - `DELONIX_ROOTX`、`DELONIX_ROOT_BACKUP` —— `crates/adapters/delonix-sdn/src/infra.rs` 里的测试 fixture，用来证明读取一个进程 environ 是按完整名字匹配的，而不是前缀匹配。
-- `DELONIX_IMAGE`、`DELONIX_DISTRO`、`DELONIX_RELEASE`、`DELONIX_BUILT_BY`、`DELONIX_BASE_IMAGE`、`DELONIX_BASE_SHA256`、`DELONIX_K8S_VERSION`、`DELONIX_OFFLINE`、`DELONIX_NODE_EXPORTER`、`DELONIX_EXTRA_PACKAGES` —— `image vm build` 写在一个构建好的 VM 镜像**里面**（`bins/delonix-runtime-bin/src/cmd/vmimage.rs`）的溯源文件 `/etc/delonix-image-release` 的 key。在 guest 里用 `cat /etc/delonix-image-release` 读取它们；没有任何进程会读取它们。
+- `DELONIX_IMAGE`、`DELONIX_DISTRO`、`DELONIX_RELEASE`、`DELONIX_BUILT_BY`、`DELONIX_BASE_IMAGE`、`DELONIX_BASE_SHA256`、`DELONIX_K8S_VERSION`、`DELONIX_OFFLINE`、`DELONIX_NODE_EXPORTER`、`DELONIX_EXTRA_PACKAGES`、`DELONIX_CNI_PLUGINS`、`DELONIX_NET_PROFILES` —— `vm image build` 写在一个构建好的 VM 镜像**里面**（`bins/delonix-runtime-bin/src/cmd/vmimage.rs`）的溯源文件 `/etc/delonix-image-release` 的 key。在 guest 里用 `cat /etc/delonix-image-release` 读取它们；没有任何进程会读取它们。
+
+  后面两个携带着网络那一半的溯源信息，这样一个节点无需任何人挂载 qcow2 就能回答
+  「我携带的是哪一套插件」和「这个镜像是为哪些 profile 准备的」：`DELONIX_CNI_PLUGINS`
+  是被固定的参考插件集合连同它的摘要（`cni_plugins::provenance`），`DELONIX_NET_PROFILES`
+  是每一个 profile 连同它会安装的版本（`net_profiles::provenance`）。在一个 `--no-k8s`
+  镜像上这两个都是 `none`，因为它没有 kubelet 可供服务。
 
 ---
 

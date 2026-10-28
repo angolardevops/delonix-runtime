@@ -1,4 +1,4 @@
-<!-- translated-from: contributing-workflow.md sha256:7a27cf21c3440859aaa70b55740a2566cfff13b0f365c965900c98be188a10db -->
+<!-- translated-from: contributing-workflow.md sha256:b58928c2e1e424cc6e4ec7ba7bd630e5bef3652e854a8956534cfc7fbffd428f -->
 # 贡献流程
 
 **阅读之前：**[克隆、构建与测试](build-and-test.md#the-gates-ci-runs)（门禁部分）和
@@ -29,14 +29,21 @@ git log --oneline -- <path you will touch>          # what was already decided, 
 
 ## 一个任务一个 worktree
 
+> **分支模型与生命周期：** 权威的规则 —— 一个改动从哪个分支出发、怎么落地、怎么清理 ——
+> 在[工程流程](engineering-process.md)里。简而言之：`develop` 是集成线，`main` 是已发布线；
+> `feat/chore/refactor/perf/docs/test/ci/build` 从 `origin/develop` 出发，`fix/bug/hotfix` 从
+> `origin/main` 出发。`python3 scripts/gitflow.py`（或 `make gitflow ARGS="…"`）跑这套流程。
+> 本节只讲无论基底是什么都适用的 worktree 卫生。
+
 常常有好几个人和工具同时在同一个 clone 上工作。在一个共享的 checkout 里编辑，已经在这里
 真真切切地造成过损失：改动被吸收进别人的提交、`HEAD` 在一个任务进行到一半时切换了分支，
 还有在一棵脏的树上跑出一个绿色的 `cargo test`，却什么都没证明 `HEAD` 是能编译的。所以每个
-任务都会有自己的 git worktree 和分支，从 `origin/main` 创建出来：
+任务都会有自己的 git worktree 和分支，从它的分类所选中的那个基底创建出来：
 
 ```bash
-git fetch origin
-git worktree add -b <topic>/<task> <workspace>/.worktrees/delonix-runtime/<task> origin/main
+git fetch origin --prune
+# base is origin/develop for feat/chore/…, origin/main for fix/bug/hotfix
+git worktree add -b <prefix>/<task> <workspace>/.worktrees/delonix-runtime/<task> origin/<base>
 cd <workspace>/.worktrees/delonix-runtime/<task>
 ```
 
@@ -54,13 +61,17 @@ cd <workspace>/.worktrees/delonix-runtime/<task>
 - 推送因为分叉被拒绝时，**用 rebase，不要用 merge**：`git pull --rebase`。这里的历史
   是线性的。
 - **任务做完之后，把两样东西都删掉**：worktree 和分支 —— 分支不会随着
-  `worktree remove` 一起消失，过期分支就是这样堆起来的：
+  `worktree remove` 一起消失，过期分支就是这样堆起来的。先证明内容已经在 `develop` 里
+  （`git cherry develop <branch>`），然后用 `-d`（绝不用 `-D`，那会把尚未集成的提交藏起来）：
 
   ```bash
   git worktree remove <path>
-  git branch -D <topic>/<task>
-  git worktree list
+  git branch -d <prefix>/<task>
+  git worktree prune
   ```
+
+  `python3 scripts/gitflow.py cleanup <branch> --execute` 做的正是这件事，并且在工作尚未
+  集成或树是脏的时候拒绝执行。
 
 ## 版本对齐
 
@@ -156,14 +167,21 @@ Record，再动代码，比如：
 
 ## 新增或修改一个 CLI 命令
 
-- **把每一个入口都接上。** 有几个命令能从不止一条路径到达（比如 `delonix vm pull` 和
-  `delonix image vm pull`）。把它们全部改掉，然后用你构建出来的二进制程序逐一检查 ——
-  包括 shell 补全，因为你改的那份 `clap` 声明，未必就是用户实际那条路径解析用的那份。
-  补全引擎可以直接探测；`_CLAP_COMPLETE_INDEX` 是正在被补全的那个词的位置：
+- **把每一个入口都接上。** 当同一个任务确实能从不止一条路径到达时（compose/pod/Docker-API
+  这几个翻译器全都汇入同一个 `RunOpts`，就是活生生的例子），把它们全部改掉，然后用你构建
+  出来的二进制程序逐一检查 —— 包括 shell 补全，因为你改的那份 `clap` 声明，未必就是用户
+  实际那条路径解析用的那份。补全引擎可以直接探测；`_CLAP_COMPLETE_INDEX` 是正在被补全的
+  那个词的位置：
 
   ```bash
-  COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix image vm ''
+  COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix vm image ''
   ```
+
+  **当任务是单个资源的生命周期时，宁可用一个入口，也不要用好几个。**
+  `delonix vm pull`/`image vm pull`/`image --vm pull` 曾经是同一个命令的三份独立定义，靠
+  手工保持同步 —— 正是这一条所警告的那种漂移反复出现的根源。它们被折叠进了一个嵌套组
+  `delonix vm image <verb>`（AGENTS.md 里 CLI 重构的 Sprint 9）；要照抄的是那次合并，而不是
+  它消灭掉的那种重复。
 - **对着二进制程序验证**，不要对着源码：`./target/debug/delonix <group> <command> --help`，
   再做一次把状态根隔离开的真实运行（见
   [克隆、构建与测试](build-and-test.md#isolating-the-engines-state)）。

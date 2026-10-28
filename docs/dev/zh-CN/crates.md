@@ -1,4 +1,4 @@
-<!-- translated-from: crates.md sha256:c952168a8d193157afed44910bad62135d9e99905052a41a7323ed0cb25580c7 -->
+<!-- translated-from: crates.md sha256:af72635fc57c488b382a65194b935e907b034ba89e2e34e778982b5da9a2d4fd -->
 # 各个 crate
 
 **阅读之前：**[架构](architecture.md)，尤其是[层与允许的依赖方向](architecture.md#layers-and-the-allowed-direction)。
@@ -455,6 +455,7 @@ crate 文档中的一个文档测试。
 | `run_host` | `HostRuntime`，`RunHost` 端口的实现 |
 | `regulate`、`resource_advice`、`workload_view` | 资源压力、宿主机建议、请求值与实际生效值的对照视图 |
 | `usage` | 工作负载累计计数器的一次采样（`cgroup_sample`、`process_sample`），读不到的内容在 `Unmeasured` 中点名说明，而不是报告为零——这就是 MCP 的 `workload.usage` 返回的东西 |
+| `pressure` | 从某个工作负载的 cgroup v2 文件读取的争用序列：`cpu.stat` 节流、`*.pressure`（PSI）、`memory.events` OOM；都是纯解析器，并为每个读不到的分组给出一个 `Why`（`read_cgroup`、`vmm_cgroup`） |
 | `provider_report` | Linux 提供者针对容器和 Pod 对能力目录的回答 |
 
 **主要公开 API**
@@ -806,6 +807,7 @@ uid 设成 `0700` 是正常情况。
 |---|---|
 | `telemetry` | `init`——`fmt` subscriber，配置好时再加上 OTLP |
 | `metrics` | Prometheus 计数器/仪表以及 `encode` |
+| `workload` | 每个工作负载的争用序列（`WorkloadSeries`），由一个采集器在抓取时渲染 |
 
 **主要公开 API**
 
@@ -813,6 +815,7 @@ uid 设成 `0700` 是正常情况。
 |---|---|---|
 | `telemetry::init` | 在每个二进制程序启动时调用一次 | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` |
 | `metrics::encode` | `/metrics` 的文本格式输出 | `crates/adapters/delonix-telemetry/src/metrics.rs:encode` |
+| `metrics::publish_workloads` | 在一次抓取之前替换每个工作负载的快照 | `crates/adapters/delonix-telemetry/src/metrics.rs:publish_workloads` |
 
 **与……对话。** 不依赖任何引擎 crate。配置好时向一个 collector 导出
 OTLP。
@@ -1159,7 +1162,7 @@ crate 文档写明：新的本地客户端应该接到 ADR-0040/0041 的节点�
 | 模块 | 职责 |
 |---|---|
 | `lib.rs` | `serve_blocking`、`axum` 路由、各处理函数、`run_cli` |
-| `dashstats` | `DashSummary`、`collect`（计数、内存、网络、磁盘）、超时、指标发布 |
+| `dashstats` | `DashSummary`、`collect`（计数、内存、网络、磁盘）、`collect_workload_series`（每个工作负载的节流/压力/OOM）、超时、指标发布 |
 
 **主要公开 API**
 
