@@ -253,6 +253,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::image::ImageCmd,
     },
+    /// OCI runtime (runc-compatible CLI): create/start/state/kill/delete a
+    /// container from a bundle. The engine's own init behind the runc contract,
+    /// so it can sit where runc/crun do (ADR-0080).
+    #[command(name = "oci-runtime")]
+    OciRuntime(cmd::oci_runtime::OciRuntimeArgs),
     /// Build an image from a Dockerfile or Delonixfile.
     Build(cmd::build::BuildArgs),
     /// Declarative microVMs: create/ls/start/stop/console.
@@ -1169,6 +1174,7 @@ fn run() -> Result<()> {
         Cmd::Push(a) => cmd::image::run(cmd::image::ImageCmd::Push(a)),
         Cmd::Pod { action } => cmd::pod::run(action),
         Cmd::Image { action } => cmd::image::run(action),
+        Cmd::OciRuntime(args) => cmd::oci_runtime::run(args),
         Cmd::Build(args) => cmd::build::run(args),
         Cmd::Vm { action } => cmd::vm::run(action),
         Cmd::Systemcontainer { action } => cmd::system_container::run(action),

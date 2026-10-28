@@ -192,6 +192,7 @@ SOURCE_FILES = {
     "workload": "workload.rs",
     "pod": "pod.rs",
     "image": "image.rs",
+    "oci-runtime": "oci_runtime.rs",
     "build": "build.rs",
     "vm": "vm.rs",
     "systemcontainer": "system_container.rs",
@@ -524,6 +525,38 @@ imagem: Ubuntu cloud image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> 
                  "delonix image push kaeso-odoo:18 ghcr.io/angolardevops/kaeso-odoo:18"),
             ]},
             "apply": {"examples": [("", "delonix image apply -f delonix-manifest.yaml")]},
+        },
+    },
+    "oci-runtime": {
+        "title": "delonix oci-runtime",
+        "tagline": "CLI de runtime compatível com o runc (ADR-0080): corre um container a partir de um bundle OCI, com o init do próprio motor por trás do contrato do runc.",
+        "intro": """O contrato que o Kubernetes, o Docker e o Podman falam com o nível mais baixo é o do
+<code>runc</code>: <code>create</code>/<code>start</code>/<code>state</code>/<code>kill</code>/<code>delete</code>
+sobre um <strong>bundle OCI</strong> (um directório com <code>config.json</code> + <code>rootfs/</code> já
+extraído). Este grupo expõe exactamente esse contrato por cima do init do <code>delonix</code> — logo o
+<code>delonix oci-runtime</code> pode ocupar o lugar onde hoje está o <code>runc</code> ou o <code>crun</code>.<br><br>
+O estado vive no <code>--root</code> (por omissão <code>$XDG_RUNTIME_DIR/delonix-runtime</code> em rootless, ou
+<code>/run/delonix-runtime</code>), à parte do image store: o bundle já traz o <code>rootfs/</code>, por isso
+<strong>não é preciso imagem nem unpack</strong>. O trabalho é traduzir o <code>config.json</code> (args, env,
+cwd, hostname, limites delegados, user namespace, seccomp) para o <code>Container</code> + <code>RunSpec</code> do
+motor. Campos sem suporte real em rootless (<code>hooks</code>, AppArmor, controladores de recurso não delegados)
+são <strong>recusados pelo nome</strong>, com a razão — nunca ignorados em silêncio.""",
+        "subs": {
+            "create": {"examples": [
+                ('Criar (sem arrancar) a partir de um bundle feito por `image export`',
+                 'delonix image export --rootless alpine:3.19 /tmp/b && delonix oci-runtime create c1 --bundle /tmp/b')]},
+            "start": {"examples": [
+                ('Arrancar o container previamente criado',
+                 'delonix oci-runtime start c1')]},
+            "state": {"examples": [
+                ('Imprimir o estado OCI em JSON (ociVersion, id, status, pid, bundle)',
+                 'delonix oci-runtime state c1')]},
+            "kill": {"examples": [
+                ('Enviar um sinal (por omissão SIGTERM)',
+                 'delonix oci-runtime kill c1 KILL')]},
+            "delete": {"examples": [
+                ('Desmontar e apagar o estado (`--force` mata primeiro)',
+                 'delonix oci-runtime delete c1')]},
         },
     },
     "build": {

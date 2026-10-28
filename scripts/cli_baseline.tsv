@@ -303,3 +303,8 @@
 ~	save
 ~	stats
 ~	tag
+~	oci-runtime create
+~	oci-runtime delete
+~	oci-runtime kill
+~	oci-runtime start
+~	oci-runtime state
