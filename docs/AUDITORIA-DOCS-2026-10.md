@@ -104,15 +104,15 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 
 **🔴 Alta (promete o que não existe, ou quebra uma função nuclear):**
 1. ✅ `kinds.html` diz que Storage/ShareVolume ainda carregam — código rejeita. *(D)* **(FEITO — Secção 10)**
-2. Binário stale → regeneração descarta `bucket` e comandos novos. *(A)*
-3. 3× `$schema` + instalador apontam para `angolardevops.github.io/delonix-runtime` (não resolve). *(B)*
-4. Páginas Markdown mostram corpo só-PT em modo EN (4 guias). *(A)*
-5. Contraste de tokens de código no tema claro. *(A)*
-6. Pesquisa Ctrl+K ausente (92 páginas sem pesquisa). *(A)*
+2. ✅ Binário stale → regeneração descarta `bucket` e comandos novos. *(A)* **(resolvido: binário 0.1.0; +gate `contract_gate` na Secção 15)**
+3. 3× `$schema` + instalador apontam para `angolardevops.github.io/delonix-runtime` (não resolve). *(B)* **(Secção 2)**
+4. ✅ Páginas Markdown mostram corpo só-PT em modo EN (4 guias). *(A)* **(FEITO — Secção 9: rotuladas "Portuguese only")**
+5. ✅ Contraste de tokens de código no tema claro. *(A)* **(FEITO — Secção 6; rácios ≥4,5:1)**
+6. ✅ Pesquisa Ctrl+K ausente (92 páginas sem pesquisa). *(A)* **(FEITO — Secção 7)**
 
-**🟠 Média:** imagens golden `angolardevops` vs `ngolacloud`; proveniência 5.1.1→0.1.0 (labs + conformidade); `Delonix 0.53.0`; botão de cópia; `--help` EN-only; taglines EN em falta; `<html lang>` fixo; 22 âncoras quebradas (slugify); traduções stale; FirewallPolicy/Tunnel na tagline; env vars de desenho.
+**🟠 Média:** imagens golden `angolardevops` vs `ngolacloud` *(B, por fazer)*; proveniência 5.1.1→0.1.0 (labs ✅ reetiquetados Sec 11; conformidade por re-medir); `Delonix 0.53.0` *(B, por fazer)*; ✅ botão de cópia (Sec 8); ✅ `--help` EN-only rotulado (Sec 9); ✅ taglines EN (Sec 9); ✅ `<html lang>` (Sec 9); ✅ âncoras guia-vm (Sec 9; manual traduzido adiado); ⏳ traduções stale do manual (adiado, Sec 9); ✅ FirewallPolicy/Tunnel na tagline (Sec 10); ✅ env vars de desenho (Sec 12).
 
-**🟢 Baixa:** 346× "Delonix Runtime" no handbook; título duplicado; metadados ausentes; zh-CN fora da landing; labs não ligados; nav mobile; cores fora de tokens.
+**🟢 Baixa:** 346× "Delonix Runtime" no handbook *(por fazer, regeneração do handbook)*; ✅ título duplicado (Sec 16); ✅ metadados (Sec 16); ✅ zh-CN na landing (Sec 3); ✅ labs ligados (Sec 3); ✅ nav mobile (Sec 5); ✅ cores fora de tokens (Sec 6).
 
 ## Mapeamento para o backlog (frentes seguintes, uma sessão cada)
 
@@ -120,19 +120,19 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 |---|---|
 | 2 — Referências repo/release | Todas as linhas 🔴/🟠 de **B** |
 | 3 — Navegação/redireccionamentos | ✅ **FEITO** — **C** (zh-CN landing, labs não ligados); `image→vm#image` já resolvia |
-| 4 — Introdução/onboarding | — (reescrita; usar `delonix init` real) |
-| 5 — Layout/largura | nav mobile (**A**) |
-| 6 — Temas/contraste | tokens tema claro, output muted, tags/callouts (**A**) |
-| 7 — Pesquisa Ctrl+K | **A** (ausente) |
-| 8 — Botão de cópia | **A** (ausente) |
-| 9 — Traduções PT/EN | Markdown só-PT, `--help` EN-only, taglines EN, `<html lang>`, traduções stale, âncoras traduzidas |
+| 4 — Introdução/onboarding | ✅ **FEITO** — `index` reescrita (4 percursos, comandos verificados no binário); liga ao glossário |
+| 5 — Layout/largura | ✅ **FEITO** — nav hambúrguer colapsável <840px (**A**) |
+| 6 — Temas/contraste | ✅ **FEITO** — tokens de código brilhantes no tema claro, `--out-ink`, tags/callouts via variáveis; rácios ≥4,5:1 (**A**) |
+| 7 — Pesquisa Ctrl+K | ✅ **FEITO** — modal Ctrl/Cmd+K vendored + `search-index.json` (773 registos); âncoras reconciliadas com ids do gerador (**A**) |
+| 8 — Botão de cópia | ✅ **FEITO** — botão só nos `<pre>` de comando, bilingue, fallback `execCommand` (**A**) |
+| 9 — Traduções PT/EN | ✅ **PARCIAL** — taglines EN, `<html lang>`, md só-PT rotulado, `--help` rotulado EN, slugify guia-vm (10→0). ADIADO: 45 traduções stale/missing do manual (volume; leitor protegido por avisos) |
 | 10 — Kinds | ✅ **FEITO** — Storage/ShareVolume, tagline EN, FirewallPolicy→NetworkPolicy, NetworkZone sunset (**D**) |
-| 11 — Labs | labs não ligados; proveniência 5.1.1 |
-| 12 — Variáveis | referência já limpa; marcar env vars de ADR/discovery |
-| 13 — Glossário | — (novo) |
-| 14 — Arquitectura | diagramas (`arquitectura.html`/`c4.html`) a rever |
-| 15 — Exemplos testáveis | gate binário/`gen.py`; schema $ref |
-| 16 — Validação visual/publicação | sem workflow de deploy; validar Pages base URL |
+| 11 — Labs | ✅ **FEITO** — labs ligados (Sec 3) + proveniência reetiquetada como baseline histórica 5.1.x (não re-medida na 0.1.0) |
+| 12 — Variáveis | ✅ **FEITO** — env vars de `adr/0039`+`discovery/62` marcadas como desenho (0 leitores no código confirmado) |
+| 13 — Glossário | ✅ **FEITO** — nova página `glossario.html` (22 termos, 5 grupos), na nav sob "Conceitos" |
+| 14 — Arquitectura | ✅ **FEITO** — `arquitectura.html` reconstruída com os ~10 crates em falta; `c4.html` já correcto (ambos gerados) |
+| 15 — Exemplos testáveis | ✅ **FEITO** — `contract_gate()` (binário↔GROUPS, bidireccional) + `scripts/docs_command_gate.py`; 26 exemplos confirmados |
+| 16 — Validação visual/publicação | ✅ **FEITO** — título duplicado corrigido, `canonical`/`og:`/`twitter:` + `SITE_BASE`; base URL Pages validada (sem `<base>`, por decisão) |
 
 ## Contagens
 
