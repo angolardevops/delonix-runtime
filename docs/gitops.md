@@ -222,7 +222,7 @@ como `+~` (por adoptar) e o apply seguinte resolve-o.
 ## Escrever o manifesto sem decorar nada
 
 ```yaml
-# yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
+# yaml-language-server: $schema=https://ngolacloud.github.io/delonix/schema/v1/delonix.json
 ```
 
 Uma linha, e o editor passa a dar completação, verificação de tipos e a

@@ -10,7 +10,7 @@
 //! ROOT=$(mktemp -d)
 //! DELONIX_ROOT=$ROOT target/debug/delonix pull busybox:latest
 //! DELONIX_ROOT=$ROOT \
-//!   DELONIX_CLI_BIN=$PWD/target/debug/delonix \
+//!   DELONIX_BIN=$PWD/target/debug/delonix \
 //!   cargo test -p delonix-node-api --test live_container_update -- --ignored --nocapture
 //! ```
 
@@ -58,15 +58,13 @@ fn memory_max_of(pid: i32) -> String {
 }
 
 #[tokio::test]
-#[ignore = "launches a real container; run with --ignored and DELONIX_CLI_BIN + a DELONIX_ROOT holding busybox"]
+#[ignore = "launches a real container; run with --ignored and DELONIX_BIN + a DELONIX_ROOT holding busybox"]
 async fn update_container_lowers_the_live_memory_max() {
-    if std::env::var_os("DELONIX_CLI_BIN").is_none() || std::env::var_os("DELONIX_ROOT").is_none() {
-        eprintln!(
-            "SKIP: set DELONIX_CLI_BIN=<path to delonix> and DELONIX_ROOT=<root with busybox \
-             pulled> to run this live test"
-        );
-        return;
-    }
+    assert!(
+        std::env::var_os("DELONIX_BIN").is_some() && std::env::var_os("DELONIX_ROOT").is_some(),
+        "needs DELONIX_BIN=<path to delonix> and DELONIX_ROOT=<root with busybox pulled>: \
+         run with --ignored"
+    );
 
     let (_sock_dir, sock) = short_sock();
     let s = sock.clone();

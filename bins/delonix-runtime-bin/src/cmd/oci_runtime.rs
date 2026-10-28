@@ -8,7 +8,7 @@
 //! network namespace — and refuses by name what has no honoured path here
 //! (interactive terminal, per-container pids limit, cpuset, joining a netns).
 //!
-//! The key reuse (see `docs/dev/rt4-phase1-impl-map.md`): `delonix_linux::create_with`
+//! The key reuse (see `docs/discovery/69_RT4_PHASE1_IMPL_MAP.md`): `delonix_linux::create_with`
 //! launches from a `Container` + a rootfs PATH, not an image — and a bundle
 //! already carries `rootfs/` + `config.json`, so no image store is involved.
 

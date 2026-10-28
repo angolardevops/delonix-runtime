@@ -16,6 +16,8 @@ Terminal Linux e noção de container/rede. O Lab 1 ajuda mas não é obrigatór
 
 ## Versão e ambiente testados
 
+> **Baseline histórica (linha 5.1.x):** os valores abaixo foram medidos na linha antiga e **ainda não foram re-medidos na linha 0.1.0 actual**.
+
 `delonix 5.1.1`, Linux com cgroup v2, execução rootless. Validado a 2026-10-24
 (DNS interno, `kind: Dependency` → `NetworkPolicy` com *default deny*, e a
 distinção política-vs-serviço comprovada ao vivo — positivo `EXIT=0`, negativo

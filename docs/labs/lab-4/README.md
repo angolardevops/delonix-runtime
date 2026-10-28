@@ -16,6 +16,8 @@ Terminal Linux e noção de container/imagem. O Lab 1 ajuda mas não é obrigat�
 
 ## Versão e ambiente testados
 
+> **Baseline histórica (linha 5.1.x):** os valores abaixo foram medidos na linha antiga e **ainda não foram re-medidos na linha 0.1.0 actual**.
+
 `delonix 5.1.1`, Linux com cgroup v2, execução rootless. Validado a 2026-10-24
 (build a partir do `Delonixfile` com precedência sobre o `Dockerfile`, e
 `(healthy)` lido de `container ps -o json` — positivo `EXIT=0`; os dois modos de

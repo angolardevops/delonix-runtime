@@ -15,6 +15,8 @@ Terminal Linux e noção de cgroup v2. O Lab 1 ajuda mas não é obrigatório.
 
 ## Versão e ambiente testados
 
+> **Baseline histórica (linha 5.1.x):** os valores abaixo foram medidos na linha antiga e **ainda não foram re-medidos na linha 0.1.0 actual**.
+
 `delonix 5.1.1`, Linux com cgroup v2 e delegação rootless de `cpu memory pids`
 (`cpuset`/`io` ausentes, e está certo). Execução rootless. Validado a 2026-10-24.
 

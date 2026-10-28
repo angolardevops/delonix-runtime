@@ -365,7 +365,7 @@ nenhum, porque o visto verde é o que as pessoas seguem.
 Aponta o editor e escreve manifestos com completação e validação:
 
 ```yaml
-# yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
+# yaml-language-server: $schema=https://ngolacloud.github.io/delonix/schema/v1/delonix.json
 apiVersion: compute.delonix.io/v1alpha1
 kind: Pod
 metadata: { name: web }
@@ -445,7 +445,7 @@ O schema diz se o ficheiro está **bem escrito**; o
 de token ou de segredo legível por outros utilizadores, uma CA que não existe. Nenhum dos dois contacta um nó.
 
 ```yaml
-# yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json
+# yaml-language-server: $schema=https://ngolacloud.github.io/delonix/schema/v1/providers.json
 apiVersion: config.delonix.io/v1
 defaultProvider: libvirt
 providers:

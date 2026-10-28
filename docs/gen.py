@@ -1639,8 +1639,8 @@ isso está certo para CORRER e errado para DECIDIR: uma migração precisa da li
 uma segunda tabela para discordar deles. Responde a "o que posso escrever num manifesto, e o que
 escrevo a seguir a <code>explain</code>". A coluna <code>FORM</code> é a que não se adivinha: diz
 se um documento desse Kind sobrevive ao <code>load</code> sob o seu próprio nome — é por isso que
-um <code>kind: Egress</code> nunca aparece num plano como <code>Egress</code> (fundiu-se em
-<code>FirewallPolicy</code>).""",
+um <code>kind: Dependency</code> nunca aparece num plano como <code>Dependency</code> (é açúcar que
+baixa para <code>NetworkPolicy</code>).""",
         "subs": {},
     },
     "apply": {
@@ -1738,6 +1738,72 @@ VERBATIM da flag, para os dois nunca poderem divergir.""",
 # parte em vez de dentro de `GROUPS` para não obrigar a tocar em 26 entradas
 # grandes já existentes; `group_page` funde os dois por chave.
 GROUPS_EN = {
+    "backup": {
+        "tagline": "Backup of ONE resource — container, pod, vm or stack — into a tar.gz.",
+        "intro": """Not to be confused with <code>system snapshot create</code>, which takes the whole
+NODE. Here the archive carries the resource record and the DATA of the volumes it uses — not the
+image nor the rootfs, because a measured rootfs is 435 MB against 1.5 KB of record, and the image is
+content-addressed and re-downloads. The VM is the exception: its overlay IS its state, so that one
+travels (the golden base does not). <b>Nothing has to stop</b>: a container (or all members of a
+pod/stack, together) is held in the cgroup v2 <i>freezer</i> during the snapshot — no process can
+write while <code>tar</code> reads, and the PID does not change; a VM goes through libvirt's external
+snapshot, running on a temporary overlay while the real disk is copied, then settling back onto it.
+The guarantee is <b>crash consistency</b>, exactly what a power cut leaves — a journalled filesystem
+and any write-ahead-log database recover from it. What it is NOT: memory is not saved, so a process
+is not resumed mid-flight (that is CRIU) and an app with state only in RAM loses it —
+<code>--stop</code> and <code>--quiesce</code> are the two ways to ask for more, and each says what it
+costs. The destination can be a folder or a <code>volume:&lt;name&gt;</code>, which is how the archive
+lands on a NAS. Being a daemonless engine, <code>backup schedule</code> installs a <b>systemd user
+timer</b>: <code>--max-for-day N</code> spaces N runs across the day, and <code>--cron</code>
+translates the crontab expression — refusing what it cannot express rather than approximating.
+<code>schedule</code> <b>also takes the first archive, now</b>: a schedule whose first run is hours
+away leaves whoever installed it with no backup and the impression of having one. <code>restore</code>
+unpacks into a working folder BEFORE touching anything — a truncated archive then costs nothing — and
+refuses while the resource is running (<code>--force</code> stops it, restores, and starts it again).
+The <code>&lt;kind&gt;</code> is no longer positional: the archive already records what it carries,
+and <code>--kind</code> stays for anyone who wants a mismatch to be refused.""",
+    },
+    "config": {
+        "tagline": "A local preference, never a context: get, set, unset.",
+        "intro": """Just one key today, <code>output</code> (<code>table</code>|<code>json</code>),
+persisted in <code>config.json</code> under this host's <code>DELONIX_ROOT</code>. Never a remote
+context: the specification wanted <code>endpoint</code>/<code>identity</code>/<code>tls</code>, and
+that is exactly what ADR-0010 refused — the remote management API stays local until someone names a
+concrete consumer to reopen it.<br><br>
+<code>namespace</code> was left out on purpose: unlike <code>output</code>, which has ONE read point
+(<code>resolve_output</code>, called wherever this CLI takes <code>-o/--output</code>), a namespace
+default would be read by a dozen commands with no common point — building it just because the
+specification asked for more keys would be the field the system ignores that this repository has
+already paid for more than once.""",
+    },
+    "namespace": {
+        "tagline": "Isolation namespaces: ls, describe — who stands on each side of the boundary.",
+        "intro": """A namespace <strong>has no record of its own</strong>: it exists while something is
+in it, so this group DERIVES — just like <code>cluster ls</code> (from labels) and <code>pod
+ls</code>. There is no <code>create</code>/<code>rm</code> on purpose: an empty namespace would be a
+resource with a lifecycle, quotas and teardown — ADR matter, not a listing.<br><br>
+The boundary is nftables chains on the <code>forward</code> hook, and traffic between two containers
+on the SAME bridge only reaches it through <code>br_netfilter</code>. Without it every rule installs,
+every command reports success, and the namespaces <strong>do not isolate</strong> — which is why
+<code>ls</code> says so out loud when the host is not filtering, and <code>describe</code>
+distinguishes <em>no</em> from <em>don't know</em>.""",
+    },
+    "oci-runtime": {
+        "tagline": "runc-compatible runtime CLI (ADR-0080): run a container from an OCI bundle, with the engine's own init behind the runc contract.",
+        "intro": """The contract that Kubernetes, Docker and Podman speak to the lowest level is
+runc's: <code>create</code>/<code>start</code>/<code>state</code>/<code>kill</code>/<code>delete</code>
+over an <strong>OCI bundle</strong> (a directory with <code>config.json</code> + an already-extracted
+<code>rootfs/</code>). This group exposes exactly that contract on top of <code>delonix</code>'s init —
+so <code>delonix oci-runtime</code> can take the place where <code>runc</code> or <code>crun</code> sit
+today.<br><br>
+State lives under <code>--root</code> (default <code>$XDG_RUNTIME_DIR/delonix-runtime</code> in
+rootless, or <code>/run/delonix-runtime</code>), apart from the image store: the bundle already brings
+the <code>rootfs/</code>, so <strong>no image and no unpack are needed</strong>. The work is to
+translate <code>config.json</code> (args, env, cwd, hostname, delegated limits, user namespace,
+seccomp) into the engine's <code>Container</code> + <code>RunSpec</code>. Fields with no real support
+in rootless (<code>hooks</code>, AppArmor, non-delegated resource controllers) are <strong>refused by
+name</strong>, with the reason — never silently ignored.""",
+    },
     "bucket": {
         "tagline": "S3 object storage (buckets): ls, inspect, rm.",
         "intro": """The imperative side of <code>kind: ObjectStorage</code> (ADR-0081): list, inspect
@@ -2212,8 +2278,8 @@ namespace other than the source's.""",
 there is no second table to disagree with them. It answers «what can I write in a manifest, and
 what do I type after <code>explain</code>». The <code>FORM</code> column is the one that cannot be
 guessed: it says whether a document of that Kind survives the load under its own name — which is
-why a <code>kind: Egress</code> never shows up in a plan as <code>Egress</code> (it merged into
-<code>FirewallPolicy</code>).""",
+why a <code>kind: Dependency</code> never shows up in a plan as <code>Dependency</code> (it is sugar
+that lowers into <code>NetworkPolicy</code>).""",
     },
     "apply": {
         "tagline": "Converge a manifest — the canonical spelling of `stack apply`.",
@@ -3227,16 +3293,28 @@ EXAMPLES_EN = {
 CSS = """
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
---tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
---tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+--out-ink:#4a5563;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#9da7b3;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#9da7b3;--tok-head:#ff9a5a;--tok-sep:#9da7b3;
+--tag-ok-bg:#d8f3dc;--tag-ok-fg:#1b4332;--tag-mid-bg:#fff3bf;--tag-mid-fg:#5c4a00;
+--tag-no-bg:#ffe3e3;--tag-no-fg:#7a1420;
+--warn-border:#e03131;--warn-bg:#fff0f0;--warn-fg:#c92a2a}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
 --bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--out-ink:#aeb8c6;
 --tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
---tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e;
+--tag-ok-bg:#0f3d24;--tag-ok-fg:#8fe3ac;--tag-mid-bg:#453800;--tag-mid-fg:#ffe066;
+--tag-no-bg:#4a1015;--tag-no-fg:#ffa8a8;
+--warn-border:#e5484d;--warn-bg:#3a1414;--warn-fg:#ff8787}}
 :root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
 --bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--out-ink:#aeb8c6;
 --tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
---tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e;
+--tag-ok-bg:#0f3d24;--tag-ok-fg:#8fe3ac;--tag-mid-bg:#453800;--tag-mid-fg:#ffe066;
+--tag-no-bg:#4a1015;--tag-no-fg:#ffa8a8;
+--warn-border:#e5484d;--warn-bg:#3a1414;--warn-fg:#ff8787}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
@@ -3294,6 +3372,7 @@ pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-r
 overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
+.help-note{font-size:.76rem;color:var(--muted);margin:0 0 .35rem;font-style:italic}
 .tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
 .tok-comment{color:var(--tok-comment);font-style:italic}
 .tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
@@ -3301,13 +3380,17 @@ pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .tok-sep{color:var(--tok-sep)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
 .ex .out,div.out{margin-top:.4rem}
-.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--out-ink);
 padding:.7rem 1rem;font-size:.82rem}
 .ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
 margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
 th{background:var(--side)}
+dl{margin:1rem 0}
+dt{font-weight:700;margin-top:1.1rem}
+dd{margin:.25rem 0 0;padding-left:1rem;border-left:2px solid var(--line);color:var(--ink)}
+dd+dt{border-top:1px solid var(--line);padding-top:1.1rem}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
 .card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
 .card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
@@ -3321,15 +3404,13 @@ padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
 .pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
 padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
 .tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
-.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
-.tag.no{background:#ffe3e3;color:#7a1420}
-@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
-.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.tag.ok{background:var(--tag-ok-bg);color:var(--tag-ok-fg)}
+.tag.mid{background:var(--tag-mid-bg);color:var(--tag-mid-fg)}
+.tag.no{background:var(--tag-no-bg);color:var(--tag-no-fg)}
 .callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
 background:var(--accent-soft)}
-.callout.warn{border-color:#e03131;background:#fff0f0}
-.callout.warn b{color:#c92a2a}
-@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout.warn{border-color:var(--warn-border);background:var(--warn-bg)}
+.callout.warn b{color:var(--warn-fg)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
@@ -3338,20 +3419,71 @@ aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transfo
 aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
 aside.toc a:hover{color:var(--accent);text-decoration:none}
 @media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
-@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+/* Hambúrguer: escondido no desktop; a lista de nav está sempre visível. */
+.nav-toggle{display:none;appearance:none;border:1px solid var(--line);background:var(--bg);
+color:var(--ink);border-radius:8px;width:30px;height:30px;flex-shrink:0;align-items:center;
+justify-content:center;cursor:pointer;font-size:1.05rem;line-height:1}
+.nav-toggle:hover{border-color:var(--accent)}
+/* Botão de cópia: sobre o fundo do código (SEMPRE escuro) nos dois temas. */
+pre.has-copy{position:relative}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;appearance:none;cursor:pointer;
+border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--code-ink);
+border-radius:6px;padding:.16rem .5rem;font-size:.72rem;font-weight:600;line-height:1.4;
+opacity:0;transition:opacity .15s,background .15s,color .15s,border-color .15s}
+pre.has-copy:hover .copy-btn,.copy-btn:focus-visible{opacity:1}
+.copy-btn:hover{background:rgba(255,255,255,.16)}
+.copy-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.copy-btn.ok{opacity:1;background:rgba(63,185,80,.22);border-color:#3fb950;color:#7ee787}
+.copy-btn.err{opacity:1;background:rgba(248,81,73,.22);border-color:#f85149;color:#ffa8a8}
+.copy-btn.ok::after{content:" \\2713"}
+.copy-btn.err::after{content:" \\2717"}
+@media (hover:none){.copy-btn{opacity:1}}
+@media (max-width:840px){.layout{display:block}
+nav.side{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:.8rem 1rem;
+border-right:none;border-bottom:1px solid var(--line)}
+nav.side .brand{margin-bottom:0}
+.nav-toggle{display:inline-flex}
+.nav-links{display:none;margin-top:.8rem;max-height:70vh;overflow-y:auto}
+nav.side.open .nav-links{display:block}
 main{padding:1.4rem 1.2rem 4rem;max-width:none}}
+
+/* Pesquisa Ctrl/Cmd+K — modal vendored, sem CDN, temas claro/escuro via vars */
+.search-trigger{appearance:none;display:flex;align-items:center;gap:.4rem;width:100%;margin:.1rem 0 .6rem;
+padding:.4rem .55rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted);
+font:inherit;font-size:.86rem;cursor:pointer;text-align:left}
+.search-trigger:hover{border-color:var(--accent);color:var(--ink)}
+.search-trigger .kbd{margin-left:auto;font-size:.68rem;border:1px solid var(--line);border-radius:5px;
+padding:.05rem .32rem;color:var(--muted)}
+.search-overlay{position:fixed;inset:0;z-index:1000;display:none;align-items:flex-start;justify-content:center;
+background:rgba(8,10,16,.5);padding:12vh 1rem 1rem}
+.search-overlay.open{display:flex}
+.search-panel{width:100%;max-width:640px;background:var(--bg);border:1px solid var(--line);border-radius:12px;
+box-shadow:0 18px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;max-height:72vh;overflow:hidden}
+.search-head{display:flex;align-items:center;gap:.55rem;padding:.7rem .9rem;border-bottom:1px solid var(--line)}
+.search-head svg{flex:none;width:18px;height:18px;color:var(--muted)}
+.search-input{flex:1;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:1rem}
+.search-esc{flex:none;font-size:.68rem;border:1px solid var(--line);border-radius:5px;padding:.1rem .35rem;color:var(--muted)}
+.search-results{list-style:none;margin:0;padding:.3rem;overflow-y:auto}
+.search-results li{padding:.5rem .6rem;border-radius:8px;cursor:pointer;scroll-margin:.4rem}
+.search-results li.active,.search-results li:hover{background:var(--accent-soft)}
+.search-results .r-title{font-weight:600;color:var(--ink);font-size:.94rem}
+.search-results li.active .r-title{color:var(--accent)}
+.search-results .r-sec{font-size:.78rem;color:var(--accent);margin-left:.4rem;font-weight:500}
+.search-results .r-ex{font-size:.82rem;color:var(--muted);margin-top:.15rem;line-height:1.35;
+display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.search-results mark{background:var(--accent-soft);color:var(--accent);padding:0 .12em;border-radius:3px}
+.search-empty{padding:1.3rem;text-align:center;color:var(--muted);font-size:.9rem}
 """
 
 
-def sidebar(active, depth=0):
-    p = "../" * depth
-    # (section PT, section EN, [(href, label PT, label EN), ...]) — the 14
-    # guides grouped by theme (Get started/Concepts/Guides/Reference), in
-    # the style of kubectl's quick-reference (Concepts/Tasks/Tutorials/
-    # Reference) instead of one flat list. Same hrefs/labels as always —
-    # pure reorganization, zero new page.
-    doc_groups = [
-        ("Começar", "Get started", [
+# (section PT, section EN, [(href, label PT, label EN), ...]) — the 14
+# guides grouped by theme (Get started/Concepts/Guides/Reference), in the
+# style of kubectl's quick-reference (Concepts/Tasks/Tutorials/Reference)
+# instead of one flat list. Hoisted to module scope so the sidebar AND the
+# search index (`build_search_index()`) read the SAME bilingual page list —
+# never a second copy of the titles/URLs.
+DOC_GROUPS = [
+    ("Começar", "Get started", [
             ("index.html", "Início", "Home"),
             ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
             ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", "Full project: Delonix Temp"),
@@ -3359,6 +3491,7 @@ def sidebar(active, depth=0):
         ("Conceitos", "Concepts", [
             ("estrutura.html", "Estrutura de recursos", "Resource structure"),
             ("kinds.html", "Kinds e templates", "Kinds & templates"),
+            ("glossario.html", "Glossário", "Glossary"),
             ("arquitectura.html", "Arquitectura", "Architecture"),
             ("c4.html", "Modelo C4 e system design", "C4 model & system design"),
             ("cri.html", "CRI — kubelet sem containerd", "CRI — kubelet without containerd"),
@@ -3378,6 +3511,11 @@ def sidebar(active, depth=0):
             ("comparacao.html", "Delonix vs Docker vs Podman", "Delonix vs Docker vs Podman"),
         ]),
     ]
+
+
+def sidebar(active, depth=0):
+    p = "../" * depth
+    doc_groups = DOC_GROUPS
 
     def link_bi(href, pt, en):
         cls = ' class="on"' if href == active else ""
@@ -3433,13 +3571,20 @@ def sidebar(active, depth=0):
 <span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
 <span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+<button class="nav-toggle" type="button" aria-controls="nav-links" aria-expanded="false" aria-label="Menu de navegação / Navigation menu" title="Menu">☰</button>
 </div></div>
+<div class="nav-links" id="nav-links">
+<button class="search-trigger" type="button" data-search-open aria-haspopup="dialog" aria-controls="search-overlay">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:15px;height:15px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<span class="lang-pt">Pesquisar</span><span class="lang-en">Search</span>
+<span class="kbd">Ctrl K</span></button>
 {doc_html}
 <h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
 {cmd_html}
 <h5>{bi('span', 'Projecto', 'Project')}</h5>
 <a href="https://github.com/ngolacloud/delonix">GitHub</a>
 <a href="https://github.com/ngolacloud/delonix/releases">Releases</a>
+</div>
 </nav>"""
 
 
@@ -3451,7 +3596,7 @@ THEME_INIT_JS = """<script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
 var l=localStorage.getItem('delonix-docs-lang');
-if(l)document.documentElement.setAttribute('data-lang',l);
+if(l){document.documentElement.setAttribute('data-lang',l);document.documentElement.lang=(l==='en'?'en':'pt');}
 }catch(e){}})();</script>"""
 
 # JS partilhado por todas as páginas: toggle de tema (persistido), índice
@@ -3543,26 +3688,35 @@ function isVisibleForLang(el,lang){
   return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
 }
 function buildToc(){
-  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
-      aside=document.getElementById('pagetoc');
-  if(!main||!nav)return;
+  var main=document.querySelector('main');
+  if(!main)return;
   var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  // Âncoras estáveis: ids atribuídos a TODOS os h2/h3 visíveis, em ordem de
+  // documento, com um único mapa de dedup — a MESMA regra que o índice de
+  // pesquisa aplica em Python (build_search_index), para `url#slug` bater.
+  var used={};
+  [].slice.call(main.querySelectorAll('h2,h3')).forEach(function(h){
+    if(!isVisibleForLang(h,lang))return;
+    // Um id explícito do gerador MANDA (kinds, glossário, md_page, labs,
+    // subcomandos): só o registamos no dedup e seguimos — sobrescrevê-lo
+    // partiria os links internos que lhe apontam (ex.: vm.html#image).
+    if(h.id){used[h.id]=1;return;}
+    var label=visibleHeadingText(h);
+    var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+    while(used[slug])slug+='-x';
+    used[slug]=1;h.id=slug;
+  });
+  var nav=document.getElementById('toc-nav'),aside=document.getElementById('pagetoc');
+  if(!nav)return;
   var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
     return isVisibleForLang(h,lang);
   });
   nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
   if(aside)aside.style.display='';
-  var used={};
   heads.forEach(function(h){
-    var label=visibleHeadingText(h);
-    if(!h.id){
-      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
-      while(used[slug])slug+='-x';
-      used[slug]=1;h.id=slug;
-    }
     var a=document.createElement('a');
-    a.href='#'+h.id;a.textContent=label;
+    a.href='#'+h.id;a.textContent=visibleHeadingText(h);
     nav.appendChild(a);
   });
 }
@@ -3586,13 +3740,214 @@ function initLangToggle(){
     var eff=document.documentElement.getAttribute('data-lang')||'pt';
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
+    document.documentElement.lang=(next==='en'?'en':'pt');
     try{localStorage.setItem(KEY,next);}catch(e){}
     buildToc();
   });
 }
 
+function initNavToggle(){
+  var btn=document.querySelector('.nav-toggle'),nav=document.querySelector('nav.side');
+  if(!btn||!nav)return;
+  btn.addEventListener('click',function(){
+    var open=nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded',open?'true':'false');
+  });
+  // No mobile, fechar o menu ao seguir um link.
+  nav.addEventListener('click',function(e){
+    if(e.target.closest('#nav-links a')&&matchMedia('(max-width:840px)').matches){
+      nav.classList.remove('open');btn.setAttribute('aria-expanded','false');
+    }
+  });
+}
+
+function legacyCopy(text){
+  try{
+    var ta=document.createElement('textarea');
+    ta.value=text;ta.setAttribute('readonly','');
+    ta.style.position='fixed';ta.style.top='-9999px';ta.style.left='-9999px';
+    document.body.appendChild(ta);ta.focus();ta.select();
+    var ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  }catch(e){return false;}
+}
+function flashCopy(btn,ok){
+  btn.classList.remove('ok','err');
+  btn.classList.add(ok?'ok':'err');
+  clearTimeout(btn._copyT);
+  btn._copyT=setTimeout(function(){btn.classList.remove('ok','err');},1600);
+}
+function isCommandPre(pre,code){
+  // Só blocos de COMANDO: nunca .out (resultados) nem .help (--help), nem YAML.
+  if(pre.closest('.out'))return false;
+  if(pre.parentElement&&pre.parentElement.classList.contains('help'))return false;
+  var text=code.textContent;
+  if(/^apiVersion:|\\nkind:\\s/.test(text))return false;
+  return !!(pre.closest('.ex')||/^(delonix|dlx)\\b/.test(text.trim()));
+}
+function initCopyButtons(){
+  document.querySelectorAll('main pre > code').forEach(function(code){
+    var pre=code.parentElement;
+    if(!isCommandPre(pre,code))return;
+    if(pre.querySelector('.copy-btn'))return;
+    pre.classList.add('has-copy');
+    var btn=document.createElement('button');
+    btn.type='button';
+    btn.className='copy-btn';
+    btn.setAttribute('aria-label','Copiar comando / Copy command');
+    btn.innerHTML='<span class="lang-pt">Copiar</span><span class="lang-en">Copy</span>';
+    btn.addEventListener('click',function(){
+      var text=code.textContent;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(
+          function(){flashCopy(btn,true);},
+          function(){flashCopy(btn,legacyCopy(text));});
+      }else{
+        flashCopy(btn,legacyCopy(text));
+      }
+    });
+    pre.appendChild(btn);
+  });
+}
+
+// ---- Pesquisa Ctrl/Cmd+K (índice estático search-index.json, vendored) ----
+var SEARCH_I18N={
+  pt:{ph:'Pesquisar na documentação…',aria:'Pesquisar na documentação',list:'Resultados da pesquisa',
+      none:'Sem resultados para',hint:'Escreve para pesquisar'},
+  en:{ph:'Search the documentation…',aria:'Search the documentation',list:'Search results',
+      none:'No results for',hint:'Type to search'}
+};
+var searchData=null,searchLoading=false,searchItems=[],searchActive=-1,lastFocus=null;
+function docsBase(){return window.__DOCS_BASE__||'';}
+function curLang(){return document.documentElement.getAttribute('data-lang')||'pt';}
+function fold(s){return (s||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');}
+function loadIndex(cb){
+  if(searchData){cb();return;}
+  if(searchLoading)return;
+  searchLoading=true;
+  fetch(docsBase()+'search-index.json').then(function(r){return r.json();}).then(function(d){
+    searchData=d;searchLoading=false;cb();
+  }).catch(function(){searchData=[];searchLoading=false;cb();});
+}
+function markText(text,terms){
+  text=text||'';
+  var ft=fold(text),ranges=[];
+  terms.forEach(function(t){
+    var from=0,i;
+    while((i=ft.indexOf(t,from))>=0){ranges.push([i,i+t.length]);from=i+t.length;}
+  });
+  if(!ranges.length)return esc(text);
+  ranges.sort(function(a,b){return a[0]-b[0];});
+  var out='',pos=0;
+  ranges.forEach(function(r){
+    if(r[0]<pos)return;
+    out+=esc(text.slice(pos,r[0]))+'<mark>'+esc(text.slice(r[0],r[1]))+'</mark>';
+    pos=r[1];
+  });
+  return out+esc(text.slice(pos));
+}
+function runQuery(q){
+  var lang=curLang(),terms=fold(q).split(/\\s+/).filter(Boolean),out=[];
+  if(!terms.length)return out;
+  (searchData||[]).forEach(function(rec){
+    var title=(rec.title&&rec.title[lang])||'';
+    var text=(rec.text&&rec.text[lang])||'';
+    var exc=(rec.excerpt&&rec.excerpt[lang])||'';
+    if(rec.kind==='section'&&!text)return;   // registo não é deste idioma
+    if(rec.kind==='page'&&!title)return;
+    var ftitle=fold(title),ftext=fold(text),hay=fold(title+' '+text+' '+exc);
+    var ok=true,score=0;
+    terms.forEach(function(t){
+      if(hay.indexOf(t)<0){ok=false;return;}
+      if(ftitle.indexOf(t)>=0)score+=4;
+      if(ftext.indexOf(t)>=0)score+=2;
+      score+=1;
+    });
+    if(rec.kind==='page')score+=1;
+    if(ok)out.push({rec:rec,score:score,title:title,text:text,exc:exc});
+  });
+  out.sort(function(a,b){return b.score-a.score;});
+  return out.slice(0,40);
+}
+function hrefFor(rec,lang){
+  var slug=rec.slug&&rec.slug[lang];
+  return docsBase()+rec.url+(slug?('#'+slug):'');
+}
+function renderResults(q){
+  var ul=document.getElementById('search-results');if(!ul)return;
+  var lang=curLang(),terms=fold(q).split(/\\s+/).filter(Boolean);
+  var res=runQuery(q);
+  searchItems=[];searchActive=-1;ul.innerHTML='';
+  if(!q){ul.innerHTML='<li class="search-empty" role="presentation">'+esc(SEARCH_I18N[lang].hint)+'</li>';return;}
+  if(!res.length){ul.innerHTML='<li class="search-empty" role="presentation">'+esc(SEARCH_I18N[lang].none)+' “'+esc(q)+'”</li>';return;}
+  res.forEach(function(r,idx){
+    var li=document.createElement('li');
+    li.setAttribute('role','option');li.id='search-opt-'+idx;li.setAttribute('aria-selected','false');
+    var sec=r.rec.kind==='section'?('<span class="r-sec">'+markText(r.text,terms)+'</span>'):'';
+    li.innerHTML='<div class="r-title">'+markText(r.title,terms)+sec+'</div>'+
+      (r.exc?('<div class="r-ex">'+markText(r.exc,terms)+'</div>'):'');
+    var href=hrefFor(r.rec,lang);
+    li.addEventListener('click',function(){location.href=href;});
+    searchItems.push({href:href,el:li});
+    ul.appendChild(li);
+  });
+  setActive(0);
+}
+function setActive(i){
+  if(!searchItems.length)return;
+  if(searchActive>=0&&searchItems[searchActive]){
+    searchItems[searchActive].el.classList.remove('active');
+    searchItems[searchActive].el.setAttribute('aria-selected','false');
+  }
+  searchActive=(i+searchItems.length)%searchItems.length;
+  var it=searchItems[searchActive];
+  it.el.classList.add('active');it.el.setAttribute('aria-selected','true');
+  it.el.scrollIntoView({block:'nearest'});
+  var inp=document.getElementById('search-input');if(inp)inp.setAttribute('aria-activedescendant',it.el.id);
+}
+function openSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  loadIndex(function(){var inp=document.getElementById('search-input');if(inp&&inp.value)renderResults(inp.value);});
+  lastFocus=document.activeElement;
+  ov.classList.add('open');ov.removeAttribute('aria-hidden');
+  var lang=curLang(),inp=document.getElementById('search-input');
+  inp.placeholder=SEARCH_I18N[lang].ph;inp.setAttribute('aria-label',SEARCH_I18N[lang].aria);
+  var ul=document.getElementById('search-results');if(ul)ul.setAttribute('aria-label',SEARCH_I18N[lang].list);
+  inp.value='';renderResults('');
+  setTimeout(function(){inp.focus();},0);
+}
+function closeSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  ov.classList.remove('open');ov.setAttribute('aria-hidden','true');
+  if(lastFocus&&lastFocus.focus)lastFocus.focus();
+}
+function initSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  var inp=document.getElementById('search-input');
+  [].slice.call(document.querySelectorAll('[data-search-open]')).forEach(function(b){
+    b.addEventListener('click',function(e){e.preventDefault();openSearch();});
+  });
+  inp.addEventListener('input',function(){renderResults(inp.value);});
+  ov.addEventListener('mousedown',function(e){if(e.target===ov)closeSearch();});
+  document.addEventListener('keydown',function(e){
+    var open=ov.classList.contains('open');
+    if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();open?closeSearch():openSearch();return;}
+    if(!open)return;
+    if(e.key==='Escape'){e.preventDefault();closeSearch();}
+    else if(e.key==='ArrowDown'){e.preventDefault();setActive(searchActive+1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();setActive(searchActive-1);}
+    else if(e.key==='Enter'){e.preventDefault();if(searchActive>=0&&searchItems[searchActive])location.href=searchItems[searchActive].href;}
+    else if(e.key==='Tab'){e.preventDefault();inp.focus();}   // trap de foco simples: 1 campo
+  });
+}
+function scrollToHash(){
+  if(!location.hash)return;
+  try{var el=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(el)el.scrollIntoView();}catch(e){}
+}
+
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();initLangToggle();buildToc();highlightAll();
+  initThemeToggle();initLangToggle();initNavToggle();buildToc();highlightAll();initCopyButtons();initSearch();scrollToHash();
 });
 })();</script>"""
 
@@ -3605,15 +3960,73 @@ FOOTER_EN = ('Delonix Engine · Apache-2.0 · '
              ' · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.')
 FOOTER_HTML = bi("span", FOOTER_PT, FOOTER_EN)
 TOC_HEADING_HTML = bi("span", "Nesta página", "On this page")
+# Os blocos `<div class='help'>` embebem o `--help` REAL do clap, que é só-EN.
+# Em vez de tentar traduzir a saída do binário, rotula-se o bloco (bilingue)
+# para o leitor PT saber que o que se segue é a saída verbatim, em inglês.
+HELP_NOTE_HTML = bi("div", "Saída real do binário (em inglês).",
+                    "Real output of the binary (English).", cls="help-note")
+
+# URL base do GitHub Pages (modo "branch → /docs", sem CNAME/domínio próprio).
+# NÃO se usa uma tag <base> HTML: os links do site são relativos com
+# profundidade variável (`../kinds.html`, `comandos/x.html`) e um <base>
+# resolvê-los-ia todos contra a raiz, partindo a navegação. Serve só de origem
+# para os URLs ABSOLUTOS de `canonical`/`og:url`, calculados por página.
+SITE_BASE = "https://ngolacloud.github.io/delonix"
+SITE_NAME = "Delonix Engine"
+SITE_DESCRIPTION = ("Engine de containers e microVMs daemonless, rootless-first, "
+                    "em Rust — referência gerada do --help real do binário.")
+
+# Material recolhido por `page()` para o índice de pesquisa (uma entrada por
+# página gerada), consumido no fim por `build_search_index()`.
+_SEARCH_PAGES = []
+
+# Marcação do modal de pesquisa, partilhada por todas as páginas. Rótulos
+# bilingues por CSS (lang-pt/lang-en); placeholder/aria-label são postos pelo
+# JS conforme o idioma activo. Começa escondido (sem classe `open`).
+SEARCH_MODAL_HTML = """<div class="search-overlay" id="search-overlay" role="dialog" aria-modal="true" aria-label="Pesquisa / Search" aria-hidden="true">
+<div class="search-panel">
+<div class="search-head">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<input class="search-input" id="search-input" type="text" role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="true" aria-activedescendant="" autocomplete="off" spellcheck="false" placeholder="Pesquisar / Search">
+<span class="search-esc" aria-hidden="true">Esc</span>
+</div>
+<ul class="search-results" id="search-results" role="listbox" aria-label="Resultados / Results"></ul>
+</div>
+</div>"""
 
 
 def page(path, title, body, depth=0):
+    # Guarda o material desta página para o índice de pesquisa — `page()` é o
+    # único sítio por onde TODAS as páginas passam, logo o índice sai das
+    # mesmas estruturas que o site, nunca de uma segunda fonte.
+    _SEARCH_PAGES.append({"path": path, "title": title, "body": body})
+    base = "../" * depth
+    # `canonical`/`og:url` absolutos a partir do caminho da própria página
+    # (independente da profundidade); a raiz colapsa `index.html` para `/`.
+    canon = SITE_BASE + "/" + ("" if path == "index.html" else path)
+    # O index chama-se já "Delonix Engine" — sem isto o <title> saía duplicado
+    # ("Delonix Engine · Delonix Engine").
+    page_title = (html.escape(title) if title == SITE_NAME
+                  else f"{html.escape(title)} · {html.escape(SITE_NAME)}")
+    og_title = html.escape(title)
+    desc = html.escape(SITE_DESCRIPTION)
+    canon_e = html.escape(canon)
     doc = f"""<!DOCTYPE html>
 <html lang="pt">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Delonix Engine</title>
+<title>{page_title}</title>
+<meta name="description" content="{desc}">
+<link rel="canonical" href="{canon_e}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{html.escape(SITE_NAME)}">
+<meta property="og:title" content="{og_title}">
+<meta property="og:description" content="{desc}">
+<meta property="og:url" content="{canon_e}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{og_title}">
+<meta name="twitter:description" content="{desc}">
 {THEME_INIT_JS}
 <style>{CSS}</style>
 </head>
@@ -3626,6 +4039,8 @@ def page(path, title, body, depth=0):
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5>{TOC_HEADING_HTML}</h5><nav id="toc-nav"></nav></div></aside>
 </div>
+{SEARCH_MODAL_HTML}
+<script>window.__DOCS_BASE__={base!r};</script>
 {SITE_JS}
 </body>
 </html>"""
@@ -3690,7 +4105,7 @@ def group_page(name, g):
     # descarta (nunca se duplica), mantendo o bloco de código a começar já
     # em "Usage:".
     _, top_rest = split_help_intro(top_help)
-    body.append(f"<div class='help'><pre><code>{html.escape(top_rest)}</code></pre></div>")
+    body.append(f"<div class='help'>{HELP_NOTE_HTML}<pre><code>{html.escape(top_rest)}</code></pre></div>")
     if g.get("examples"):
         body.append(f"<h2>{bi('span', 'Exemplos', 'Examples')}</h2>" + examples_html(g["examples"], EXAMPLES_EN.get((name, None)), (name, None)))
     if g.get("extra"):
@@ -3704,7 +4119,7 @@ def group_page(name, g):
             for para in sub_intro.split("\n\n"):
                 if para.strip():
                     body.append(f"<p class='intro'>{render_prose(para.strip())}</p>")
-        body.append(f"<div class='help'><pre><code>{html.escape(sub_rest)}</code></pre></div>")
+        body.append(f"<div class='help'>{HELP_NOTE_HTML}<pre><code>{html.escape(sub_rest)}</code></pre></div>")
         if meta.get("notes"):
             notes_en = NOTES_EN.get((name, sub))
             if notes_en:
@@ -3759,17 +4174,50 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Primeiros passos</h2>
-<pre><code>delonix version                  # a identidade do build e o que fazer a seguir
-delonix init                     # olha para esta pasta e começa o projecto certo
+<p>Quatro percursos independentes, do mais simples ao mais completo. Todos os comandos
+abaixo foram verificados contra o binário — confirma qualquer um com <code>--help</code>.
+Novo nos termos? O <a href="glossario.html">glossário</a> define <em>daemonless</em>,
+<em>rootless</em>, <em>holder-netns</em>, <em>Kind</em>, <em>converge/apply</em> e o resto.</p>
 
-# um serviço web na porta 8080, sem root, sem daemon
-delonix container run -d --name web -p 8080:80 nginx
+<h3>1 · Um container</h3>
+<p>Um serviço web na porta 8080, sem root e sem daemon. Com <code>--net host</code> (o
+omisso) o container passa ao seu próprio netns com NAT em espaço de utilizador
+(slirp4netns); <code>-p</code> liga só a <code>127.0.0.1</code> salvo se nomeares o
+endereço.</p>
+<pre><code>delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
 delonix container stats          # CPU/memória/PIDs
 delonix container logs -f web    # logs em contínuo
 delonix container stop web       # a porta fecha sozinha
 delonix container start web      # rearranca com o mesmo estado</code></pre>
+
+<h3>2 · Um projecto completo</h3>
+<p><code>delonix init</code> olha para esta pasta e despacha para o template certo;
+<code>delonix stack init</code> escreve um projecto COMPLETO (Delonixfile + manifesto +
+cluster + README), já preenchido. Depois <code>delonix apply</code> — a grafia canónica de
+<code>stack apply</code> — converge o manifesto por ordem de dependências.</p>
+<pre><code>delonix init                                  # detecta a stack desta pasta
+delonix stack init -t fastapi                 # ou força um template (`-t list` mostra-os)
+delonix apply -f delonix-manifest.yaml        # converge tudo o que o manifesto declara
+delonix stack plan -f delonix-manifest.yaml   # o que mudaria, sem mudar nada</code></pre>
+
+<h3>3 · Um cluster Kubernetes local</h3>
+<p>Modo kind nativo: os nós <code>kindest/node</code> arrancam dentro do próprio engine e
+são iniciados com <code>kubeadm</code> — <strong>sem Docker</strong>. Sem flags, 1
+control-plane pronto a usar.</p>
+<pre><code>delonix cluster create                      # 1 control-plane, nome inventado
+delonix cluster create --name dev --workers 2   # + 2 workers
+delonix cluster health                      # o control-plane responde? nós Ready?
+delonix cluster ls                          # clusters deste host (kind E baseados em VM)</code></pre>
+
+<h3>4 · Ver tudo a correr</h3>
+<p>Um painel htop-style de containers, VMs, redes e volumes. <code>--once</code> imprime um
+retrato de texto e sai (o omisso quando o stdout não é um terminal); <code>--json</code>
+para scripts/Grafana.</p>
+<pre><code>delonix dashboard                 # TUI interactivo
+delonix dashboard --scope container   # focado num tipo de recurso
+delonix dashboard --once          # um retrato de texto e sai</code></pre>
 
 <h2>Referência da CLI</h2>
 {cards}
@@ -3823,17 +4271,49 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Getting started</h2>
-<pre><code>delonix version                  # the build's identity, and what to do next
-delonix init                     # looks at this folder and starts the right project
+<p>Four independent tracks, from the simplest to the most complete. Every command below was
+verified against the binary — confirm any of them with <code>--help</code>. New to the
+terms? The <a href="glossario.html">glossary</a> defines <em>daemonless</em>,
+<em>rootless</em>, <em>holder-netns</em>, <em>Kind</em>, <em>converge/apply</em> and the rest.</p>
 
-# a web service on port 8080, no root, no daemon
-delonix container run -d --name web -p 8080:80 nginx
+<h3>1 · A container</h3>
+<p>A web service on port 8080, no root and no daemon. With <code>--net host</code> (the
+default) the container moves to its own netns with userspace NAT (slirp4netns);
+<code>-p</code> binds to <code>127.0.0.1</code> only unless you name the address.</p>
+<pre><code>delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
 delonix container stats          # CPU/memory/PIDs
 delonix container logs -f web    # follow logs
 delonix container stop web       # the port closes on its own
 delonix container start web      # restarts with the same state</code></pre>
+
+<h3>2 · A complete project</h3>
+<p><code>delonix init</code> looks at this folder and dispatches to the right template;
+<code>delonix stack init</code> writes a COMPLETE project (Delonixfile + manifest + cluster +
+README), already filled in. Then <code>delonix apply</code> — the canonical spelling of
+<code>stack apply</code> — converges the manifest in dependency order.</p>
+<pre><code>delonix init                                  # detects this folder's stack
+delonix stack init -t fastapi                 # or force a template (`-t list` shows them)
+delonix apply -f delonix-manifest.yaml        # converge everything the manifest declares
+delonix stack plan -f delonix-manifest.yaml   # what would change, changing nothing</code></pre>
+
+<h3>3 · A local Kubernetes cluster</h3>
+<p>Native kind mode: the <code>kindest/node</code> nodes start inside the engine itself and
+are bootstrapped with <code>kubeadm</code> — <strong>no Docker</strong>. No flags, 1
+control-plane ready to use.</p>
+<pre><code>delonix cluster create                      # 1 control-plane, invented name
+delonix cluster create --name dev --workers 2   # + 2 workers
+delonix cluster health                      # is the control-plane answering? nodes Ready?
+delonix cluster ls                          # this host's clusters (kind AND VM-based)</code></pre>
+
+<h3>4 · See everything running</h3>
+<p>An htop-style panel of containers, VMs, networks and volumes. <code>--once</code> prints a
+text snapshot and exits (the default when stdout is not a terminal); <code>--json</code> for
+scripts/Grafana.</p>
+<pre><code>delonix dashboard                 # interactive TUI
+delonix dashboard --scope container   # focused on one kind of resource
+delonix dashboard --once          # one text snapshot and exit</code></pre>
 
 <h2>CLI reference</h2>
 {cards}
@@ -3857,25 +4337,33 @@ ARCH = """
 quando os dois discordam ou quando uma dependência vai contra a direcção das camadas (uma camada só
 depende das de baixo; um binário compõe UMA interface).</p>
 <div class="arch">
-<div class="row"><div class="box mut" style="flex:3"><b>binários — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin</b>
+<div class="row"><div class="box mut" style="flex:3"><b>binários — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin · delonix-node-api-bin</b>
 a CLI <code>delonix</code> é a única porta: container · image · build · vm · volume · network · stack · cluster · …;
-<code>delonix mcp</code>/<code>serve api</code>/<code>serve cri</code> executam os binários irmãos</div></div>
+<code>delonix mcp</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve cri</code> executam os binários irmãos</div></div>
 <div class="row">
 <div class="box"><b>delonix-cri</b>servidor CRI runtime.v1 — o kubelet fala com o Delonix</div>
 <div class="box"><b>delonix-mgmt</b>API de gestão LOCAL (HTTP+JSON num socket unix), métricas Prometheus</div>
+<div class="box"><b>delonix-node-api</b>contrato de nó <code>delonix.node.v1</code> (gRPC + HTTP/JSON dos mesmos .proto num socket unix) — NodeService + openapi.json</div>
 <div class="box"><b>delonix-mcp</b>servidor Model Context Protocol, local e sem inquilino</div>
 </div>
 <div class="row">
-<div class="box"><b>delonix-proxmox</b>VmBackend e SDN contra a API de um nó Proxmox VE</div>
-<div class="box"><b>delonix-truenas</b>dataset, quota e partilha numa appliance TrueNAS</div>
+<div class="box"><b>delonix-provider-cloud-hypervisor · -libvirt</b>backends VmBackend locais (microVM por processo · libvirt/KVM, ADR-0044) — saíram do delonix-vm, que os regista</div>
+<div class="box"><b>delonix-proxmox</b>VmBackend REMOTO e SDN contra a API de um nó Proxmox VE (ADR-0008)</div>
+<div class="box"><b>delonix-truenas</b>dataset, quota e partilha numa appliance TrueNAS (ADR-0009)</div>
 <div class="box"><b>delonix-opnsense</b>GatewayProvider contra a API REST do OPNsense (ADR-0051)</div>
+<div class="box"><b>delonix-powerdns</b>cliente da API de um servidor PowerDNS (ADR-0064) — limpa os registos de gateway do nó</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-provider-btrfs · -zfs · -lvm</b>drivers de pool de armazenamento (subvolume btrfs · dataset zfs · LV thin lvm, ADR-0067)</div>
+<div class="box"><b>delonix-provider-ceph</b>Ceph nativo pela porta de storage: RADOS · RBD · CephFS · RGW S3 (ADR-0081)</div>
+<div class="box"><b>delonix-storage-helper</b>helper PRIVILEGIADO dos pools — um processo por ligação, SO_PEERCRED + allowUsers (ADR-0067)</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-linux</b>clone() + namespaces, pivot_root, seccomp/caps, cgroups v2 delegados, exec, reconcile</div>
 <div class="box"><b>delonix-sdn</b>SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft,
 DNS interno, overlay WireGuard</div>
 <div class="box"><b>delonix-oci</b>pull OCI (digest verificado), build, export, buildpacks CNB, assinaturas</div>
-<div class="box"><b>delonix-vm</b>microVMs (VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
+<div class="box"><b>delonix-vm</b>raiz de composição das microVMs: semeia o registo de VmBackend e monta o VmEngine; cloud-init</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-volume</b>volumes nomeados, bind mounts, quotas, nfs/cifs/webdav</div>
@@ -3886,6 +4374,10 @@ DNS interno, overlay WireGuard</div>
 <div class="row">
 <div class="box mut"><b>delonix-compute</b>contexto: a especificação única de execução, registos Container/Vm</div>
 <div class="box mut"><b>delonix-stack</b>contexto: tabela de Kinds, reconciliador de 3 vias, revisões</div>
+<div class="box mut"><b>delonix-networking</b>contexto: portas de rede por papel (GatewayProvider, NetworkZoneProvider), registos e posse (ADR-0059)</div>
+<div class="box mut"><b>delonix-storage</b>contexto: porta de driver de pool, registo, allowlist do administrador e posse (ADR-0067)</div>
+</div>
+<div class="row">
 <div class="box mut"><b>delonix-node</b>contexto: eventos, verificações do host, contrato de dispatch</div>
 <div class="box mut"><b>delonix-security-runtime</b>contexto: política e o único ponto de admissão</div>
 </div>
@@ -3895,7 +4387,7 @@ modelo do segredo</div>
 <div class="box mut"><b>delonix-net-rules</b>fundação pura, sem dependências: CIDR, nomes de bridge, IPAM</div>
 </div>
 </div>
-<p>De cima para baixo: binários e interfaces · providers · adaptadores · contextos · fundação.</p>
+<p>De cima para baixo: binários e interfaces · providers · adaptadores · contextos · fundação — os 35 crates em cinco camadas (ADR-0040). O detalhe completo, com as dependências reais, está no <a href="c4.html">modelo C4</a>.</p>
 
 <h2>Daemonless a sério</h2>
 <p>Não há daemon, nem sequer um monitor por container (o conmon do podman). O <code>run</code> faz
@@ -3961,25 +4453,33 @@ ARCH_EN = """
 disagree or when a dependency runs against the direction of the layers (a layer depends only on the
 ones below it; a binary composes ONE interface).</p>
 <div class="arch">
-<div class="row"><div class="box mut" style="flex:3"><b>binaries — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin</b>
+<div class="row"><div class="box mut" style="flex:3"><b>binaries — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin · delonix-node-api-bin</b>
 the <code>delonix</code> CLI is the one door: container · image · build · vm · volume · network · stack · cluster · …;
-<code>delonix mcp</code>/<code>serve api</code>/<code>serve cri</code> run the sibling binaries</div></div>
+<code>delonix mcp</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve cri</code> run the sibling binaries</div></div>
 <div class="row">
 <div class="box"><b>delonix-cri</b>runtime.v1 CRI server — the kubelet talks to Delonix</div>
 <div class="box"><b>delonix-mgmt</b>LOCAL management API (HTTP+JSON over a unix socket), Prometheus metrics</div>
+<div class="box"><b>delonix-node-api</b><code>delonix.node.v1</code> node contract (gRPC + HTTP/JSON of the same .proto over a unix socket) — NodeService + openapi.json</div>
 <div class="box"><b>delonix-mcp</b>Model Context Protocol server, local and tenancy-free</div>
 </div>
 <div class="row">
-<div class="box"><b>delonix-proxmox</b>VmBackend and SDN against one Proxmox VE node's API</div>
-<div class="box"><b>delonix-truenas</b>dataset, quota and share on a TrueNAS appliance</div>
+<div class="box"><b>delonix-provider-cloud-hypervisor · -libvirt</b>local VmBackend backends (per-process microVM · libvirt/KVM, ADR-0044) — split out of delonix-vm, which registers them</div>
+<div class="box"><b>delonix-proxmox</b>REMOTE VmBackend and SDN against one Proxmox VE node's API (ADR-0008)</div>
+<div class="box"><b>delonix-truenas</b>dataset, quota and share on a TrueNAS appliance (ADR-0009)</div>
 <div class="box"><b>delonix-opnsense</b>GatewayProvider against OPNsense's REST API (ADR-0051)</div>
+<div class="box"><b>delonix-powerdns</b>client of one PowerDNS server's API (ADR-0064) — reaps the node's gateway records</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-provider-btrfs · -zfs · -lvm</b>storage pool drivers (btrfs subvolume · zfs dataset · lvm thin LV, ADR-0067)</div>
+<div class="box"><b>delonix-provider-ceph</b>native Ceph over the storage port: RADOS · RBD · CephFS · RGW S3 (ADR-0081)</div>
+<div class="box"><b>delonix-storage-helper</b>the PRIVILEGED pool helper — one process per connection, SO_PEERCRED + allowUsers (ADR-0067)</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-linux</b>clone() + namespaces, pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
 <div class="box"><b>delonix-sdn</b>rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall,
 internal DNS, WireGuard overlay</div>
 <div class="box"><b>delonix-oci</b>OCI pull (digest verified), build, export, CNB buildpacks, signatures</div>
-<div class="box"><b>delonix-vm</b>microVMs (VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
+<div class="box"><b>delonix-vm</b>microVM composition root: seeds the VmBackend registry and assembles the VmEngine; cloud-init</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-volume</b>named volumes, bind mounts, quotas, nfs/cifs/webdav</div>
@@ -3990,6 +4490,10 @@ internal DNS, WireGuard overlay</div>
 <div class="row">
 <div class="box mut"><b>delonix-compute</b>context: the one run specification, Container/Vm records</div>
 <div class="box mut"><b>delonix-stack</b>context: the Kind table, three-way reconciler, revisions</div>
+<div class="box mut"><b>delonix-networking</b>context: network ports by role (GatewayProvider, NetworkZoneProvider), records and ownership (ADR-0059)</div>
+<div class="box mut"><b>delonix-storage</b>context: the pool-driver port, the registry, the admin allowlist and ownership (ADR-0067)</div>
+</div>
+<div class="row">
 <div class="box mut"><b>delonix-node</b>context: events, host checks, the dispatch contract</div>
 <div class="box mut"><b>delonix-security-runtime</b>context: policy and the single admission point</div>
 </div>
@@ -3999,7 +4503,7 @@ secret model</div>
 <div class="box mut"><b>delonix-net-rules</b>pure foundation, zero dependencies: CIDRs, bridge names, IPAM</div>
 </div>
 </div>
-<p>Top to bottom: binaries and interfaces · providers · adapters · contexts · foundation.</p>
+<p>Top to bottom: binaries and interfaces · providers · adapters · contexts · foundation — the 35 crates in five layers (ADR-0040). The full detail, with the real dependencies, is in the <a href="c4.html">C4 model</a>.</p>
 
 <h2>Genuinely daemonless</h2>
 <p>There's no daemon, not even a per-container monitor (podman's conmon). <code>run</code> does a
@@ -4595,6 +5099,21 @@ main{max-width:1280px}
     page("c4.html", "Modelo C4 e system design", body)
 
 
+def _md_slug(value, separator):
+    """Slugify partilhado pelos cabeçalhos do `md_page` E pelas âncoras do
+    índice escrito à mão nessas páginas.
+
+    O slugify por omissão do Python-Markdown despia os acentos para ASCII e
+    colapsava corridas de espaços, por isso uma âncora do índice como
+    `#1-antes-de-começar` (acentos mantidos) ou `#7-...--a-vm-declarada`
+    (` — ` escrito como `--`) nunca batia com o `id` gerado do cabeçalho. Este
+    mantém os caracteres de palavra Unicode e mapeia CADA espaço para o
+    separador SEM colapsar — a convenção que esses índices já usam — logo o
+    índice e os cabeçalhos aterram no mesmo `id`."""
+    value = re.sub(r"[^\w\s-]", "", value).strip().lower()
+    return re.sub(r"\s", separator, value)
+
+
 def md_page(src_name, out_name, title):
     """Uma página do site a partir de um `.md` do repositório.
 
@@ -4606,8 +5125,18 @@ def md_page(src_name, out_name, title):
     import markdown
 
     src = open(os.path.join(ROOT, src_name)).read()
-    body = markdown.markdown(src, extensions=["tables", "fenced_code", "toc"])
-    page(out_name, title, body)
+    body = markdown.markdown(
+        src,
+        extensions=["tables", "fenced_code", "toc"],
+        extension_configs={"toc": {"slugify": _md_slug}},
+    )
+    # Estes guias são escritos SÓ em português; o toggle de idioma não traduz o
+    # corpo Markdown. Em vez de mostrar texto PT a um leitor EN em silêncio,
+    # rotula-se explicitamente (o aviso só aparece com data-lang="en").
+    banner = ('<div class="callout warn lang-en"><b>Portuguese only.</b> '
+              "This guide is authored in Portuguese; the language toggle does "
+              "not translate its body.</div>")
+    page(out_name, title, banner + body)
 
 
 def subcommands_of(group):
@@ -4712,12 +5241,13 @@ KINDS_DOC = [
      "<code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind)."),
     ("Network", "networking/network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
      "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje. "
-     "O MESMO Kind absorve também a zona de SDN do próprio Proxmox VE (o antigo <code>kind: NetworkZone</code>, "
-     "dobrado aqui): realizada pelo provider de zonas configurado (<code>DELONIX_PROXMOX_*</code>)."),
+     "O MESMO Kind absorve também a zona de SDN do próprio Proxmox VE (o <code>kind: NetworkZone</code> — "
+     "<em>sunset</em>: ainda aceite no load mas sem secção própria, a baixar para <code>Network</code>): "
+     "realizada pelo provider de zonas configurado (<code>DELONIX_PROXMOX_*</code>)."),
     ("Volume", "storage/volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. O "
      "MESMO Kind cobre armazenamento de REDE (NFS/SMB/WebDAV, com um bloco <code>nfs:</code>/<code>cifs:</code>/"
-     "<code>webdav:</code> — o antigo <code>kind: Storage</code>, hoje reescrito nisto com aviso de depreciação) e "
-     "fatias ISOLADAS com quota própria (bloco <code>share:</code> — o antigo <code>kind: ShareVolume</code>, "
+     "<code>webdav:</code> — o antigo <code>kind: Storage</code>, hoje <strong>removido</strong>, escrito directamente como este bloco) e "
+     "fatias ISOLADAS com quota própria (bloco <code>share:</code> — o antigo <code>kind: ShareVolume</code>, também removido, "
      "vários container/vm/pod a partilhar um export sem se verem). O mesmo ficheiro mostra os três cenários."),
     ("Image", "artifact/image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. "
      "As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix vm image build</code>."),
@@ -4725,8 +5255,8 @@ KINDS_DOC = [
      "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
     ("Container", "compute/container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
      "têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites."),
-    ("FirewallPolicy (as duas direcções)", "networking/networkpolicy.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
-     "NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
+    ("NetworkPolicy (as duas direcções)", "networking/networkpolicy.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
+     "NetworkPolicy; o nome antigo <code>FirewallPolicy</code> continua aceite como alias). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
      "default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é "
      "<code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o "
      "mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que "
@@ -4827,12 +5357,13 @@ KINDS_DOC_EN = [
     "<code>cluster-vm.yaml</code> (provisions the VMs) and <code>cluster-kind.yaml</code> (kind mode).",
     "A user network. Containers join it with <code>--net &lt;name&gt;</code>; "
     "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today. "
-    "The SAME Kind also absorbs a Proxmox VE SDN zone (the former <code>kind: NetworkZone</code>, folded in "
-    "here): realized by the configured zone provider (<code>DELONIX_PROXMOX_*</code>).",
+    "The SAME Kind also absorbs a Proxmox VE SDN zone (the <code>kind: NetworkZone</code> — <em>sunset</em>: still "
+    "accepted on load but with no section of its own, lowering into <code>Network</code>): realized by the "
+    "configured zone provider (<code>DELONIX_PROXMOX_*</code>).",
     "A named local volume — the data survives <code>container rm</code>. The SAME Kind covers "
     "NETWORK storage (NFS/SMB/WebDAV, with an <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block — "
-    "the former <code>kind: Storage</code>, now rewritten into this with a deprecation warning) and ISOLATED, "
-    "individually-quota'd slices (a <code>share:</code> block — the former <code>kind: ShareVolume</code>, "
+    "the former <code>kind: Storage</code>, now <strong>removed</strong> and written directly as this block) and ISOLATED, "
+    "individually-quota'd slices (a <code>share:</code> block — the former <code>kind: ShareVolume</code>, also removed, "
     "several container/vm/pod sharing one export without seeing each other). The one file shows all three "
     "scenarios.",
     "Pre-pulls (or builds) an image before the containers that depend on it. Golden VM images "
@@ -4841,9 +5372,10 @@ KINDS_DOC_EN = [
     "It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.",
     "The everyday workload. Only <code>image</code> is required; every other field "
     "has a default. Covers networking, storage, resources (cgroup v2), secrets, security, devices and limits.",
-    "Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each "
-    "document is the desired state of one direction for one target container — allowlist + default-deny, "
-    "idempotent.",
+    "Declarative per-direction L4 firewall (k8s NetworkPolicy-style; the old name <code>FirewallPolicy</code> is "
+    "still accepted as an alias). Each document is the desired state of one direction for one target container — "
+    "allowlist + default-deny, idempotent. <strong>The <code>kind: Egress</code> no longer exists</strong>: it is "
+    "<code>direction: egress</code> in this same policy (they shared the whole struct).",
     "Built-in L7/HTTP reverse proxy — routing by <code>Host</code> + "
     "<code>path</code> prefix to backend containers. TLS terminates at the proxy (self-signed or "
     "<code>secretRef</code>); hot reload via SIGHUP.",
@@ -4934,8 +5466,7 @@ a supervisionar tudo; há um holder mínimo por recurso, que morre com o recurso
 <p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
 com asserção de resultado <em>funcional</em> (HTTP 200 — não um exit-code isolado),
 em <code>docs/labs/lab-1/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-1/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
-(Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-1/lab.sh</code>). Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-2", "Limites de recursos que pegam mesmo", "iniciante", """
 <p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
@@ -4970,8 +5501,7 @@ com asserção de resultado <em>funcional</em> — o <code>memory.max</code> REA
 cgroup do kernel, não a saída do comando — e <strong>falha em voz alta</strong>
 se o limite não pegou (<code>memory.max=max</code>), em vez de passar em silêncio,
 em <code>docs/labs/lab-2/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-2/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
-(Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-2/lab.sh</code>). Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-3", "Duas aplicações que se falam por nome", "intermédio", """
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
@@ -5013,7 +5543,7 @@ nome (<code>getent hosts db</code> → IP) e a porta responde ao par autorizado 
 (o terceiro container ainda a alcançar), distinguindo «bloqueado por política» de
 «serviço em baixo», em vez de passar em silêncio, em <code>docs/labs/lab-3/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
-Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-4", "Do Dockerfile à imagem, sem daemon", "intermédio", """
 <p>Objectivo: construir uma imagem e correr o que construíste.</p>
@@ -5047,7 +5577,7 @@ qualquer <code>Dockerfile</code> sem <code>-f</code> — e <strong>falha em voz
 alta</strong> distinguindo «build falhou» de «healthcheck nunca passou», em vez de
 passar em silêncio, em <code>docs/labs/lab-4/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
-Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-5", "Uma microVM a sério", "intermédio", """
 <p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
@@ -5084,8 +5614,7 @@ de pé, e prova que <code>vm destroy</code> <strong>não deixa órfãos</strong>
 (<code>describe vm</code> deixa de resolver) — <strong>falha em voz alta</strong>
 distinguindo «VM nunca arrancou» de «sem IP» de «snapshot/restore falhou», em
 <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-5/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
-(Linux, libvirt, rootless) a 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-5/lab.sh</code>). Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, libvirt, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-6", "A tua própria imagem de VM, com VMfile", "avançado", """
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
@@ -5128,9 +5657,7 @@ destroy (o overlay era por-VM) — <strong>falha em voz alta</strong> distinguin
 <code>docs/labs/lab-6/</code>: <code>prepare → run → verify → cleanup</code>
 (<code>bash docs/labs/lab-6/lab.sh</code>). Precisa de libguestfs
 (<code>virt-customize</code>) no host; o arnês gera a sua própria chave SSH e
-aponta o <code>SSHKEY</code> do scaffold para ela. Validado em
-<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a
-2026-10-24.</p>"""),
+aponta o <code>SSHKEY</code> do scaffold para ela. Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-7", "Kubernetes sem Docker", "avançado", """
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
@@ -5257,8 +5784,7 @@ you may see no holder at all.)</p>
 <p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
 own, asserting a <em>functional</em> result (HTTP 200 — not an isolated exit
 code), under <code>docs/labs/lab-1/</code>: <code>prepare → run → verify →
-cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Validated on
-<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-2": ("Resource limits that actually take", "beginner", """
 <p>Goal: find out whether this host enforces limits — and what to do when it
@@ -5293,8 +5819,7 @@ own, asserting a <em>functional</em> result — the REAL <code>memory.max</code>
 the kernel cgroup, not the command's output — and it <strong>fails loudly</strong>
 if the limit didn't take (<code>memory.max=max</code>) instead of passing
 silently, under <code>docs/labs/lab-2/</code>: <code>prepare → run → verify →
-cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Validated on
-<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-3": ("Two apps that talk to each other by name", "intermediate", """
 <p>Goal: user network, internal DNS, and isolation — with zero DNS
@@ -5336,7 +5861,7 @@ and it <strong>fails loudly</strong> if <code>db</code> is left open to everyone
 (the third container still reaching it), telling "blocked by policy" apart from
 "service down" instead of passing silently, under <code>docs/labs/lab-3/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
-Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-4": ("From Dockerfile to image, no daemon", "intermediate", """
 <p>Goal: build an image and run what you built.</p>
@@ -5370,7 +5895,7 @@ before any <code>Dockerfile</code> with no <code>-f</code> — and it <strong>fa
 loudly</strong>, telling "build failed" apart from "healthcheck never passed"
 instead of passing silently, under <code>docs/labs/lab-4/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
-Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-5": ("A real microVM", "intermediate", """
 <p>Goal: a full VM with the same CLI as containers.</p>
@@ -5407,8 +5932,7 @@ keeps it up, and it proves <code>vm destroy</code> <strong>leaves no orphans</st
 (<code>describe vm</code> stops resolving) — it <strong>fails loudly</strong>,
 telling "VM never started" apart from "no IP" apart from "snapshot/restore
 failed", under <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-5/lab.sh</code>). Validated on <strong>delonix 5.1.1</strong>
-(Linux, libvirt, rootless) on 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-5/lab.sh</code>). Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, libvirt, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-6": ("Your own VM image, with a VMfile", "advanced", """
 <p>Goal: build your own qcow2 image, the same way you build a container
@@ -5453,9 +5977,7 @@ started" apart from "orphan", under <code>docs/labs/lab-6/</code>:
 <code>prepare → run → verify → cleanup</code>
 (<code>bash docs/labs/lab-6/lab.sh</code>). Needs libguestfs
 (<code>virt-customize</code>) on the host; the harness generates its own SSH key
-and points the scaffold's <code>SSHKEY</code> at it. Validated on
-<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on
-2026-10-24.</p>"""),
+and points the scaffold's <code>SSHKEY</code> at it. Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-7": ("Kubernetes with no Docker", "advanced", """
 <p>Goal: a local cluster whose node runtime IS Delonix.</p>
@@ -5575,6 +6097,19 @@ def labs_page():
             body.append(f"<h2 id='{anchor}'>{html.escape(title)} "
                         f"<span class='badge'>{html.escape(level)}</span></h2>")
             body.append(html_body)
+        # Só ligamos os labs que têm materiais reais em disco (lab-1..6);
+        # lab-7/lab-8 ainda não têm arnês — evita links quebrados no Pages.
+        if os.path.isdir(os.path.join(ROOT, "labs", anchor)):
+            body.append(bi("p",
+                f"<strong>Materiais:</strong> "
+                f"<a href='labs/{anchor}/README.md'>guia escrito</a> · "
+                f"<a href='labs/{anchor}/lab.sh'>arnês executável</a> "
+                f"(<code>prepare → run → verify → cleanup</code>).",
+                f"<strong>Materials:</strong> "
+                f"<a href='labs/{anchor}/README.md'>written guide</a> · "
+                f"<a href='labs/{anchor}/lab.sh'>runnable harness</a> "
+                f"(<code>prepare → run → verify → cleanup</code>).",
+                cls="note"))
     page("labs.html", "Laboratórios", "\n".join(body))
 
 
@@ -6010,16 +6545,22 @@ def kinds_page():
         'todos os campos, com os defaults e um comentário. Aplica um só com '
         '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
         '(ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → VirtualMachine → '
-        'Container → Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway; <code>Storage</code> e '
-        '<code>ShareVolume</code> baixam para <code>Volume</code> antes desta ordem entrar em jogo). '
-        'A lista completa, com os grupos e o que cada documento se torna, está em '
+        'Container → Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway). Os antigos <code>kind: Storage</code>, '
+        '<code>ShareVolume</code> e <code>Egress</code> foram <strong>removidos</strong>: a capacidade vive agora '
+        'em blocos do <code>Volume</code> (<code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>/<code>share:</code>) '
+        'e do <code>NetworkPolicy</code> (<code>direction: egress</code>) — aplicá-los pelo nome antigo dá erro, a '
+        'apontar o substituto. A lista completa, com os grupos e o que cada documento se torna, está em '
         '<a href="estrutura.html">Estrutura de recursos</a>.',
         'Each Kind with a COMPLETE, functional template — '
         'every field, with defaults and a comment. Apply just one with '
         '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
-        '(dependency order: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → '
-        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> lowers into '
-        '<code>Volume</code> before this order comes into play).',
+        '(dependency order: Secret → Network → NetworkRoute → Volume → Image → VirtualMachine → Container → '
+        'Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway). The former <code>kind: Storage</code>, '
+        '<code>ShareVolume</code> and <code>Egress</code> were <strong>removed</strong>: the capability now lives '
+        'in blocks on <code>Volume</code> (<code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>/<code>share:</code>) '
+        'and on <code>NetworkPolicy</code> (<code>direction: egress</code>) — applying them by the old name errors '
+        'with the replacement. The full list, with the groups and what each document becomes, is in '
+        '<a href="estrutura.html">Resource structure</a>.',
         cls='tagline',
     )
     body = [f"<h1>Kinds do manifesto</h1>{tagline}"]
@@ -6362,7 +6903,448 @@ delonix container rm -f delonix-temp</code></pre>
 """
 
 
+def command_map_members():
+    """Lista plana de todos os nomes do COMMAND MAP do `delonix --help`.
+
+    São os MESMOS nomes (já resolvidos a page-keys por
+    `root_command_categories()`) que o índice e o cheatsheet iteram — não uma
+    segunda cópia da taxonomia.
+    """
+    members = []
+    for _category, names in root_command_categories():
+        members.extend(names)
+    return members
+
+
+def contract_gate():
+    """Aborta a geração se binário e `gen.py` divergirem no que documentam.
+
+    Três modos de deriva silenciosa que mais nada apanhava:
+
+      * **Binário à FRENTE do `gen.py`.** O índice e o cheatsheet iteram os
+        membros do COMMAND MAP e só desenham cartão `if g in GROUPS` — um comando
+        NOVO no binário que `GROUPS` ainda não documenta era descartado SEM
+        aviso. O `help_of()` nunca o apanha, porque o `gen.py` jamais pede o
+        `--help` de um comando que não conhece.
+      * **`gen.py` à frente do binário.** Uma página de topo em `GROUPS` cujo
+        comando foi removido/renomeado — ou um binário STALE a que falta `bucket`
+        e companhia. O `help_of()` só abortaria ao gerar essa página; aqui
+        aborta-se primeiro, com as duas listas lado a lado.
+      * **Exemplo embebido em falta.** Um `examples/<grupo>/<kind>.yaml` ausente
+        publica hoje, em silêncio, um bloco `# (exemplo em falta: …)` (fallback
+        em `kinds_page()`). Aqui é erro duro.
+
+    É barato: um só `delonix --help` (já em cache) mais leituras de ficheiro.
+    `scripts/docs_command_gate.py` corre SÓ isto, sem gerar HTML.
+    """
+    members = set(command_map_members())
+    # Uma chave de `GROUPS` cujo `GROUP_PATH` tem um só elemento é um comando de
+    # TOPO (com página própria); as de vários elementos (`ingress` → `net
+    # ingress`) são filhos aninhados e não aparecem no COMMAND MAP de raiz.
+    documented = {k for k in GROUPS if len(group_argv(k)) == 1}
+    problems = []
+    for name in sorted(members - documented):
+        problems.append(
+            f"binário tem `{name}` no COMMAND MAP mas `GROUPS` não lhe dá página "
+            "— seria descartado em silêncio do índice/cheatsheet"
+        )
+    for name in sorted(documented - members):
+        problems.append(
+            f"`GROUPS` documenta `{name}` mas não está no COMMAND MAP do binário "
+            "— página órfã (binário stale ou comando removido?)"
+        )
+    for kind, fname, _intro in KINDS_DOC:
+        if not os.path.isfile(os.path.join(ROOT, "..", "examples", fname)):
+            problems.append(f"exemplo embebido em falta para `{kind}`: examples/{fname}")
+    if problems:
+        raise SystemExit(
+            f"gen.py: contrato binário↔documentação divergente ({BIN}):\n  - "
+            + "\n  - ".join(problems)
+            + "\n  Corrige `GROUPS`/`GROUP_PATH`/`KINDS_DOC` ou reconstrói o binário."
+        )
+
+
+# Glossário (Secção 13) — termos nucleares, agrupados por tema. Cada entrada é
+# (termo, definição PT, definição EN). As definições foram verificadas contra o
+# `--help` do binário (`apply`, `cluster create`, `net`, `api-resources`, ...);
+# os nomes de Kind coincidem com o que `delonix api-resources` lista. Os títulos
+# dos grupos são <h2> (entram na TOC); cada grupo rende um <dl>.
+GLOSSARY = [
+    ("Modelo de execução", "Execution model", [
+        ("daemonless",
+         "Sem processo residente. Cada comando <code>delonix</code> é um processo efémero que fala "
+         "directamente com o kernel (namespaces, cgroups v2, <code>pivot_root</code>), guarda o estado "
+         "em ficheiros e termina. Não há <code>dockerd</code> nem um monitor por container.",
+         "No resident process. Every <code>delonix</code> command is an ephemeral process that talks to "
+         "the kernel directly (namespaces, cgroups v2, <code>pivot_root</code>), keeps its state in files, "
+         "and exits. There is no <code>dockerd</code> and no per-container monitor."),
+        ("rootless",
+         "Corre com o teu UID, sem privilégios de root — o modo por omissão. Assenta em user namespaces e "
+         "em cgroup v2 delegado. Publicar portas abaixo de 1024 (<code>-p 80:80</code>) exige "
+         "<code>--low-ports</code> no instalador, porque o kernel reserva essas portas aos processos "
+         "privilegiados (o mesmo muro do Podman/Docker rootless).",
+         "Runs with your UID, no root privileges — the default mode. It builds on user namespaces and "
+         "delegated cgroup v2. Publishing ports below 1024 (<code>-p 80:80</code>) requires "
+         "<code>--low-ports</code> in the installer, because the kernel reserves those ports for "
+         "privileged processes (the same wall rootless Podman/Docker hit)."),
+        ("holder-netns",
+         "O network namespace PARTILHADO que serve a rede rootless. Em vez de um <code>slirp4netns</code> "
+         "por container (Podman), o delonix mantém UM par holder-netns + slirp4netns partilhado, com DNAT "
+         "<code>nft</code> para o publish de portas — o que permite trocar portas e volumes a quente, sem "
+         "reiniciar o container.",
+         "The SHARED network namespace that serves rootless networking. Instead of one "
+         "<code>slirp4netns</code> per container (Podman), delonix keeps ONE shared holder-netns + "
+         "slirp4netns pair, with <code>nft</code> DNAT for port publishing — which is what lets you swap "
+         "ports and volumes hot, with no container restart."),
+        ("slirp4netns",
+         "NAT em espaço de utilizador que dá conectividade a um netns sem privilégios. É o processo que "
+         "liga o lado do host de um <code>-p</code> em modo <code>--net host</code>.",
+         "Userspace NAT that gives a netns connectivity without privileges. It is the process that binds "
+         "the host side of a <code>-p</code> under <code>--net host</code>."),
+        ("cgroup v2",
+         "A hierarquia UNIFICADA de control groups do kernel Linux (CPU/memória/PIDs/IO). O delonix exige "
+         "cgroup v2 e, em rootless, assenta na delegação via <code>systemd</code> "
+         "(<code>user@&lt;uid&gt;.service</code>). Um limite como <code>-m 2G</code> é <code>memory.max</code>.",
+         "The UNIFIED control-group hierarchy of the Linux kernel (CPU/memory/PIDs/IO). delonix requires "
+         "cgroup v2 and, when rootless, relies on <code>systemd</code> delegation "
+         "(<code>user@&lt;uid&gt;.service</code>). A limit like <code>-m 2G</code> is <code>memory.max</code>."),
+        ("OCI",
+         "Open Container Initiative — os formatos-padrão de imagem e de runtime de container. O delonix "
+         "puxa e constrói imagens OCI e oferece uma CLI runc-compatível em <code>delonix oci-runtime</code> "
+         "(create/start/state/kill/delete sobre um bundle, ADR-0080).",
+         "Open Container Initiative — the standard image and container-runtime formats. delonix pulls and "
+         "builds OCI images and offers a runc-compatible CLI in <code>delonix oci-runtime</code> "
+         "(create/start/state/kill/delete over a bundle, ADR-0080)."),
+    ]),
+    ("Rede", "Networking", [
+        ("netns",
+         "Network namespace — o isolamento de rede do kernel (interfaces, tabelas de routing e firewall "
+         "próprios). Cada container corre no seu; <code>delonix net netns</code> gere a infra do ingress "
+         "rootless (up/status/attach/publish/firewall).",
+         "Network namespace — the kernel's network isolation (its own interfaces, routing tables and "
+         "firewall). Each container runs in one; <code>delonix net netns</code> manages the rootless "
+         "ingress infra (up/status/attach/publish/firewall)."),
+        ("ingress / egress",
+         "<code>delonix net ingress</code> é o firewall INBOUND (regras L4 + publishes DNAT); "
+         "<code>delonix net egress</code> é o firewall OUTBOUND (regras L4 + política de egress por rede).",
+         "<code>delonix net ingress</code> is the INBOUND firewall (L4 rules + DNAT publishes); "
+         "<code>delonix net egress</code> is the OUTBOUND firewall (L4 rules + per-network egress policy)."),
+        ("Gateway",
+         "<code>kind: Gateway</code> — a exposição ao exterior. <code>delonix net tunnel</code> expõe uma "
+         "porta local à internet pública através de um Gateway.",
+         "<code>kind: Gateway</code> — exposure to the outside. <code>delonix net tunnel</code> exposes a "
+         "local port to the public internet through a Gateway."),
+        ("HTTPRoute",
+         "<code>kind: HTTPRoute</code> — o reverse-proxy L7/HTTP embebido (apply/rm via "
+         "<code>delonix net httproute</code>). <code>kind: Ingress</code> é um alias de compatibilidade "
+         "que baixa para HTTPRoute.",
+         "<code>kind: HTTPRoute</code> — the embedded L7/HTTP reverse-proxy (apply/rm via "
+         "<code>delonix net httproute</code>). <code>kind: Ingress</code> is a compatibility alias that "
+         "folds into HTTPRoute."),
+        ("NetworkPolicy",
+         "<code>kind: NetworkPolicy</code> (alias aceite no load: <code>FirewallPolicy</code>) — política "
+         "de rede L4 por container/rede, com <code>direction: egress</code> para a saída. Um "
+         "<code>kind: Dependency</code> é açúcar que baixa para NetworkPolicy.",
+         "<code>kind: NetworkPolicy</code> (alias accepted on load: <code>FirewallPolicy</code>) — L4 "
+         "network policy per container/network, with <code>direction: egress</code> for outbound. A "
+         "<code>kind: Dependency</code> is sugar that folds into NetworkPolicy."),
+    ]),
+    ("Manifesto e recursos", "Manifest and resources", [
+        ("Kind",
+         "O TIPO de um recurso declarativo no manifesto (ex.: <code>Container</code>, <code>Volume</code>, "
+         "<code>Network</code>, <code>VirtualMachine</code>). <code>delonix api-resources</code> lista "
+         "todos (plural, atalho, apiVersion); <code>delonix explain &lt;Kind&gt;</code> dá a referência de "
+         "campos. Não confundir com o cluster «kind» (ver abaixo).",
+         "The TYPE of a declarative resource in the manifest (e.g. <code>Container</code>, "
+         "<code>Volume</code>, <code>Network</code>, <code>VirtualMachine</code>). "
+         "<code>delonix api-resources</code> lists them all (plural, shortname, apiVersion); "
+         "<code>delonix explain &lt;Kind&gt;</code> gives the field reference. Not to be confused with a "
+         "«kind» cluster (see below)."),
+        ("manifesto",
+         "O ficheiro <code>delonix-manifest.yaml</code> que declara os recursos desejados (um ou mais "
+         "Kinds). É a fonte da verdade do estado — o engine converge o host para ele.",
+         "The <code>delonix-manifest.yaml</code> file that declares the desired resources (one or more "
+         "Kinds). It is the source of truth for state — the engine converges the host toward it."),
+        ("Stack",
+         "<code>kind: Stack</code> — o agregado de um manifesto inteiro. <code>delonix stack apply</code> "
+         "aplica todos os Kinds por ordem de dependências (Network → Volume → Image → Vm → Container); os "
+         "recursos ficam marcados com o label <code>delonix.io/stack</code>, por onde "
+         "<code>stack destroy</code> os reconhece.",
+         "<code>kind: Stack</code> — the aggregate of a whole manifest. <code>delonix stack apply</code> "
+         "applies every Kind in dependency order (Network → Volume → Image → Vm → Container); the "
+         "resources are tagged with the <code>delonix.io/stack</code> label, by which "
+         "<code>stack destroy</code> recognizes them."),
+        ("converge / apply",
+         "Aplicar um manifesto é convergir o host para o estado declarado (criar o que falta, reconfigurar "
+         "a quente o que divergiu), de forma idempotente e fail-fast, sem ficheiro de estado — o último "
+         "spec aplicado vive no próprio recurso. <code>delonix apply</code> é a grafia canónica (o verbo "
+         "pertence ao manifesto, não a um grupo); <code>stack apply</code> é o mesmo. <code>delonix "
+         "plan</code> mostra o que um apply mudaria; <code>delonix drift</code> mostra o que a MÁQUINA "
+         "mudou desde o último apply.",
+         "Applying a manifest means converging the host toward the declared state (create what's missing, "
+         "reconfigure hot what drifted), idempotently and fail-fast, with no state file — the last applied "
+         "spec lives on the resource itself. <code>delonix apply</code> is the canonical spelling (the "
+         "verb belongs to the manifest, not one group); <code>stack apply</code> is the same. "
+         "<code>delonix plan</code> shows what an apply would change; <code>delonix drift</code> shows "
+         "what the MACHINE changed since the last apply."),
+        ("Delonixfile",
+         "O ficheiro de build do projecto (análogo a um Dockerfile, com extensões Delonix), escrito por "
+         "<code>delonix init</code>/<code>stack init</code> e lido por <code>delonix build</code>.",
+         "The project's build file (analogous to a Dockerfile, with Delonix extensions), written by "
+         "<code>delonix init</code>/<code>stack init</code> and read by <code>delonix build</code>."),
+        ("Pod / Workload",
+         "<code>kind: Pod</code> são N containers reais a partilhar um netns (<code>delonix pod</code>: "
+         "create/logs/exec/cp/attach/port-forward). <code>kind: Workload</code> é a camada de computação "
+         "unificada sobre containers E VMs, açúcar que baixa para Container/Pod/VirtualMachine "
+         "(<code>delonix workload</code> ls/stop/rm, ADR-0002).",
+         "<code>kind: Pod</code> is N real containers sharing a netns (<code>delonix pod</code>: "
+         "create/logs/exec/cp/attach/port-forward). <code>kind: Workload</code> is the unified compute "
+         "layer over containers AND VMs, sugar that folds into Container/Pod/VirtualMachine "
+         "(<code>delonix workload</code> ls/stop/rm, ADR-0002)."),
+    ]),
+    ("VMs", "VMs", [
+        ("microVM",
+         "Uma máquina virtual leve de 1.ª classe, declarada por <code>kind: VirtualMachine</code> e gerida "
+         "por <code>delonix vm</code> (create/ls/start/stop/console). Arranca em Cloud Hypervisor (ou "
+         "libvirt).",
+         "A first-class lightweight virtual machine, declared by <code>kind: VirtualMachine</code> and "
+         "managed by <code>delonix vm</code> (create/ls/start/stop/console). It boots on Cloud Hypervisor "
+         "(or libvirt)."),
+        ("Cloud Hypervisor",
+         "O VMM (Virtual Machine Monitor) leve em Rust que o delonix usa por omissão para as microVMs — "
+         "caminho nativo, sem libvirt. Ver o guia <a href='cloud.html'>cloud-init, cloud-img e CH</a>.",
+         "The lightweight Rust VMM (Virtual Machine Monitor) delonix uses by default for microVMs — native "
+         "path, no libvirt. See the <a href='cloud.html'>cloud-init, cloud-img &amp; CH</a> guide."),
+    ]),
+    ("Kubernetes", "Kubernetes", [
+        ("CRI",
+         "Container Runtime Interface — a API que o kubelet usa para falar com um runtime. O delonix serve "
+         "a sua própria (<code>delonix serve cri</code>), o que deixa o kubelet correr <strong>sem "
+         "containerd</strong>. Ver o guia <a href='cri.html'>CRI</a>.",
+         "Container Runtime Interface — the API the kubelet uses to talk to a runtime. delonix serves its "
+         "own (<code>delonix serve cri</code>), which lets the kubelet run <strong>without "
+         "containerd</strong>. See the <a href='cri.html'>CRI</a> guide."),
+        ("kind (cluster)",
+         "Um cluster Kubernetes local em modo «kind»: os nós <code>kindest/node</code> arrancam DENTRO do "
+         "próprio engine e são iniciados por <code>kubeadm</code>, <strong>sem Docker</strong>. "
+         "<code>delonix cluster create</code> — sem flags, 1 control-plane pronto a usar.",
+         "A local Kubernetes cluster in «kind» mode: the <code>kindest/node</code> nodes start INSIDE the "
+         "engine itself and are bootstrapped by <code>kubeadm</code>, <strong>no Docker</strong>. "
+         "<code>delonix cluster create</code> — no flags, 1 control-plane ready to use."),
+        ("kubeadm",
+         "A ferramenta oficial de bootstrap de Kubernetes. O delonix usa-a para iniciar tanto os clusters "
+         "kind-mode como os clusters provisionados em VMs (<code>delonix cluster kubeadm</code>, "
+         "<code>kind: KubernetesCluster</code>).",
+         "The official Kubernetes bootstrap tool. delonix uses it to bring up both kind-mode clusters and "
+         "VM-provisioned clusters (<code>delonix cluster kubeadm</code>, "
+         "<code>kind: KubernetesCluster</code>)."),
+    ]),
+]
+
+
+def glossary_page():
+    tagline = bi(
+        "p",
+        "Os termos nucleares do delonix, definidos com rigor e verificados contra o binário "
+        "(<code>delonix api-resources</code>, <code>--help</code>). Começa pelo "
+        "<a href='index.html'>início</a> se ainda não instalaste.",
+        "The core terms of delonix, defined precisely and verified against the binary "
+        "(<code>delonix api-resources</code>, <code>--help</code>). Start at the "
+        "<a href='index.html'>home page</a> if you have not installed yet.",
+        cls="tagline",
+    )
+    body = [bi("h1", "Glossário", "Glossary"), tagline]
+    for pt_title, en_title, terms in GLOSSARY:
+        anchor = "-".join(en_title.lower().replace("/", " ").split())
+        body.append(
+            f"<h2 id='{anchor}'>"
+            f"<span class='lang-pt'>{html.escape(pt_title)}</span>"
+            f"<span class='lang-en'>{html.escape(en_title)}</span></h2>"
+        )
+        items = ["<dl>"]
+        for term, pt_def, en_def in terms:
+            items.append(f"<dt><code>{html.escape(term)}</code></dt>")
+            items.append(
+                "<dd>"
+                f"<span class='lang-pt'>{pt_def}</span>"
+                f"<span class='lang-en'>{en_def}</span></dd>"
+            )
+        items.append("</dl>")
+        body.append("\n".join(items))
+    page("glossario.html", "Glossário", "\n".join(body))
+
+
+# ---------------------------------------------------------------------------
+# Índice de pesquisa (Ctrl/Cmd+K) — gerado a partir das MESMAS páginas que o
+# site (`_SEARCH_PAGES`, recolhido por `page()`) e dos títulos bilingues da nav
+# (`DOC_GROUPS`/`GROUPS`), escrito em `docs/search-index.json` versionável. O
+# modal carrega-o uma vez por `fetch` (vendored, mesma origem — zero CDN).
+# ---------------------------------------------------------------------------
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _plain(fragment):
+    """HTML → texto nu: tira tags, desfaz entidades, colapsa espaços."""
+    return _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", fragment))).strip()
+
+
+def _slug(label):
+    """Mesmo slug que o `buildToc` do JS: minúsculas, não-[a-z0-9] → '-',
+    sem '-' nas pontas. Acentos caem (não são a-z) tal como no JS."""
+    s = re.sub(r"[^a-z0-9]+", "-", label.lower())
+    s = re.sub(r"^-|-$", "", s)
+    return s or "sec"
+
+
+def _dedup(slug, used):
+    while used.get(slug):
+        slug += "-x"
+    used[slug] = 1
+    return slug
+
+
+def _class_lang(tag_html):
+    m = re.search(r"class\s*=\s*[\"']([^\"']*)[\"']", tag_html)
+    if not m:
+        return None
+    cls = m.group(1)
+    if "lang-pt" in cls:
+        return "pt"
+    if "lang-en" in cls:
+        return "en"
+    return None
+
+
+def _excerpt(region, lang):
+    """Excerto de um idioma: remove os blocos marcados com o OUTRO idioma
+    (span/p/div/li) e depois reduz a texto nu, truncado."""
+    other = "lang-en" if lang == "pt" else "lang-pt"
+    cleaned = re.sub(
+        r"<(span|p|div|li)\b[^>]*" + other + r"[^>]*>.*?</\1>", " ", region, flags=re.S
+    )
+    t = _plain(cleaned)
+    return t[:160].rstrip()
+
+
+_HEAD_TOKEN_RE = re.compile(
+    r"(?P<divopen><div\b[^>]*>)"
+    r"|(?P<divclose></div>)"
+    r"|(?P<head><(?P<hl>h[23])\b[^>]*>.*?</(?P=hl)>)",
+    re.S,
+)
+
+
+def _extract_sections(body):
+    """Extrai os h2/h3 em ordem de documento com texto PT/EN e âncora por
+    idioma. O idioma de cada cabeçalho vem da classe do próprio <hN>, senão
+    do <div> antecessor mais próximo (índice duplica secções inteiras por
+    idioma), senão é bilingue. Os slugs replicam o dedup do `buildToc`."""
+    div_stack = []
+    heads = []
+    for m in _HEAD_TOKEN_RE.finditer(body):
+        if m.group("divopen"):
+            lang = _class_lang(m.group("divopen"))
+            if lang is None:
+                lang = div_stack[-1] if div_stack else None
+            div_stack.append(lang)
+        elif m.group("divclose"):
+            if div_stack:
+                div_stack.pop()
+            continue
+        else:
+            full = m.group("head")
+            level = int(m.group("hl")[1])
+            open_tag = re.match(r"<h[23]\b[^>]*>", full).group(0)
+            inner = full[len(open_tag):-len("</h%d>" % level)]
+            idm = re.search(r"id\s*=\s*[\"']([^\"']+)[\"']", open_tag)
+            hid = idm.group(1) if idm else None
+            own = _class_lang(open_tag)
+            ctx = div_stack[-1] if div_stack else None
+            eff = own or ctx  # None => bilingue (visível nos dois idiomas)
+            pt_span = re.search(r"<span[^>]*lang-pt[^>]*>(.*?)</span>", inner, re.S)
+            en_span = re.search(r"<span[^>]*lang-en[^>]*>(.*?)</span>", inner, re.S)
+            region = body[m.end():m.end() + 1400]
+            # O antecessor lang-xx manda mesmo quando o <hN> traz spans dos dois
+            # idiomas (ex.: cartões do index duplicados nos blocos pt E en): o
+            # `buildToc` só vê o cabeçalho no idioma do bloco, logo o texto/slug
+            # têm de sair só desse idioma, senão o dedup `-x` não bate.
+            if eff == "pt":
+                t = _plain(pt_span.group(1)) if pt_span else _plain(inner)
+                pt_text, en_text, vis_pt, vis_en = t, "", True, False
+            elif eff == "en":
+                t = _plain(en_span.group(1)) if en_span else _plain(inner)
+                pt_text, en_text, vis_pt, vis_en = "", t, False, True
+            elif pt_span and en_span:
+                pt_text = _plain(pt_span.group(1))
+                en_text = _plain(en_span.group(1))
+                vis_pt = vis_en = True
+            else:
+                t = _plain(inner)
+                pt_text, en_text, vis_pt, vis_en = t, t, True, True
+            heads.append({
+                "level": level, "pt": pt_text, "en": en_text,
+                "vis_pt": vis_pt, "vis_en": vis_en, "region": region, "id": hid,
+            })
+    used_pt, used_en = {}, {}
+    for h in heads:
+        # Id explícito do gerador MANDA — é o que o `buildToc` preserva no DOM
+        # (mesma regra), por isso `url#slug` da pesquisa bate com o elemento.
+        # Registamo-lo no dedup para os slugs calculados não colidirem com ele.
+        if h["id"]:
+            used_pt[h["id"]] = used_en[h["id"]] = 1
+            h["slug_pt"] = h["id"] if h["vis_pt"] else ""
+            h["slug_en"] = h["id"] if h["vis_en"] else ""
+        else:
+            h["slug_pt"] = _dedup(_slug(h["pt"]), used_pt) if h["vis_pt"] and h["pt"] else ""
+            h["slug_en"] = _dedup(_slug(h["en"]), used_en) if h["vis_en"] and h["en"] else ""
+    return heads
+
+
+def _page_titles_bi():
+    m = {}
+    for _spt, _sen, entries in DOC_GROUPS:
+        for href, pt, en in entries:
+            m[href] = (pt, en)
+    for name in GROUPS:
+        # Nomes de comando são neutros em idioma (p.ex. "delonix run").
+        m["comandos/%s.html" % name] = (GROUPS[name]["title"], GROUPS[name]["title"])
+    return m
+
+
+def build_search_index():
+    titles = _page_titles_bi()
+    records = []
+    for pg in _SEARCH_PAGES:
+        url, body = pg["path"], pg["body"]
+        tpt, ten = titles.get(url, (pg["title"], pg["title"]))
+        no_heads = re.sub(r"<h[1-6]\b[^>]*>.*?</h[1-6]>", " ", body, flags=re.S)
+        records.append({
+            "url": url, "kind": "page", "level": 1,
+            "title": {"pt": tpt, "en": ten},
+            "text": {"pt": tpt, "en": ten},
+            "slug": {"pt": "", "en": ""},
+            "excerpt": {"pt": _excerpt(no_heads, "pt"), "en": _excerpt(no_heads, "en")},
+        })
+        for h in _extract_sections(body):
+            records.append({
+                "url": url, "kind": "section", "level": h["level"],
+                "title": {"pt": tpt, "en": ten},
+                "text": {"pt": h["pt"], "en": h["en"]},
+                "slug": {"pt": h["slug_pt"], "en": h["slug_en"]},
+                "excerpt": {
+                    "pt": _excerpt(h["region"], "pt") if h["vis_pt"] else "",
+                    "en": _excerpt(h["region"], "en") if h["vis_en"] else "",
+                },
+            })
+    out = os.path.join(ROOT, "search-index.json")
+    with open(out, "w") as f:
+        json.dump(records, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"search-index.json: {len(records)} registos ({len(_SEARCH_PAGES)} páginas)")
+
+
 def main():
+    contract_gate()
     # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
     # último token do output inteiro deixou de ser a versão.
     ver = (
@@ -6397,6 +7379,7 @@ def main():
     page("index.html", "Delonix Engine", index_html)
     cheatsheet_page()
     kinds_page()
+    glossary_page()
     page("arquitectura.html", "Arquitectura", bi("div", ARCH, ARCH_EN))
     c4_page()
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", bi("div", CLOUD, CLOUD_EN))
@@ -6413,6 +7396,7 @@ def main():
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))
     for n, g in GROUPS.items():
         group_page(n, g)
+    build_search_index()
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
     print(f"docs geradas (delonix {ver}) em {ROOT}")
 

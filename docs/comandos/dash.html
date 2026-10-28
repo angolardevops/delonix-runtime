@@ -4,25 +4,47 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>delonix dashboard · Delonix Engine</title>
+<meta name="description" content="Engine de containers e microVMs daemonless, rootless-first, em Rust — referência gerada do --help real do binário.">
+<link rel="canonical" href="https://ngolacloud.github.io/delonix/comandos/dash.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Delonix Engine">
+<meta property="og:title" content="delonix dashboard">
+<meta property="og:description" content="Engine de containers e microVMs daemonless, rootless-first, em Rust — referência gerada do --help real do binário.">
+<meta property="og:url" content="https://ngolacloud.github.io/delonix/comandos/dash.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="delonix dashboard">
+<meta name="twitter:description" content="Engine de containers e microVMs daemonless, rootless-first, em Rust — referência gerada do --help real do binário.">
 <script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
 var l=localStorage.getItem('delonix-docs-lang');
-if(l)document.documentElement.setAttribute('data-lang',l);
+if(l){document.documentElement.setAttribute('data-lang',l);document.documentElement.lang=(l==='en'?'en':'pt');}
 }catch(e){}})();</script>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
---tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
---tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+--out-ink:#4a5563;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#9da7b3;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#9da7b3;--tok-head:#ff9a5a;--tok-sep:#9da7b3;
+--tag-ok-bg:#d8f3dc;--tag-ok-fg:#1b4332;--tag-mid-bg:#fff3bf;--tag-mid-fg:#5c4a00;
+--tag-no-bg:#ffe3e3;--tag-no-fg:#7a1420;
+--warn-border:#e03131;--warn-bg:#fff0f0;--warn-fg:#c92a2a}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
 --bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--out-ink:#aeb8c6;
 --tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
---tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e;
+--tag-ok-bg:#0f3d24;--tag-ok-fg:#8fe3ac;--tag-mid-bg:#453800;--tag-mid-fg:#ffe066;
+--tag-no-bg:#4a1015;--tag-no-fg:#ffa8a8;
+--warn-border:#e5484d;--warn-bg:#3a1414;--warn-fg:#ff8787}}
 :root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
 --bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--out-ink:#aeb8c6;
 --tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
---tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e;
+--tag-ok-bg:#0f3d24;--tag-ok-fg:#8fe3ac;--tag-mid-bg:#453800;--tag-mid-fg:#ffe066;
+--tag-no-bg:#4a1015;--tag-no-fg:#ffa8a8;
+--warn-border:#e5484d;--warn-bg:#3a1414;--warn-fg:#ff8787}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
@@ -80,6 +102,7 @@ pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-r
 overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
+.help-note{font-size:.76rem;color:var(--muted);margin:0 0 .35rem;font-style:italic}
 .tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
 .tok-comment{color:var(--tok-comment);font-style:italic}
 .tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
@@ -87,13 +110,17 @@ pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .tok-sep{color:var(--tok-sep)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
 .ex .out,div.out{margin-top:.4rem}
-.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--out-ink);
 padding:.7rem 1rem;font-size:.82rem}
 .ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
 margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
 th{background:var(--side)}
+dl{margin:1rem 0}
+dt{font-weight:700;margin-top:1.1rem}
+dd{margin:.25rem 0 0;padding-left:1rem;border-left:2px solid var(--line);color:var(--ink)}
+dd+dt{border-top:1px solid var(--line);padding-top:1.1rem}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
 .card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
 .card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
@@ -107,15 +134,13 @@ padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
 .pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
 padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
 .tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
-.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
-.tag.no{background:#ffe3e3;color:#7a1420}
-@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
-.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.tag.ok{background:var(--tag-ok-bg);color:var(--tag-ok-fg)}
+.tag.mid{background:var(--tag-mid-bg);color:var(--tag-mid-fg)}
+.tag.no{background:var(--tag-no-bg);color:var(--tag-no-fg)}
 .callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
 background:var(--accent-soft)}
-.callout.warn{border-color:#e03131;background:#fff0f0}
-.callout.warn b{color:#c92a2a}
-@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout.warn{border-color:var(--warn-border);background:var(--warn-bg)}
+.callout.warn b{color:var(--warn-fg)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
@@ -124,8 +149,60 @@ aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transfo
 aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
 aside.toc a:hover{color:var(--accent);text-decoration:none}
 @media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
-@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+/* Hambúrguer: escondido no desktop; a lista de nav está sempre visível. */
+.nav-toggle{display:none;appearance:none;border:1px solid var(--line);background:var(--bg);
+color:var(--ink);border-radius:8px;width:30px;height:30px;flex-shrink:0;align-items:center;
+justify-content:center;cursor:pointer;font-size:1.05rem;line-height:1}
+.nav-toggle:hover{border-color:var(--accent)}
+/* Botão de cópia: sobre o fundo do código (SEMPRE escuro) nos dois temas. */
+pre.has-copy{position:relative}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;appearance:none;cursor:pointer;
+border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--code-ink);
+border-radius:6px;padding:.16rem .5rem;font-size:.72rem;font-weight:600;line-height:1.4;
+opacity:0;transition:opacity .15s,background .15s,color .15s,border-color .15s}
+pre.has-copy:hover .copy-btn,.copy-btn:focus-visible{opacity:1}
+.copy-btn:hover{background:rgba(255,255,255,.16)}
+.copy-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.copy-btn.ok{opacity:1;background:rgba(63,185,80,.22);border-color:#3fb950;color:#7ee787}
+.copy-btn.err{opacity:1;background:rgba(248,81,73,.22);border-color:#f85149;color:#ffa8a8}
+.copy-btn.ok::after{content:" \2713"}
+.copy-btn.err::after{content:" \2717"}
+@media (hover:none){.copy-btn{opacity:1}}
+@media (max-width:840px){.layout{display:block}
+nav.side{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:.8rem 1rem;
+border-right:none;border-bottom:1px solid var(--line)}
+nav.side .brand{margin-bottom:0}
+.nav-toggle{display:inline-flex}
+.nav-links{display:none;margin-top:.8rem;max-height:70vh;overflow-y:auto}
+nav.side.open .nav-links{display:block}
 main{padding:1.4rem 1.2rem 4rem;max-width:none}}
+
+/* Pesquisa Ctrl/Cmd+K — modal vendored, sem CDN, temas claro/escuro via vars */
+.search-trigger{appearance:none;display:flex;align-items:center;gap:.4rem;width:100%;margin:.1rem 0 .6rem;
+padding:.4rem .55rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted);
+font:inherit;font-size:.86rem;cursor:pointer;text-align:left}
+.search-trigger:hover{border-color:var(--accent);color:var(--ink)}
+.search-trigger .kbd{margin-left:auto;font-size:.68rem;border:1px solid var(--line);border-radius:5px;
+padding:.05rem .32rem;color:var(--muted)}
+.search-overlay{position:fixed;inset:0;z-index:1000;display:none;align-items:flex-start;justify-content:center;
+background:rgba(8,10,16,.5);padding:12vh 1rem 1rem}
+.search-overlay.open{display:flex}
+.search-panel{width:100%;max-width:640px;background:var(--bg);border:1px solid var(--line);border-radius:12px;
+box-shadow:0 18px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;max-height:72vh;overflow:hidden}
+.search-head{display:flex;align-items:center;gap:.55rem;padding:.7rem .9rem;border-bottom:1px solid var(--line)}
+.search-head svg{flex:none;width:18px;height:18px;color:var(--muted)}
+.search-input{flex:1;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:1rem}
+.search-esc{flex:none;font-size:.68rem;border:1px solid var(--line);border-radius:5px;padding:.1rem .35rem;color:var(--muted)}
+.search-results{list-style:none;margin:0;padding:.3rem;overflow-y:auto}
+.search-results li{padding:.5rem .6rem;border-radius:8px;cursor:pointer;scroll-margin:.4rem}
+.search-results li.active,.search-results li:hover{background:var(--accent-soft)}
+.search-results .r-title{font-weight:600;color:var(--ink);font-size:.94rem}
+.search-results li.active .r-title{color:var(--accent)}
+.search-results .r-sec{font-size:.78rem;color:var(--accent);margin-left:.4rem;font-weight:500}
+.search-results .r-ex{font-size:.82rem;color:var(--muted);margin-top:.15rem;line-height:1.35;
+display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.search-results mark{background:var(--accent-soft);color:var(--accent);padding:0 .12em;border-radius:3px}
+.search-empty{padding:1.3rem;text-align:center;color:var(--muted);font-size:.9rem}
 </style>
 </head>
 <body>
@@ -137,13 +214,20 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
 <span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+<button class="nav-toggle" type="button" aria-controls="nav-links" aria-expanded="false" aria-label="Menu de navegação / Navigation menu" title="Menu">☰</button>
 </div></div>
-<h5><span class='lang-pt'>Começar</span><span class='lang-en'>Get started</span></h5><a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a><h5><span class='lang-pt'>Conceitos</span><span class='lang-en'>Concepts</span></h5><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><h5><span class='lang-pt'>Guias</span><span class='lang-en'>Guides</span></h5><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><h5><span class='lang-pt'>Contribuir</span><span class='lang-en'>Contribute</span></h5><a href="../handbook/index.html"><span class='lang-pt'>Manual do contribuidor</span><span class='lang-en'>Contributor handbook</span></a><h5><span class='lang-pt'>Referência</span><span class='lang-en'>Reference</span></h5><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../codigos.html"><span class='lang-pt'>Dicionário de códigos</span><span class='lang-en'>Code dictionary</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a>
+<div class="nav-links" id="nav-links">
+<button class="search-trigger" type="button" data-search-open aria-haspopup="dialog" aria-controls="search-overlay">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:15px;height:15px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<span class="lang-pt">Pesquisar</span><span class="lang-en">Search</span>
+<span class="kbd">Ctrl K</span></button>
+<h5><span class='lang-pt'>Começar</span><span class='lang-en'>Get started</span></h5><a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a><h5><span class='lang-pt'>Conceitos</span><span class='lang-en'>Concepts</span></h5><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../glossario.html"><span class='lang-pt'>Glossário</span><span class='lang-en'>Glossary</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><h5><span class='lang-pt'>Guias</span><span class='lang-en'>Guides</span></h5><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><h5><span class='lang-pt'>Contribuir</span><span class='lang-en'>Contribute</span></h5><a href="../handbook/index.html"><span class='lang-pt'>Manual do contribuidor</span><span class='lang-en'>Contributor handbook</span></a><h5><span class='lang-pt'>Referência</span><span class='lang-en'>Reference</span></h5><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../codigos.html"><span class='lang-pt'>Dicionário de códigos</span><span class='lang-en'>Code dictionary</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
 <h6 class='cat'><span class='lang-pt'>Cargas de trabalho</span><span class='lang-en'>Workloads</span></h6><a href="../comandos/container.html">delonix container</a><a href="../comandos/run.html">delonix run</a><a href="../comandos/create.html">delonix create</a><a href="../comandos/ps.html">delonix ps</a><a href="../comandos/start.html">delonix start</a><a href="../comandos/stop.html">delonix stop</a><a href="../comandos/restart.html">delonix restart</a><a href="../comandos/rm.html">delonix rm</a><a href="../comandos/exec.html">delonix exec</a><a href="../comandos/logs.html">delonix logs</a><a href="../comandos/kill.html">delonix kill</a><a href="../comandos/attach.html">delonix attach</a><a href="../comandos/stats.html">delonix stats</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/oci-runtime.html">delonix oci-runtime</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/systemcontainer.html">delonix systemcontainer</a><a href="../comandos/workload.html">delonix workload</a><h6 class='cat'><span class='lang-pt'>Artefactos</span><span class='lang-en'>Artifacts</span></h6><a href="../comandos/pull.html">delonix pull</a><a href="../comandos/images.html">delonix images</a><a href="../comandos/rmi.html">delonix rmi</a><a href="../comandos/tag.html">delonix tag</a><a href="../comandos/save.html">delonix save</a><a href="../comandos/load.html">delonix load</a><a href="../comandos/push.html">delonix push</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/secret.html">delonix secret</a><h6 class='cat'><span class='lang-pt'>Armazenamento</span><span class='lang-en'>Storage</span></h6><a href="../comandos/volume.html">delonix volume</a><a href="../comandos/bucket.html">delonix bucket</a><h6 class='cat'><span class='lang-pt'>Rede</span><span class='lang-en'>Networking</span></h6><a href="../comandos/network.html">delonix network</a><a href="../comandos/net.html">delonix net</a><a href="../comandos/netns.html" class="sub">delonix net netns</a><a href="../comandos/flow.html" class="sub">delonix net flow</a><a href="../comandos/capture.html" class="sub">delonix net capture</a><a href="../comandos/l4guard.html" class="sub">delonix net l4guard</a><a href="../comandos/ingress.html" class="sub">delonix net ingress</a><a href="../comandos/egress.html" class="sub">delonix net egress</a><a href="../comandos/httproute.html" class="sub">delonix net httproute</a><a href="../comandos/tunnel.html" class="sub">delonix net tunnel</a><a href="../comandos/hosts.html">delonix hosts</a><h6 class='cat'><span class='lang-pt'>Clusters</span><span class='lang-en'>Clusters</span></h6><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/kube.html" class="sub">delonix cluster kube</a><h6 class='cat'><span class='lang-pt'>Declarativo</span><span class='lang-en'>Declarative</span></h6><a href="../comandos/explain.html">delonix explain</a><a href="../comandos/api-resources.html">delonix api-resources</a><a href="../comandos/apply.html">delonix apply</a><a href="../comandos/plan.html">delonix plan</a><a href="../comandos/wait.html">delonix wait</a><a href="../comandos/manifest.html">delonix manifest</a><a href="../comandos/diff.html">delonix diff</a><a href="../comandos/drift.html">delonix drift</a><a href="../comandos/migrate.html">delonix migrate</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/gitops.html">delonix gitops</a><h6 class='cat'><span class='lang-pt'>Recursos</span><span class='lang-en'>Resources</span></h6><a href="../comandos/get.html">delonix get</a><a href="../comandos/describe.html">delonix describe</a><a href="../comandos/delete.html">delonix delete</a><h6 class='cat'><span class='lang-pt'>Servir</span><span class='lang-en'>Serve</span></h6><a href="../comandos/compatibility.html">delonix compatibility</a><a href="../comandos/serve.html">delonix serve</a><a href="../cri.html" class="sub">delonix serve cri</a><a href="../comandos/api.html" class="sub">delonix serve api</a><a href="../comandos/docker-api.html" class="sub">delonix serve docker-api</a><a href="../comandos/node-api.html" class="sub">delonix serve node-api</a><a href="../comandos/mcp.html">delonix mcp</a><h6 class='cat'><span class='lang-pt'>Motor</span><span class='lang-en'>Engine</span></h6><a href="../comandos/init.html">delonix init</a><a href="../comandos/version.html">delonix version</a><a href="../comandos/policy.html">delonix policy</a><a href="../comandos/config.html">delonix config</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/boot.html" class="sub">delonix system boot</a><a href="../comandos/namespace.html" class="sub">delonix system namespace</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/provider.html">delonix provider</a><a href="../comandos/dash.html" class="on">delonix dashboard</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/man.html">delonix man</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/ngolacloud/delonix">GitHub</a>
 <a href="https://github.com/ngolacloud/delonix/releases">Releases</a>
+</div>
 </nav>
 <main>
 <h1>delonix dashboard</h1>
@@ -179,7 +263,7 @@ container/VM/memory/network/disk gauges) and <code>GET /v1/dash</code> (the same
 <code>DashSummary</code> as JSON); the expensive fields (network/disk) recompute in the background
 every 30s, so the scrape itself always stays fast.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dash.rs"><code>cmd/dash.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix dashboard [OPTIONS]
+<div class='help'><div class='help-note lang-pt'>Saída real do binário (em inglês).</div><div class='help-note lang-en'>Real output of the binary (English).</div><pre><code>Usage: delonix dashboard [OPTIONS]
 
 Options:
       --scope &lt;SCOPE&gt;
@@ -235,6 +319,17 @@ fields are explicitly marked when they haven't been measured yet — never disgu
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
 </div>
+<div class="search-overlay" id="search-overlay" role="dialog" aria-modal="true" aria-label="Pesquisa / Search" aria-hidden="true">
+<div class="search-panel">
+<div class="search-head">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<input class="search-input" id="search-input" type="text" role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="true" aria-activedescendant="" autocomplete="off" spellcheck="false" placeholder="Pesquisar / Search">
+<span class="search-esc" aria-hidden="true">Esc</span>
+</div>
+<ul class="search-results" id="search-results" role="listbox" aria-label="Resultados / Results"></ul>
+</div>
+</div>
+<script>window.__DOCS_BASE__='../';</script>
 <script>(function(){
 function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
 
@@ -320,26 +415,35 @@ function isVisibleForLang(el,lang){
   return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
 }
 function buildToc(){
-  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
-      aside=document.getElementById('pagetoc');
-  if(!main||!nav)return;
+  var main=document.querySelector('main');
+  if(!main)return;
   var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  // Âncoras estáveis: ids atribuídos a TODOS os h2/h3 visíveis, em ordem de
+  // documento, com um único mapa de dedup — a MESMA regra que o índice de
+  // pesquisa aplica em Python (build_search_index), para `url#slug` bater.
+  var used={};
+  [].slice.call(main.querySelectorAll('h2,h3')).forEach(function(h){
+    if(!isVisibleForLang(h,lang))return;
+    // Um id explícito do gerador MANDA (kinds, glossário, md_page, labs,
+    // subcomandos): só o registamos no dedup e seguimos — sobrescrevê-lo
+    // partiria os links internos que lhe apontam (ex.: vm.html#image).
+    if(h.id){used[h.id]=1;return;}
+    var label=visibleHeadingText(h);
+    var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+    while(used[slug])slug+='-x';
+    used[slug]=1;h.id=slug;
+  });
+  var nav=document.getElementById('toc-nav'),aside=document.getElementById('pagetoc');
+  if(!nav)return;
   var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
     return isVisibleForLang(h,lang);
   });
   nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
   if(aside)aside.style.display='';
-  var used={};
   heads.forEach(function(h){
-    var label=visibleHeadingText(h);
-    if(!h.id){
-      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
-      while(used[slug])slug+='-x';
-      used[slug]=1;h.id=slug;
-    }
     var a=document.createElement('a');
-    a.href='#'+h.id;a.textContent=label;
+    a.href='#'+h.id;a.textContent=visibleHeadingText(h);
     nav.appendChild(a);
   });
 }
@@ -363,13 +467,214 @@ function initLangToggle(){
     var eff=document.documentElement.getAttribute('data-lang')||'pt';
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
+    document.documentElement.lang=(next==='en'?'en':'pt');
     try{localStorage.setItem(KEY,next);}catch(e){}
     buildToc();
   });
 }
 
+function initNavToggle(){
+  var btn=document.querySelector('.nav-toggle'),nav=document.querySelector('nav.side');
+  if(!btn||!nav)return;
+  btn.addEventListener('click',function(){
+    var open=nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded',open?'true':'false');
+  });
+  // No mobile, fechar o menu ao seguir um link.
+  nav.addEventListener('click',function(e){
+    if(e.target.closest('#nav-links a')&&matchMedia('(max-width:840px)').matches){
+      nav.classList.remove('open');btn.setAttribute('aria-expanded','false');
+    }
+  });
+}
+
+function legacyCopy(text){
+  try{
+    var ta=document.createElement('textarea');
+    ta.value=text;ta.setAttribute('readonly','');
+    ta.style.position='fixed';ta.style.top='-9999px';ta.style.left='-9999px';
+    document.body.appendChild(ta);ta.focus();ta.select();
+    var ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  }catch(e){return false;}
+}
+function flashCopy(btn,ok){
+  btn.classList.remove('ok','err');
+  btn.classList.add(ok?'ok':'err');
+  clearTimeout(btn._copyT);
+  btn._copyT=setTimeout(function(){btn.classList.remove('ok','err');},1600);
+}
+function isCommandPre(pre,code){
+  // Só blocos de COMANDO: nunca .out (resultados) nem .help (--help), nem YAML.
+  if(pre.closest('.out'))return false;
+  if(pre.parentElement&&pre.parentElement.classList.contains('help'))return false;
+  var text=code.textContent;
+  if(/^apiVersion:|\nkind:\s/.test(text))return false;
+  return !!(pre.closest('.ex')||/^(delonix|dlx)\b/.test(text.trim()));
+}
+function initCopyButtons(){
+  document.querySelectorAll('main pre > code').forEach(function(code){
+    var pre=code.parentElement;
+    if(!isCommandPre(pre,code))return;
+    if(pre.querySelector('.copy-btn'))return;
+    pre.classList.add('has-copy');
+    var btn=document.createElement('button');
+    btn.type='button';
+    btn.className='copy-btn';
+    btn.setAttribute('aria-label','Copiar comando / Copy command');
+    btn.innerHTML='<span class="lang-pt">Copiar</span><span class="lang-en">Copy</span>';
+    btn.addEventListener('click',function(){
+      var text=code.textContent;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(
+          function(){flashCopy(btn,true);},
+          function(){flashCopy(btn,legacyCopy(text));});
+      }else{
+        flashCopy(btn,legacyCopy(text));
+      }
+    });
+    pre.appendChild(btn);
+  });
+}
+
+// ---- Pesquisa Ctrl/Cmd+K (índice estático search-index.json, vendored) ----
+var SEARCH_I18N={
+  pt:{ph:'Pesquisar na documentação…',aria:'Pesquisar na documentação',list:'Resultados da pesquisa',
+      none:'Sem resultados para',hint:'Escreve para pesquisar'},
+  en:{ph:'Search the documentation…',aria:'Search the documentation',list:'Search results',
+      none:'No results for',hint:'Type to search'}
+};
+var searchData=null,searchLoading=false,searchItems=[],searchActive=-1,lastFocus=null;
+function docsBase(){return window.__DOCS_BASE__||'';}
+function curLang(){return document.documentElement.getAttribute('data-lang')||'pt';}
+function fold(s){return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+function loadIndex(cb){
+  if(searchData){cb();return;}
+  if(searchLoading)return;
+  searchLoading=true;
+  fetch(docsBase()+'search-index.json').then(function(r){return r.json();}).then(function(d){
+    searchData=d;searchLoading=false;cb();
+  }).catch(function(){searchData=[];searchLoading=false;cb();});
+}
+function markText(text,terms){
+  text=text||'';
+  var ft=fold(text),ranges=[];
+  terms.forEach(function(t){
+    var from=0,i;
+    while((i=ft.indexOf(t,from))>=0){ranges.push([i,i+t.length]);from=i+t.length;}
+  });
+  if(!ranges.length)return esc(text);
+  ranges.sort(function(a,b){return a[0]-b[0];});
+  var out='',pos=0;
+  ranges.forEach(function(r){
+    if(r[0]<pos)return;
+    out+=esc(text.slice(pos,r[0]))+'<mark>'+esc(text.slice(r[0],r[1]))+'</mark>';
+    pos=r[1];
+  });
+  return out+esc(text.slice(pos));
+}
+function runQuery(q){
+  var lang=curLang(),terms=fold(q).split(/\s+/).filter(Boolean),out=[];
+  if(!terms.length)return out;
+  (searchData||[]).forEach(function(rec){
+    var title=(rec.title&&rec.title[lang])||'';
+    var text=(rec.text&&rec.text[lang])||'';
+    var exc=(rec.excerpt&&rec.excerpt[lang])||'';
+    if(rec.kind==='section'&&!text)return;   // registo não é deste idioma
+    if(rec.kind==='page'&&!title)return;
+    var ftitle=fold(title),ftext=fold(text),hay=fold(title+' '+text+' '+exc);
+    var ok=true,score=0;
+    terms.forEach(function(t){
+      if(hay.indexOf(t)<0){ok=false;return;}
+      if(ftitle.indexOf(t)>=0)score+=4;
+      if(ftext.indexOf(t)>=0)score+=2;
+      score+=1;
+    });
+    if(rec.kind==='page')score+=1;
+    if(ok)out.push({rec:rec,score:score,title:title,text:text,exc:exc});
+  });
+  out.sort(function(a,b){return b.score-a.score;});
+  return out.slice(0,40);
+}
+function hrefFor(rec,lang){
+  var slug=rec.slug&&rec.slug[lang];
+  return docsBase()+rec.url+(slug?('#'+slug):'');
+}
+function renderResults(q){
+  var ul=document.getElementById('search-results');if(!ul)return;
+  var lang=curLang(),terms=fold(q).split(/\s+/).filter(Boolean);
+  var res=runQuery(q);
+  searchItems=[];searchActive=-1;ul.innerHTML='';
+  if(!q){ul.innerHTML='<li class="search-empty" role="presentation">'+esc(SEARCH_I18N[lang].hint)+'</li>';return;}
+  if(!res.length){ul.innerHTML='<li class="search-empty" role="presentation">'+esc(SEARCH_I18N[lang].none)+' “'+esc(q)+'”</li>';return;}
+  res.forEach(function(r,idx){
+    var li=document.createElement('li');
+    li.setAttribute('role','option');li.id='search-opt-'+idx;li.setAttribute('aria-selected','false');
+    var sec=r.rec.kind==='section'?('<span class="r-sec">'+markText(r.text,terms)+'</span>'):'';
+    li.innerHTML='<div class="r-title">'+markText(r.title,terms)+sec+'</div>'+
+      (r.exc?('<div class="r-ex">'+markText(r.exc,terms)+'</div>'):'');
+    var href=hrefFor(r.rec,lang);
+    li.addEventListener('click',function(){location.href=href;});
+    searchItems.push({href:href,el:li});
+    ul.appendChild(li);
+  });
+  setActive(0);
+}
+function setActive(i){
+  if(!searchItems.length)return;
+  if(searchActive>=0&&searchItems[searchActive]){
+    searchItems[searchActive].el.classList.remove('active');
+    searchItems[searchActive].el.setAttribute('aria-selected','false');
+  }
+  searchActive=(i+searchItems.length)%searchItems.length;
+  var it=searchItems[searchActive];
+  it.el.classList.add('active');it.el.setAttribute('aria-selected','true');
+  it.el.scrollIntoView({block:'nearest'});
+  var inp=document.getElementById('search-input');if(inp)inp.setAttribute('aria-activedescendant',it.el.id);
+}
+function openSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  loadIndex(function(){var inp=document.getElementById('search-input');if(inp&&inp.value)renderResults(inp.value);});
+  lastFocus=document.activeElement;
+  ov.classList.add('open');ov.removeAttribute('aria-hidden');
+  var lang=curLang(),inp=document.getElementById('search-input');
+  inp.placeholder=SEARCH_I18N[lang].ph;inp.setAttribute('aria-label',SEARCH_I18N[lang].aria);
+  var ul=document.getElementById('search-results');if(ul)ul.setAttribute('aria-label',SEARCH_I18N[lang].list);
+  inp.value='';renderResults('');
+  setTimeout(function(){inp.focus();},0);
+}
+function closeSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  ov.classList.remove('open');ov.setAttribute('aria-hidden','true');
+  if(lastFocus&&lastFocus.focus)lastFocus.focus();
+}
+function initSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  var inp=document.getElementById('search-input');
+  [].slice.call(document.querySelectorAll('[data-search-open]')).forEach(function(b){
+    b.addEventListener('click',function(e){e.preventDefault();openSearch();});
+  });
+  inp.addEventListener('input',function(){renderResults(inp.value);});
+  ov.addEventListener('mousedown',function(e){if(e.target===ov)closeSearch();});
+  document.addEventListener('keydown',function(e){
+    var open=ov.classList.contains('open');
+    if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();open?closeSearch():openSearch();return;}
+    if(!open)return;
+    if(e.key==='Escape'){e.preventDefault();closeSearch();}
+    else if(e.key==='ArrowDown'){e.preventDefault();setActive(searchActive+1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();setActive(searchActive-1);}
+    else if(e.key==='Enter'){e.preventDefault();if(searchActive>=0&&searchItems[searchActive])location.href=searchItems[searchActive].href;}
+    else if(e.key==='Tab'){e.preventDefault();inp.focus();}   // trap de foco simples: 1 campo
+  });
+}
+function scrollToHash(){
+  if(!location.hash)return;
+  try{var el=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(el)el.scrollIntoView();}catch(e){}
+}
+
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();initLangToggle();buildToc();highlightAll();
+  initThemeToggle();initLangToggle();initNavToggle();buildToc();highlightAll();initCopyButtons();initSearch();scrollToHash();
 });
 })();</script>
 </body>
