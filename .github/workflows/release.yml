@@ -320,7 +320,7 @@ jobs:
       # would add supply-chain surface to the step that exists to guarantee it,
       # which is also why the SBOM comes from a script of ours and not a `syft`.
       #
-      # Verify with: gh attestation verify <file> --repo angolardevops/delonix-runtime
+      # Verify with: gh attestation verify <file> --repo ngolacloud/delonix
       - name: Proveniência (SLSA) dos binários
         uses: actions/attest-build-provenance@v1
         with:

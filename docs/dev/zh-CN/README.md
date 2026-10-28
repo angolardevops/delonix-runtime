@@ -4,7 +4,7 @@
 本手册面向想要**修改引擎**的人：你今天克隆了本仓库，想在不破坏你的宿主机或引擎的前提下发出第一个
 pull request。读完本页后，你会知道本手册的编排顺序，以及针对你的角色应按什么顺序阅读哪些页面。如果你只想
 *使用* Delonix，请改为从 [README](../../../README.rst) 和
-[用户文档网站](https://angolardevops.github.io/delonix-runtime/) 开始。
+[用户文档网站](https://ngolacloud.github.io/delonix/) 开始。
 
 <!-- dev-docs:begin crate-count -->
 工作区共有 **34 个 crate**，产出 **6 个二进制**（`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`）。

@@ -5,7 +5,7 @@ Este manual é para quem quer **mudar o motor**: clonaste o repositório hoje e 
 primeiro pull request sem partir o teu host nem o motor. Depois desta página vais saber como o
 manual está sequenciado e que páginas ler, por que ordem, para o teu papel. Se só queres *usar*
 o Delonix, começa antes pelo [README](../../../README.rst) e pelo
-[site de documentação do utilizador](https://angolardevops.github.io/delonix-runtime/).
+[site de documentação do utilizador](https://ngolacloud.github.io/delonix/).
 
 <!-- dev-docs:begin crate-count -->
 O workspace tem **34 crates** e produz **6 binários** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).

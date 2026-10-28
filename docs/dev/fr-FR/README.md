@@ -6,7 +6,7 @@ aujourd’hui et vous voulez envoyer une première pull request sans casser votr
 Après cette page, vous saurez comment le manuel est séquencé et quelles pages lire, dans quel
 ordre, pour votre rôle. Si vous voulez seulement *utiliser* Delonix, commencez plutôt par le
 [README](../../../README.rst) et le
-[site de documentation utilisateur](https://angolardevops.github.io/delonix-runtime/).
+[site de documentation utilisateur](https://ngolacloud.github.io/delonix/).
 
 <!-- dev-docs:begin crate-count -->
 Le workspace compte **34 crates** et livre **6 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).

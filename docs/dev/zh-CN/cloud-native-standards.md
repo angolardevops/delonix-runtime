@@ -606,7 +606,7 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
 - **SLSA 来源证明**：`release.yml` 里 "Proveniência (SLSA) dos binários" 这一步,
   对已发布的 `delonix`、`delonix-cri` 和 `delonix-mcp` 二进制文件使用
   `actions/attest-build-provenance`。用
-  `gh attestation verify <file> --repo angolardevops/delonix-runtime` 来验证。
+  `gh attestation verify <file> --repo ngolacloud/delonix` 来验证。
 - **与 cosign 兼容的镜像签名**：`crates/adapters/delonix-oci/src/sign.rs`。
   `sign_image`（在 `delonix image sign` 背后）发布一份 ECDSA P-256 的
   simple-signing 载荷作为 `.sig` artifact；`verify_signature`（在

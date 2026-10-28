@@ -17,7 +17,7 @@ from pathlib import Path
 
 INSTALL = Path(__file__).resolve().parent / "install.sh"
 TEXT = INSTALL.read_text()
-REPO = "angolardevops/delonix-runtime"
+REPO = "ngolacloud/delonix"
 
 
 def function_source(name: str) -> str:

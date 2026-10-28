@@ -52,7 +52,7 @@ fix it before going further — every later step depends on it.
 **1. Clone, with the tags.**
 
 ```bash
-git clone https://github.com/angolardevops/delonix-runtime.git
+git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin
 git describe --tags --abbrev=0        # prints the newest release, e.g. vX.Y.Z

@@ -294,7 +294,7 @@ pub fn sbom_spdx(image: &Image, packages: &[Package]) -> serde_json::Value {
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": format!("{name}-sbom"),
         "documentNamespace": format!(
-            "https://github.com/angolardevops/delonix-runtime/image-sbom/{}",
+            "https://github.com/ngolacloud/delonix/image-sbom/{}",
             image.short_id()
         ),
         "creationInfo": {

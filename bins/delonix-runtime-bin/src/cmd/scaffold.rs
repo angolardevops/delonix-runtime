@@ -1623,7 +1623,7 @@ fn privileged_port_message(flag: &str, port: &str) -> String {
             ("alt", &(n + 8000).to_string()),
             (
                 "url",
-                "https://github.com/angolardevops/delonix-runtime/\
+                "https://github.com/ngolacloud/delonix/\
                  releases/latest/download/install.sh",
             ),
         ],

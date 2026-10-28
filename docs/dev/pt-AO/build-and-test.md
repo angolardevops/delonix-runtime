@@ -15,7 +15,7 @@ regras estão em [Fluxo de contribuição](contributing-workflow.md#one-worktree
 ## Clonar
 
 ```bash
-git clone https://github.com/angolardevops/delonix-runtime.git
+git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 ```
@@ -289,8 +289,8 @@ Para voltares a um binário publicado, corre o instalador outra vez; ele substit
 directório de instalação pela release que indicares:
 
 ```bash
-curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --user
-curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
+curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --user
+curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
 ```
 
 Os ficheiros de completion e as man pages que geraste à mão não são removidos por nenhum dos dois

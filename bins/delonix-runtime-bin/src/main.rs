@@ -674,7 +674,7 @@ fn long_version_text() -> &'static str {
          \x20 delonix stack init && delonix stack apply   # {c4}\n\
          \x20 delonix dashboard                           # {c5}\n\
          \n\
-         {docs}: https://angolardevops.github.io/delonix-runtime/ · delonix <group> --help",
+         {docs}: https://ngolacloud.github.io/delonix/ · delonix <group> --help",
             v = env!("CARGO_PKG_VERSION"),
             tag = t("daemonless, rootless-first container & microVM engine (kernel-native, Rust)"),
             hash = env!("DELONIX_GIT_HASH"),

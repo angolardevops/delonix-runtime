@@ -72,7 +72,7 @@ footer a{color:inherit}
 <div class="temp" id="temp">&mdash;</div>
 <form id="f"><input id="q" value="Luanda"><button>ver</button></form>
 <p class="meta" id="meta"></p>
-<footer>Servido por <a href="https://github.com/angolardevops/delonix-runtime">Delonix Runtime</a>
+<footer>Servido por <a href="https://github.com/ngolacloud/delonix">Delonix Runtime</a>
 via <code>container run</code> + <code>httproute</code> + <code>tunnel</code>. Actualiza a cada 30s.</footer>
 <script>
 let city = "Luanda";

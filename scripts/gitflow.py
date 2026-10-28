@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ORIGIN_SLUG = "delonix-runtime"
+ORIGIN_SLUG = "ngolacloud/delonix"
 REMOTE = "origin"
 INTEGRATION = "develop"
 RELEASED = "main"
@@ -114,13 +114,13 @@ def repo_root(cwd=None) -> Path:
 
 
 def validate_remote(cwd=None):
-    """Confirm we are in the delonix-runtime repo with the expected origin,
+    """Confirm we are in the delonix engine repo with the expected origin,
     before any mutation. Fail closed with an actionable message otherwise."""
     try:
         url = git_out(["remote", "get-url", REMOTE], cwd=cwd)
     except GitFlowError:
         raise GitFlowError(
-            f"no '{REMOTE}' remote here — run inside the delonix-runtime clone."
+            f"no '{REMOTE}' remote here — run inside the {ORIGIN_SLUG} clone."
         )
     if ORIGIN_SLUG not in url:
         raise GitFlowError(

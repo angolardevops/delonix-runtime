@@ -9,7 +9,7 @@ import "delonix/node/v1/common.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+option go_package = "github.com/ngolacloud/delonix/gen/go/delonix/node/v1;nodev1";
 
 service NodeService {
   // The entry point (ADR-0042 D2): the API version and a link to every resource

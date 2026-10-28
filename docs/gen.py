@@ -224,7 +224,7 @@ SOURCE_FILES = {
     "backup": "rbackup.rs",
 }
 SOURCE_BASE_URL = (
-    "https://github.com/angolardevops/delonix-runtime/blob/main/"
+    "https://github.com/ngolacloud/delonix/blob/main/"
     "bins/delonix-runtime-bin/src/cmd/"
 )
 
@@ -1464,7 +1464,7 @@ escrito à mão diverge do motor, e este repositório já pagou essa divergênci
 responder no terminal o que um editor apontado ao schema mostra em linha. O schema é
 <strong>estável</strong> dentro do <code>0.x</code>: um campo nunca é removido nem muda de tipo ou
 de significado — ver a
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">promessa
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md">promessa
 de estabilidade</a>. Para saber o que mudou entre duas versões há
 <code>scripts/schema-diff.sh</code>, que compara campo a campo e sai 1 com diferenças.""",
         "subs": {},
@@ -2035,7 +2035,7 @@ hand-written schema drifts from the engine, and this repository has paid for tha
 times — so the terminal answers what an editor pointed at the schema shows inline. The schema is
 <strong>stable</strong> within <code>0.x</code>: a field is never removed and never changes type or
 meaning — see the
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">stability
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md">stability
 promise</a>. To see what changed between two versions there is
 <code>scripts/schema-diff.sh</code>, which compares field by field and exits 1 on differences.""",
     },
@@ -3438,8 +3438,8 @@ def sidebar(active, depth=0):
 <h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
 {cmd_html}
 <h5>{bi('span', 'Projecto', 'Project')}</h5>
-<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
-<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+<a href="https://github.com/ngolacloud/delonix">GitHub</a>
+<a href="https://github.com/ngolacloud/delonix/releases">Releases</a>
 </nav>"""
 
 
@@ -3598,10 +3598,10 @@ document.addEventListener('DOMContentLoaded',function(){
 
 
 FOOTER_PT = ('Delonix Engine · Apache-2.0 · '
-             '<a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>'
+             '<a href="https://github.com/ngolacloud/delonix">ngolacloud/delonix</a>'
              ' · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.')
 FOOTER_EN = ('Delonix Engine · Apache-2.0 · '
-             '<a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>'
+             '<a href="https://github.com/ngolacloud/delonix">ngolacloud/delonix</a>'
              ' · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.')
 FOOTER_HTML = bi("span", FOOTER_PT, FOOTER_EN)
 TOC_HEADING_HTML = bi("span", "Nesta página", "On this page")
@@ -3740,7 +3740,7 @@ container.</p>
 <p>Um comando instala o binário <strong>e</strong> todas as dependências de runtime
 (rede rootless, VMs, tuning de kernel), escolhendo a variante certa para o teu CPU.
 Funciona em Debian/Ubuntu, Fedora/RHEL, openSUSE e Arch:</p>
-<pre><code>curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash</code></pre>
+<pre><code>curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash</code></pre>
 <p>Para publicar a porta <strong>80</strong> ou <strong>443</strong> (<code>-p 80:80</code>)
 acrescenta <code>--low-ports</code>:</p>
 <pre><code>curl -fsSL .../install.sh | bash -s -- --low-ports</code></pre>
@@ -3754,7 +3754,7 @@ como root na porta 80 a encaminhar para uma porta alta. Reverter: apagar
 <code>/etc/sysctl.d/99-delonix-lowports.conf</code>.</p>
 <p>Alternativa (só o binário, dependências por tua conta):</p>
 <pre><code>curl -fL -o ~/.local/bin/delonix \\
-  https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
+  https://github.com/ngolacloud/delonix/releases/latest/download/delonix-x86_64-linux
 chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
@@ -3805,7 +3805,7 @@ lets you <em>swap ports and volumes on the fly</em>, with no container restart.<
 <p>One command installs the binary <strong>and</strong> every runtime dependency (rootless
 networking, VMs, kernel tuning), picking the right variant for your CPU. Works on
 Debian/Ubuntu, Fedora/RHEL, openSUSE and Arch:</p>
-<pre><code>curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash</code></pre>
+<pre><code>curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash</code></pre>
 <p>To publish port <strong>80</strong> or <strong>443</strong> (<code>-p 80:80</code>) add
 <code>--low-ports</code>:</p>
 <pre><code>curl -fsSL .../install.sh | bash -s -- --low-ports</code></pre>
@@ -3818,7 +3818,7 @@ shared machine, the alternative that doesn't lower anything is a root proxy on p
 to a high port. To revert: delete <code>/etc/sysctl.d/99-delonix-lowports.conf</code>.</p>
 <p>Alternative (binary only, dependencies are on you):</p>
 <pre><code>curl -fL -o ~/.local/bin/delonix \\
-  https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
+  https://github.com/ngolacloud/delonix/releases/latest/download/delonix-x86_64-linux
 chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
@@ -3946,7 +3946,7 @@ fechou um TOCTOU residual no kubeconfig, e reviu o núcleo de syscalls (namespac
 auditoria (2026-08-10) varreu as classes de CVE conhecidas do Docker/runc/CRI-O e corrigiu o que
 encontrou. Isto reduz o risco, não o elimina: num host partilhado, trata imagens e manifestos de
 terceiros com a mesma cautela que terias com qualquer runtime. Detalhe completo em
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
 — ver também a <a href="comparacao.html">comparação com Docker/Podman</a> para o estado geral do
 projecto.</p>
 </div>
@@ -4051,7 +4051,7 @@ residual TOCTOU on the kubeconfig, and reviewed the syscall core (namespaces, se
 (2026-08-10) swept the known Docker/runc/CRI-O CVE classes and fixed what it found. That lowers the
 risk, it does not remove it: on a shared host, treat third-party images and manifests with the
 same care you would with any runtime. Full detail in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
 — see also the <a href="comparacao.html">comparison with Docker/Podman</a> for the project's
 overall status.</p>
 </div>
@@ -4096,7 +4096,7 @@ suite de upstream, e o número é publicado:</p>
 79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
 <p>Reproduz com <code>tests/compat/cri-conformance.sh</code>. O detalhe completo do que falha e
 porquê — incluindo o que <em>não</em> é nosso — está em
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
 <p>Cerca de metade das falhas restantes não são lacunas do motor: nove são specs de AppArmor, que
 exigem <code>CAP_MAC_ADMIN</code> no user namespace <em>inicial</em> (o Docker e o containerd têm
 exactamente o mesmo limite), e quatro são testes de montagem em que a própria suite não consegue
@@ -4150,7 +4150,7 @@ can verify. <code>delonix-cri</code> is run against <a href="https://github.com/
 79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
 <p>Reproduce it with <code>tests/compat/cri-conformance.sh</code>. Full detail on what fails and
 why — including what <em>isn't</em> ours to fix — is in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
 <p>About half of the remaining failures aren't engine gaps: nine are AppArmor specs, which need
 <code>CAP_MAC_ADMIN</code> in the <em>initial</em> user namespace (Docker and containerd hit
 exactly the same limit), and four are mount tests where the suite itself can't mount on the host
@@ -4191,9 +4191,9 @@ Não há indícios de execução remota de código a partir da rede — a fronte
 sólida e já foi testada por um 2.º par de olhos — mas <strong>por prudência, um projecto sem anos
 de produção continua a merecer cautela</strong> em produção multi-tenant com dados sensíveis.
 Detalhe completo, com ficheiro e linha de cada achado e o estado da correcção:
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">relatório
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/AUDITORIA-E2E.md">relatório
 da auditoria original</a> e
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise
 de gaps com o histórico completo das rondas seguintes</a>.</p>
 </div>
 
@@ -4354,9 +4354,9 @@ Delonix se quiseres testar a operação — <code>docker-compose.yml</code>, mul
 <td>Os achados de severidade CRÍTICA/ALTA já estão corrigidos e re-confirmados por uma auditoria
 independente (aviso acima); ainda faltam ~27 achados MÉDIO/BAIXO documentados (sem exploit
 conhecido) e o histórico de produção que só o tempo dá — acompanha o
-<a href="https://github.com/angolardevops/delonix-runtime/releases">changelog</a>.</td></tr>
+<a href="https://github.com/ngolacloud/delonix/releases">changelog</a>.</td></tr>
 <tr><td>Quer avaliar tecnicamente ao detalhe (gap-a-gap, com ficheiro e linha)</td>
-<td>Lê a <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise de gaps completa</a> no repositório.</td></tr>
+<td>Lê a <a href="https://github.com/ngolacloud/delonix/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise de gaps completa</a> no repositório.</td></tr>
 </table>
 """
 
@@ -4385,9 +4385,9 @@ There's no sign of remote code execution from the network — the rootless→roo
 solid and has already been tested by a second pair of eyes — but <strong>out of caution, a project
 without years of production history still deserves care</strong> in multi-tenant production with
 sensitive data. Full detail, with the file and line of every finding and its fix status:
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">original audit
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/AUDITORIA-E2E.md">original audit
 report</a> and
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">gap
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">gap
 analysis with the full history of later rounds</a>.</p>
 </div>
 
@@ -4552,9 +4552,9 @@ you want to test operations — <code>docker-compose.yml</code>, multi-stage and
 <td>CRITICAL/HIGH severity findings are already fixed and re-confirmed by an independent audit
 (notice above); about 27 documented MEDIUM/LOW findings remain (no known exploit), plus the
 production track record only time can give — follow the
-<a href="https://github.com/angolardevops/delonix-runtime/releases">changelog</a>.</td></tr>
+<a href="https://github.com/ngolacloud/delonix/releases">changelog</a>.</td></tr>
 <tr><td>Wants to evaluate it technically in detail (gap by gap, with file and line)</td>
-<td>Read the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">full gap
+<td>Read the <a href="https://github.com/ngolacloud/delonix/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">full gap
 analysis</a> in the repository.</td></tr>
 </table>
 """
@@ -6030,14 +6030,14 @@ def kinds_page():
         "recriar (a não ser com <code>--replace</code>). Sem ficheiro de estado: o último spec aplicado vive "
         "no próprio recurso. Continua fail-fast e sem rollback, e é convergência <em>a pedido</em> — não um "
         "loop. Os templates abaixo são os ficheiros reais em "
-        "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.",
+        "<a href='https://github.com/ngolacloud/delonix/tree/main/examples'><code>examples/</code></a>.",
         "Since v0.47.0 <code>apply</code> <strong>converges</strong>: <code>stack plan</code> says what would "
         "change and why, and <code>apply</code> reconfigures ports, volumes, networks, memory and CPU "
         "<strong>hot, with the PID unchanged</strong> — refusing, by field name, anything that would need a "
         "recreate (unless you pass <code>--replace</code>). No state file: the last applied spec lives on the "
         "resource itself. Still fail-fast and without rollback, and still convergence <em>on demand</em> — not "
         "a loop. The templates below are the real files in "
-        "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
+        "<a href='https://github.com/ngolacloud/delonix/tree/main/examples'><code>examples/</code></a>."))
     for (kind, fname, intro), intro_en in zip(KINDS_DOC, KINDS_DOC_EN):
         # The first word used to be the whole anchor, so any two labels that
         # start the same way (the two Volume-family variants beside the plain
@@ -6125,7 +6125,7 @@ temperatura ACTUAL de qualquer cidade (via <a href="https://open-meteo.com/">Ope
 API key) e serve uma página que actualiza sozinha a cada 30s. O objectivo é percorrer o ciclo
 completo do Delonix num só projecto pequeno: <code>build</code> multi-stage → <code>container
 run</code> → expor à internet com <code>tunnel</code>. Os ficheiros completos estão em
-<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/_labs/delonix-temp"><code>examples/_labs/delonix-temp/</code></a>
+<a href="https://github.com/ngolacloud/delonix/tree/main/examples/_labs/delonix-temp"><code>examples/_labs/delonix-temp/</code></a>
 — <code>git clone</code> e segue os passos abaixo tal como estão.</p>
 
 <h2>1. A app</h2>
@@ -6248,7 +6248,7 @@ temperature of any city (via <a href="https://open-meteo.com/">Open-Meteo</a>, n
 serves a page that refreshes itself every 30s. The goal is to walk the full Delonix cycle in one
 small project: multi-stage <code>build</code> → <code>container
 run</code> → expose to the internet with <code>tunnel</code>. The complete files are in
-<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/_labs/delonix-temp"><code>examples/_labs/delonix-temp/</code></a>
+<a href="https://github.com/ngolacloud/delonix/tree/main/examples/_labs/delonix-temp"><code>examples/_labs/delonix-temp/</code></a>
 — <code>git clone</code> it and follow the steps below exactly as they are.</p>
 
 <h2>1. The app</h2>

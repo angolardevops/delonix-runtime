@@ -3054,7 +3054,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                         // silently reverts on the next boot.
                         (
                             "url",
-                            "https://github.com/angolardevops/delonix-runtime/\
+                            "https://github.com/ngolacloud/delonix/\
                              releases/latest/download/install.sh",
                         ),
                     ],

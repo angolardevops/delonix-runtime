@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — instalador oficial do Delonix Runtime.
 #
-#   curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
+#   curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash
 #
 # This script installs a PUBLISHED release: the signed `delonix` binary, its
 # companion binaries, and the runtime tools and host configuration they need.
@@ -83,7 +83,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 {
 
-REPO="angolardevops/delonix-runtime"
+REPO="ngolacloud/delonix"
 # Chave PÚBLICA minisign das releases oficiais (só a linha base64, sem o
 # comentário). É a raiz de confiança do instalador: o SHA256SUMS é assinado em
 # CI com a privada correspondente, que nunca sai do secret do repositório.
@@ -523,7 +523,7 @@ if [ "$WITH_BINARY" = 1 ]; then
       warn "  kind: Storage      -> kind: Volume with an nfs:/cifs:/webdav: block"
       warn "  kind: ShareVolume  -> kind: Volume with a share: block"
       warn "  kind: Egress       -> kind: NetworkPolicy with direction: egress"
-      warn "  migration: https://angolardevops.github.io/delonix-runtime/estrutura.html"
+      warn "  migration: https://ngolacloud.github.io/delonix/estrutura.html"
       ;;
   esac
   # Guarda explícita: sem `--user` isto é a 1ª chamada a sudo do script (a

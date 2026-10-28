@@ -17,7 +17,7 @@ package delonix.node.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+option go_package = "github.com/ngolacloud/delonix/gen/go/delonix/node/v1;nodev1";
 
 service StorageService {
   // The RADOS cluster's health as this node sees it. `pool` names a storage

@@ -10,7 +10,7 @@ import "delonix/node/v1/compute.proto";
 import "delonix/node/v1/operations.proto";
 import "google/api/annotations.proto";
 
-option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+option go_package = "github.com/ngolacloud/delonix/gen/go/delonix/node/v1;nodev1";
 
 // ------------------------------------------------------------------------------ networks
 

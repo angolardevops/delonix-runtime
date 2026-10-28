@@ -11,7 +11,7 @@ documentation. Après elle, vous savez, pour toute modification, quel générate
 ## Où elle est publiée
 
 Le site est servi par **GitHub Pages** depuis le répertoire `/docs` de `main`, à l'adresse
-<https://angolardevops.github.io/delonix-runtime/>. Le réglage de la source Pages lui-même se trouve
+<https://ngolacloud.github.io/delonix/>. Le réglage de la source Pages lui-même se trouve
 dans les paramètres du dépôt, et non dans l'arborescence ; ce que l'arborescence contient, en
 revanche, c'est `docs/.nojekyll`, qui désactive Jekyll afin que chaque fichier sous `docs/` soit
 servi exactement tel qu'il a été commité.

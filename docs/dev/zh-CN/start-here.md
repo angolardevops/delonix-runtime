@@ -49,7 +49,7 @@ Rust 工具链，以及 `PATH` 上的 `protoc`。完整清单，以及那些看�
 **1. 克隆，带上 tag。**
 
 ```bash
-git clone https://github.com/angolardevops/delonix-runtime.git
+git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin
 git describe --tags --abbrev=0        # prints the newest release, e.g. vX.Y.Z

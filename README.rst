@@ -2,13 +2,13 @@
 Delonix Engine
 ==============
 
-.. image:: https://img.shields.io/github/v/release/angolardevops/delonix-runtime?label=release
+.. image:: https://img.shields.io/github/v/release/ngolacloud/delonix?label=release
    :target: https://github.com/ngolacloud/delonix/releases/latest
    :alt: Latest release
-.. image:: https://img.shields.io/github/actions/workflow/status/angolardevops/delonix-runtime/ci.yml?branch=main&label=CI
+.. image:: https://img.shields.io/github/actions/workflow/status/ngolacloud/delonix/ci.yml?branch=main&label=CI
    :target: https://github.com/ngolacloud/delonix/actions/workflows/ci.yml
    :alt: CI status
-.. image:: https://img.shields.io/github/license/angolardevops/delonix-runtime
+.. image:: https://img.shields.io/github/license/ngolacloud/delonix
    :target: https://github.com/ngolacloud/delonix/blob/main/LICENSE
    :alt: License
 

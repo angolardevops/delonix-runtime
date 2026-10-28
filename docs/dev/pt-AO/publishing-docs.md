@@ -11,7 +11,7 @@ para qualquer mudança, que gerador correr e que ficheiros fazer commit com ele.
 ## Onde é publicada
 
 O site é servido pelo **GitHub Pages** a partir do directório `/docs` da `main`, em
-<https://angolardevops.github.io/delonix-runtime/>. A configuração da origem do Pages vive nas
+<https://ngolacloud.github.io/delonix/>. A configuração da origem do Pages vive nas
 definições do repositório, não na árvore; o que a árvore contém é o `docs/.nojekyll`, que desliga o
 Jekyll para que cada ficheiro em `docs/` seja servido exactamente como foi commitado.
 
