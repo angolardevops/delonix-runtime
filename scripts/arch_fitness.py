@@ -305,14 +305,36 @@ def misplaced(pkgs: dict[str, dict]) -> list[str]:
 # a comment or the contract is the first step of shaping the engine around that
 # consumer — so it fails here, comments included. History that needs the name lives
 # in docs/, never in crates/, bins/ or proto/.
+#
+# ONE exception: a hosting reference. Where the engine is HOSTED — the repo URL, the
+# GHCR image path, the Pages host, the proto `go_package` import path — is not the
+# engine knowing who consumes it. Decision 2026-10-28: the engine repo lives in the
+# `ngolacloud` org (`github.com/ngolacloud/delonix`), so the consumer name is allowed
+# inside a hosting URL and nowhere else (not in logic, not in free prose).
 CONSUMER_NAMES = re.compile(
     r"delonix[-_](?:paas|api|core|orchestrator|console)\b|ngc[-_](?:agent|api)\b"
     r"|\bdelonixctl\b|\bngolacloud\b|\bpaas\b",
     re.IGNORECASE,
 )
+HOSTING = re.compile(
+    r"github\.com/[\w.-]+|ghcr\.io/[\w.-]+|[\w.-]+\.github\.io", re.IGNORECASE
+)
 BOUNDARY_ROOTS = ("crates", "bins", "proto")
 BOUNDARY_FILES = ("Cargo.toml", "Makefile")
 TEXT_SUFFIXES = {".rs", ".proto", ".toml", ".md", ".c", ".h", ".sh", ".py", ".json", ".yaml", ".yml"}
+
+
+def consumer_hit(line: str) -> str | None:
+    """The consumer name a line names in engine logic, or None. A name that falls
+    inside a hosting reference (repo URL / GHCR path / Pages host / go_package) is
+    allowed — that is where the engine lives, not who it is shaped around."""
+    hosting = [m.span() for m in HOSTING.finditer(line)]
+    for m in CONSUMER_NAMES.finditer(line):
+        a, b = m.span()
+        if any(hs <= a and b <= he for hs, he in hosting):
+            continue
+        return m.group(0)
+    return None
 
 
 def consumer_mentions() -> list[str]:
@@ -328,10 +350,10 @@ def consumer_mentions() -> list[str]:
         if not f.is_file():
             continue
         for n, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            m = CONSUMER_NAMES.search(line)
-            if m:
+            hit = consumer_hit(line)
+            if hit:
                 rel = f.relative_to(ROOT).as_posix()
-                bad.append(f"{rel}:{n}: names a consumer ({m.group(0)!r}) — the engine knows none")
+                bad.append(f"{rel}:{n}: names a consumer ({hit!r}) — the engine knows none")
     return bad
 
 # An integration test that RETURNS passes. `let Ok(url) = env::var(..) else { return; }`

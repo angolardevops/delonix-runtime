@@ -15,7 +15,7 @@
 # requests, and a request never shares a process with another caller's.
 [Unit]
 Description=Delonix storage pool helper socket (ADR-0067)
-Documentation=https://github.com/angolardevops/delonix-runtime
+Documentation=https://github.com/ngolacloud/delonix
 
 [Socket]
 ListenStream=/run/delonix-storage-helper.sock

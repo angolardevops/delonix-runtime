@@ -28,6 +28,31 @@ import arch_fitness as g  # noqa: E402
 SHARED = ["edition", "license", "repository", "version"]
 
 
+class ConsumerMentions(unittest.TestCase):
+    def test_a_consumer_name_in_logic_is_a_hit(self):
+        self.assertEqual(g.consumer_hit('let who = "ngolacloud";'), "ngolacloud")
+        self.assertIsNotNone(g.consumer_hit("# this engine is for the paas"))
+        self.assertIsNotNone(g.consumer_hit("use delonix_paas::client;"))
+
+    def test_the_consumer_name_in_a_hosting_url_is_allowed(self):
+        self.assertIsNone(g.consumer_hit('repository = "https://github.com/ngolacloud/delonix"'))
+        self.assertIsNone(g.consumer_hit("GHCR_IMAGE ?= ghcr.io/ngolacloud/delonix"))
+        self.assertIsNone(g.consumer_hit("docs: https://ngolacloud.github.io/delonix/"))
+        self.assertIsNone(g.consumer_hit(
+            'option go_package = "github.com/ngolacloud/delonix/gen/go/delonix/node/v1;nodev1";'
+        ))
+
+    def test_a_hosting_url_does_not_whitewash_the_rest_of_the_line(self):
+        # The name in logic still fails even if a hosting URL is also present.
+        self.assertEqual(
+            g.consumer_hit('// see github.com/ngolacloud/delonix — shaped for ngolacloud'),
+            "ngolacloud",
+        )
+
+    def test_a_clean_line_is_not_a_hit(self):
+        self.assertIsNone(g.consumer_hit('let name = "delonix";'))
+
+
 class WorkspacePackageFields(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
