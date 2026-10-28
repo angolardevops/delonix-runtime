@@ -3697,6 +3697,10 @@ function buildToc(){
   var used={};
   [].slice.call(main.querySelectorAll('h2,h3')).forEach(function(h){
     if(!isVisibleForLang(h,lang))return;
+    // Um id explícito do gerador MANDA (kinds, glossário, md_page, labs,
+    // subcomandos): só o registamos no dedup e seguimos — sobrescrevê-lo
+    // partiria os links internos que lhe apontam (ex.: vm.html#image).
+    if(h.id){used[h.id]=1;return;}
     var label=visibleHeadingText(h);
     var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
     while(used[slug])slug+='-x';
@@ -7253,6 +7257,8 @@ def _extract_sections(body):
             level = int(m.group("hl")[1])
             open_tag = re.match(r"<h[23]\b[^>]*>", full).group(0)
             inner = full[len(open_tag):-len("</h%d>" % level)]
+            idm = re.search(r"id\s*=\s*[\"']([^\"']+)[\"']", open_tag)
+            hid = idm.group(1) if idm else None
             own = _class_lang(open_tag)
             ctx = div_stack[-1] if div_stack else None
             eff = own or ctx  # None => bilingue (visível nos dois idiomas)
@@ -7278,12 +7284,20 @@ def _extract_sections(body):
                 pt_text, en_text, vis_pt, vis_en = t, t, True, True
             heads.append({
                 "level": level, "pt": pt_text, "en": en_text,
-                "vis_pt": vis_pt, "vis_en": vis_en, "region": region,
+                "vis_pt": vis_pt, "vis_en": vis_en, "region": region, "id": hid,
             })
     used_pt, used_en = {}, {}
     for h in heads:
-        h["slug_pt"] = _dedup(_slug(h["pt"]), used_pt) if h["vis_pt"] and h["pt"] else ""
-        h["slug_en"] = _dedup(_slug(h["en"]), used_en) if h["vis_en"] and h["en"] else ""
+        # Id explícito do gerador MANDA — é o que o `buildToc` preserva no DOM
+        # (mesma regra), por isso `url#slug` da pesquisa bate com o elemento.
+        # Registamo-lo no dedup para os slugs calculados não colidirem com ele.
+        if h["id"]:
+            used_pt[h["id"]] = used_en[h["id"]] = 1
+            h["slug_pt"] = h["id"] if h["vis_pt"] else ""
+            h["slug_en"] = h["id"] if h["vis_en"] else ""
+        else:
+            h["slug_pt"] = _dedup(_slug(h["pt"]), used_pt) if h["vis_pt"] and h["pt"] else ""
+            h["slug_en"] = _dedup(_slug(h["en"]), used_en) if h["vis_en"] and h["en"] else ""
     return heads
 
 
