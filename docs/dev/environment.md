@@ -2,7 +2,7 @@
 
 **Before you read:** [Start here](start-here.md#day-0-in-30-minutes) (Day 0) and [Linux foundations](linux-foundations.md) — the host traps below are explained in terms of user namespaces and cgroup delegation.
 
-Delonix Runtime is **Linux-only**: every primitive it uses — namespaces, cgroups v2, nftables,
+Delonix is **Linux-only**: every primitive it uses — namespaces, cgroups v2, nftables,
 `pivot_root`, the new mount API — lives in the Linux kernel. You can *compile* most of the
 workspace and run its pure-logic tests on any Linux box with the toolchain below; to *run*
 containers and exercise the live paths you need a host that satisfies the kernel and package

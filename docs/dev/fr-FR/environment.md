@@ -1,9 +1,9 @@
-<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
+<!-- translated-from: environment.md sha256:be05e7ccde096c9ce02ed0ac2e209b74dfd4f12d13614fdb052f74a6069bb1e1 -->
 # Préparer votre environnement
 
 **Avant de lire :** [Commencer ici](start-here.md#day-0-in-30-minutes) (Jour 0) et [Fondations Linux](linux-foundations.md) — les pièges de l’hôte ci-dessous sont expliqués en termes de user namespaces et de délégation de cgroup.
 
-Delonix Runtime est **exclusivement Linux** : chaque primitive qu’il utilise — namespaces, cgroups v2, nftables,
+Delonix est **exclusivement Linux** : chaque primitive qu’il utilise — namespaces, cgroups v2, nftables,
 `pivot_root`, la nouvelle API de montage — vit dans le noyau Linux. Vous pouvez *compiler* la plus grande partie du
 workspace et exécuter ses tests de logique pure sur n’importe quelle machine Linux disposant de la toolchain ci-dessous ; pour *exécuter*
 des containers et exercer les chemins réels, il vous faut un hôte qui satisfait les exigences de noyau et de

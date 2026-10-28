@@ -1,5 +1,5 @@
 <!-- translated-from: README.md sha256:bb63e156dd668cde907112c102d5b2e8f1cb53382b74f70ac37d9f16dccade51 -->
-# Delonix Runtime — Manuel du contributeur
+# Delonix — Manuel du contributeur
 
 Ce manuel s’adresse aux personnes qui veulent **modifier le moteur** : vous avez cloné le dépôt
 aujourd’hui et vous voulez envoyer une première pull request sans casser votre hôte ni le moteur.
@@ -14,7 +14,7 @@ Le workspace compte **35 crates** et livre **6 binaires** (`delonix`, `delonix-c
 
 ## Ce qu’est le moteur — et ce qu’il n’est pas
 
-Delonix Runtime est une abstraction d’exécution pour **un nœud** : il exécute des **containers et des microVM**
+Delonix est une abstraction d’exécution pour **un nœud** : il exécute des **containers et des microVM**
 et gère le réseau et le stockage dont ils ont besoin. Il est déclaratif (ses propres Kinds, regroupés par
 `apiVersion` — voir `delonix api-resources`), et il ne parle aux providers (le noyau Linux, libvirt,
 Cloud Hypervisor, Proxmox VE, OPNsense, le CRI de Kubernetes) qu’à travers des ports, jamais à travers

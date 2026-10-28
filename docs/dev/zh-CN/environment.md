@@ -1,9 +1,9 @@
-<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
+<!-- translated-from: environment.md sha256:be05e7ccde096c9ce02ed0ac2e209b74dfd4f12d13614fdb052f74a6069bb1e1 -->
 # 准备你的环境
 
 **阅读之前：**[从这里开始](start-here.md#day-0-in-30-minutes)（第 0 天）和 [Linux 基础](linux-foundations.md) —— 下面这些宿主机陷阱，都是用用户命名空间和 cgroup 委派的术语来解释的。
 
-Delonix Runtime **只支持 Linux**：它用到的每一个原语 —— 命名空间、cgroups v2、
+Delonix **只支持 Linux**：它用到的每一个原语 —— 命名空间、cgroups v2、
 nftables、`pivot_root`、新的 mount API —— 都活在 Linux 内核里。你可以在任何装有下面这套
 工具链的 Linux 机器上*编译*大部分工作区，也能跑它的纯逻辑测试；但要*运行*容器、走一遍那些
 实机路径，你需要一台满足本页内核与软件包要求的宿主机。读完本页之后，你的宿主机应该能通过

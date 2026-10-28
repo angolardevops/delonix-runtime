@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:29bfa631d854ca52b0ea6139372f8e307b7921ad31fae6f8d4510b1e41550478 -->
 # IaaS et cloud native — où s’inscrit le moteur
 
 **Avant de lire :** [Commencer ici](start-here.md#what-delonix-is-5-minutes) (les quatre phrases sur ce qu’est Delonix). Aucune connaissance du noyau ni de Rust n’est encore nécessaire.
@@ -95,7 +95,7 @@ flowchart TB
   CP["IaaS control plane<br/><small>tenancy, scheduling, quotas, billing — NOT this repository</small>"]
   NC["Node-local client<br/><small>control-plane agent, kubelet, operator shell</small>"]
   subgraph NODE["One node"]
-    ENG["Delonix Runtime<br/><small>the engine: containers, microVMs, their network and storage</small>"]
+    ENG["Delonix<br/><small>the engine: containers, microVMs, their network and storage</small>"]
     DOORS["Interfaces<br/><small>CLI, node contract, CRI, MCP</small>"]
     ST[("State root<br/><small>JSON records, image store, volumes</small>")]
     K["Linux kernel<br/><small>namespaces, cgroups v2, nftables, overlayfs</small>"]
@@ -154,7 +154,7 @@ et rien dans `crates/`, `bins/` ou `proto/` n’a le droit d’en nommer un. `sc
 
 ### Ce qu’il est
 
-Delonix Runtime est la **couche d’exécution de nœud** du schéma ci-dessus. Sur un nœud, il :
+Delonix est la **couche d’exécution de nœud** du schéma ci-dessus. Sur un nœud, il :
 
 - exécute des **containers et des microVM** — les containers via `crates/adapters/delonix-linux`,
   les VM via les implémentations enregistrables de `VmBackend` dans `crates/adapters/delonix-vm` ;

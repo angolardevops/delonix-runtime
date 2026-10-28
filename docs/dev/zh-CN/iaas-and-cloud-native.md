@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:29bfa631d854ca52b0ea6139372f8e307b7921ad31fae6f8d4510b1e41550478 -->
 # IaaS 与云原生——引擎的定位
 
 **阅读之前：**[从这里开始](start-here.md#what-delonix-is-5-minutes)（关于 Delonix 是什么的四句话）。这里还不需要任何内核或 Rust 知识。
@@ -80,7 +80,7 @@ flowchart TB
   CP["IaaS control plane<br/><small>tenancy, scheduling, quotas, billing — NOT this repository</small>"]
   NC["Node-local client<br/><small>control-plane agent, kubelet, operator shell</small>"]
   subgraph NODE["One node"]
-    ENG["Delonix Runtime<br/><small>the engine: containers, microVMs, their network and storage</small>"]
+    ENG["Delonix<br/><small>the engine: containers, microVMs, their network and storage</small>"]
     DOORS["Interfaces<br/><small>CLI, node contract, CRI, MCP</small>"]
     ST[("State root<br/><small>JSON records, image store, volumes</small>")]
     K["Linux kernel<br/><small>namespaces, cgroups v2, nftables, overlayfs</small>"]
@@ -138,7 +138,7 @@ flowchart TB
 
 ### 它是什么
 
-Delonix Runtime 就是上图中的**节点执行层**。在单个节点上，它：
+Delonix 就是上图中的**节点执行层**。在单个节点上，它：
 
 - 运行**容器和微虚拟机**——容器通过 `crates/adapters/delonix-linux`，虚拟机通过
   `crates/adapters/delonix-vm` 中可注册的 `VmBackend` 实现；

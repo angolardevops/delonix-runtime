@@ -767,7 +767,7 @@ def render_site(out: Path) -> None:
             kicker = html.escape(GROUP_NAMES[lang][group_of(page.name)])
             doc = f"""<!doctype html>
 <html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Delonix Runtime — {html.escape(ui["title"])}</title>
+<title>{html.escape(title)} · Delonix — {html.escape(ui["title"])}</title>
 <script>try{{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}}catch(e){{}}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="{FONTS}">
@@ -776,7 +776,7 @@ def render_site(out: Path) -> None:
 <body>
 <header class="top">
   <button class="iconbtn menubtn" type="button" aria-label="{html.escape(chrome["menu"])}">{ICON_MENU}</button>
-  <a class="brand" href="index.html" aria-label="{html.escape(chrome["home"])}"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">{html.escape(ui["title"])}</span></a>
+  <a class="brand" href="index.html" aria-label="{html.escape(chrome["home"])}"><span class="mark">D</span><span class="word">Delonix</span><span class="sep"></span><span class="sub">{html.escape(ui["title"])}</span></a>
   <button class="searchbtn" type="button">{ICON_SEARCH}<span class="label">{html.escape(ui["search_ph"])}</span><kbd>Ctrl K</kbd></button>
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language">{options}</select>
@@ -812,7 +812,7 @@ def render_site(out: Path) -> None:
     # The entry page picks the reader's language; without JavaScript it links all three.
     (out / "index.html").write_text(
         '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>Delonix Runtime — Contributor handbook</title>'
+        '<title>Delonix — Contributor handbook</title>'
         '<script>var l=(navigator.languages||[navigator.language||""]).join(",").toLowerCase();'
         'location.replace(/(^|,)pt/.test(l)?"pt-AO/index.html":/(^|,)fr/.test(l)?"fr-FR/index.html":/(^|,)zh/.test(l)?"zh-CN/index.html":"en/index.html");</script>'
         '<body style="font:16px/1.6 system-ui,sans-serif;padding:24px">'

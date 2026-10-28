@@ -20,7 +20,7 @@ idea of the engine ([IaaS and cloud native](iaas-and-cloud-native.md)), the host
 
 ### What Delonix is (5 minutes)
 
-Delonix Runtime is an engine that runs **containers and microVMs on one node**, together with the
+Delonix is an engine that runs **containers and microVMs on one node**, together with the
 networking and storage they need. It is:
 
 - **declarative** — you describe resources with its own Kinds (`delonix api-resources` lists them)
