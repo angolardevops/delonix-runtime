@@ -1639,8 +1639,8 @@ isso está certo para CORRER e errado para DECIDIR: uma migração precisa da li
 uma segunda tabela para discordar deles. Responde a "o que posso escrever num manifesto, e o que
 escrevo a seguir a <code>explain</code>". A coluna <code>FORM</code> é a que não se adivinha: diz
 se um documento desse Kind sobrevive ao <code>load</code> sob o seu próprio nome — é por isso que
-um <code>kind: Egress</code> nunca aparece num plano como <code>Egress</code> (fundiu-se em
-<code>FirewallPolicy</code>).""",
+um <code>kind: Dependency</code> nunca aparece num plano como <code>Dependency</code> (é açúcar que
+baixa para <code>NetworkPolicy</code>).""",
         "subs": {},
     },
     "apply": {
@@ -2212,8 +2212,8 @@ namespace other than the source's.""",
 there is no second table to disagree with them. It answers «what can I write in a manifest, and
 what do I type after <code>explain</code>». The <code>FORM</code> column is the one that cannot be
 guessed: it says whether a document of that Kind survives the load under its own name — which is
-why a <code>kind: Egress</code> never shows up in a plan as <code>Egress</code> (it merged into
-<code>FirewallPolicy</code>).""",
+why a <code>kind: Dependency</code> never shows up in a plan as <code>Dependency</code> (it is sugar
+that lowers into <code>NetworkPolicy</code>).""",
     },
     "apply": {
         "tagline": "Converge a manifest — the canonical spelling of `stack apply`.",
@@ -4712,12 +4712,13 @@ KINDS_DOC = [
      "<code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind)."),
     ("Network", "networking/network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
      "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje. "
-     "O MESMO Kind absorve também a zona de SDN do próprio Proxmox VE (o antigo <code>kind: NetworkZone</code>, "
-     "dobrado aqui): realizada pelo provider de zonas configurado (<code>DELONIX_PROXMOX_*</code>)."),
+     "O MESMO Kind absorve também a zona de SDN do próprio Proxmox VE (o <code>kind: NetworkZone</code> — "
+     "<em>sunset</em>: ainda aceite no load mas sem secção própria, a baixar para <code>Network</code>): "
+     "realizada pelo provider de zonas configurado (<code>DELONIX_PROXMOX_*</code>)."),
     ("Volume", "storage/volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. O "
      "MESMO Kind cobre armazenamento de REDE (NFS/SMB/WebDAV, com um bloco <code>nfs:</code>/<code>cifs:</code>/"
-     "<code>webdav:</code> — o antigo <code>kind: Storage</code>, hoje reescrito nisto com aviso de depreciação) e "
-     "fatias ISOLADAS com quota própria (bloco <code>share:</code> — o antigo <code>kind: ShareVolume</code>, "
+     "<code>webdav:</code> — o antigo <code>kind: Storage</code>, hoje <strong>removido</strong>, escrito directamente como este bloco) e "
+     "fatias ISOLADAS com quota própria (bloco <code>share:</code> — o antigo <code>kind: ShareVolume</code>, também removido, "
      "vários container/vm/pod a partilhar um export sem se verem). O mesmo ficheiro mostra os três cenários."),
     ("Image", "artifact/image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. "
      "As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix vm image build</code>."),
@@ -4725,8 +4726,8 @@ KINDS_DOC = [
      "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
     ("Container", "compute/container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
      "têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites."),
-    ("FirewallPolicy (as duas direcções)", "networking/networkpolicy.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
-     "NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
+    ("NetworkPolicy (as duas direcções)", "networking/networkpolicy.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
+     "NetworkPolicy; o nome antigo <code>FirewallPolicy</code> continua aceite como alias). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
      "default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é "
      "<code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o "
      "mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que "
@@ -4827,12 +4828,13 @@ KINDS_DOC_EN = [
     "<code>cluster-vm.yaml</code> (provisions the VMs) and <code>cluster-kind.yaml</code> (kind mode).",
     "A user network. Containers join it with <code>--net &lt;name&gt;</code>; "
     "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today. "
-    "The SAME Kind also absorbs a Proxmox VE SDN zone (the former <code>kind: NetworkZone</code>, folded in "
-    "here): realized by the configured zone provider (<code>DELONIX_PROXMOX_*</code>).",
+    "The SAME Kind also absorbs a Proxmox VE SDN zone (the <code>kind: NetworkZone</code> — <em>sunset</em>: still "
+    "accepted on load but with no section of its own, lowering into <code>Network</code>): realized by the "
+    "configured zone provider (<code>DELONIX_PROXMOX_*</code>).",
     "A named local volume — the data survives <code>container rm</code>. The SAME Kind covers "
     "NETWORK storage (NFS/SMB/WebDAV, with an <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block — "
-    "the former <code>kind: Storage</code>, now rewritten into this with a deprecation warning) and ISOLATED, "
-    "individually-quota'd slices (a <code>share:</code> block — the former <code>kind: ShareVolume</code>, "
+    "the former <code>kind: Storage</code>, now <strong>removed</strong> and written directly as this block) and ISOLATED, "
+    "individually-quota'd slices (a <code>share:</code> block — the former <code>kind: ShareVolume</code>, also removed, "
     "several container/vm/pod sharing one export without seeing each other). The one file shows all three "
     "scenarios.",
     "Pre-pulls (or builds) an image before the containers that depend on it. Golden VM images "
@@ -4841,9 +4843,10 @@ KINDS_DOC_EN = [
     "It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.",
     "The everyday workload. Only <code>image</code> is required; every other field "
     "has a default. Covers networking, storage, resources (cgroup v2), secrets, security, devices and limits.",
-    "Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each "
-    "document is the desired state of one direction for one target container — allowlist + default-deny, "
-    "idempotent.",
+    "Declarative per-direction L4 firewall (k8s NetworkPolicy-style; the old name <code>FirewallPolicy</code> is "
+    "still accepted as an alias). Each document is the desired state of one direction for one target container — "
+    "allowlist + default-deny, idempotent. <strong>The <code>kind: Egress</code> no longer exists</strong>: it is "
+    "<code>direction: egress</code> in this same policy (they shared the whole struct).",
     "Built-in L7/HTTP reverse proxy — routing by <code>Host</code> + "
     "<code>path</code> prefix to backend containers. TLS terminates at the proxy (self-signed or "
     "<code>secretRef</code>); hot reload via SIGHUP.",
@@ -6023,16 +6026,22 @@ def kinds_page():
         'todos os campos, com os defaults e um comentário. Aplica um só com '
         '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
         '(ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → VirtualMachine → '
-        'Container → Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway; <code>Storage</code> e '
-        '<code>ShareVolume</code> baixam para <code>Volume</code> antes desta ordem entrar em jogo). '
-        'A lista completa, com os grupos e o que cada documento se torna, está em '
+        'Container → Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway). Os antigos <code>kind: Storage</code>, '
+        '<code>ShareVolume</code> e <code>Egress</code> foram <strong>removidos</strong>: a capacidade vive agora '
+        'em blocos do <code>Volume</code> (<code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>/<code>share:</code>) '
+        'e do <code>NetworkPolicy</code> (<code>direction: egress</code>) — aplicá-los pelo nome antigo dá erro, a '
+        'apontar o substituto. A lista completa, com os grupos e o que cada documento se torna, está em '
         '<a href="estrutura.html">Estrutura de recursos</a>.',
         'Each Kind with a COMPLETE, functional template — '
         'every field, with defaults and a comment. Apply just one with '
         '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
-        '(dependency order: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → '
-        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> lowers into '
-        '<code>Volume</code> before this order comes into play).',
+        '(dependency order: Secret → Network → NetworkRoute → Volume → Image → VirtualMachine → Container → '
+        'Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway). The former <code>kind: Storage</code>, '
+        '<code>ShareVolume</code> and <code>Egress</code> were <strong>removed</strong>: the capability now lives '
+        'in blocks on <code>Volume</code> (<code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>/<code>share:</code>) '
+        'and on <code>NetworkPolicy</code> (<code>direction: egress</code>) — applying them by the old name errors '
+        'with the replacement. The full list, with the groups and what each document becomes, is in '
+        '<a href="estrutura.html">Resource structure</a>.',
         cls='tagline',
     )
     body = [f"<h1>Kinds do manifesto</h1>{tagline}"]

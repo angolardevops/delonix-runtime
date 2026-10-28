@@ -88,10 +88,10 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 
 | Página/componente | Problema | Evidência | Alteração | Prio | Validação |
 |---|---|---|---|---|---|
-| `kinds.html` — Storage/ShareVolume | Doc promete que `kind: Storage`/`ShareVolume` **ainda carregam** (reescritos com aviso); código **rejeita com erro duro** | Doc `kinds.html:1836,1846,1854,149`; código `manifest.rs:861,882,886` (`removed_kind_hint`); não estão em `FACTS` | Corrigir texto: foram **REMOVIDOS** (como já diz a secção Egress `kinds.html:2794`) | 🔴 | `delonix … apply` de `kind: Storage` dá erro; doc coerente |
-| `kinds.html` — tagline EN | Usa nome antigo `Tunnel` (hoje `Gateway`); ordem de apply omite 10 kinds reais | `kinds.html:149` (EN); ordem real `kinds.rs:304-685,774` | Actualizar nomes e ordem na tagline EN | 🟠 | Comparar com `stack_kinds()` |
-| `kinds.html` — FirewallPolicy | Secção titulada pelo alias `FirewallPolicy`; nome canónico é `NetworkPolicy` | `kinds.html:2793`; `kinds.rs:82` (`FIREWALL_POLICY="NetworkPolicy"`) | Titular pelo canónico, alias como nota | 🟠 | `api-resources` mostra `NetworkPolicy` |
-| `kinds.html` — NetworkZone | Aceite no load mas sem secção própria | `kinds.rs:373` (`Sunset`); sem `<h2>` | Acrescentar nota (é sunset) | 🟢 | — |
+| `kinds.html` — Storage/ShareVolume | ✅ **FEITO (Secção 10)** — texto dizia que baixavam/eram reescritos para `Volume`; corrigido p/ **REMOVIDOS**. Re-medido no binário 0.1.0: `Storage`/`ShareVolume`/`Egress` dão **DX-1000 "was removed"** (não o antigo `removed_kind_hint`). Capacidade vive em blocos de `Volume`(`nfs:`/`cifs:`/`webdav:`/`share:`) e `NetworkPolicy`(`direction: egress`) | tagline + intro de `Volume` em `gen.py`; `stack validate -f kind:Storage` → DX-1000 | Corrigido texto (removidos, não reescritos) | 🔴 | `delonix stack validate` de `kind: Storage` dá erro ✅; doc coerente ✅ |
+| `kinds.html` — tagline EN | ✅ **FEITO (Secção 10)** — EN usava `Vm`/`FirewallPolicy`/`Tunnel`; alinhada ao PT (`VirtualMachine`/`NetworkPolicy`/`Gateway`) + link p/ `estrutura.html`. Ordem é subconjunto representativo deliberado (24 kinds `in_stack`; lista completa delegada a `estrutura.html`) | `gen.py` `kinds_page()`; `api-resources` | Nomes canónicos na tagline EN | 🟠 | `api-resources`/`stack_kinds()` ✅ |
+| `kinds.html` — FirewallPolicy | ✅ **FEITO (Secção 10)** — secção retitulada `NetworkPolicy`; `FirewallPolicy` referido como alias na intro. Confirmado: binário normaliza `kind: FirewallPolicy`→`NetworkPolicy` | `gen.py` label; `kinds.rs:82`; `api-resources` (`np NetworkPolicy`) | Título canónico, alias em nota | 🟠 | `api-resources` mostra `NetworkPolicy` ✅ |
+| `kinds.html` — NetworkZone | ✅ **FEITO (Secção 10)** — nota de *sunset* acrescentada à intro de `Network` (ainda aceite no load, baixa p/ `Network`). Confirmado: `api-resources` → `sunset → Network` | `gen.py` intro `Network`; `api-resources` | Nota (é sunset) | 🟢 | — |
 | `kinds.html` — Application/VolumeClaim | Citados no pedido mas **não existem** nem na doc nem no código (ausência limpa) | sem `<h2>`; sem linha em `FACTS` | Nenhuma (confirmar que não são prometidos) | — | — |
 | CLI — cobertura | Nenhum comando documentado ausente do **código-fonte**; `ingress-proxy` oculto (correcto) | enum `Cmd` `main.rs`; `main.rs:648` (`hide`) | — | — | — |
 | CLI — deriva | Risco materializado pelo binário stale (ver linha A) | `gen.py:24` | (coberto em A) | 🔴 | — |
@@ -103,7 +103,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 ## Síntese de prioridades
 
 **🔴 Alta (promete o que não existe, ou quebra uma função nuclear):**
-1. `kinds.html` diz que Storage/ShareVolume ainda carregam — código rejeita. *(D)*
+1. ✅ `kinds.html` diz que Storage/ShareVolume ainda carregam — código rejeita. *(D)* **(FEITO — Secção 10)**
 2. Binário stale → regeneração descarta `bucket` e comandos novos. *(A)*
 3. 3× `$schema` + instalador apontam para `angolardevops.github.io/delonix-runtime` (não resolve). *(B)*
 4. Páginas Markdown mostram corpo só-PT em modo EN (4 guias). *(A)*
@@ -126,7 +126,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 | 7 — Pesquisa Ctrl+K | **A** (ausente) |
 | 8 — Botão de cópia | **A** (ausente) |
 | 9 — Traduções PT/EN | Markdown só-PT, `--help` EN-only, taglines EN, `<html lang>`, traduções stale, âncoras traduzidas |
-| 10 — Kinds | Storage/ShareVolume, tagline, FirewallPolicy, NetworkZone (**D**) |
+| 10 — Kinds | ✅ **FEITO** — Storage/ShareVolume, tagline EN, FirewallPolicy→NetworkPolicy, NetworkZone sunset (**D**) |
 | 11 — Labs | labs não ligados; proveniência 5.1.1 |
 | 12 — Variáveis | referência já limpa; marcar env vars de ADR/discovery |
 | 13 — Glossário | — (novo) |
