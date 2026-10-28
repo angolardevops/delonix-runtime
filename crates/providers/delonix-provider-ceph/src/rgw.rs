@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use base64::Engine as _;
 use delonix_storage::exec::Run;
 
 use crate::ceph::{self, Answer};
@@ -116,6 +117,55 @@ impl Rgw {
         }
     }
 
+    /// Creates the bucket `bucket`, owned by the identity whose keys are given,
+    /// with an S3 `PUT /{bucket}` against `endpoint`. A bucket is not shaped like
+    /// a disk — it is made over S3, not by `radosgw-admin` — so this is the one
+    /// call that speaks the gateway's data plane. Creating an EMPTY bucket holds
+    /// no tenant data, so it stays on the right side of ADR-0081's boundary.
+    ///
+    /// Idempotent: a bucket this identity already owns is success (the gateway's
+    /// `BucketAlreadyOwnedByYou`), so a re-apply does not fail.
+    pub fn create_bucket(
+        &self,
+        bucket: &str,
+        access_key: &str,
+        secret_key: &str,
+        endpoint: &str,
+    ) -> RgwResult<()> {
+        let date = httpdate::fmt_http_date(std::time::SystemTime::now());
+        // Path-style: the bucket is the first path segment, so the signed
+        // resource and the URL path are both `/{bucket}`.
+        let resource = format!("/{bucket}");
+        let authorization = sign_v2("PUT", &resource, &date, access_key, secret_key);
+        let url = format!("{}{resource}", endpoint.trim_end_matches('/'));
+
+        let resp = reqwest::blocking::Client::new()
+            .put(&url)
+            .header(reqwest::header::DATE, &date)
+            .header(reqwest::header::AUTHORIZATION, &authorization)
+            // An empty body: Content-Length 0 and — crucially — NO Content-Type,
+            // which the StringToSign leaves blank; a stray type would mismatch.
+            .body(Vec::<u8>::new())
+            .send()
+            .map_err(|e| {
+                RgwError::Undetermined(format!("S3 PUT bucket '{bucket}' at {url}: {e}"))
+            })?;
+
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let body = resp.text().unwrap_or_default();
+        // The gateway reports an already-owned bucket as 409; that is the
+        // idempotent case, not a failure.
+        if body.contains("BucketAlreadyOwnedByYou") {
+            return Ok(());
+        }
+        Err(RgwError::Undetermined(format!(
+            "S3 PUT bucket '{bucket}': {status} {body}"
+        )))
+    }
+
     /// The buckets the gateway holds, or those of one tenant.
     pub fn list_buckets(&self, uid: Option<&str>) -> RgwResult<Vec<String>> {
         let mut parts = vec!["bucket", "list"];
@@ -208,6 +258,30 @@ impl Rgw {
             other => Err(map_fail(other)),
         }
     }
+}
+
+/// The AWS Signature Version 2 `Authorization` header value for a request, as
+/// RGW's S3 endpoint accepts it (`AWS <access-key>:<signature>`).
+///
+/// The StringToSign is `VERB \n Content-MD5 \n Content-Type \n Date \n
+/// CanonicalizedResource`; an empty body carries no Content-MD5 and no
+/// Content-Type, so two lines are blank. The signature is
+/// `base64(HMAC-SHA1(secret, StringToSign))`.
+fn sign_v2(
+    method: &str,
+    canonical_resource: &str,
+    date: &str,
+    access_key: &str,
+    secret_key: &str,
+) -> String {
+    let string_to_sign = format!("{method}\n\n\n{date}\n{canonical_resource}");
+    let key = ring::hmac::Key::new(
+        ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+        secret_key.as_bytes(),
+    );
+    let tag = ring::hmac::sign(&key, string_to_sign.as_bytes());
+    let signature = base64::engine::general_purpose::STANDARD.encode(tag.as_ref());
+    format!("AWS {access_key}:{signature}")
 }
 
 /// The first key pair of a `radosgw-admin user {create,info}` document.
@@ -336,6 +410,29 @@ mod tests {
         let rgw = Rgw::new(script.clone(), None);
         rgw.set_user_quota("delonix", None, None).unwrap();
         assert!(script.calls().is_empty(), "no quota fields → no call");
+    }
+
+    #[test]
+    fn sign_v2_matches_the_aws_reference_vector() {
+        // The canonical example from the AWS S3 REST authentication reference
+        // (GET /johnsmith/photos/puppy.jpg) — if our HMAC-SHA1 + base64 and the
+        // StringToSign layout are right, we reproduce its published signature.
+        let auth = sign_v2(
+            "GET",
+            "/johnsmith/photos/puppy.jpg",
+            "Tue, 27 Mar 2007 19:36:42 +0000",
+            "AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+        assert_eq!(auth, "AWS AKIAIOSFODNN7EXAMPLE:bWq2s1WEIj+Ydj0vQ697zp+IXMU=");
+    }
+
+    #[test]
+    fn sign_v2_signs_a_bucket_put_with_an_empty_body() {
+        // A bucket PUT: empty Content-MD5 and Content-Type, the resource is the
+        // bucket. Pinned so a change to the StringToSign layout is caught.
+        let auth = sign_v2("PUT", "/media", "Wed, 28 Oct 2026 12:00:00 GMT", "AK", "SK");
+        assert_eq!(auth, "AWS AK:TMe1pk3zdCs9Wh2IPsyU3LU/Khw=");
     }
 
     #[test]
