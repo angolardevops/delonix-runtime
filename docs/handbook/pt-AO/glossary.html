@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/glossary.html">EN · English</option><option value="../pt-AO/glossary.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/glossary.html">FR-FR · Français</option><option value="../zh-CN/glossary.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -219,19 +219,19 @@ onde o termo é explicado ou implementado. Os caminhos são relativos à raiz do
 namespaces, cgroups, descritores de ficheiro, sinais) são ensinados em <a href="linux-foundations.html">Fundações de Linux</a>,
 e o OCI, o CRI, o CNI e o KVM tal como o motor os usa em <a href="cloud-native-primer.html">Introdução ao cloud native</a>.</p>
 <hr />
-<p><strong>Adapter</strong> — Um crate em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> que implementa uma porta contra um mecanismo local: o
+<p><strong>Adapter</strong> — Um crate em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> que implementa uma porta contra um mecanismo local: o
 kernel (<code>delonix-linux</code>), o dataplane de rede (<code>delonix-sdn</code>), a loja OCI (<code>delonix-oci</code>), os
 hypervisors locais de VM (<code>delonix-vm</code>). Um adapter pode depender de crates de fundação e de
 contexto, nunca de um crate de interface. Ver: <a href="architecture.html#layers-and-the-allowed-direction">Camadas</a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py::LAYERS</code></a>.</p>
-<p><strong>ADR (Architecture Decision Record)</strong> — Um ficheiro Markdown por decisão estrutural, em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py::LAYERS</code></a>.</p>
+<p><strong>ADR (Architecture Decision Record)</strong> — Um ficheiro Markdown por decisão estrutural, em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>,
 com o nome <code>NNNN-title.md</code>, escrito em inglês, antes do código. Um ADR aceite nunca é reescrito; um
-ADR novo sucede-lhe. Ver: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>,
+ADR novo sucede-lhe. Ver: <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>,
 <a href="contributing-workflow.html#when-to-write-an-adr">Quando escrever um ADR</a>.</p>
 <p><strong>Apply / plan / prune</strong> — Os três verbos da convergência declarativa. <code>delonix plan</code> mostra o que um
 apply mudaria e não muda nada (<code>--detailed-exitcode</code> sai com 2 quando há alterações);
 <code>delonix apply</code> faz convergir o manifesto; <code>--prune</code> remove também o que a stack possui e o manifesto
-já não declara, e nunca corre por omissão. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>,
+já não declara, e nunca corre por omissão. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>,
 <a href="cloud-native-primer.html#48-declarative-reconciliation">Reconciliação declarativa</a>.</p>
 <p><strong>Catálogo de capacidades</strong> — A lista versionada das coisas que um operador pode pedir a um provider
 (um restart de VM, uma migração a quente, uma firewall por workload, …), e o denominador de qualquer
@@ -239,66 +239,66 @@ afirmação «este provider cobre X». Cada provider responde a cada entrada com
 <code>supported</code> tem de citar a sua evidência (um teste, uma secção da bateria e2e, um cenário de caos ou
 um teste ao vivo), e um teste da CLI confirma que a referência citada existe. O <code>delonix provider ls</code>
 mede as respostas neste host; o <code>delonix provider matrix</code> imprime a vista declarada, publicada como
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/providers/capability-matrix.md" target="_blank" rel="noopener"><code>docs/providers/capability-matrix.md</code></a>. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/capability.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/capability.rs</code></a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener">ADR-0050</a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/providers/capability-matrix.md" target="_blank" rel="noopener"><code>docs/providers/capability-matrix.md</code></a>. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/capability.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/capability.rs</code></a>,
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener">ADR-0050</a>.</p>
 <p><strong>CAS (content-addressed storage)</strong> — A loja de blobs de imagens: cada blob vive em
 <code>blobs/sha256/&lt;hex&gt;</code> no state root, endereçado pelo seu digest, por isso conteúdo idêntico é guardado
 uma só vez. A integridade é verificada quando o conteúdo <strong>entra</strong> na loja, não quando é lido: um pull
 compara o manifesto, a config e cada layer com o digest esperado (<code>verify_manifest_digest</code> e as
-comparações de digest em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>). <code>Cas::read</code> é uma leitura
+comparações de digest em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>). <code>Cas::read</code> é uma leitura
 simples de ficheiro e não volta a calcular o hash; <code>Cas::verify</code> volta a calculá-lo a pedido. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs::Cas</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs::Cas</code></a>,
 <a href="architecture.html#state-on-disk">Estado em disco</a>.</p>
 <p><strong>CDI (Container Device Interface)</strong> — Uma especificação da CNCF que descreve como expor um
 dispositivo (tipicamente uma GPU) a um container. O Delonix só <strong>consome</strong> specs já geradas por uma
 ferramenta do fabricante e transforma-as nos mesmos mounts e nós de dispositivo que <code>-v</code>/<code>--device</code>
-produzem; nunca descobre drivers sozinho. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>.</p>
+produzem; nunca descobre drivers sozinho. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>.</p>
 <p><strong>cgroup delegation</strong> — O mecanismo do cgroup v2 que deixa um utilizador sem privilégios gerir uma
 sub-árvore de cgroups. Sem ele, os limites de recursos rootless (<code>-m</code>, <code>--cpus</code>) não podem ser
 impostos; o motor detecta isto e recusa um limite que não conseguiria aplicar, em vez de o aceitar em
 silêncio. Uma shell aberta por SSH muitas vezes não está delegada; <code>systemd-run --user --scope -p
 Delegate=yes</code> dá uma que está. <code>delonix system info</code> mostra a resposta como <code>cgroup2 delegated</code>. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::cgroup_limits_apply</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::cgroup_limits_apply</code></a>,
 <a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">cgroups v2 e delegação</a>,
 <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup</a>.</p>
 <p><strong>CNI (Container Network Interface)</strong> — O padrão de plugins que o Kubernetes usa para dar rede a um
 pod. O Delonix consegue correr a cadeia de plugins CNI de um nó contra um network namespace nomeado,
 que é como um sandbox de pod do CRI recebe a sua rede. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs::attach_named_netns</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs::attach_named_netns</code></a>,
 <a href="cloud-native-primer.html#45-container-networking">Rede de containers</a>.</p>
-<p><strong>Contract (node)</strong> — A API de um nó, definida em Protocol Buffers em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>
-(pacote <code>delonix.node.v1</code>), com um documento OpenAPI <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado a partir dela.
-O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> guarda a formatação, o lint, a compatibilidade com a última tag e o
+<p><strong>Contract (node)</strong> — A API de um nó, definida em Protocol Buffers em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>
+(pacote <code>delonix.node.v1</code>), com um documento OpenAPI <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado a partir dela.
+O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> guarda a formatação, o lint, a compatibilidade com a última tag e o
 OpenAPI gerado. É um contrato publicado, servido em parte: o <code>delonix serve node-api</code>
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>) responde ao <code>NodeService.ListProviders</code>, e todos os outros RPCs
+(<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>) responde ao <code>NodeService.ListProviders</code>, e todos os outros RPCs
 respondem <code>UNIMPLEMENTED</code>. Ver:
 <a href="architecture.html#where-the-restructuring-stands">Em que ponto está a reestruturação</a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
 <p><strong>Control process</strong> — A metade reiniciável da infra de rede rootless: o binário do motor arrancado
 com os argumentos internos <code>netns control</code> (não é um comando para o utilizador) corre dentro dos
 namespaces segurados pelo pin, escuta num socket unix de controlo <code>0600</code> (aceitando só o uid do
 próprio motor) e faz os attaches, os publishes, as mudanças de firewall, o DNS e o DHCP, um pedido de
 cada vez. Matá-lo não perturba os workloads a correr; o comando seguinte reinicia-o. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::start_control</code></a>, <code>control_loop</code>; <strong>Holder / pin</strong>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::start_control</code></a>, <code>control_loop</code>; <strong>Holder / pin</strong>.</p>
 <p><strong>CRI (Container Runtime Interface)</strong> — A API gRPC que o kubelet usa para correr pods. O crate
 <code>delonix-cri</code> (binário <code>delonix-cri</code>) implementa-a por cima do motor, para que um nó Kubernetes possa
-usar o Delonix em vez de outro runtime. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/</code></a>,
+usar o Delonix em vez de outro runtime. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/</code></a>,
 <a href="cloud-native-primer.html#46-kubernetes-cri-kubelet-kubeadm-and-kind">Kubernetes</a>.</p>
 <p><strong>Daemonless</strong> — Não é preciso nenhum processo residente para o motor funcionar: cada comando da CLI
 faz o seu trabalho e sai. O que tem de persistir pertence ao systemd (units, timers) ou a um processo
 por workload com um dono claro (o supervisor de um container, o pin de rede). Um processo residente
-novo precisa de um ADR. Ver: <em>«Identidade e fronteira do motor»</em> no <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>,
+novo precisa de um ADR. Ver: <em>«Identidade e fronteira do motor»</em> no <a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>,
 <a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">Daemonless</a>.</p>
 <p><strong>Delegated cgroup</strong> — Ver <strong>cgroup delegation</strong>.</p>
 <p><strong><code>DX_*</code> exit class</strong> — Cada erro do motor tem uma string de código estável (<code>DX_NOT_FOUND</code>,
 <code>DX_INVALID_ARGUMENT</code>, …) e corresponde a um código de saída do processo decidido a partir do <strong>tipo</strong>
 do erro, nunca da sua mensagem (traduzida): por exemplo 4 = recurso inexistente, 5 = conflito. Os
 scripts e os reconciliadores decidem pelo número, não pelo texto. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs::Error::code</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs::for_error</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs::Error::code</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs::for_error</code></a>,
 <a href="rust-primer.html#32-errors-one-error-and-exit-codes-derived-from-its-type">Erros</a>.</p>
 <p><strong>Fitness function</strong> — Uma verificação automática de que a arquitectura ainda tem a forma que foi
-decidida. Aqui é o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (job de CI <code>arch</code>): direcção das camadas, directório =
+decidida. Aqui é o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (job de CI <code>arch</code>): direcção das camadas, directório =
 camada, versões das dependências só na raiz, nenhum nome de consumidor no código, e os ratchets de
 dívida. Ver:
 <a href="architecture.html#engine-identity-and-boundaries">Identidade e fronteiras do motor</a>,
@@ -308,30 +308,30 @@ com os argumentos internos <code>netns pin</code> cria um user, network e mount 
 segurando-os; o seu pidfile mantém o nome histórico <code>holder.pid</code>, e todo o <code>nsenter -t &lt;pid&gt;</code> para a
 infra aponta para ele. Antes da divisão em pin e processo de controlo, um único «holder» fazia os dois
 trabalhos, e é por isso que as duas palavras aparecem no código. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::start_pin</code></a>, <code>pin_main</code>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>; <strong>Control process</strong>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::start_pin</code></a>, <code>pin_main</code>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>; <strong>Control process</strong>.</p>
 <p><strong>IPAM (IP address management)</strong> — Atribuição dos endereços dos workloads dentro do prefixo de uma
 rede. O Delonix mantém um ficheiro de leases por prefixo em <code>ipam/</code> no state root, e um ceifador que
 só reclama um lease depois de o ter visto órfão duas vezes, separadas por um período de graça.
-<code>delonix network ipam ls</code> lista os leases. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/ipam.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/ipam.rs::allocate</code></a>,
+<code>delonix network ipam ls</code> lista os leases. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/ipam.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/ipam.rs::allocate</code></a>,
 <code>reap_orphan_leases</code>; a aritmética pura de endereços está em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>.</p>
 <p><strong>Kind</strong> — O tipo de um recurso declarativo num manifesto (<code>kind: Network</code>, <code>kind: Pod</code>,
 <code>kind: VirtualMachine</code>, …), agrupado por <code>apiVersion</code> (<code>core</code>, <code>compute</code>, <code>networking</code>, <code>gateway</code>,
 <code>storage</code>, <code>artifact</code>, <code>infrastructure</code>). Os factos de cada Kind — o seu grupo, se tem namespace, se
 converge, a sua forma — vivem numa só tabela. <code>delonix api-resources</code> imprime-a;
 <code>delonix explain &lt;Kind&gt;</code> documenta os seus campos. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::FACTS</code></a>, <code>KindFacts</code>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::FACTS</code></a>, <code>KindFacts</code>.</p>
 <p><strong>LANG-01</strong> — A regra de língua do código: identificadores, comentários e mensagens visíveis ao
 utilizador escrevem-se em inglês; o português chega ao operador só através do catálogo de tradução
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, escolhido com <code>--l18n pt</code>). O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> conta
+(<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, escolhido com <code>--l18n pt</code>). O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> conta
 o português que ainda está no código, como um ratchet. Ver:
 <a href="contributing-workflow.html#language-english-in-the-code-lang-01">Língua</a>.</p>
 <p><strong>Layer (ADR-0040)</strong> — Um dos anéis arquitecturais a que cada crate pertence: fundação, contextos,
 adapters, providers, interfaces, binários. As dependências apontam para dentro, e o directório do
 crate (<code>crates/&lt;layer&gt;/</code>) tem de bater certo com a camada declarada. Não confundir com uma <strong>layer de
 imagem</strong> (ver <strong>Overlay / lowerdir</strong>). Ver: <a href="architecture.html#layers-and-the-allowed-direction">Camadas</a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
 <p><strong>Lowering (sugar Kinds)</strong> — Reescrever um Kind de conveniência no Kind que faz de facto o trabalho,
 enquanto o manifesto é carregado, para que o resto do motor nunca o veja. <code>Workload</code> baixa para
 <code>Container</code>/<code>Pod</code>/<code>VirtualMachine</code>, <code>Dependency</code> para <code>NetworkPolicy</code>; o <code>spec.expose</code> de uma
@@ -339,26 +339,26 @@ enquanto o manifesto é carregado, para que o resto do motor nunca o veja. <code
 <code>delonix api-resources</code> diz em que se torna cada Kind: <code>primary</code>, <code>sugar → X</code> (baixado),
 <code>compat → X</code> (um schema estrangeiro mantido mas compilado para X), <code>sunset → X</code> (ainda aplicado como
 ele próprio, com sucessor anunciado), <code>aggregate</code> (expande-se nos documentos que contém, como o
-<code>Stack</code>). Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::Form</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs::load</code></a>.</p>
+<code>Stack</code>). Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::Form</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs::load</code></a>.</p>
 <p><strong>MCP (Model Context Protocol)</strong> — Um protocolo através do qual um cliente de IA chama ferramentas.
 <code>delonix mcp serve</code> (crate <code>delonix-mcp</code>) é uma superfície de controlo <strong>local</strong> e sem inquilino,
 sobre stdio: um processo em primeiro plano arrancado pelo cliente para uma sessão, confiado como o uid
-local que o corre — não uma API de gestão remota. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>.</p>
+local que o corre — não uma API de gestão remota. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a>,
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>.</p>
 <p><strong>microVM</strong> — Uma máquina virtual leve com um modelo de dispositivos mínimo, que arranca depressa,
 usada onde um workload precisa do seu próprio kernel. No Delonix o hypervisor de microVMs é o Cloud
 Hypervisor; o <code>libvirt</code> (QEMU/KVM) é o outro backend local. Um <code>Workload</code> com <code>type: microvm</code> força o
 backend Cloud Hypervisor. Ver: <a href="microvm-setup.html">Construir microVMs</a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>.</p>
 <p><strong>NoCloud seed</strong> — Um ISO pequeno com o <code>user-data</code>, o <code>meta-data</code> e o <code>network-config</code> do cloud-init,
 anexado a uma VM para o seu primeiro arranque aplicar o hostname, as chaves SSH e a rede. O Delonix
 gera um por VM, a não ser que a imagem seja um appliance que não corre cloud-init. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs::generate_seed_iso</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs::generate_seed_iso</code></a>,
 <a href="cloud-native-primer.html#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init">Virtualização</a>.</p>
 <p><strong>OCI (Open Container Initiative)</strong> — Os padrões para imagens de containers (image spec), para as
 distribuir a partir de registos (distribution spec) e para as correr (runtime spec). O Delonix faz ele
-próprio o pull, o build, o armazenamento e o push de imagens OCI. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/</code></a>,
+próprio o pull, o build, o armazenamento e o push de imagens OCI. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/</code></a>,
 <a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">Imagens OCI</a>.</p>
 <p><strong>Overlay / lowerdir</strong> — O overlayfs empilha as layers só de leitura da imagem (os <code>lowerdir</code>s) por
 baixo de um directório <code>upper</code> gravável por container. O Delonix desempacota cada layer de imagem uma
@@ -366,38 +366,38 @@ só vez em <code>layers/</code> e todos os containers dessa imagem partilham-nas
 <code>upper/</code>, <code>work/</code>, <code>merged/</code> e um ficheiro <code>overlay-lowers</code> que lista as layers. O mount é feito dentro
 do próprio user namespace do container com a nova API de mount, uma chamada <code>lowerdir+</code> por layer,
 para que imagens com muitas layers não esbarrem no limite de comprimento das opções do <code>mount(2)</code>
-clássico. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs::prepare_overlay</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::mount_overlay_if_marked</code></a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>.</p>
+clássico. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs::prepare_overlay</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::mount_overlay_if_marked</code></a>,
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>.</p>
 <p><strong>Port (hexagonal)</strong> — Um trait de que um caso de uso precisa e que um adapter ou provider
 implementa, para que o domínio nunca nomeie um mecanismo concreto. Exemplos: <code>VmBackend</code>, e as portas
 de compute <code>ImageStore</code>, <code>StorageProvider</code>, <code>NetworkProvider</code>, <code>WorkloadRuntime</code>, e <code>VmBackends</code>,
 <code>LocalDiskImages</code>, <code>SeedBuilder</code> para os casos de uso de VM. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>, <code>launch.rs</code>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>, <code>launch.rs</code>,
 <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits como portas</a>.</p>
-<p><strong>Provider</strong> — Um crate em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> que implementa uma porta contra <strong>uma API de gestão
+<p><strong>Provider</strong> — Um crate em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> que implementa uma porta contra <strong>uma API de gestão
 remota</strong> (hoje Proxmox VE, OPNsense e TrueNAS), trazendo o seu próprio cliente HTTP. Um provider novo entra como
 implementação de uma porta, registado na raiz de composição — nunca como um <code>if provider == …</code> no
 código — e precisa de um ADR. Ver: <a href="crates.html#providers">Providers</a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0051-opnsense-firewall-provider.md" target="_blank" rel="noopener">ADR-0051</a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>,
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0051-opnsense-firewall-provider.md" target="_blank" rel="noopener">ADR-0051</a>.</p>
 <p><strong>Ficheiro de providers</strong> — <code>providers.yaml</code> (<code>apiVersion: config.delonix.io/v1</code>): um ficheiro por nó
 que diz que providers o nó tem, como o motor chega a cada um, e qual serve um pedido que não nomeia
 nenhum (<code>defaultProvider</code>). O primeiro ficheiro encontrado ganha e os ficheiros nunca se fundem
 (<code>DELONIX_PROVIDERS_CONFIG</code>, depois <code>$XDG_CONFIG_HOME/delonix/</code>, depois <code>/etc/delonix/</code>); uma chave
 desconhecida ou um segredo escrito no próprio ficheiro é recusado pelo nome. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/providers_config.rs</code></a>, <code>delonix provider config show|validate|schema</code>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener">ADR-0054</a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/providers_config.rs</code></a>, <code>delonix provider config show|validate|schema</code>,
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener">ADR-0054</a>.</p>
 <p><strong>Ratchet</strong> — Um gate sobre um contador de dívida que falha quando o número <strong>sobe</strong> e também quando
 <strong>desce</strong> sem a linha de base registada ter sido baixada no mesmo commit, para que o progresso fique
-registado e nunca se perca. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (português no código) e os ratchets de dívida
-do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> funcionam assim; os dois têm <code>--list</code> e <code>--update</code>. Ver:
+registado e nunca se perca. O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (português no código) e os ratchets de dívida
+do <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> funcionam assim; os dois têm <code>--list</code> e <code>--update</code>. Ver:
 <a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Regras de arquitectura</a>.</p>
 <p><strong>Reconcile (3-way)</strong> — Como o <code>plan</code>/<code>apply</code> decidem o que mudar sem um ficheiro de estado. Os três
 lados são o manifesto (o desejado), o que é observado no nó (o real), e a última spec aplicada,
 guardada no próprio recurso na anotação <code>delonix.io/last-applied</code>. O terceiro lado separa «tiraste
 este campo do ficheiro» (reverte-o) de «alguém definiu isto à mão» (deixa-o). Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>,
 <a href="system-design-interview.html#55-the-declarative-reconciler-without-a-state-file">O reconciliador declarativo</a>.</p>
 <p><strong>Rootless</strong> — Correr como um utilizador sem privilégios, com privilégios só dentro dos user
 namespaces que o motor cria. É o caminho por omissão no Delonix («rootless-first»); root é um opt-in
@@ -406,20 +406,20 @@ explícito. Ver:
 <p><strong>slirp4netns</strong> — Uma pilha de rede em espaço de utilizador que liga um network namespace rootless à
 rede do host sem privilégios, e encaminha portas do host para dentro dele. O Delonix corre um único
 <code>slirp4netns</code> para toda a infra de rede rootless, com o NAT e a publicação de portas feitos pelo
-nftables dentro do namespace da infra. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>,
+nftables dentro do namespace da infra. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>,
 <a href="system-design-interview.html#52-networking-pin-control-slirp-nftables">Rede</a>.</p>
 <p><strong>Stack</strong> — O conjunto de recursos que um manifesto possui. A posse é uma label em cada recurso,
 <code>delonix.io/stack</code>, e não um registo à parte: <code>apply --prune</code> e <code>stack destroy</code> só tocam em recursos
 que a levam, e um recurso criado à mão nunca é removido por eles. <code>Stack</code> é também um Kind agregado
 que agrupa recursos num só documento. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::STACK_LABEL</code></a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::STACK_LABEL</code></a>.</p>
 <p><strong>State root</strong> — O directório que guarda todo o estado do motor em ficheiros (não há base de dados):
 <code>DELONIX_ROOT</code> quando definido, senão <code>~/.local/share/delonix</code> (ou <code>$XDG_DATA_HOME/delonix</code>) para um
 utilizador e <code>/var/lib/delonix</code> para root. Os sockets de rede vivem num directório de runtime à parte
 (<code>DELONIX_NET_RUNTIME_DIR</code>). Define sempre os dois quando testas. Os registos debaixo dela são lidos,
 escritos e trancados pelo adapter <code>delonix-state</code>. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/util.rs::state_root</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs::Store::default_root</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/util.rs::state_root</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs::Store::default_root</code></a>,
 <a href="architecture.html#state-on-disk">Estado em disco</a>,
 <a href="build-and-test.html#isolating-the-engines-state">Isolar o estado do motor</a>.</p>
 <p><strong>subuid / subgid</strong> — Um intervalo de ids de utilizador e de grupo delegados ao teu utilizador em
@@ -427,23 +427,23 @@ escritos e trancados pelo adapter <code>delonix-state</code>. Ver:
 do <code>newuidmap</code> e do <code>newgidmap</code>); sem ele, só o teu próprio uid é mapeado e as imagens que usam outros
 utilizadores partem-se. Os ficheiros que um container escreve como um id mapeado não pertencem ao teu
 uid no host, e é por isso que algumas operações voltam a entrar num namespace mapeado. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>,
 <a href="environment.html#kernel-requirements">Requisitos do kernel</a>.</p>
 <p><strong>Supervisor</strong> — O processo que o <code>container run -d</code> faz fork para ser o pai real do container:
 espera pelo container, regista o seu verdadeiro estado de saída (e uma razão <code>OOMKilled</code>), e aplica a
 política <code>--restart</code>. Como faz <code>fork</code>, tem de ser arrancado a partir de um processo com uma só thread;
 os servidores re-executam primeiro um <code>delonix</code> novo. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs::run_supervised</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::wait_and_record</code></a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs::run_supervised</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::wait_and_record</code></a>.</p>
 <p><strong>System container (container de sistema)</strong> — Um userland inteiro corrido como uma unidade num
 provider remoto (hoje um container LXC num nó Proxmox VE), declarado como <code>kind: SystemContainer</code>.
 <strong>Não</strong> é um <code>kind: Container</code>: o provider não oferece <code>exec</code>, logs nem estado de saída e o dataplane
 do motor não chega lá, por isso tem uma semântica mais próxima de uma VM (snapshots, backups, clone,
 mudança entre nós). O motor faz ele próprio o pull da imagem; o nó corre-a; uma mudança feita à mão
 no nó é deriva. Sempre sem privilégio. Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/system_container.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lxc.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lxc.rs</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/system_container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/system_container.rs</code></a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0058-proxmox-lxc-is-not-a-container-provider.md" target="_blank" rel="noopener">ADR-0058</a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/system_container.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/src/lxc.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lxc.rs</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/system_container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/system_container.rs</code></a>,
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0058-proxmox-lxc-is-not-a-container-provider.md" target="_blank" rel="noopener">ADR-0058</a>.</p>
 <p><strong>userns (user namespace)</strong> — O namespace Linux que mapeia ids de utilizador, dando a um processo
 privilégios de root só sobre os objectos que o seu namespace possui. É a base da operação rootless, e
 em Ubuntu recentes pode ser bloqueado pelo AppArmor para binários fora dos caminhos esperados. Ver:
@@ -454,29 +454,29 @@ em Ubuntu recentes pode ser bloqueado pelo AppArmor para binários fora dos cami
 que um pacote encontre a sua regra numa só consulta, em vez de percorrer uma regra por workload. O
 Delonix usa o <code>fwmap</code> (endereço de um workload → a sua chain de firewall) e o <code>netpair</code> (um par de
 bridges → uma isenção que abre uma rota entre duas redes). Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::FWMAP</code></a>, <code>NETPAIR_MAP</code>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::FWMAP</code></a>, <code>NETPAIR_MAP</code>.</p>
 <p><strong>VmBackend</strong> — A porta que todo o backend de VM implementa (<code>boot</code>, <code>stop</code>, <code>destroy</code>, <code>is_running</code>,
 <code>ip</code>, pausa e snapshots, …), definida no contexto de computação e reexportada pelo <code>delonix-vm</code>. O
 Cloud Hypervisor e o libvirt estão registados por omissão; um provider remoto entrega à raiz de
 composição um registo, que é ela quem regista. Registar não faz I/O, e a auto-detecção filtra pela
 registration antes de construir seja o que for, por isso um backend remoto só se liga quando é
-escolhido. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs::register_backend</code></a>, <code>select_backend</code>,
+escolhido. Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs::register_backend</code></a>, <code>select_backend</code>,
 <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits como portas</a>.</p>
 <p><strong>VmEngine</strong> — Os casos de uso de VM (create, stop, start, status, list, remove e os verbos de
 dia-2) como métodos de uma struct no contexto de computação, genérica sobre as portas que recebe:
 um <code>StateRepository&lt;Vm&gt;</code>, <code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code> e o <code>VmNetwork</code> opcional.
 Nunca abre um store, corre um comando nem nomeia um backend; o <code>delonix-vm</code> constrói um por chamada
 sobre as suas próprias implementações e mantém as suas funções públicas como invólucros (ADR-0044
-P4b.3). Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs::VmEngine</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>.</p>
+P4b.3). Ver: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs::VmEngine</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>.</p>
 <p><strong>Workload</strong> — Duas coisas relacionadas. <code>kind: Workload</code> é um Kind de açúcar com <code>spec.type:
 container|pod|vm|microvm</code> que baixa para o Kind correspondente na altura do load
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0001-workload-kind-schema.md" target="_blank" rel="noopener">ADR-0001</a>). <code>delonix workload</code> é o grupo de comandos de
+(<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0001-workload-kind-schema.md" target="_blank" rel="noopener">ADR-0001</a>). <code>delonix workload</code> é o grupo de comandos de
 day-2 (<code>ls</code>, <code>describe</code>, <code>stop</code>, <code>rm</code>) que lista e actua sobre containers e VMs em conjunto
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0002-compute-driver-trait.md" target="_blank" rel="noopener">ADR-0002</a>). Ver:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::WORKLOAD_LOWERS_TO</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/workload.rs</code></a>.</p>
+(<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0002-compute-driver-trait.md" target="_blank" rel="noopener">ADR-0002</a>). Ver:
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::WORKLOAD_LOWERS_TO</code></a>,
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/workload.rs</code></a>.</p>
 <p><strong>Worktree</strong> — Um <code>git worktree</code>: um segundo directório de trabalho ligado ao mesmo repositório, no
 seu próprio branch. Cada tarefa aqui tem o seu, criado a partir de <code>origin/main</code> num directório
 persistente fora do repositório (nunca <code>/tmp</code>), e é removido juntamente com o seu branch no fim. Ver:
@@ -484,7 +484,7 @@ persistente fora do repositório (nunca <code>/tmp</code>), e é removido juntam
 <hr />
 <p><strong>Seguinte:</strong> <a href="index.html#reading-paths-by-role">Visão geral e percursos de leitura</a> — é o fim do curso; volta aos percursos de leitura por papel para escolheres o que aprofundar a seguir.</p>
 <nav class="pager"><a href="environment-variables.html"><span>← Anterior</span>Variáveis de ambiente (DELONIX_*)</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/glossary.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/glossary.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/glossary.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/glossary.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul></ul>

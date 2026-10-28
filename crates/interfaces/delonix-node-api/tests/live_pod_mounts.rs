@@ -13,13 +13,14 @@
 //! ROOT=$(mktemp -d)
 //! DELONIX_ROOT=$ROOT target/debug/delonix pull busybox:1.36
 //! DELONIX_ROOT=$ROOT \
-//!   DELONIX_CLI_BIN=$PWD/target/debug/delonix \
+//!   DELONIX_BIN=$PWD/target/debug/delonix \
 //!   cargo test -p delonix-node-api --test live_pod_mounts -- --ignored --nocapture
 //! ```
 //!
-//! `CreatePod` re-execs `$DELONIX_CLI_BIN` (the `delonix` CLI), so that variable
-//! and a `DELONIX_ROOT` with `busybox:1.36` already pulled are required; without
-//! them the test skips with a message rather than fail.
+//! `CreatePod` re-execs `$DELONIX_BIN` (the `delonix` CLI — the same variable
+//! `delonix_node::dispatch::cli_bin` reads), so that variable and a
+//! `DELONIX_ROOT` with `busybox:1.36` already pulled are required; the test
+//! fails naming them when either is missing.
 
 use std::time::Duration;
 
@@ -63,15 +64,13 @@ async fn connect(sock: &str) -> tonic::transport::Channel {
 }
 
 #[tokio::test]
-#[ignore = "launches a real pod; run with --ignored and DELONIX_CLI_BIN + a DELONIX_ROOT holding busybox:1.36"]
+#[ignore = "launches a real pod; run with --ignored and DELONIX_BIN + a DELONIX_ROOT holding busybox:1.36"]
 async fn a_pod_shares_a_named_volume_between_its_members_over_grpc() {
-    if std::env::var_os("DELONIX_CLI_BIN").is_none() || std::env::var_os("DELONIX_ROOT").is_none() {
-        eprintln!(
-            "SKIP: set DELONIX_CLI_BIN=<path to delonix> and DELONIX_ROOT=<root with busybox:1.36 \
-             pulled> to run this live test"
-        );
-        return;
-    }
+    assert!(
+        std::env::var_os("DELONIX_BIN").is_some() && std::env::var_os("DELONIX_ROOT").is_some(),
+        "needs DELONIX_BIN=<path to delonix> and DELONIX_ROOT=<root with busybox:1.36 pulled>: \
+         run with --ignored"
+    );
 
     let (_sock_dir, sock) = short_sock();
     let s = sock.clone();

@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/releases-and-stability.html">EN · English</option><option value="../pt-AO/releases-and-stability.html">PT-AO · Português (Angola)</option><option value="../fr-FR/releases-and-stability.html">FR-FR · Français</option><option value="../zh-CN/releases-and-stability.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -211,13 +211,13 @@ th:first-child,td:first-child{white-space:nowrap}
 <p class="kicker">贡献</p>
 <h1 id="releases-and-stability">发布与稳定性</h1>
 <p><strong>阅读前须知：</strong> <a href="contributing-workflow.html#version-alignment">贡献流程</a>（版本门禁）和<a href="publishing-docs.html">发布文档</a>（一次发布会重新生成什么）。</p>
-<p>本页讲的是一次发布的另一半：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里的 <code>version</code> 承诺了什么、推送一个 <code>v*</code> 标签会
+<p>本页讲的是一次发布的另一半：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里的 <code>version</code> 承诺了什么、推送一个 <code>v*</code> 标签会
 发生什么，以及引擎保证在没有主版本号变更的情况下不会破坏什么。<a href="publishing-docs.html">发布文档</a>
 已经讲过一次发布中文档那一侧的事情（什么会被重新生成、CI 检查什么）；本页讲的是版本号本身，
 以及它所支撑的 CLI/清单（manifest）契约。</p>
 <h2 id="the-version-gate">版本门禁<a class="hanchor" href="#the-version-gate" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>（CI 任务 <code>version</code>，用 <code>fetch-depth: 0</code> 是因为它需要每一个标签）
-只允许根目录 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里工作区（workspace）的 <code>version</code> 恰好是以下两者之一：</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>（CI 任务 <code>version</code>，用 <code>fetch-depth: 0</code> 是因为它需要每一个标签）
+只允许根目录 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里工作区（workspace）的 <code>version</code> 恰好是以下两者之一：</p>
 <ol>
 <li><strong>等于这次提交所包含的最新标签。</strong> 这是发布之间的日常工作状态。两次版本号相同的构建，
    靠 <code>delonix --version</code> 来区分——它会打印出与那个标签之间的距离：
@@ -239,11 +239,11 @@ th:first-child,td:first-child{white-space:nowrap}
 <td>这条分支是在那次发布之前开始的；原样合并会撤销那次发布已经发布出去的内容。先合并 <code>origin/main</code>。</td>
 </tr>
 <tr>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 低于所包含的最新标签</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 低于所包含的最新标签</td>
 <td>会把一个更旧的版本号发布到一个更新的版本号之上。</td>
 </tr>
 <tr>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 高于所包含的最新标签，却没有对应的 <code>docs/<wbr>releases/<wbr>v&lt;version&gt;.<wbr>md</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 高于所包含的最新标签，却没有对应的 <code>docs/<wbr>releases/<wbr>v&lt;version&gt;.<wbr>md</code></td>
 <td>版本号提升了却没有匹配的标签——这会把 <code>delonix-cri</code> 的下载（它是根据正在运行的二进制文件自身的版本号来解析的，见 <code>vmimage.rs</code>）指向一个永远不会存在的发布。</td>
 </tr>
 </tbody>
@@ -269,7 +269,7 @@ gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 <li>构建 <code>delonix</code>、<code>delonix-cri</code>、<code>delonix-mcp</code>、<code>delonix-mgmt</code> 和 <code>delonix-node-api</code> 两次——一次是通用
    x86-64，一次带上 <code>-C target-cpu=x86-64-v3</code>（AVX2/BMI2/FMA）——特意选在 <code>ubuntu-22.04</code>
    上构建，好让 glibc 基线版本（2.35）与 RHEL 9 和 Debian 12 保持兼容，而不只是与最新的
-   Ubuntu 兼容。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 会在宿主机 CPU 支持时自动选用 <code>-v3</code> 版本的构建。一个
+   Ubuntu 兼容。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 会在宿主机 CPU 支持时自动选用 <code>-v3</code> 版本的构建。一个
    独立的 <code>build-arm64</code> 任务会在一台 aarch64 运行器上原生构建同样这五个二进制文件（每个
    组件一个，没有 <code>-v3</code> 变体），以 <code>&lt;name&gt;-aarch64-linux</code> 的形式发布，并放进同一份
    <code>SHA256SUMS</code> 里。<code>install.sh</code> 会在一台 aarch64 宿主机上安装它们（#447）。这个任务只在
@@ -278,9 +278,9 @@ gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 <li><strong>针对这次确切的发布构建重新生成用户站点，如果 <code>docs/</code> 有差异就失败。</strong> 这道门禁之所以
    存在，是因为它曾经不存在：v0.48.0 里就曾经发生过一个站点缺口在上线时随之发布，隐藏了一个
    新命令好几个小时，而与此同时另一个并行的 CI 任务已经因此报红——只是这两条工作流程谁也没
-   看谁。在这里、在发布之前跑一遍 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>，堵上了这个缺口。</li>
-<li>构建一份带校验和的 <code>SHA256SUMS</code>、一份 SPDX 2.3 的软件物料清单（SBOM，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a>，
-   从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a> 生成，它自身也被哈希进 <code>SHA256SUMS</code>），以及——当配置了
+   看谁。在这里、在发布之前跑一遍 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>，堵上了这个缺口。</li>
+<li>构建一份带校验和的 <code>SHA256SUMS</code>、一份 SPDX 2.3 的软件物料清单（SBOM，<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a>，
+   从 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a> 生成，它自身也被哈希进 <code>SHA256SUMS</code>），以及——当配置了
    <code>MINISIGN_SECRET_KEY</code> 密钥时——一份对 <code>SHA256SUMS</code> 的 minisign 签名。<code>SHA256SUMS</code>
    本身只能证明传输完整性（它来自与二进制文件相同的 URL）；签名证明的是这次发布确实来自
    本项目，因为 <code>install.sh</code> 内置了公钥，并且在没有 <code>--insecure-skip-signature</code> 的情况下
@@ -295,9 +295,9 @@ gh workflow run release.yml -f tag=v4.5.0                 # publishes it
    项目</em>）。</li>
 <li>发布 GitHub Release：当 <code>docs/releases/&lt;tag&gt;.md</code> 存在时，用它作为发布说明；否则用
    <code>--generate-notes</code>。</li>
-<li>检出 <code>main</code>，重新生成 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>）以及手册生成的
-   事实部分（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>），并单独重新生成手册的<strong>站点</strong>
-   （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a>）——把有变化的部分提交上去，带 <code>[skip ci]</code>，这样文档就
+<li>检出 <code>main</code>，重新生成 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>）以及手册生成的
+   事实部分（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>），并单独重新生成手册的<strong>站点</strong>
+   （<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a>）——把有变化的部分提交上去，带 <code>[skip ci]</code>，这样文档就
    永远不会比一次发布落后超过这一次提交。生成器在这一步失败只是一个响亮的警告，而不是一次
    失败的发布：发布本身并不依赖它。</li>
 </ol>
@@ -306,14 +306,14 @@ gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 那些页面，具体做法正如<a href="publishing-docs.html#what-happens-at-release-time">发布文档 § 发布时会发生什么</a>
 所描述的那样。</p>
 <h2 id="what-is-stable-and-where-that-promise-lives">什么是稳定的，以及这个承诺写在哪里<a class="hanchor" href="#what-is-stable-and-where-that-promise-lives" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 才是真正的契约，就在同一个仓库里，被 <code>delonix explain</code> 和生成出来
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 才是真正的契约，就在同一个仓库里，被 <code>delonix explain</code> 和生成出来
 的页面共同读取——本节只是把你引导到那里去，因为在这里再复述一遍它的内容,只会多出一份会与
 代码脱节的副本。这条契约自 v0.42.3 起生效，到了 v1.0.0，它读起来就是本项目真正的语义化
 版本承诺,而不再只是一条局限于 <code>0.x</code> 阶段内部的备注。</p>
 <p><strong>稳定——不会在没有主版本号变更的情况下被破坏：</strong></p>
 <ul>
 <li>容器/镜像生命周期的动词（<code>container run</code>、<code>ps</code>、<code>stop</code>、<code>exec</code> 等）以及镜像相关的动词，
-  沿用 Docker/Podman 自己的命名和参数顺序，以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 为
+  沿用 Docker/Podman 自己的命名和参数顺序，以及 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 为
   <code>run</code>/<code>exec</code> 列出的那些具体的短/长标志位。</li>
 <li>退出码（<code>0</code> 成功、<code>4</code> 未找到、<code>5</code> 冲突、<code>69</code> 缺少宿主机能力、<code>124</code> 超时……）以及每次
   失败所携带的 <code>DX-CDNN</code> 字典编号（ADR-0043）——这个编号标识的是<em>哪一种</em>失败，其含义永远
@@ -329,7 +329,7 @@ gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 <li>节点的 <strong>providers 文件</strong>（<code>providers.yaml</code>，<code>apiVersion: config.delonix.io/v1</code>，ADR-0054）
   享有与清单 schema 相同的承诺：一个键绝不会被移除或挪作他用，新键永远是可选的，而
   <code>apiVersion</code> 只会随一个 <code>v2</code> 改变，并且 <code>v2</code> 发布时 <code>v1</code> 依然会被读取。它的 schema 由引擎
-  读取的类型生成（<code>delonix provider config schema</code>，发布为 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/providers.json" target="_blank" rel="noopener"><code>docs/schema/v1/providers.json</code></a>，
+  读取的类型生成（<code>delonix provider config schema</code>，发布为 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/providers.json" target="_blank" rel="noopener"><code>docs/schema/v1/providers.json</code></a>，
   有一个测试会在已发布的副本不是生成结果时失败）。</li>
 </ul>
 <p><strong>不稳定——可以在任何版本里改变：</strong> <code>serve cri</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve docker-api</code>（本地管理
@@ -348,13 +348,13 @@ API 尤其没有已发布的契约，明确不是拿来做自动化的对象—�
 一次真实教训：一次重命名可能会漏掉一个<em>内部</em>调用者（CRI 服务器自己在 v0.30.0 重组之后的
 好几个月里，一直在调用一个已经被移除的 <code>delonix netns attach</code>，破坏了 rootless 下的 pod
 创建）——对整个工作区（workspace）grep 旧的拼法，而不只是文档和测试，是切这一刀的一部分。</p>
-<p>对本页或 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 标记为稳定的东西做破坏性变更，首先需要一份 ADR
+<p>对本页或 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 标记为稳定的东西做破坏性变更，首先需要一份 ADR
 （<a href="contributing-workflow.html#when-to-write-an-adr">贡献流程 § 什么时候要写 ADR</a>），因为
 按定义它移动了一条结构性边界——这与新增一个后端或新增一条特权边界所适用的推理是一样的。</p>
 <hr />
 <p><strong>下一篇：</strong> <a href="publishing-docs.html">发布文档</a>——站点和本手册是如何被生成、经过门禁检查并发布的，以及你的 PR 必须重新生成什么。</p>
 <nav class="pager"><a href="contributing-workflow.html"><span>← 上一页</span>贡献流程</a><a class="next" href="publishing-docs.html"><span>下一页 →</span>发布文档</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/releases-and-stability.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/releases-and-stability.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/releases-and-stability.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/releases-and-stability.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

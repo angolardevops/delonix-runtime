@@ -11,13 +11,14 @@
 //! ROOT=$(mktemp -d)
 //! DELONIX_ROOT=$ROOT target/debug/delonix pull busybox:latest
 //! DELONIX_ROOT=$ROOT \
-//!   DELONIX_CLI_BIN=$PWD/target/debug/delonix \
+//!   DELONIX_BIN=$PWD/target/debug/delonix \
 //!   cargo test -p delonix-node-api --test live_container_lifecycle -- --ignored --nocapture
 //! ```
 //!
-//! `Start` re-execs `$DELONIX_CLI_BIN` (the `delonix` CLI), so that variable and
-//! a `DELONIX_ROOT` with `busybox:latest` already pulled are required; without
-//! them the test skips with a message rather than fail.
+//! `Start` re-execs `$DELONIX_BIN` (the `delonix` CLI — the same variable
+//! `delonix_node::dispatch::cli_bin` reads), so that variable and a
+//! `DELONIX_ROOT` with `busybox:latest` already pulled are required; the test
+//! fails naming them when either is missing.
 
 use std::time::Duration;
 
@@ -45,17 +46,15 @@ async fn wait_for(path: &str) {
 }
 
 #[tokio::test]
-#[ignore = "launches a real container; run with --ignored and DELONIX_CLI_BIN + a DELONIX_ROOT holding busybox"]
+#[ignore = "launches a real container; run with --ignored and DELONIX_BIN + a DELONIX_ROOT holding busybox"]
 async fn the_container_lifecycle_runs_end_to_end_over_grpc() {
-    // The launch re-execs the CLI, and the server/CLI/image store all read
-    // DELONIX_ROOT. Both must be set for a real run; otherwise skip.
-    if std::env::var_os("DELONIX_CLI_BIN").is_none() || std::env::var_os("DELONIX_ROOT").is_none() {
-        eprintln!(
-            "SKIP: set DELONIX_CLI_BIN=<path to delonix> and DELONIX_ROOT=<root with busybox \
-             pulled> to run this live test"
-        );
-        return;
-    }
+    // The launch re-execs `$DELONIX_BIN`, and the server/CLI/image store all read
+    // DELONIX_ROOT; fail naming both when either is missing rather than pass empty.
+    assert!(
+        std::env::var_os("DELONIX_BIN").is_some() && std::env::var_os("DELONIX_ROOT").is_some(),
+        "needs DELONIX_BIN=<path to delonix> and DELONIX_ROOT=<root with busybox pulled>: \
+         run with --ignored"
+    );
 
     let (_sock_dir, sock) = short_sock();
     let s = sock.clone();

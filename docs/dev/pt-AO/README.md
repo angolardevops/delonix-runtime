@@ -8,7 +8,7 @@ o Delonix, começa antes pelo [README](../../../README.rst) e pelo
 [site de documentação do utilizador](https://ngolacloud.github.io/delonix/).
 
 <!-- dev-docs:begin crate-count -->
-O workspace tem **34 crates** e produz **6 binários** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).
+O workspace tem **35 crates** e produz **6 binários** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).
 <!-- dev-docs:end crate-count -->
 
 ## O que o motor é — e o que não é

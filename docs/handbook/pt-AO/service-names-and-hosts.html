@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/service-names-and-hosts.html">EN · English</option><option value="../pt-AO/service-names-and-hosts.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/service-names-and-hosts.html">FR-FR · Français</option><option value="../zh-CN/service-names-and-hosts.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -219,7 +219,7 @@ endereço que a rota reservou). O motor consegue escrever esse mapeamento por ti
 fazer. Tudo o que se segue é lido dos ficheiros nomeados ao lado; as decisões são o ADR-0046
 (<code>hosts: [host]</code>) e o ADR-0048 (<code>hosts sync</code>), que deves ler para perceber o <em>porquê</em>.</p>
 <h2 id="one-block-per-state-root">Um bloco por state root<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
-<p>Tudo isto vive em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a>. O motor nunca reescreve o
+<p>Tudo isto vive em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a>. O motor nunca reescreve o
 ficheiro de hosts: é dono de <strong>um bloco delimitado</strong> e deixa todos os outros bytes em paz.</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text"># BEGIN delonix 3fa2c1d0 (managed — do not edit)
 127.0.0.1	app.example.pt
@@ -416,13 +416,13 @@ delonix-runtime-bin hosts_file</code>.</p>
 <ul>
 <li><code>cmd/hosts_file.rs</code> para o mecanismo, <code>cmd/ingress_proxy.rs</code> (<code>desired_hosts</code>, <code>rebuild</code>,
   <code>hosts_block_now</code>, <code>sync_hosts_now</code>, <code>hosts_sync_flag</code>) para as duas entradas.</li>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a> para as
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> e <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a> para as
   decisões e o que cada uma diz que foi medido.</li>
 </ul>
 <hr />
 <p><strong>A seguir:</strong> <a href="coding-conventions.html">Convenções de código</a> — como o código neste repositório tem de ser escrito, cada regra etiquetada com o gate ou a decisão que está por trás.</p>
 <nav class="pager"><a href="troubleshooting.html"><span>← Anterior</span>Diagnóstico de problemas</a><a class="next" href="coding-conventions.html"><span>Seguinte →</span>Convenções de código</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/service-names-and-hosts.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/service-names-and-hosts.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/service-names-and-hosts.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/service-names-and-hosts.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

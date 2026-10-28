@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/service-names-and-hosts.html">EN · English</option><option value="../pt-AO/service-names-and-hosts.html">PT-AO · Português (Angola)</option><option value="../fr-FR/service-names-and-hosts.html">FR-FR · Français</option><option value="../zh-CN/service-names-and-hosts.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -220,7 +220,7 @@ th:first-child,td:first-child{white-space:nowrap}
 路各自会拒绝做什么。下面所写的一切都是从它旁边点名的那些文件里读出来的；相关决策是
 ADR-0046（<code>hosts: [host]</code>）和 ADR-0048（<code>hosts sync</code>），要理解<em>为什么</em>应该去读那两份文档。</p>
 <h2 id="one-block-per-state-root">每个 state root 一个块<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
-<p>这一切都活在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a> 里。引擎从不重写整个 hosts
+<p>这一切都活在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a> 里。引擎从不重写整个 hosts
 文件：它只拥有<strong>一个界定好的块</strong>，其余每一个字节都不去碰。</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text"># BEGIN delonix 3fa2c1d0 (managed — do not edit)
 127.0.0.1	app.example.pt
@@ -409,14 +409,14 @@ delonix hosts sync --off        # removes it; the rest of the file is as it was
 <ul>
 <li>机制部分见 <code>cmd/hosts_file.rs</code>；两个输入部分见 <code>cmd/ingress_proxy.rs</code>（<code>desired_hosts</code>、
   <code>rebuild</code>、<code>hosts_block_now</code>、<code>sync_hosts_now</code>、<code>hosts_sync_flag</code>）。</li>
-<li>相关决策以及每一份文档各自说测量过什么，见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> 和
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a>。</li>
+<li>相关决策以及每一份文档各自说测量过什么，见 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> 和
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a>。</li>
 </ul>
 <hr />
 <p><strong>下一篇：</strong><a href="coding-conventions.html">编码约定</a> —— 本仓库中的代码必须怎么写，每条规则都标注了
 它背后的门禁或决定。</p>
 <nav class="pager"><a href="troubleshooting.html"><span>← 上一页</span>排查问题</a><a class="next" href="coding-conventions.html"><span>下一页 →</span>编码规范</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/service-names-and-hosts.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/service-names-and-hosts.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/service-names-and-hosts.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/service-names-and-hosts.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

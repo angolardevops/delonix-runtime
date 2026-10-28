@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/releases-and-stability.html">EN · English</option><option value="../pt-AO/releases-and-stability.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/releases-and-stability.html">FR-FR · Français</option><option value="../zh-CN/releases-and-stability.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -211,14 +211,14 @@ th:first-child,td:first-child{white-space:nowrap}
 <p class="kicker">Contribuir</p>
 <h1 id="releases-and-stability">Releases e estabilidade</h1>
 <p><strong>Antes de leres:</strong> <a href="contributing-workflow.html#version-alignment">Fluxo de contribuição</a> (o gate de versão) e <a href="publishing-docs.html">Publicar a documentação</a> (o que uma release regenera).</p>
-<p>Esta página é sobre a outra metade de uma release: o que o <code>version</code> no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> promete, o
+<p>Esta página é sobre a outra metade de uma release: o que o <code>version</code> no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> promete, o
 que acontece quando se pede uma release, e o que o motor garante que não parte sem uma versão
 major. <a href="publishing-docs.html">Publicar a documentação</a> já cobre o lado da documentação de uma
 release (o que regenera, o que a CI verifica); esta página cobre o próprio número de versão e o
 contrato de CLI/manifesto que ele suporta.</p>
 <h2 id="the-version-gate">O gate de versão<a class="hanchor" href="#the-version-gate" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (job de CI <code>version</code>, <code>fetch-depth: 0</code> porque precisa de todas as tags)
-permite que o <code>version</code> do workspace, no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> da raiz, seja exactamente uma de duas
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (job de CI <code>version</code>, <code>fetch-depth: 0</code> porque precisa de todas as tags)
+permite que o <code>version</code> do workspace, no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> da raiz, seja exactamente uma de duas
 coisas:</p>
 <ol>
 <li><strong>Igual à tag mais recente que este commit contém.</strong> Trabalho normal entre releases. Duas
@@ -242,11 +242,11 @@ coisas:</p>
 <td>O ramo começou antes dessa release; fazer merge dele tal como está desfaz o que a release já publicou. Faz merge do <code>origin/main</code> primeiro.</td>
 </tr>
 <tr>
-<td>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> está abaixo da tag contida mais recente</td>
+<td>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> está abaixo da tag contida mais recente</td>
 <td>Um número de versão mais antigo seria publicado por cima de um mais recente.</td>
 </tr>
 <tr>
-<td>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> está acima da tag contida mais recente, sem <code>docs/<wbr>releases/<wbr>v&lt;versão&gt;.<wbr>md</code> nenhum</td>
+<td>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> está acima da tag contida mais recente, sem <code>docs/<wbr>releases/<wbr>v&lt;versão&gt;.<wbr>md</code> nenhum</td>
 <td>Um bump sem tag correspondente — manda o download do <code>delonix-cri</code> (que é resolvido a partir da própria versão do binário em execução, vê <code>vmimage.rs</code>) para uma release que nunca vai existir.</td>
 </tr>
 </tbody>
@@ -273,7 +273,7 @@ o nome à release, por isso um <code>tag: main</code> não verificado teria publ
 <li>Constrói <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code> e <code>delonix-node-api</code> duas vezes — uma genérica
    x86-64, outra com <code>-C target-cpu=x86-64-v3</code> (AVX2/BMI2/FMA) — especificamente em
    <code>ubuntu-22.04</code>, para a linha de base do glibc (2.35) ficar compatível com o RHEL 9 e o
-   Debian 12, não só com o Ubuntu mais recente. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> escolhe a build <code>-v3</code>
+   Debian 12, não só com o Ubuntu mais recente. O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> escolhe a build <code>-v3</code>
    automaticamente quando o CPU do host a suporta. Um job <code>build-arm64</code> separado constrói os mesmos
    cinco binários nativamente num runner aarch64 (um por componente, sem variante <code>-v3</code>), e são
    publicados como <code>&lt;name&gt;-aarch64-linux</code> sob o mesmo <code>SHA256SUMS</code>. O <code>install.sh</code> instala-os num
@@ -283,9 +283,9 @@ o nome à release, por isso um <code>tag: main</code> não verificado teria publ
    divergir.</strong> Este gate existe porque uma vez não existia: um buraco no site saiu ao vivo na
    v0.48.0, escondendo um comando novo durante horas enquanto um job de CI paralelo já estava
    vermelho sobre isso — os dois workflows simplesmente não se olhavam um ao outro. Correr o
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> aqui, antes de publicar, fecha isso.</li>
-<li>Constrói um <code>SHA256SUMS</code> com checksum, um SBOM SPDX 2.3 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a>, a partir do
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a>, ele próprio metido no hash do <code>SHA256SUMS</code>), e — quando o secret
+   <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> aqui, antes de publicar, fecha isso.</li>
+<li>Constrói um <code>SHA256SUMS</code> com checksum, um SBOM SPDX 2.3 (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a>, a partir do
+   <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a>, ele próprio metido no hash do <code>SHA256SUMS</code>), e — quando o secret
    <code>MINISIGN_SECRET_KEY</code> está configurado — uma assinatura minisign sobre o <code>SHA256SUMS</code>. O
    <code>SHA256SUMS</code> sozinho só prova integridade de transferência (vem da mesma URL que o binário); a
    assinatura prova que a release veio deste projecto, já que o <code>install.sh</code> traz a chave pública
@@ -301,9 +301,9 @@ o nome à release, por isso um <code>tag: main</code> não verificado teria publ
    que a release é <em>deste projecto</em>, para quem já confia na sua chave pública embutida).</li>
 <li>Publica a GitHub Release, com <code>docs/releases/&lt;tag&gt;.md</code> como notas quando esse ficheiro existe,
    ou <code>--generate-notes</code> caso contrário.</li>
-<li>Faz checkout à <code>main</code> e regenera o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>) e os factos
-   gerados do manual (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) e, à parte, o <strong>site</strong> do manual
-   (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a>) — comitando o que tiver mudado, <code>[skip ci]</code>, para a documentação
+<li>Faz checkout à <code>main</code> e regenera o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>) e os factos
+   gerados do manual (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) e, à parte, o <strong>site</strong> do manual
+   (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a>) — comitando o que tiver mudado, <code>[skip ci]</code>, para a documentação
    nunca ficar mais de um commit atrás de uma release. Uma falha do gerador aqui é um aviso alto,
    não uma release falhada: a release em si não depende disso.</li>
 </ol>
@@ -313,7 +313,7 @@ anterior (commits, notas de release) e actualiza só as páginas que essa mudan�
 exactamente como descrito em <a href="publishing-docs.html#what-happens-at-release-time">Publicar a documentação § O que acontece no momento da
 release</a>.</p>
 <h2 id="what-is-stable-and-where-that-promise-lives">O que é estável, e onde vive essa promessa<a class="hanchor" href="#what-is-stable-and-where-that-promise-lives" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> é o contrato de facto, no mesmo repositório, lido pelo <code>delonix explain</code>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> é o contrato de facto, no mesmo repositório, lido pelo <code>delonix explain</code>
 e pelas páginas geradas igualmente — esta secção só te orienta até lá, porque duplicar o
 conteúdo dele aqui dar-lhe-ia uma segunda cópia a desalinhar-se do código. Aplica-se desde a
 v0.42.3 e, desde a v1.0.0, lê-se como a promessa de semver real do projecto, em vez de uma nota
@@ -322,7 +322,7 @@ dentro do <code>0.x</code>.</p>
 <ul>
 <li>Os verbos de ciclo de vida de container/imagem (<code>container run</code>, <code>ps</code>, <code>stop</code>, <code>exec</code>, …) e os
   verbos de imagem, com os nomes e a ordem de argumentos do próprio Docker/Podman, e as flags
-  curtas/longas específicas que <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> lista para <code>run</code>/<code>exec</code>.</li>
+  curtas/longas específicas que <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> lista para <code>run</code>/<code>exec</code>.</li>
 <li>Os códigos de saída (<code>0</code> sucesso, <code>4</code> não encontrado, <code>5</code> conflito, <code>69</code> capacidade do host em
   falta, <code>124</code> prazo esgotado, …) e o número do dicionário <code>DX-CDNN</code> que cada falha carrega
   (ADR-0043) — o número identifica <em>qual</em> falha e nunca muda de significado nem é reutilizado;
@@ -341,7 +341,7 @@ dentro do <code>0.x</code>.</p>
   ADR-0054) tem a mesma promessa que o schema do manifesto: uma chave nunca é removida nem muda de
   propósito, uma chave nova é sempre opcional, e o <code>apiVersion</code> só muda com um <code>v2</code> que sai
   enquanto o <code>v1</code> continua a ser lido. O schema é gerado dos tipos que o motor lê
-  (<code>delonix provider config schema</code>, publicado como <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/providers.json" target="_blank" rel="noopener"><code>docs/schema/v1/providers.json</code></a>, com um teste
+  (<code>delonix provider config schema</code>, publicado como <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/providers.json" target="_blank" rel="noopener"><code>docs/schema/v1/providers.json</code></a>, com um teste
   que falha quando a cópia publicada não é a gerada).</li>
 </ul>
 <p><strong>Não estável — pode mudar em qualquer versão:</strong> <code>serve cri</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve docker-api</code> (a API
@@ -363,7 +363,7 @@ para trás um chamador <em>interno</em> (o próprio servidor CRI continuou a inv
 attach</code> já removido durante meses depois da reorganização da v0.30.0, partindo a criação de pods
 rootless) — fazer grep ao workspace inteiro pela grafia antiga, não só à documentação e aos
 testes, faz parte de fazer o corte.</p>
-<p>Uma quebra a algo que esta página ou o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> marca como estável precisa de um
+<p>Uma quebra a algo que esta página ou o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> marca como estável precisa de um
 ADR primeiro (<a href="contributing-workflow.html#when-to-write-an-adr">Fluxo de contribuição § Quando escrever um
 ADR</a>), porque move uma fronteira estrutural por
 definição — o mesmo raciocínio que se aplica a um backend novo ou a uma fronteira de privilégio
@@ -371,7 +371,7 @@ nova aplica-se também aqui.</p>
 <hr />
 <p><strong>A seguir:</strong> <a href="publishing-docs.html">Publicar a documentação</a> — como o site e este manual são gerados, controlados por gate e publicados, e o que o teu PR tem de regenerar.</p>
 <nav class="pager"><a href="contributing-workflow.html"><span>← Anterior</span>Fluxo de contribuição</a><a class="next" href="publishing-docs.html"><span>Seguinte →</span>Publicar a documentação</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/releases-and-stability.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/releases-and-stability.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/releases-and-stability.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/releases-and-stability.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

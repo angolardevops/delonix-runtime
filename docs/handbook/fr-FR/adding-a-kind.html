@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/adding-a-kind.html">EN · English</option><option value="../pt-AO/adding-a-kind.html">PT-AO · Português (Angola)</option><option value="../fr-FR/adding-a-kind.html" selected>FR-FR · Français</option><option value="../zh-CN/adding-a-kind.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Changer le thème de couleur" title="Changer le thème de couleur"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -222,7 +222,7 @@ parcourt tous les chemins à la fois : primaire, convergent, supprimable, avec n
 de son propre registre. Chaque fichier cité ci-dessous est lu depuis l'arbre, pas depuis le
 souvenir d'une ancienne disposition.</p>
 <h2 id="the-one-table-a-kind-has-to-answer">La table unique à laquelle un Kind doit répondre<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> est la source unique de ce qu'est un Kind. Le
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> est la source unique de ce qu'est un Kind. Le
 commentaire du module lui-même explique pourquoi elle existe : avant cette table, les mêmes faits
 sur un Kind vivaient dans six listes séparées (<code>KINDS</code>, <code>CONVERGING_KINDS</code>, <code>TEARDOWN_KINDS</code>,
 <code>kind_honors_namespace</code>, les <code>DECLARATIVOS</code> du test du wait, et les branches de <code>presence()</code>), et
@@ -340,12 +340,12 @@ tiennent la colonne en place (ADR-0045) :</p>
   plus anciennes sont dispensées (<code>ingress</code>, <code>vms</code>, <code>firewallPolicies</code>), car renommer un groupe
   casse chaque Stack déjà publié.</li>
 </ul>
-<p>Le groupe doit ensuite être prouvé de bout en bout, dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> :</p>
+<p>Le groupe doit ensuite être prouvé de bout en bout, dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> :</p>
 <ul>
 <li><code>manifest.rs</code>, <strong><code>stack_group_sample</code></strong> — le <code>spec</code> minimal d'un enfant du groupe et le Kind
   qu'il devient ; <code>every_stack_group_loads</code> parcourt chaque groupe et échoue sur un groupe sans
   échantillon.</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a></strong> — doit mentionner le groupe ; <code>the_stack_example_names_every_group</code>
+<li><strong><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a></strong> — doit mentionner le groupe ; <code>the_stack_example_names_every_group</code>
   échoue sinon. Ce fichier est aussi ce qu'affiche la page Kinds du site utilisateur.</li>
 <li><code>schema.rs</code>, <strong><code>every_stack_group_is_typed_against_its_kinds_own_spec</code></strong> — les éléments du groupe
   sont typés contre la propre spec du Kind, donc le Kind a besoin de sa branche <code>TYPED_KINDS</code>
@@ -354,8 +354,8 @@ tiennent la colonne en place (ADR-0045) :</p>
 <h2 id="the-spec-type-and-the-schema">Le type de spec et le schéma<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
 <p>Un Kind avec une spec de manifeste typée (la plupart) a besoin d'une struct
 <code>#[derive(Deserialize, Serialize, JsonSchema)]</code> — <code>ServiceSpec</code> pour cet exemple, dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a> — et d'une branche dans <code>TYPED_KINDS</code>, dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>, plus le bras correspondant qui nomme la struct pour
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a> — et d'une branche dans <code>TYPED_KINDS</code>, dans
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>, plus le bras correspondant qui nomme la struct pour
 <code>manifest_schema</code>. Cette constante alimente <code>delonix manifest schema</code> et
 <code>delonix explain &lt;Kind&gt;.&lt;champ&gt;</code>, tous deux générés depuis la même struct (ADR-0007), afin que le
 schéma publié ne puisse jamais diverger de ce que le code accepte réellement. Laisser un Kind de
@@ -366,7 +366,7 @@ donne la redirection spécifique, et <code>todo_kind_conhecido_tem_schema_ou_dic
 fait échouer le build si un Kind que la table connaît n'est ni dans <code>TYPED_KINDS</code> ni doté d'un
 indice. Le message générique (« no typed schema for X ») se lit comme un bug du manifeste ;
 l'indice dit que c'est une propriété du Kind.</p>
-<p>Deux autres endroits lisent la spec, tous deux dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> :</p>
+<p>Deux autres endroits lisent la spec, tous deux dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> :</p>
 <ul>
 <li><strong><code>filled_spec</code></strong> — un bras appelant le <code>spec_with_defaults(doc)</code> du Kind, l'aller-retour par la
   struct typée que <code>stack apply --dry-run</code> et <code>manifest render</code> impriment avec chaque valeur par
@@ -384,9 +384,9 @@ copie que quelqu'un tient à jour à la main :</p>
 pas exactement ce que génère le binaire. Utilisez le binaire construit depuis votre arbre
 (<code>target/release/delonix</code> ou <code>cargo run -p delonix-runtime-bin --</code>), pas celui de votre <code>PATH</code>.</p>
 <h2 id="wiring-the-kind-into-the-reconciler">Câbler le Kind dans le réconciliateur<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
-<p>Le plan du réconciliateur (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>) est pur — il
+<p>Le plan du réconciliateur (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>) est pur — il
 n'ouvre jamais un store ni n'exécute une commande. Tout ce qui touche la machine vit dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>, ré-exporté comme <code>cmd::kinds</code>/<code>cmd::reconcile</code> depuis
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>, ré-exporté comme <code>cmd::kinds</code>/<code>cmd::reconcile</code> depuis
 <code>delonix-stack</code> (<code>pub use delonix_stack::kinds;</code> dans <code>cmd/mod.rs</code>, donc rien de ce qui appelait
 déjà <code>cmd::kinds::…</code> n'a eu à changer quand la table est passée dans son propre crate). Quatre
 fonctions dans <code>stack.rs</code> ont besoin d'une branche pour un nouveau Kind qui converge :</p>
@@ -469,7 +469,7 @@ client demandant le nom). Deux tests protègent spécifiquement cette colonne :
 </ul>
 <h2 id="the-generic-verbs-and-drift">Les verbes génériques et <code>drift</code><a class="hanchor" href="#the-generic-verbs-and-drift" aria-label="#">#</a></h2>
 <p><code>delonix get</code>/<code>describe</code>/<code>delete &lt;pluriel&gt;</code> routent par Kind à travers trois listes dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/verbs.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/verbs.rs</code></a> — <code>GET_ROUTES</code>, <code>DESCRIBE_ROUTES</code> et
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/verbs.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/verbs.rs</code></a> — <code>GET_ROUTES</code>, <code>DESCRIBE_ROUTES</code> et
 <code>DELETE_ROUTES</code> — plus un bras par verbe qui appelle les propres <code>cmd_ls</code>, <code>cmd_describe</code> et
 <code>remove_for_replace</code> du Kind. Un Kind qui ne peut pas y répondre écrit l'obstacle dans
 <code>no_verb_reason</code> à la place (<code>Stack</code> se lit depuis un fichier, <code>Workload</code> est abaissé au load, …).
@@ -482,13 +482,13 @@ répond « not wired yet » à l'utilisateur. Lisez cette ligne ; le build ne
 Kinds peuvent être énumérés depuis leur propre store. Si votre <code>actual()</code> a besoin des documents
 analysés pour répondre — le nœud ne tient aucun registre qui liste le Kind tout seul, comme une
 <code>NetworkPolicy</code> qui vit sous forme de règles nft sur une cible — ajoutez-le à <code>DOC_SCOPED</code> dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/drift.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/drift.rs</code></a>. <code>doc_scoped_matches_the_stack_wiring</code> lit <code>stack.rs</code>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/drift.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/drift.rs</code></a>. <code>doc_scoped_matches_the_stack_wiring</code> lit <code>stack.rs</code>
 (le site d'appel <strong>et</strong> la signature de <code>actual</code>) et échoue si la liste et le câblage sont en
 désaccord ; un module qui reçoit <code>docs</code> et les ignore (<code>fn actual(_docs: …)</code>) n'a pas sa place
 dans la liste.</p>
 <h2 id="namespaces-and-completion">Namespaces et complétion<a class="hanchor" href="#namespaces-and-completion" aria-label="#">#</a></h2>
 <p>Si le Kind est namespaced (<code>namespaced != Namespaced::Never</code>), il lui faut aussi une entrée dans
-<code>NAMESPACE_SOURCES</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>) — soit <code>NsSource::Store(fn)</code>
+<code>NAMESPACE_SOURCES</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>) — soit <code>NsSource::Store(fn)</code>
 lisant le propre store du Kind, soit <code>NsSource::Via("AutreKind — raison")</code> quand le namespace
 voyage vers l'enregistrement d'un autre Kind (le namespace d'un <code>Pod</code> se trouve sur ses
 <code>Container</code>s membres, par exemple). <code>every_namespaced_kind_declares_a_source</code> échoue sinon —
@@ -503,7 +503,7 @@ locataire dont la seule ressource serait le nouveau Kind.</p>
    (<code>schema.rs</code>) — ou une entrée dans <code>untyped_hint</code> expliquant pourquoi pas.</li>
 <li><code>manifest.rs</code> — un bras dans <code>filled_spec</code> (<code>spec_with_defaults</code>), un bras dans
    <code>spec_fields_for</code>, et un échantillon dans <code>stack_group_sample</code> ; le groupe dans
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a>.</li>
+   <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a>.</li>
 <li><code>stack.rs</code> — des branches dans <code>desired_of</code>, <code>actual_of</code>, <code>converge_and_stamp</code>, <code>stamp_all</code>,
    <code>destroy_one</code>, <code>presence</code>, et une couche dans <code>run_layers</code> appelant le propre <code>apply(docs)</code> du
    Kind.</li>
@@ -515,8 +515,8 @@ locataire dont la seule ressource serait le nouveau Kind.</p>
 <li><code>drift.rs</code> — <code>DOC_SCOPED</code>, uniquement si <code>actual()</code> a réellement besoin des documents.</li>
 <li>Si namespaced : une entrée dans <code>NAMESPACE_SOURCES</code> (<code>complete.rs</code>).</li>
 <li>Chaque nouvelle chaîne visible par l'utilisateur en anglais dans le code et traduite dans
-    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> ; un nouveau code d'erreur dans le dictionnaire
-    <code>DX-CDNN</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>) a lui aussi besoin de son texte PT
+    <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> ; un nouveau code d'erreur dans le dictionnaire
+    <code>DX-CDNN</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>) a lui aussi besoin de son texte PT
     (<code>every_dictionary_text_has_a_portuguese_translation</code>). Lancez <code>python3 scripts/lang_ratchet.py</code>.</li>
 <li><code>delonix manifest schema &gt; docs/schema/v1/delonix.json</code> avec le binaire de l'arbre, puis
     <code>python3 docs/gen.py &lt;ce binaire&gt;</code> pour que la page Kinds du site utilisateur suive.</li>
@@ -530,7 +530,7 @@ exige <code>in_stack: false</code> et <code>converges: false</code> pour ces for
 <hr />
 <p><strong>Ensuite :</strong> <a href="contributing-workflow.html">Flux de contribution</a> — worktrees, alignement de version, la règle de langue, quand écrire un ADR, et comment envoyer le changement.</p>
 <nav class="pager"><a href="coding-conventions.html"><span>← Précédent</span>Conventions de code</a><a class="next" href="engineering-process.html"><span>Suivant →</span>Engineering process (canonical)</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/adding-a-kind.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/adding-a-kind.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/fr-FR/adding-a-kind.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/adding-a-kind.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>

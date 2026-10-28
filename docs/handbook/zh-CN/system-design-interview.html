@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/system-design-interview.html">EN · English</option><option value="../pt-AO/system-design-interview.html">PT-AO · Português (Angola)</option><option value="../fr-FR/system-design-interview.html">FR-FR · Français</option><option value="../zh-CN/system-design-interview.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -332,8 +332,8 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 </tbody>
 </table></div>
-<p>节点契约的设计要点，全部写在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4
-和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> 里：</p>
+<p>节点契约的设计要点，全部写在 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4
+和 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> 里：</p>
 <ul>
 <li><strong><code>.proto</code> 文件是唯一的真相来源</strong>；REST 映射来自 <code>google.api.http</code> 注解，OpenAPI 文档从它们
   生成。一个 CI 门禁会检查格式、lint、相对于上一个版本的破坏性变更、除双向流（<code>Exec</code>、
@@ -345,7 +345,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <li><strong>长任务返回一个 <code>Operation</code></strong>，它在被确认之前就已经持久化，因此一个重启后的服务器能够说出
   <code>Interrupted</code>，而不是永远说 <code>RUNNING</code>。</li>
 <li><strong>仅限本地。</strong> <code>SO_PEERCRED</code>、同一个 uid、没有 TCP、没有 TLS、引擎里没有身份这个概念——
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了一个远程 API。任何节点之外的东西
+  <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了一个远程 API。任何节点之外的东西
   都要在自己前面放一个代理。</li>
 </ul>
 <blockquote class="say say-interviewer"><p><span class="speaker">面试官</span>为什么不直接做一个 REST 服务器？</p>
@@ -354,10 +354,10 @@ th:first-child,td:first-child{white-space:nowrap}
 （<code>delonix-model/src/exitcode.rs</code>）就是 ADR-0040 D4 要求契约的错误必须携带的那些 <code>DX_*</code> 类别。</p>
 </blockquote>
 <p><strong>它在代码中的位置：</strong> <code>proto/delonix/node/v1/{node,compute,infra,operations,common}.proto</code>；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a>
-（<code>serve_blocking</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mcp-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/src/main.rs</code></a>；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>。
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a>
+（<code>serve_blocking</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-mcp-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/src/main.rs</code></a>；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>。
 诚实的现状：目前还没有任何 crate 引用 <code>delonix.node.v1</code>；本地程序用的是管理 API
-（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>），ADR-0042 计划把它迁移之后移除。</p>
+（<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>），ADR-0042 计划把它迁移之后移除。</p>
 <hr />
 <h2 id="4-high-level-design">4. 高层设计<a class="hanchor" href="#4-high-level-design" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">候选人</span>我会这样分层：领域的规则永远不导入内核，并且让每一个长期存活的进程恰好只拥有
@@ -400,7 +400,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <ul>
 <li><strong>层</strong>（ADR-0040 D1）：基础层 → 上下文层 → 适配器/provider 层 → 接口层 → 二进制程序，
-  由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 强制执行。</li>
+  由 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 强制执行。</li>
 <li><strong>状态</strong>是位于同一个 root 之下的 JSON 记录和按内容寻址的文件，写入是原子的，读改写周围加了
   <code>flock</code>——没有数据库，因为没有守护进程去拥有一个。记录的<em>类型</em>定义在别处
   （<code>delonix-compute</code> 上下文里的 <code>Container</code>/<code>Vm</code>；<code>delonix-model</code> 基础层 crate 里的 <code>Status</code>
@@ -409,12 +409,12 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
   还按节点存在（一个只持有命名空间的 <em>pin</em>、一个可重启的 <em>control</em> 进程、一个 <code>slirp4netns</code>
   上行链路）。除此之外没有别的东西会常驻。</li>
 </ul>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（<code>LAYERS</code>、<code>ALLOWED</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>（<code>Store::update</code>、<code>JsonStore::update</code>、
-<code>write_atomic</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>（<code>Container</code>、<code>Vm</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a>（<code>Status</code>、<code>ContainerFw</code>、<code>FwRule</code>）；
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（<code>LAYERS</code>、<code>ALLOWED</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>（<code>Store::update</code>、<code>JsonStore::update</code>、
+<code>write_atomic</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>（<code>Container</code>、<code>Vm</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a>（<code>Status</code>、<code>ContainerFw</code>、<code>FwRule</code>）；
 <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a>（<code>run_supervised</code>）。</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a>（<code>run_supervised</code>）。</p>
 <hr />
 <h2 id="5-deep-dives">5. 深入探讨<a class="hanchor" href="#5-deep-dives" aria-label="#">#</a></h2>
 <h3 id="51-a-rootless-container-run">5.1 一次无根的 <code>container run</code><a class="hanchor" href="#51-a-rootless-container-run" aria-label="#">#</a></h3>
@@ -473,13 +473,13 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 （<code>MountWait::{Ready, InitExited, Unknown}</code>）和一个上限，所以一个卡住的 mount 不会把 <code>run</code>
 也一起卡住。</p>
 </blockquote>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a>（<code>resolve_run</code>、
-<code>build_record</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/launch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/launch.rs</code></a>（<code>start</code>、
-<code>should_supervise</code>、<code>WorkloadRuntime</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>
-（<code>HostWorkload</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a>（<code>run_supervised</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>（<code>spawn</code>、<code>write_userns_maps</code>、<code>setup_cgroup</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a>（<code>resolve_run</code>、
+<code>build_record</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/launch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/launch.rs</code></a>（<code>start</code>、
+<code>should_supervise</code>、<code>WorkloadRuntime</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>
+（<code>HostWorkload</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a>（<code>run_supervised</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>（<code>spawn</code>、<code>write_userns_maps</code>、<code>setup_cgroup</code>、
 <code>container_init</code>、<code>setup_rootfs</code>、<code>wait_for_mounts</code>、<code>MountWait</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>（<code>cmd_run</code>）。</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>（<code>cmd_run</code>）。</p>
 <h3 id="52-networking-pin-control-slirp-nftables">5.2 网络：pin、control、slirp、nftables<a class="hanchor" href="#52-networking-pin-control-slirp-nftables" aria-label="#">#</a></h3>
 <blockquote class="say say-interviewer"><p><span class="speaker">面试官</span>容器之间需要互相通信、按命名空间隔离、还要能发布端口——但宿主机上没有
 <code>CAP_NET_ADMIN</code>。</p>
@@ -557,14 +557,14 @@ egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决�
 每连接的 I/O 上限（<code>CONTROL_IO_TIMEOUT</code>）之所以存在，是为了让一个卡住的客户端不至于冻结
 整个节点的控制面。</p>
 </blockquote>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>ensure_up</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>ensure_up</code>、
 <code>start_pin</code>、<code>pin_main</code>、<code>start_control</code>、<code>control_main</code>、<code>control_loop</code>、<code>start_slirp</code>、
 <code>attach_container</code>、<code>do_attach</code>、<code>publish_port</code>、<code>join_argv</code>、<code>ingress_table_ruleset</code>、
 <code>fw_chain_body</code>、<code>dlxns_set</code>、<code>DLXALL_SET</code>、<code>ingress_v6_refusal_ruleset</code>、
-<code>CONTROL_IO_TIMEOUT</code>、<code>CONTROL_REPLY_TIMEOUT</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>（<code>HostNetwork</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/network.rs</code></a>（<code>attach_custom_network</code>、<code>wire_network</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>（<code>reexec_into_netns</code>、<code>run_from_spec</code>）。</p>
+<code>CONTROL_IO_TIMEOUT</code>、<code>CONTROL_REPLY_TIMEOUT</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>（<code>HostNetwork</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/network.rs</code></a>（<code>attach_custom_network</code>、<code>wire_network</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>（<code>reexec_into_netns</code>、<code>run_from_spec</code>）。</p>
 <h3 id="53-images-cas-shared-layers-and-the-many-layer-mount">5.3 镜像：CAS、共享层与多层挂载<a class="hanchor" href="#53-images-cas-shared-layers-and-the-many-layer-mount" aria-label="#">#</a></h3>
 <blockquote class="say say-interviewer"><p><span class="speaker">面试官</span>一个节点运行了二十个同一镜像的容器。磁盘上有什么？</p>
 </blockquote><blockquote class="say say-candidate"><p><span class="speaker">候选人</span>blob 只有一份，解包后的层只有一份，每个容器只有一个小小的可写目录。</p>
@@ -585,16 +585,16 @@ egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决�
   代价——在某台开发用主机上，<code>containers/</code> 占了 47 GiB，其中大部分是完全相同的拷贝，一个
   2.1 GiB 镜像的每一次 <code>run</code> 都要花大约 13 秒去拷贝。共享层之后，那个目录降到了 7.2 GiB。
 - <strong>多层。</strong> 经典的 <code>mount(2)</code> 把 <code>lowerdir=a:b:c……</code> 作为一个字符串传入，内核最多只拷贝其中
-  的一个页面，<strong>并悄悄截断</strong>。为 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 测量过
+  的一个页面，<strong>并悄悄截断</strong>。为 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 测量过
   （2026-09-06 验证）：20 层（4084 字节）能挂载，30 层（5994 字节）就失败了，而一个 91 层的
   builder 镜像需要 9107 字节。现在的挂载改用 <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>，
   每一层调用一次 <code>lowerdir+</code>，因此没有长度上限。</p>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs</code></a>（<code>Cas::write</code>、<code>Cas::has</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>（<code>blob_with_progress_capped</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs</code></a>（<code>Cas::write</code>、<code>Cas::has</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>（<code>blob_with_progress_capped</code>、
 <code>BLOB_ATTEMPTS</code>、<code>parse_content_range</code>、<code>verify_manifest_digest</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a>（<code>prepare_overlay</code>、<code>LOWERS_FILE</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>（<code>HostImages</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>（<code>mount_overlay_if_marked</code>、<code>fsopen_overlay</code>）。</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a>（<code>prepare_overlay</code>、<code>LOWERS_FILE</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>（<code>HostImages</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>（<code>mount_overlay_if_marked</code>、<code>fsopen_overlay</code>）。</p>
 <h3 id="54-microvms-one-port-a-registry-and-the-firmware-trap">5.4 微虚拟机：一个端口、一个注册表与固件陷阱<a class="hanchor" href="#54-microvms-one-port-a-registry-and-the-firmware-trap" aria-label="#">#</a></h3>
 <blockquote class="say say-interviewer"><p><span class="speaker">面试官</span>在不构建一个到处渗漏的 hypervisor 抽象层的前提下，加入对 VM 的支持。</p>
 </blockquote><blockquote class="say say-candidate"><p><span class="speaker">候选人</span>每个 provider 一个 trait，一个由组合根（composition root）填充的注册表，而那些
@@ -629,17 +629,17 @@ egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决�
   一个 NoCloud ISO，其 <code>network-config</code> 按 <strong>MAC</strong> 地址匹配主网卡，而一个远程后端则可以
   原生地实现它。</li>
 </ul>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>（<code>VmBackend</code>、
-<code>BackendRegistration</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a>（<code>VmEngine</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>（<code>RegistryBackends</code>、<code>QemuImgDisks</code>、
-<code>CloudLocaldsSeed</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>（<code>builtin_backends</code>、<code>register_backend</code>、<code>select_backend</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>（<code>VmBackend</code>、
+<code>BackendRegistration</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a>（<code>VmEngine</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>（<code>RegistryBackends</code>、<code>QemuImgDisks</code>、
+<code>CloudLocaldsSeed</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>（<code>builtin_backends</code>、<code>register_backend</code>、<code>select_backend</code>、
 <code>select_for_create</code>、<code>auto_detect</code>、<code>backend_for</code>、<code>CloudHypervisorBackend</code>、<code>LibvirtBackend</code>、<code>launch_vmm</code>、
-<code>DEFAULT_CH_FIRMWARES</code>、<code>set_network</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a>
-（<code>generate_seed_iso</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>VmNetwork</code>、<code>VmBackends</code>、<code>LocalDiskImages</code>、<code>SeedBuilder</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/vm_network.rs</code></a>（<code>HostVmNetwork</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>sdn_reachable</code>、<code>dhcp_lease_ip</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>（<code>ProxmoxBackend</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）。</p>
+<code>DEFAULT_CH_FIRMWARES</code>、<code>set_network</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a>
+（<code>generate_seed_iso</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>VmNetwork</code>、<code>VmBackends</code>、<code>LocalDiskImages</code>、<code>SeedBuilder</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/vm_network.rs</code></a>（<code>HostVmNetwork</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>sdn_reachable</code>、<code>dhcp_lease_ip</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>（<code>ProxmoxBackend</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）。</p>
 <h3 id="55-the-declarative-reconciler-without-a-state-file">5.5 声明式协调器，没有状态文件<a class="hanchor" href="#55-the-declarative-reconciler-without-a-state-file" aria-label="#">#</a></h3>
 <blockquote class="say say-interviewer"><p><span class="speaker">面试官</span><code>apply</code> 必须能收敛、检测漂移、清理——很像 Terraform——但你说过没有守护进程、
 也没有数据库。</p>
@@ -688,10 +688,10 @@ dataplane；实线箭头是调用；虚线箭头是回复；<code>alt</code> 和
         A-&gt;&gt;M: prune — Delete changes in teardown order
     end
 </pre>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>（<code>plan</code>、<code>Action</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>（<code>plan</code>、<code>Action</code>、
 <code>Change</code>、<code>STACK_LABEL</code>、<code>LAST_APPLIED</code>、<code>hot_fields_for</code>、<code>encode_last_applied</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>（<code>KindFacts</code>、<code>facts</code>、<code>stack_kinds</code>、
-<code>converges</code>、<code>has_teardown</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>（<code>apply</code>、
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>（<code>KindFacts</code>、<code>facts</code>、<code>stack_kinds</code>、
+<code>converges</code>、<code>has_teardown</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>（<code>apply</code>、
 <code>apply_docs</code>、<code>refuse_unallowed</code>、<code>run_layers</code>、<code>salvage_ownership</code>、<code>converge_and_stamp</code>、
 <code>prune</code>、<code>destroy_one</code>）。</p>
 <hr />
@@ -778,17 +778,17 @@ dataplane；实线箭头是调用；虚线箭头是回复；<code>alt</code> 和
 <li><strong>单节点的限制。</strong> pin 的 netns 内部，每个网络都是一个 <code>/16</code>；每一次 netns/veth/nftables
   变更都要经过同一条串行化的控制连接；<code>slirp4netns</code> 的吞吐是用户态的；而把一个 VM 迁到另
   一台主机（<code>vm migrate</code>）要经历真实的停机——就目前的实现而言，热迁移是一个 NO-GO
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>）。跨节点调度按设计就不在范围
+  （<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>）。跨节点调度按设计就不在范围
   之内。</li>
 </ul>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>ensure_up</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>ensure_up</code>、
 <code>stale_holder_message</code>、<code>reap_orphan_refs</code>、<code>REF_MARKER_GRACE</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/ipam.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/ipam.rs</code></a>（<code>reap_orphan_leases</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>（<code>reap_orphan_slirp</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/netns.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/netns.rs</code></a>（<code>reconcile_after_respawn</code>、
-<code>is_reattach_candidate</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/prune.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/prune.rs</code></a>（<code>lease_owners</code>、
-<code>live_ref_owners</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>（<code>salvage_ownership</code>）；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>（<code>reconcile_status</code>、<code>MountWait</code>）。</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/ipam.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/ipam.rs</code></a>（<code>reap_orphan_leases</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>（<code>reap_orphan_slirp</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/netns.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/netns.rs</code></a>（<code>reconcile_after_respawn</code>、
+<code>is_reattach_candidate</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/prune.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/prune.rs</code></a>（<code>lease_owners</code>、
+<code>live_ref_owners</code>）；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>（<code>salvage_ownership</code>）；
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>（<code>reconcile_status</code>、<code>MountWait</code>）。</p>
 <hr />
 <h2 id="8-follow-up-questions">8. 后续问题<a class="hanchor" href="#8-follow-up-questions" aria-label="#">#</a></h2>
 <p><strong>为什么不加一个小小的守护进程来处理事件和重启？</strong>
@@ -796,41 +796,41 @@ dataplane；实线箭头是调用；虚线箭头是回复；<code>alt</code> 和
 （<code>delonix_node::events</code>），重启属于每个容器自己的 supervisor，启动持久化则是每个工作负载
 一个 systemd unit（<code>delonix system boot</code>）。一个守护进程需要它自己的、带着「其他方案为什么
 做不到」之证据的 ADR——这个问题被提出来过一次的例子见
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>，而在保持无守护进程的前提下做持续协调的例子
-见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>（<em>Proposed</em>）。</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>，而在保持无守护进程的前提下做持续协调的例子
+见 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>（<em>Proposed</em>）。</p>
 <p><strong>如果服务器不能 <code>clone</code>，CRI 是怎么启动一个容器的？</strong>
 <code>StartContainer</code> 构建一个带类型的 <code>RunOpts</code>，把它写进一个 <code>0600</code> 的文件，然后运行
 <code>delonix __apirun &lt;spec&gt;</code>，后者调用的是和 CLI 一样的那个 <code>cmd_run</code>。ADR-0040 D5 会用一个
 launcher 可执行程序取代这一跳 CLI。CRI 路径上的资源策略跟随 kubelet
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>）。</p>
+（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>）。</p>
 <p><strong>为什么管理 API 只限本地？</strong>
 远程访问意味着身份、授权、证书，以及对调用方的审计——而这些概念，引擎里统统没有。
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了它；出于同样的理由，MCP 界面也只限
-本地（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了它；出于同样的理由，MCP 界面也只限
+本地（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</p>
 <p><strong>你会怎么加一个新的 VM provider？</strong>
 一个实现了 <code>VmBackend</code> 的新 crate，在组合根处注册——不需要改动任何调用点
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>）。ADR-0040 D3 把 provider 自己的开关挪进了
+（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>）。ADR-0040 D3 把 provider 自己的开关挪进了
 带命名空间的扩展里，把古怪之处挪进了 capability 里；OpenStack 卡在了一次 spike 上
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>）。</p>
+（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>）。</p>
 <p><strong>Service 在没有 VIP 的情况下是怎么做负载均衡的？</strong>
 一个 <code>Service</code> 按标签选中若干容器，内部 DNS 每次查询都返回若干条 <code>A</code> 记录，轮流转动——没有
-新的 dataplane（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0032-service-kind-dns-round-robin.md" target="_blank" rel="noopener">ADR-0032</a>）。</p>
+新的 dataplane（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0032-service-kind-dns-round-robin.md" target="_blank" rel="noopener">ADR-0032</a>）。</p>
 <p><strong>为什么 state root 下面用的是 ext4，而不是 btrfs/zfs？</strong>
 在共享层缓存之上做 overlay，已经消除了重复；只有在有了经过测量的需求之后，才会重新考虑换
-一种文件系统（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>）。</p>
+一种文件系统（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>）。</p>
 <p><strong>macOS 和 Windows 怎么办？</strong>
 不是移植——这个引擎所用到的一切，都不存在于 Linux 内核之外。计划是做一个用来启动 Linux
-客户机 VM 的 launcher（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0036-macos-windows-support.md" target="_blank" rel="noopener">ADR-0036</a>，<em>Proposed</em>）。</p>
+客户机 VM 的 launcher（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0036-macos-windows-support.md" target="_blank" rel="noopener">ADR-0036</a>，<em>Proposed</em>）。</p>
 <p><strong>这场重构最终会走向哪里？</strong>
 四个层、一份运行规格、带 capability 的 provider 端口、一份在一个由 socket 激活的服务器上
 提供服务的节点契约，以及一个拥有每一次创建命名空间的 spawn 的 launcher
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>、
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>）。</p>
+（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>、
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>）。</p>
 <hr />
 <p><strong>下一篇：</strong><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a> —— 两种构建语法——用于 OCI
 镜像的 Delonixfile，和用于可启动磁盘的 VMfile——就按解析器所接受的样子来讲。</p>
 <nav class="pager"><a href="crates.html"><span>← 上一页</span>各个 crate</a><a class="next" href="delonixfile-and-vmfile.html"><span>下一页 →</span>Delonixfile 与 VMfile</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/system-design-interview.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/system-design-interview.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/system-design-interview.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/system-design-interview.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

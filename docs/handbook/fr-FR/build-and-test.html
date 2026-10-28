@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/build-and-test.html">EN · English</option><option value="../pt-AO/build-and-test.html">PT-AO · Português (Angola)</option><option value="../fr-FR/build-and-test.html" selected>FR-FR · Français</option><option value="../zh-CN/build-and-test.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Changer le thème de couleur" title="Changer le thème de couleur"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -220,7 +220,7 @@ répertoire de travail séparé avec sa propre branche, un par tâche, créé à
 (la commande se trouve dans <a href="start-here.html#2-open-a-worktree-from-originmain">Commencer ici, étape 2</a> ;
 les règles se trouvent dans <a href="contributing-workflow.html#one-worktree-per-task">Flux de contribution</a>).</p>
 <h2 id="clone">Cloner<a class="hanchor" href="#clone" aria-label="#">#</a></h2>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 </code></pre></div>
@@ -278,7 +278,7 @@ y atterrissent au lieu de <code>target/</code>.</p>
   ensuite.</li>
 </ul>
 <h2 id="the-makefile">Le Makefile<a class="hanchor" href="#the-makefile" aria-label="#">#</a></h2>
-<p>Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> à la racine réunit les commandes de cette page en un seul cycle de vie. Il n'ajoute
+<p>Le <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> à la racine réunit les commandes de cette page en un seul cycle de vie. Il n'ajoute
 aucune logique de build : <code>make build</code> lance le <code>cargo build</code> montré ci-dessus, avec le nombre de
 jobs et la priorité choisis pour la machine.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">make bootstrap        # une fois par machine : toolchain Rust épinglée, compilateurs C/C++, protoc, sccache
@@ -298,8 +298,8 @@ root) et ajoute <code>~/.local/bin</code> au <code>PATH</code> s'il y manque. Un
 <code>~/.zshrc</code> charge ce fichier ; <code>make uninstall</code> retire le bloc et laisse les fichiers tels qu'ils
 étaient. <code>SHELL_RC=0</code> écrit le fichier d'environnement sans toucher à vos fichiers de shell, et
 <code>make install DELONIX_ROOT=&lt;dir&gt;</code> donne au build de développement son propre state root, à l'écart
-d'une release installée. Tant que <code>DELONIX_BIN</code> est exportée, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> et
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> inspectent le binaire installé — retirez-la avant de les lancer sur
+d'une release installée. Tant que <code>DELONIX_BIN</code> est exportée, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> et
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> inspectent le binaire installé — retirez-la avant de les lancer sur
 votre arbre.</p>
 <p><code>make install-system</code> copie des binaires déjà compilés (il ne compile jamais sous <code>sudo</code>) et
 refuse tant que des processus du moteur tournent, pour les raisons listées dans l'Option C ;
@@ -344,7 +344,7 @@ artefacts l'un de l'autre. <code>make info</code> affiche ce qui a été résolu
 </tr>
 </tbody>
 </table></div>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> ne fait pas partie de ce cycle : il installe une release publiée et prépare
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> ne fait pas partie de ce cycle : il installe une release publiée et prépare
 un hôte à exécuter des conteneurs et des VM, et n'a besoin d'aucune toolchain.</p>
 <h2 id="installing-your-build-locally">Installer votre build localement<a class="hanchor" href="#installing-your-build-locally" aria-label="#">#</a></h2>
 <p>La plupart des modifications n’ont jamais besoin d’un build installé : exécutez <code>./target/debug/delonix</code> depuis votre worktree. N’installez
@@ -353,13 +353,13 @@ que lorsque vous avez besoin d’un chemin stable — une unité systemd, un scr
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">./target/debug/delonix --version    # commit: &lt;hash&gt; (+N commits since vX.Y.Z) · built: &lt;date&gt;
 command -v delonix                  # which `delonix` your shell would run instead
 </code></pre></div>
-<p>La ligne <code>commit:</code> provient de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a> (<code>DELONIX_GIT_HASH</code>,
+<p>La ligne <code>commit:</code> provient de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a> (<code>DELONIX_GIT_HASH</code>,
 <code>DELONIX_GIT_SINCE</code>). Entre deux releases, chaque build porte le même numéro de version ; le commit
 est donc le seul moyen de distinguer votre build de celui publié.</p>
 <h3 id="how-delonix-finds-its-server-binaries">Comment <code>delonix</code> trouve ses binaires serveur<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
 <p><code>delonix serve cri</code>, <code>delonix serve api</code>, <code>delonix serve node-api</code> et <code>delonix mcp</code> ne contiennent pas les serveurs : ils font un <code>exec</code> de
 <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> et <code>delonix-mcp</code> (<code>exec_server</code> dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a>). La recherche est la suivante :</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a>). La recherche est la suivante :</p>
 <ol>
 <li>le fichier de ce nom <strong>à côté du <code>delonix</code> en cours d’exécution</strong> ;</li>
 <li>sinon le nom dans le <code>PATH</code>.</li>
@@ -368,10 +368,10 @@ est donc le seul moyen de distinguer votre build de celui publié.</p>
 autre release refuse de démarrer. Il se passe aussi lui-même dans <code>DELONIX_BIN</code>, afin que le serveur rappelle
 la même CLI. Un serveur démarré directement (par exemple par une unité) trouve la CLI via
 <code>DELONIX_BIN</code>, puis un <code>delonix</code> situé à côté de lui-même, puis le <code>PATH</code> (<code>cli_bin</code> dans
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Gardez ensemble les cinq binaires d’un même build</strong> ;
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Gardez ensemble les cinq binaires d’un même build</strong> ;
 un mélange de votre build et d’une release est refusé, ou exécute du code que vous n’aviez pas l’intention de tester.</p>
 <p><code>delonix cluster kubeadm</code> et <code>delonix image vm build</code> cherchent <code>delonix-cri</code> dans leur propre ordre
-(<code>resolve_cri_bin</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>) : <code>--cri-bin</code>, puis à côté de
+(<code>resolve_cri_bin</code> dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>) : <code>--cri-bin</code>, puis à côté de
 <code>delonix</code>, puis un <code>cargo build --release -p delonix-cri</code> si le répertoire courant se trouve dans un
 checkout des sources, et seulement ensuite un téléchargement de l’asset publié.</p>
 <p>Compilez les cinq avant de les installer :</p>
@@ -394,7 +394,7 @@ hash -r                              # forget the path your shell cached
 command -v delonix &amp;&amp; delonix --version
 </code></pre></div>
 <p>Si une release est aussi installée dans <code>/usr/local/bin</code>, c’est le répertoire qui vient en premier dans le <code>PATH</code> qui l’emporte.</p>
-<p><strong>AppArmor.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> écrit un seul profil, <code>/etc/apparmor.d/delonix</code>, lié à
+<p><strong>AppArmor.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> écrit un seul profil, <code>/etc/apparmor.d/delonix</code>, lié à
 <code>&lt;install dir&gt;/delonix</code>, et uniquement sur les hôtes avec
 <code>kernel.apparmor_restrict_unprivileged_userns=1</code>. Un binaire que vous avez copié vers un nouveau chemin n’est pas couvert.
 Ne relancez pas l’installateur pour « déplacer » ce profil sur une machine qui utilise aussi une installation
@@ -420,7 +420,7 @@ delonix man --dir ~/.local/share/man
 simple commande :</p>
 <ul>
 <li>les unités de démarrage écrites par <code>delonix system boot enable</code> lancent <code>ExecStart=&lt;exe&gt; container start &lt;name&gt;</code>,
-  où <code>&lt;exe&gt;</code> est le chemin du binaire qui a exécuté <code>enable</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>,
+  où <code>&lt;exe&gt;</code> est le chemin du binaire qui a exécuté <code>enable</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>,
   préfixe d’unité <code>delonix-boot-</code>) ; remplacer ce fichier change ce qui démarre après le prochain redémarrage ;</li>
 <li><code>dist/delonix-cri.service</code> exécute <code>/usr/local/bin/delonix-cri</code> ; sur un nœud Kubernetes, le kubelet
   reçoit donc votre build au prochain redémarrage de cette unité ;</li>
@@ -433,7 +433,7 @@ ls ~/.config/systemd/user/delonix-boot-* /etc/systemd/system/delonix-* 2&gt;/dev
 pgrep -a delonix
 </code></pre></div>
 <h3 id="preparing-the-host">Préparer l’hôte<a class="hanchor" href="#preparing-the-host" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> fait deux travaux distincts. Seul le premier concerne le binaire :</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> fait deux travaux distincts. Seul le premier concerne le binaire :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -527,8 +527,8 @@ sudo apparmor_parser -R /etc/apparmor.d/delonix-dev &amp;&amp; sudo rm /etc/appa
 </code></pre></div>
 <p>Pour revenir à un binaire publié, relancez l’installateur ; il remplace les binaires de son répertoire
 d’installation par la release que vous nommez :</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --user
-curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --user
+curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
 </code></pre></div>
 <p>Les fichiers de complétion et les pages de manuel générés à la main ne sont supprimés par aucune de ces deux étapes. Terminez par
 <code>delonix --version</code> pour confirmer le commit sur lequel vous êtes revenu.</p>
@@ -540,7 +540,7 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 </code></pre></div>
 <p>Les tests qui ont besoin de privilèges ou d’un vrai hôte se sautent eux-mêmes au lieu d’échouer, de sorte que la suite a
 un sens sur un portable comme en CI. Quelques tests réels sont marqués <code>#[ignore]</code> et nomment la commande pour
-les exécuter dans leur commentaire de documentation (par exemple dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) ; n’exécutez ceux-ci
+les exécuter dans leur commentaire de documentation (par exemple dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) ; n’exécutez ceux-ci
 que sur une machine qui vous appartient :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo test -p &lt;crate&gt; -- --ignored &lt;test-name&gt;
 </code></pre></div>
@@ -637,7 +637,7 @@ des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige
 </table></div>
 <!-- dev-docs:end ci-gates -->
 
-<p>Chaque job de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> peut être reproduit localement. Exécutez ceux qui correspondent à ce que vous
+<p>Chaque job de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> peut être reproduit localement. Exécutez ceux qui correspondent à ce que vous
 avez touché avant de pousser ; exécutez-les tous avant de demander une revue.</p>
 <div class="tablewrap"><table>
 <thead>
@@ -656,7 +656,7 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 <tr>
 <td><code>lang</code></td>
 <td><code>python3 scripts/<wbr>lang_ratchet.<wbr>py</code></td>
-<td>les identifiants, commentaires ou messages en portugais <strong>augmentent</strong> — ou diminuent sans abaisser <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a> dans le même commit (<code>--list</code> les affiche, <code>--update</code> abaisse la ligne de base)</td>
+<td>les identifiants, commentaires ou messages en portugais <strong>augmentent</strong> — ou diminuent sans abaisser <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a> dans le même commit (<code>--list</code> les affiche, <code>--update</code> abaisse la ligne de base)</td>
 </tr>
 <tr>
 <td><code>arch</code></td>
@@ -666,12 +666,12 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 <tr>
 <td><code>arch</code></td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code></td>
-<td>un fait généré dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> est obsolète — exécutez <code>python3 scripts/<wbr>dev_docs.<wbr>py</code> et commitez</td>
+<td>un fait généré dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> est obsolète — exécutez <code>python3 scripts/<wbr>dev_docs.<wbr>py</code> et commitez</td>
 </tr>
 <tr>
 <td><code>contract</code></td>
 <td><code>python3 scripts/<wbr>contract_gate.<wbr>py</code></td>
-<td>le contrat de nœud dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> n’est pas propre au sens de <code>buf format</code>, échoue à <code>buf lint</code>, rompt la compatibilité avec le dernier tag, n’a pas de mapping HTTP, ou <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> n’est pas celui généré (<code>--update</code> le réécrit). Nécessite <code>protoc</code>, <code>buf</code> v1.73.0 et <code>protoc-gen-openapi</code> v0.7.1 dans le <code>PATH</code>, ainsi que les tags</td>
+<td>le contrat de nœud dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> n’est pas propre au sens de <code>buf format</code>, échoue à <code>buf lint</code>, rompt la compatibilité avec le dernier tag, n’a pas de mapping HTTP, ou <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> n’est pas celui généré (<code>--update</code> le réécrit). Nécessite <code>protoc</code>, <code>buf</code> v1.73.0 et <code>protoc-gen-openapi</code> v0.7.1 dans le <code>PATH</code>, ainsi que les tags</td>
 </tr>
 <tr>
 <td><code>version</code></td>
@@ -681,7 +681,7 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 <tr>
 <td><code>cli-surface</code></td>
 <td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; scripts/<wbr>cli-tree.<wbr>sh --gate</code></td>
-<td>une feuille de la CLI a été ajoutée, supprimée ou reclassée sans mise à jour de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> dans le même commit (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>)</td>
+<td>une feuille de la CLI a été ajoutée, supprimée ou reclassée sans mise à jour de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> dans le même commit (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>)</td>
 </tr>
 <tr>
 <td><code>cli-surface</code></td>
@@ -701,12 +701,12 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 <tr>
 <td><code>test</code></td>
 <td><code>mkdir -p /<wbr>tmp/<wbr>t &amp;&amp; TMPDIR=/<wbr>tmp/<wbr>t cargo test --workspace --locked --no-fail-fast &amp;&amp; python3 scripts/<wbr>tmp_roots_gate.<wbr>py --dir /<wbr>tmp/<wbr>t --list</code></td>
-<td>les tests laissent dans leur répertoire temporaire quelque chose qui n’est pas la dette connue de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_baseline.<wbr>json</code></a> — une nouvelle fuite, davantage d’une fuite connue, ou moins d’une fuite sans abaisser la ligne de base (<code>--update</code>). La ligne de base est ce que laisse le runner hébergé, et une fuite peut dépendre de l’hôte (un test qui retournait tôt quand <code>qemu-img</code> manquait sautait son nettoyage). La ligne de base est vide depuis que la dette a été payée : un test garde son répertoire temporaire dans une garde qui le supprime au <code>Drop</code> (<code>tempfile::TempDir</code>), si bien que la suppression s’exécute aussi sur un <code>return</code> anticipé et sur un assert échoué ; comparez donc une exécution locale avec <code>--list</code></td>
+<td>les tests laissent dans leur répertoire temporaire quelque chose qui n’est pas la dette connue de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_baseline.<wbr>json</code></a> — une nouvelle fuite, davantage d’une fuite connue, ou moins d’une fuite sans abaisser la ligne de base (<code>--update</code>). La ligne de base est ce que laisse le runner hébergé, et une fuite peut dépendre de l’hôte (un test qui retournait tôt quand <code>qemu-img</code> manquait sautait son nettoyage). La ligne de base est vide depuis que la dette a été payée : un test garde son répertoire temporaire dans une garde qui le supprime au <code>Drop</code> (<code>tempfile::TempDir</code>), si bien que la suppression s’exécute aussi sur un <code>return</code> anticipé et sur un assert échoué ; comparez donc une exécution locale avec <code>--list</code></td>
 </tr>
 <tr>
 <td><code>deny</code></td>
 <td><code>cargo deny check advisories licenses sources</code></td>
-<td>un avis RUSTSEC, une licence ou une source non autorisée (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>)</td>
+<td>un avis RUSTSEC, une licence ou une source non autorisée (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>)</td>
 </tr>
 <tr>
 <td><code>docs</code></td>
@@ -721,7 +721,7 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 </tbody>
 </table></div>
 <p><code>cli-tree.sh</code> et <code>docs_cli_gate.py</code> lisent l’arbre depuis le vrai <code>--help</code> du binaire ; définissez
-<code>DELONIX_BIN=/path/to/delonix</code> pour choisir quel binaire. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> utilise par défaut
+<code>DELONIX_BIN=/path/to/delonix</code> pour choisir quel binaire. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> utilise par défaut
 <code>target/release/delonix</code> et nécessite le module Python <code>markdown</code>. Le job <code>docs</code> génère aussi les
 pages de manuel (<code>delonix man --dir &lt;dir&gt; --index</code>) et les vérifie avec <code>groff -mandoc -ww -z</code>.</p>
 <p>Workflows séparés, non requis à chaque modification : <code>chaos.yml</code> exécute le harnais de chaos sur un
@@ -744,25 +744,25 @@ d’infrastructure réseau, et a démarré ou démoli l’infrastructure par-des
 développement exécutant des workloads actifs, cela s’est terminé avec la racine réelle reconstruisant son infrastructure réseau et
 redémarrant de vrais containers.</p>
 <p>Le moteur dérive désormais un suffixe à partir d’un <code>DELONIX_ROOT</code> non par défaut pour le répertoire d’exécution
-(<code>runtime_dir</code>/<code>root_suffix</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>), ce qui ferme cette
+(<code>runtime_dir</code>/<code>root_suffix</code> dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>), ce qui ferme cette
 collision dans le cas courant. Continuez malgré tout à exporter les deux : cela rend l’isolation explicite, garde
-le chemin du socket court et sous votre contrôle, et c’est ce que font <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> et
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> (e2e renseigne la variable que vous n’avez pas exportée).</p>
+le chemin du socket court et sous votre contrôle, et c’est ce que font <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> et
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> (e2e renseigne la variable que vous n’avez pas exportée).</p>
 <p>Gardez <code>DELONIX_NET_RUNTIME_DIR</code> court : un chemin de socket unix plus long qu’environ 108 octets échoue avec
 <code>path must be shorter than SUN_LEN</code>. <code>e2e.sh</code> refuse un répertoire d’exécution de plus de 80 octets.</p>
 <p>Lorsque vous avez terminé, démontez l’infrastructure réseau isolée avec les deux mêmes variables exportées :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">./target/debug/delonix net netns down
 </code></pre></div>
-<h2 id="vm-image-recipes-scriptsverify-imagessh">Recettes d’images de VM (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a>)<a class="hanchor" href="#vm-image-recipes-scriptsverify-imagessh" aria-label="#">#</a></h2>
+<h2 id="vm-image-recipes-scriptsverify-imagessh">Recettes d’images de VM (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a>)<a class="hanchor" href="#vm-image-recipes-scriptsverify-imagessh" aria-label="#">#</a></h2>
 <p>Les recettes de <code>images/</code> sont vérifiées de deux façons. Un test unitaire dans le crate de la CLI
 (<code>vmspec::every_shipped_recipe_is_valid_and_complete</code>) échoue si une recette cesse de se parser ou pointe vers un
-fichier ou un builder qui n’existe pas. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> va plus loin : il construit hors ligne les quatre
+fichier ou un builder qui n’existe pas. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> va plus loin : il construit hors ligne les quatre
 distributions à image cloud dans un <code>DELONIX_ROOT</code> isolé et relit le qcow2 obtenu face à ce que la recette déclarait ;
 <code>--self-test</code> prouve que les vérifications peuvent échouer sur une image que personne n’a construite. Il requiert
 <code>libguestfs-tools</code> (voir <a href="microvm-setup.html">Construire des microVMs</a>) et ne fait pas partie des gates de la CI. Les
 phases <code>--packages</code>, <code>--profile</code>, <code>--boot</code> et <code>--appliance</code> existent mais n’avaient pas été exécutées à la sortie de
 la v4.2.0.</p>
-<h2 id="end-to-end-battery-scriptse2esh">Batterie de bout en bout (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
+<h2 id="end-to-end-battery-scriptse2esh">Batterie de bout en bout (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
 <p><code>e2e.sh</code> exécute la CLI contre le vrai noyau : le <code>--help</code> de chaque feuille, plus des exécutions réelles d’une
 grande partie de la surface, et affiche un rapport PASS/FAIL/SKIP/XFAIL (détail JSONL dans
 <code>$OUT/results.jsonl</code>, par défaut <code>OUT=/tmp/delonix-e2e</code>).</p>
@@ -781,7 +781,7 @@ grande partie de la surface, et affiche un rapport PASS/FAIL/SKIP/XFAIL (détail
 <li>Une exécution verte signifie que le <code>--help</code> de chaque feuille a été vérifié et que <em>certaines</em> feuilles ont été exécutées.
   Lisez l’en-tête du script pour savoir ce qui est exécuté et ce qui ne l’est pas.</li>
 </ul>
-<h2 id="chaos-harness-scriptschaossh">Harnais de chaos (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)<a class="hanchor" href="#chaos-harness-scriptschaossh" aria-label="#">#</a></h2>
+<h2 id="chaos-harness-scriptschaossh">Harnais de chaos (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)<a class="hanchor" href="#chaos-harness-scriptschaossh" aria-label="#">#</a></h2>
 <p>Le harnais de chaos casse volontairement un moteur en cours d’exécution — tuer le holder, remplir le disque,
 attaches concurrents, applies partiels — et indique s’il s’est dégradé de la manière qu’il promet.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">scripts/chaos.sh                        # every scenario, ./target/debug/delonix
@@ -794,8 +794,8 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
   et ne touche jamais aux containers, réseaux ou enregistrements du moteur réel. Les répertoires d’images
   (<code>images</code>, <code>layers</code>, <code>blobs</code>) sont des <strong>liens symboliques vers votre store réel</strong> pour éviter les téléchargements : en pratique, le harnais
   ne fait que les lire, mais un scénario qui écrirait une image écrirait dans le store réel.</li>
-<li>Il <strong>refuse de s’exécuter sur une machine chargée</strong> (charge au-dessus d’un seuil, partagé avec <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a>
-  via <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a>) : sous charge, les scénarios échouent pour des raisons qui relèvent du banc,
+<li>Il <strong>refuse de s’exécuter sur une machine chargée</strong> (charge au-dessus d’un seuil, partagé avec <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a>
+  via <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a>) : sous charge, les scénarios échouent pour des raisons qui relèvent du banc,
   pas du produit. <code>--max-load N</code> modifie le seuil ; <code>--force</code> s’exécute quand même et marque le
   verdict comme non publiable.</li>
 <li>Le code de sortie n’est 0 que lorsqu’aucun scénario n’échoue. Les SKIP sont listés séparément.</li>
@@ -807,7 +807,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 <hr />
 <p><strong>Suivant :</strong> <a href="project-structure.html">Structure du projet</a> — la carte du dépôt : ce qu’est chaque répertoire, qui le modifie, et ce qui est généré.</p>
 <nav class="pager"><a href="environment.html"><span>← Précédent</span>Préparer votre environnement</a><a class="next" href="project-structure.html"><span>Suivant →</span>Structure du projet</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/build-and-test.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/build-and-test.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/fr-FR/build-and-test.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/build-and-test.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>

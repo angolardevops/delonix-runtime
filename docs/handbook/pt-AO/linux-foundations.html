@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/linux-foundations.html">EN · English</option><option value="../pt-AO/linux-foundations.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/linux-foundations.html">FR-FR · Français</option><option value="../zh-CN/linux-foundations.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -837,30 +837,30 @@ cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
 <li><strong>CLOEXEC em todo o lado.</strong> Abre com <code>O_CLOEXEC</code>, cria pipes com <code>pipe2(…, O_CLOEXEC)</code>, sockets
   com <code>SOCK_CLOEXEC</code>. A biblioteca padrão do Rust já o faz para o que abre; chamadas <code>libc</code> cruas
   não. No motor, vê os pipes de prontidão e de exec no <code>spawn</code>
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), cujo comentário explica que o <code>O_CLOEXEC</code> na
+  (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), cujo comentário explica que o <code>O_CLOEXEC</code> na
   ponta de escrita é o que transforma «o filho morreu, ou fez exec sem escrever» num EOF a que o
   pai consegue reagir; o mesmo <code>pipe2(…, O_CLOEXEC)</code> aparece no <code>pipe</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>, e o <code>OFlag::O_CLOEXEC</code> no <code>exec_with</code> e no
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>, e o <code>OFlag::O_CLOEXEC</code> no <code>exec_with</code> e no
   <code>open_container_ns</code> no <code>delonix-linux</code>.</li>
 <li><strong>Um filho que faz fork mas nunca exec tem de fechar o que herdou.</strong> O CLOEXEC só actua no
   <code>execve</code>. O shim de logs do motor é exactamente esse filho: fecha tudo excepto os fds de que
   precisa com <code>close_range</code> logo a seguir ao fork — ver <code>close_range_raw</code> e o seu ponto de chamada
-  no <code>spawn</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>). O <code>close_range_raw</code> chama a syscall
+  no <code>spawn</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>). O <code>close_range_raw</code> chama a syscall
   pelo número porque o wrapper <code>libc</code> só existe para alvos glibc.</li>
 <li><strong>Nunca deixes vazar um pipe ou o stdio do chamador para um filho de vida longa.</strong> Dois
-  incidentes reais estão registados no <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: o shim de logs a segurar
+  incidentes reais estão registados no <a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: o shim de logs a segurar
   outras ligações HTTP de um servidor de longa duração abertas (secção <em>«CLI (<code>delonix</code>)»</em>, a
   entrada <code>delonix serve docker-api</code>), e o pin de rede (o processo holder de vida longa do
   network namespace rootless do motor — o padrão holder mostrado em
   <a href="#creating-versus-joining-keeping-a-namespace-alive">Namespaces</a>) a herdar o stderr do chamador,
   por isso <code>out=$(delonix …)</code> nunca via EOF — corrigido escrevendo para <code>pin.log</code> (secção «A
   classe «X não é Y» — varredura de 2026-08-05»; código: <code>start_pin</code> e <code>pin_log_path</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>).</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>).</li>
 <li><strong>Sinaliza um processo através de um pidfd, não de um PID.</strong> Um PID colhido pode ser reutilizado;
   um pidfd refere-se a um processo durante toda a sua vida. Ver
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0027-pidfd-for-killing-exec-children.md" target="_blank" rel="noopener">ADR-0027</a> e <code>ChildHandle</code> (<code>open</code>, <code>kill</code>) em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/child_handle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/child_handle.rs</code></a>. Onde só existe um PID guardado, compara
-  primeiro a hora de arranque: <code>safe_to_signal</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/host.rs</code></a>.</li>
+  <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0027-pidfd-for-killing-exec-children.md" target="_blank" rel="noopener">ADR-0027</a> e <code>ChildHandle</code> (<code>open</code>, <code>kill</code>) em
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/child_handle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/child_handle.rs</code></a>. Onde só existe um PID guardado, compara
+  primeiro a hora de arranque: <code>safe_to_signal</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/host.rs</code></a>.</li>
 <li><strong>Limita os fds sob carga.</strong> Um servidor que abre um descritor por pedido tem de o fechar em
   todo caminho, incluindo erros e timeouts, e tem de tratar <code>EMFILE</code> como contra-pressão, não como
   um crash.</li>
@@ -889,7 +889,7 @@ por-workload não podem segurar o que não possuem.</p>
 <li>O <strong><code>SIGTERM</code></strong> pede a um processo para sair; pode ser apanhado, e um serviço bem-comportado
   limpa-se. O <strong><code>SIGKILL</code></strong> não pode ser apanhado nem ignorado. Uma paragem graciosa é «<code>SIGTERM</code>,
   espera um tempo limitado, depois <code>SIGKILL</code>» — o <code>stop</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> faz exactamente isso.</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> faz exactamente isso.</li>
 <li><strong>O PID 1 num namespace de PID é especial</strong>: sinais enviados a ele de <em>dentro</em> do seu namespace
   são ignorados a não ser que ele tenha instalado um handler, e até um <code>SIGKILL</code> de dentro não faz
   nada (<em>sem privilégio</em>):</li>
@@ -918,12 +918,12 @@ ps -o pid,ppid,stat,comm --ppid $P; wait
   pequeno <strong>supervisor</strong> por workload destacado: o processo que fez fork do workload é o único
   que consegue ler o seu estado de saída real e, para OOM, ler o <code>memory.events</code> antes de o
   cgroup ser removido. Ver <code>run_supervised</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> e <code>wait_and_record</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> e <code>wait_and_record</code> em
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.
 - <strong>Um servidor de longa duração tem de colher os seus filhos</strong>, e não pode colher filhos que
   outra coisa esteja à espera. O reaper do shim da API Docker espreita com <code>WNOWAIT</code> por essa
-  razão (<code>spawn_zombie_reaper</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>); o histórico
-  está no <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, secções <em>«CLI (<code>delonix</code>)»</em> e <em>«Auditoria de segurança
+  razão (<code>spawn_zombie_reaper</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>); o histórico
+  está no <a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, secções <em>«CLI (<code>delonix</code>)»</em> e <em>«Auditoria de segurança
   #3 (2026-08-10)»</em>.</p>
 <p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man7/signal.7.html"><code>signal(7)</code></a>,
 <a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>,
@@ -932,7 +932,7 @@ ps -o pid,ppid,stat,comm --ppid $P; wait
 <hr />
 <h2 id="putting-it-together">Juntando tudo<a class="hanchor" href="#putting-it-together" aria-label="#">#</a></h2>
 <p>Um container rootless é os primitivos acima, aplicados numa ordem estrita. A sequência abaixo
-segue o <code>spawn</code> e o <code>container_init</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>; a ordem não é
+segue o <code>spawn</code> e o <code>container_init</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>; a ordem não é
 cosmética, e os comentários lá explicam a corrida que cada passo fecha.</p>
 <blockquote>
 <p><strong>Legenda</strong> — os participantes são processos (e o kernel); as setas sólidas são chamadas de
@@ -1011,7 +1011,7 @@ bash -c &#x27;exec {w}&gt; &gt;(cat &gt;/dev/null; echo &quot;reader got EOF at 
 <hr />
 <p><strong>Seguinte:</strong> <a href="cloud-native-primer.html">Introdução ao cloud native</a> — onde o motor usa cada um destes primitivos, e as especificações abertas (OCI, CNI, CRI, KVM) construídas por cima deles.</p>
 <nav class="pager"><a href="iaas-and-cloud-native.html"><span>← Anterior</span>IaaS e cloud native — onde o motor encaixa</a><a class="next" href="cloud-native-primer.html"><span>Seguinte →</span>Introdução ao cloud native</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/linux-foundations.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/linux-foundations.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/linux-foundations.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/linux-foundations.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/delonixfile-and-vmfile.html">EN · English</option><option value="../pt-AO/delonixfile-and-vmfile.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/delonixfile-and-vmfile.html">FR-FR · Français</option><option value="../zh-CN/delonixfile-and-vmfile.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -247,17 +247,17 @@ acesso ao registo/à rede e, para VMs, de libguestfs e de vários GB de RAM e de
 <tbody>
 <tr>
 <td>Gramática (parser)</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
 <td><code>parse_dockerfile_with_args</code>, <code>parse_run_flags</code>, <code>parse_secret_mount</code>, <code>resolve_target_stage</code></td>
 </tr>
 <tr>
 <td>Orquestração do build</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>build.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>build.<wbr>rs</code></a></td>
 <td><code>run</code>, <code>build_from_spec</code>, <code>build_one_stage</code>, <code>default_build_file</code></td>
 </tr>
 <tr>
 <td>Commit da imagem</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
 <td><code>ImageStore::<wbr>commit_flat_rootfs</code> (rootless), <code>commit_upper</code> + <code>build_image</code> (root)</td>
 </tr>
 <tr>
@@ -271,7 +271,7 @@ acesso ao registo/à rede e, para VMs, de libguestfs e de vários GB de RAM e de
 <p><code>delonix build [CONTEXT]</code> sem <code>-f</code> chama <code>default_build_file</code> (<code>cmd/build.rs</code>): usa
 <code>&lt;context&gt;/Delonixfile</code> se existir, caso contrário <code>&lt;context&gt;/Dockerfile</code>. <strong>A gramática é a mesma
 para os dois nomes</strong> — as instruções Delonix abaixo também são aceites num ficheiro chamado
-<code>Dockerfile</code>. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> é só o nome que é descoberto primeiro. <code>-t/--tag</code> é obrigatório.</p>
+<code>Dockerfile</code>. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> é só o nome que é descoberto primeiro. <code>-t/--tag</code> é obrigatório.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">delonix build -t myapp:dev .                 # Delonixfile, else Dockerfile
 delonix build -t myapp:dev -f build/Other .  # explicit file
 </code></pre></div>
@@ -541,8 +541,8 @@ error invalid argument: RUN --mount=type=ssh: only type=secret and type=cache ar
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform &#x27;windows/amd64&#x27;: only &#x27;linux/&lt;arch&gt;&#x27; is supported (this engine does not run another OS)
 </code></pre></div>
-<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">O próprio <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> do repositório não é construído pelo <code>delonix</code><a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
-<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> na raiz do repositório empacota a CLI <code>delonix</code> numa imagem de container. É
+<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">O próprio <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> do repositório não é construído pelo <code>delonix</code><a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
+<p>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> na raiz do repositório empacota a CLI <code>delonix</code> numa imagem de container. É
 construído com <strong>Docker ou Podman</strong> (<code>docker build -f Delonixfile …</code>, ou <code>make image</code>), não com
 <code>delonix build</code>. Usa só cache mounts <code>type=cache</code> (agora aceites) e a directiva <code># syntax=</code> (um
 comentário para este parser, já que qualquer linha começada por <code>#</code> o é) — mas construí-lo com
@@ -563,17 +563,17 @@ funcionalidade foi validada. Não o uses como exemplo da gramática Delonix; usa
 <tbody>
 <tr>
 <td>Gramática, scaffold, builder</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
 <td><code>parse</code>, <code>classify_base</code>, <code>resolve_base</code>, <code>stage_ops</code>, <code>build</code>, <code>finalize</code>, <code>scaffold</code></td>
 </tr>
 <tr>
 <td>Entrada da CLI, receita dourada</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
 <td><code>VmImageCmd::Build</code>, <code>VmImageStore</code>, <code>VmImage</code>, <code>customize_args</code>, <code>tool_failure_hint</code></td>
 </tr>
 <tr>
 <td>Build declarativo</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
 <td><code>VmBuildSpec</code> (<code>spec.build</code> de <code>kind: VirtualMachine</code>)</td>
 </tr>
 </tbody>
@@ -620,11 +620,11 @@ pena conhecer:</p>
 <p><strong>Appliances</strong> (<code>appliance:</code>). Algumas imagens não se descrevem como edições a uma cloud image: o
 instalador do fabricante tem de correr (o Proxmox a partir do seu ISO, o OpenStack a puxar ~20 GiB de
 containers). Para essas a receita nomeia um <strong>builder</strong>, não um caminho: <code>appliance: {builder:
-proxmox, args: [pve, "9.2-1"]}</code> corre <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/appliances/build-proxmox.sh" target="_blank" rel="noopener"><code>scripts/appliances/build-proxmox.sh</code></a> (encontrado na pasta do
+proxmox, args: [pve, "9.2-1"]}</code> corre <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/appliances/build-proxmox.sh" target="_blank" rel="noopener"><code>scripts/appliances/build-proxmox.sh</code></a> (encontrado na pasta do
 <code>vm.yaml</code> ou em qualquer pasta acima dela) com um <code>OUT_DIR</code> isolado junto ao store de imagens, toma o
 único <code>*.qcow2</code> que ele deixa (um <code>.raw.qcow2</code> é ignorado), e regista-o com a semântica do <code>image vm
 import</code> — <code>--appliance</code> a menos que <code>cloud_init: true</code>. Como o nome é validado (<code>[a-z0-9-]</code>) e
-resolvido dentro de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>, um <code>vm.yaml</code> não consegue fazer o host correr um ficheiro
+resolvido dentro de <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>, um <code>vm.yaml</code> não consegue fazer o host correr um ficheiro
 à sua escolha; <code>args</code> e <code>env</code> também são validados (sem <code>-</code> inicial, sem <code>PATH</code>/<code>LD_*</code>/<code>BASH_ENV</code>…).
 Os campos que um builder decide por si (<code>packages</code>, <code>users</code>, <code>hostname</code>, <code>network</code>, <code>profile</code>…) são
 recusados pelo nome.</p>
@@ -878,7 +878,7 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 <td><code>--platform</code></td>
 <td>sim</td>
 <td><code>linux/&lt;arch&gt;</code>, binfmt do host necessário</td>
-<td>não (as imagens ficam amd64 — <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>)</td>
+<td>não (as imagens ficam amd64 — <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>)</td>
 </tr>
 <tr>
 <td>Cache de camadas</td>
@@ -940,7 +940,7 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 <p><strong>Seguinte:</strong> <a href="microvm-setup.html">Construir microVMs</a> — os pré-requisitos do host, os backends, as
 imagens e os verbos de dia-2 para arrancar e testar microVMs.</p>
 <nav class="pager"><a href="system-design-interview.html"><span>← Anterior</span>System Design Interview — o Delonix Engine</a><a class="next" href="microvm-setup.html"><span>Seguinte →</span>Construir microVMs</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/delonixfile-and-vmfile.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/delonixfile-and-vmfile.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/delonixfile-and-vmfile.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/delonixfile-and-vmfile.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

@@ -3829,9 +3829,9 @@ têm de ficar todos na mesma versão. Um auto-update por ordem SemVer **não** d
 
 ### Limitações conhecidas
 
-- A documentação regenerada já usa a identidade nova; as páginas do *handbook*
-  (`docs/handbook/`) regeneram quando `docs/dev/rt4-phase1-impl-map.md` entrar no
-  catálogo de páginas.
+- A documentação regenerada já usa a identidade nova; o *handbook*
+  (`docs/handbook/`) está regenerado. O plano de implementação do `oci-runtime`
+  passou para `docs/discovery/69_RT4_PHASE1_IMPL_MAP.md` (fora do catálogo de páginas).
 - Imagens GHCR da linha anterior ficam no namespace antigo; a partir desta linha
   publicam-se em `ghcr.io/ngolacloud/delonix`.
 

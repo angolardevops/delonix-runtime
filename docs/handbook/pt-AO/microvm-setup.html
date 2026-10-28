@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/microvm-setup.html">EN · English</option><option value="../pt-AO/microvm-setup.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/microvm-setup.html">FR-FR · Français</option><option value="../zh-CN/microvm-setup.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -235,14 +235,14 @@ isola sempre <strong>os dois</strong> state roots enquanto fazes experiências �
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">ls -l /dev/kvm            # must exist; missing = VT-x/AMD-V off in firmware, or no nested virt
 id -nG | tr &#x27; &#x27; &#x27;\n&#x27; | grep -x kvm   # your user must be in the kvm group
 </code></pre></div>
-<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (por omissão, ou seja sem <code>--no-vm</code>) acrescenta-te aos grupos <code>kvm</code> e
+<p>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (por omissão, ou seja sem <code>--no-vm</code>) acrescenta-te aos grupos <code>kvm</code> e
 <code>libvirt</code> e avisa quando falta o <code>/dev/kvm</code>. As mudanças de grupo precisam de uma sessão de login
 nova.</p>
 <h3 id="cloud-hypervisor-and-its-firmware">Cloud Hypervisor e o seu firmware<a class="hanchor" href="#cloud-hypervisor-and-its-firmware" aria-label="#">#</a></h3>
 <p>O backend está disponível quando o <code>cloud-hypervisor</code> está no <code>PATH</code>
-(<code>CloudHypervisorBackend::available</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>). Onde a
+(<code>CloudHypervisorBackend::available</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>). Onde a
 distribuição não o empacota, o instalador descarrega o binário <strong>estático</strong> de upstream para
-<code>/usr/local/bin/cloud-hypervisor</code>, fixado a uma versão <strong>e</strong> a um SHA-256 em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>.</p>
+<code>/usr/local/bin/cloud-hypervisor</code>, fixado a uma versão <strong>e</strong> a um SHA-256 em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>.</p>
 <p>Para arrancar uma cloud image sem <code>--kernel</code>, o CH precisa de firmware UEFI. O <code>default_ch_firmware</code>
 usa <code>$DELONIX_HYPERVISOR_FW</code> se estiver definida, caso contrário o primeiro ficheiro que exista em
 <code>DEFAULT_CH_FIRMWARES</code>:</p>
@@ -309,7 +309,7 @@ sem lhe mudarem o dono.</p>
 <tr>
 <td><code>cloud-localds</code></td>
 <td><code>cloud-image-utils</code> / <code>cloud-utils</code></td>
-<td>ISO de seed NoCloud — gerado em <strong>cada</strong> <code>vm create</code> de uma imagem cloud-init, a menos que seja dado <code>--seed</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a>)</td>
+<td>ISO de seed NoCloud — gerado em <strong>cada</strong> <code>vm create</code> de uma imagem cloud-init, a menos que seja dado <code>--seed</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a>)</td>
 </tr>
 <tr>
 <td><code>virsh</code></td>
@@ -366,7 +366,7 @@ também recusa logo à partida quando <code>&lt;root&gt;/vms/&lt;name&gt;.sock</
 <hr />
 <h2 id="2-backends-and-how-one-is-chosen">2. Backends e como um é escolhido<a class="hanchor" href="#2-backends-and-how-one-is-chosen" aria-label="#">#</a></h2>
 <h3 id="the-port-and-the-registry">A porta e o registo<a class="hanchor" href="#the-port-and-the-registry" aria-label="#">#</a></h3>
-<p>O <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>, reexportado pelo <code>delonix-vm</code>) é a porta que cada hypervisor implementa:
+<p>O <code>VmBackend</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>, reexportado pelo <code>delonix-vm</code>) é a porta que cada hypervisor implementa:
 <code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, mais métodos com implementação por omissão
 (<code>destroy</code>, <code>pause</code>, <code>unpause</code>, <code>resume</code>, <code>snapshot</code>/<code>restore</code>/<code>snapshots</code>/<code>delete_snapshot</code>,
 <code>preserve_snapshots</code>, <code>ip_is_predicted</code>, <code>manages_own_storage</code>, <code>auto_selectable</code>, <code>disk_health</code>, e os
@@ -411,7 +411,7 @@ factory corre na primeira vez que o backend é seleccionado. O <code>backend_for
 resolve o backend registado, e um nome desconhecido é um <strong>erro</strong> (antes caía para o CH).</p>
 <h3 id="selection-precedence-for-a-new-vm">Precedência de selecção para uma VM nova<a class="hanchor" href="#selection-precedence-for-a-new-vm" aria-label="#">#</a></h3>
 <p>A partir de <code>resolve_vm_defaults</code> (<code>cmd/vm.rs</code>) e <code>select_for_create</code>
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, a que o caso de uso de VM chega através de
+(<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, a que o caso de uso de VM chega através de
 <code>VmBackends::select</code>), ganha a primeira que corresponder:</p>
 <ol>
 <li><code>--backend</code> (ou <code>backend:</code> no manifesto).</li>
@@ -452,7 +452,7 @@ default provider cleared in /home/you/.config/delonix/providers.yaml (falls back
 token legível só pelo dono, uma CA que existe) sem contactar nada, e o
 <code>delonix provider config schema</code> imprime o seu JSON Schema.</p>
 <h3 id="proxmox-ve-remote">Proxmox VE (remoto)<a class="hanchor" href="#proxmox-ve-remote" aria-label="#">#</a></h3>
-<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> regista o backend Proxmox
+<p>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> regista o backend Proxmox
 no arranque quando configurado — por uma entrada <code>type: proxmox</code> no ficheiro de providers, ou pelo
 ambiente abaixo (uma má configuração é um aviso, nunca fatal para comandos sem relação). A lista
 completa das variáveis <code>DELONIX_PROXMOX_*</code>, incluindo as credenciais em ficheiro
@@ -505,8 +505,8 @@ local é enviada (<code>DELONIX_PROXMOX_IMPORT_STORAGE</code>, <code>DELONIX_PRO
 o que definir (<em>corrido</em>). O backend é dono do seu armazenamento (<code>manages_own_storage</code>), por isso
 não é feito nenhum overlay local nem seed NoCloud; um <code>--disk</code> que nomeia uma imagem do store do
 motor é enviado para o storage de importação do nó e a VM é criada a partir dela (ADR-0057); <code>--hostname</code>/<code>--ssh-key</code> vão para o cloud-init do
-nó, e <code>--user-data</code> é recusado. Desenho e limites: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>.
-Um backend OpenStack está <strong>só proposto</strong> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>); não
+nó, e <code>--user-data</code> é recusado. Desenho e limites: <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>.
+Um backend OpenStack está <strong>só proposto</strong> (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>); não
 há código para ele.</p>
 <hr />
 <h2 id="3-images">3. Imagens<a class="hanchor" href="#3-images" aria-label="#">#</a></h2>
@@ -568,11 +568,11 @@ p. ex. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>,
 <code>--node-exporter[=&lt;addr&gt;]</code>, <code>--no-compress</code>. A tua própria receita é um <code>VMfile</code> ou um <code>vm.yaml</code> — ver
 <a href="delonixfile-and-vmfile.html">Delonixfile e VMfile</a>. A pasta <code>images/</code> do repositório traz um
 <code>vm.yaml</code> por distro (<code>ubuntu</code>, <code>debian</code>, <code>rocky</code>, <code>fedora</code>, construídas offline) e por appliance;
-o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> constrói-as num <code>DELONIX_ROOT</code> isolado e lê o qcow2 de volta
+o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> constrói-as num <code>DELONIX_ROOT</code> isolado e lê o qcow2 de volta
 (<code>--self-test</code> prova que as suas verificações conseguem falhar). A instalação de pacotes, os perfis
 da receita dourada, o arranque das imagens construídas e os builders de appliances <strong>ainda não foram
 validados</strong> (notas da release v4.2.0). Os builds de imagem são só amd64
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
+(<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
 <h3 id="converting-and-importing">Converter e importar<a class="hanchor" href="#converting-and-importing" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">delonix vm convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
 delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
@@ -580,7 +580,7 @@ delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 
 <p>O <code>vm convert</code> achata (sem cadeia de backing); <code>--compress</code> só é aceite para <code>qcow2</code> e <code>vmdk</code>. O
 <code>import --appliance</code> regista <code>cloud_init: false</code>: o <code>vm create</code> passa então a não anexar <strong>nenhum</strong>
 seed e recusa <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code> pelo nome, porque o convidado nunca os leria.
-Os scripts de build de appliances vivem em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>.</p>
+Os scripts de build de appliances vivem em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>.</p>
 <hr />
 <h2 id="4-create-and-run">4. Criar e correr<a class="hanchor" href="#4-create-and-run" aria-label="#">#</a></h2>
 <h3 id="vm-create"><code>vm create</code><a class="hanchor" href="#vm-create" aria-label="#">#</a></h3>
@@ -606,7 +606,7 @@ Os scripts de build de appliances vivem em <a class="src" href="https://github.c
    fora da SDN do Delonix).</li>
 <li><strong>Overlay</strong>: <code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>, um qcow2 fino sobre a base (a porta
    <code>LocalDiskImages</code>, implementada por <code>QemuImgDisks</code> → <code>prepare_local_overlay</code> em
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>; saltado para um backend que gere o seu próprio
+   <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>; saltado para um backend que gere o seu próprio
    armazenamento); <code>--disk-size &lt;GiB&gt;</code> fá-lo crescer e não pode ser menor do que a base.</li>
 <li><strong>Boot</strong>: o <code>boot</code> do backend. O <code>create</code> é idempotente: uma VM existente e a correr é devolvida
    tal como está.</li>
@@ -663,7 +663,7 @@ ver porquê.</p>
 </tr>
 <tr>
 <td><code>delonix vm migrate &lt;name&gt; --host &lt;h&gt; --network &lt;n&gt;</code></td>
-<td>stop-copy-start por SSH para outro host; tempo de indisponibilidade real (o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> explica porque é que a migração ao vivo está fora de âmbito)</td>
+<td>stop-copy-start por SSH para outro host; tempo de indisponibilidade real (o <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> explica porque é que a migração ao vivo está fora de âmbito)</td>
 </tr>
 <tr>
 <td><code>delonix vm prune</code></td>
@@ -705,9 +705,9 @@ contabilidade do libvirt, por isso o <code>preserve_snapshots</code> despeja o X
 que muda a cada define).</p>
 <h3 id="declarative">Declarativo<a class="hanchor" href="#declarative" aria-label="#">#</a></h3>
 <p>O <code>kind: VirtualMachine</code> (<code>compute.delonix.io/v1alpha1</code>) espelha o <code>vm create</code>; um exemplo completo
-e anotado é o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/compute/virtualmachine.yaml" target="_blank" rel="noopener"><code>examples/compute/virtualmachine.yaml</code></a>. Um <code>kind: Workload</code> com <code>type: microvm</code> baixa para uma
+e anotado é o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/examples/compute/virtualmachine.yaml" target="_blank" rel="noopener"><code>examples/compute/virtualmachine.yaml</code></a>. Um <code>kind: Workload</code> com <code>type: microvm</code> baixa para uma
 <code>VirtualMachine</code> com o backend <strong>forçado</strong> a <code>cloud-hypervisor</code>; pedir outro backend é um erro
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Os dois foram <em>corridos</em> num root de rascunho:</p>
+(<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Os dois foram <em>corridos</em> num root de rascunho:</p>
 <div class="code"><div class="code-head"><span class="lang">yaml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-yaml">apiVersion: compute.delonix.io/v1alpha1
 kind: VirtualMachine
 metadata: { name: dev }
@@ -794,7 +794,7 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <tr>
 <td><code>no VM backend available</code></td>
 <td>nem <code>cloud-hypervisor</code> nem <code>virsh</code>+<code>qemu-system-x86_64</code> no <code>PATH</code></td>
-<td>instala um; o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> fá-lo</td>
+<td>instala um; o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> fá-lo</td>
 </tr>
 <tr>
 <td>VM CH «a correr» mas nunca responde; o overlay fica minúsculo</td>
@@ -891,64 +891,64 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <tbody>
 <tr>
 <td>Porta</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Casos de uso de VM (<code>VmEngine</code>: create, stop, start, status, list, remove, snapshots, verbos de dia-2) e as suas portas (<code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>)</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a>, <code>ports.rs</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a>, <code>ports.rs</code></td>
 </tr>
 <tr>
 <td>Registo, backends CH e libvirt, escolha de backend, procura de firmware, os invólucros públicos (<code>create_with</code>, <code>stop</code>, …)</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>As implementações, no adapter, das portas de VM (<code>RegistryBackends</code>, <code>QemuImgDisks</code>, <code>CloudLocaldsSeed</code>)</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Geração do seed NoCloud</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Backend Proxmox</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr></code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr></code></a></td>
 </tr>
 <tr>
 <td>CLI <code>vm</code>, <code>kind: VirtualMachine</code>, <code>vm reach</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Store de imagens, receita dourada, pull/push/import/convert, dicas de falha</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>VMfile</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Registo de backends a partir do ambiente</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbackends.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbackends.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><code>vm bridge</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbridge.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbridge.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbridge.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbridge.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Redução do <code>kind: Workload</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>workload.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>workload.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Builds de appliances</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a></td>
 </tr>
 </tbody>
 </table></div>
 <h3 id="adding-a-backend">Acrescentar um backend<a class="hanchor" href="#adding-a-backend" aria-label="#">#</a></h3>
-<p>Lê primeiro o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>; é o modelo. Em resumo:</p>
+<p>Lê primeiro o <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>; é o modelo. Em resumo:</p>
 <ul>
 <li>Implementa o <code>VmBackend</code> <strong>no seu próprio crate</strong> se ele falar com uma API remota (o crate do motor
   fica livre de clientes HTTP), colocado no directório da sua camada e listado em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (ver <a href="architecture.html">Arquitectura</a>).</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (ver <a href="architecture.html">Arquitectura</a>).</li>
 <li>Regista-o com <code>register_backend</code> a partir do processo que conhece a sua configuração, com
   <code>auto_selectable: false</code> a menos que seja um backend local, sem configuração, embutido no
   <code>delonix-vm</code>.</li>
@@ -958,7 +958,7 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <li>Deixa os verbos não suportados nos seus defaults que falham fechado; recusa os campos de <code>VmConfig</code>
   não suportados pelo nome antes de criares seja o que for.</li>
 <li>Não publiques um backend que nunca foi visto a arrancar uma VM. Backends novos e fronteiras de
-  hypervisor passam por um ADR (<a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener">docs/adr/</a>).</li>
+  hypervisor passam por um ADR (<a href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener">docs/adr/</a>).</li>
 </ul>
 <h3 id="testing">Testes<a class="hanchor" href="#testing" aria-label="#">#</a></h3>
 <ul>
@@ -972,12 +972,12 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
   <code>delonix-compute</code> (<code>vm::tests</code>) com um store em memória, um backend que regista as suas chamadas e
   um disco e um seed falsos, por isso uma mudança ao que o <code>create</code>, o <code>stop</code> ou o <code>status</code> decidem
   não precisa de hypervisor: <code>cargo test -p delonix-compute vm::</code>.</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong> — as secções <code>vm</code> correm sem hypervisor (listagem, recusas) e, quando
+<li><strong><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong> — as secções <code>vm</code> correm sem hypervisor (listagem, recusas) e, quando
   disponível, exercitam snapshots através de stop/start em libvirt (precisa de <code>virsh</code>, <code>qemu-img</code> e
   de um <code>qemu:///system</code> utilizável) e em Cloud Hypervisor. Isola os dois state roots por omissão; a
   secção CH recusa-se a correr se só o <code>DELONIX_ROOT</code> estiver isolado. As secções sem o seu
   hypervisor são reportadas como saltadas, não como passadas.</li>
-<li><strong>Teste ao vivo do Proxmox</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/tests/live.rs</code></a> cria e destrói uma
+<li><strong>Teste ao vivo do Proxmox</strong> — <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/tests/live.rs</code></a> cria e destrói uma
   VM contra um nó real e é saltado a menos que <code>DELONIX_PROXMOX_TEST_URL</code> (mais <code>_NODE</code>, <code>_USER</code>,
   <code>_PASS</code>) esteja definida: <code>cargo test -p delonix-proxmox --test live -- --nocapture</code>. Usa um nó
   descartável.</li>
@@ -993,7 +993,7 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <p><strong>Seguinte:</strong> <a href="troubleshooting.html">Resolução de problemas</a> — um índice organizado por sintoma para
 os gates e as armadilhas de host em que podes cair ao construir e testar.</p>
 <nav class="pager"><a href="delonixfile-and-vmfile.html"><span>← Anterior</span>Delonixfile e VMfile</a><a class="next" href="troubleshooting.html"><span>Seguinte →</span>Diagnóstico de problemas</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/microvm-setup.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/microvm-setup.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/microvm-setup.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/microvm-setup.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

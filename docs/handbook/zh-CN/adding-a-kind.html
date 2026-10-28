@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/adding-a-kind.html">EN · English</option><option value="../pt-AO/adding-a-kind.html">PT-AO · Português (Angola)</option><option value="../fr-FR/adding-a-kind.html">FR-FR · Français</option><option value="../zh-CN/adding-a-kind.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -220,7 +220,7 @@ th:first-child,td:first-child{white-space:nowrap}
 Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己的注册表。更新的那些 Kind 也走过
 同样的步骤；下面引用的每个文件都是从代码树里读到的，不是凭对旧结构的记忆写的。</p>
 <h2 id="the-one-table-a-kind-has-to-answer">一个 Kind 必须回答的这张唯一的表<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> 是「一个 Kind 是什么」的唯一来源。它自己的
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> 是「一个 Kind 是什么」的唯一来源。它自己的
 模块文档解释了为什么要有它：在这张表出现之前，关于一个 Kind 的同一批事实分散在六份独立的
 清单里（<code>KINDS</code>、<code>CONVERGING_KINDS</code>、<code>TEARDOWN_KINDS</code>、<code>kind_honors_namespace</code>、等待测试里
 的 <code>DECLARATIVOS</code>，以及 <code>presence()</code> 的各个分支），而它们会走样 —— <code>Vm</code>、<code>FirewallPolicy</code>
@@ -334,11 +334,11 @@ Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己
   （<code>NetworkRoute</code> 对应 <code>networkRoutes</code>），这样谁都不用去查。只有三个较早的键是例外
   （<code>ingress</code>、<code>vms</code>、<code>firewallPolicies</code>），因为改一个分组的名字会破坏所有已发布的 Stack。</li>
 </ul>
-<p>然后这个分组还得在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> 里被端到端地证明出来：</p>
+<p>然后这个分组还得在 <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> 里被端到端地证明出来：</p>
 <ul>
 <li><code>manifest.rs</code> 里的 <strong><code>stack_group_sample</code></strong> —— 这个分组里一个子项最简的 <code>spec</code>，以及它
   最终落地成的 Kind；<code>every_stack_group_loads</code> 会遍历每一个分组，遇到没有样例的就失败。</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a></strong> —— 必须提到这个分组；否则 <code>the_stack_example_names_every_group</code>
+<li><strong><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a></strong> —— 必须提到这个分组；否则 <code>the_stack_example_names_every_group</code>
   会失败。这个文件同时也是用户站点 Kinds 页面所展示的内容。</li>
 <li><code>schema.rs</code> 里的 <strong><code>every_stack_group_is_typed_against_its_kinds_own_spec</code></strong> —— 分组里的
   条目要按 Kind 自己的 spec 来做类型校验，所以这个 Kind 得先有 <code>TYPED_KINDS</code> 分支（见下一节）
@@ -347,8 +347,8 @@ Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己
 <h2 id="the-spec-type-and-the-schema">Spec 类型与 schema<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
 <p>带类型化清单 spec 的 Kind（大多数都是）需要一个
 <code>#[derive(Deserialize, Serialize, JsonSchema)]</code> 结构体 —— 本例里是
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a> 里的 <code>ServiceSpec</code> —— 以及
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 里 <code>TYPED_KINDS</code> 的一个分支，再加上
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a> 里的 <code>ServiceSpec</code> —— 以及
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 里 <code>TYPED_KINDS</code> 的一个分支，再加上
 <code>manifest_schema</code> 里指名这个结构体的对应分支。这个常量同时供给 <code>delonix manifest schema</code>
 和 <code>delonix explain &lt;Kind&gt;.&lt;field&gt;</code>，两者都是从同一个结构体生成的（ADR-0007），所以发布出去
 的 schema 不可能和代码实际接受的东西走样。把某个 Kind 排除在外是一个真实的、被允许的状态
@@ -358,7 +358,7 @@ Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己
 <code>schema.rs</code> 里）会在表里认识的某个 Kind 既不在 <code>TYPED_KINDS</code> 里、也没有 hint 的时候让构建
 失败。那条通用的提示信息（"no typed schema for X"）读起来像是清单的 bug；而这条 hint 说的是
 这是这个 Kind 本身的性质。</p>
-<p>还有两个地方会读这个 spec，都在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 里：</p>
+<p>还有两个地方会读这个 spec，都在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 里：</p>
 <ul>
 <li><strong><code>filled_spec</code></strong> —— 一个调用这个 Kind 的 <code>spec_with_defaults(doc)</code> 的分支，也就是让
   <code>stack apply --dry-run</code> 和 <code>manifest render</code> 打印出「每个默认值都已填好」的那趟经过类型化
@@ -376,9 +376,9 @@ Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己
 （<code>target/release/delonix</code> 或者 <code>cargo run -p delonix-runtime-bin --</code>），而不是 <code>PATH</code>
 上那个。</p>
 <h2 id="wiring-the-kind-into-the-reconciler">把 Kind 接入协调器<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
-<p>协调器的规划函数（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>）是纯函数 —— 它从
+<p>协调器的规划函数（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>）是纯函数 —— 它从
 不打开 store，也不执行命令。凡是会碰到机器本身的东西，都在
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a> 里，并以 <code>cmd::kinds</code>/<code>cmd::reconcile</code> 的名字
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a> 里，并以 <code>cmd::kinds</code>/<code>cmd::reconcile</code> 的名字
 从 <code>delonix-stack</code> 重新导出（<code>cmd/mod.rs</code> 里的 <code>pub use delonix_stack::kinds;</code>，所以当这张
 表搬进自己的 crate 时，任何已经在调用 <code>cmd::kinds::…</code> 的地方都不用改）。<code>stack.rs</code> 里有四个
 函数，为一个会收敛的新 Kind 各需要一个分支：</p>
@@ -449,7 +449,7 @@ Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己
 </ul>
 <h2 id="the-generic-verbs-and-drift">通用动词与 <code>drift</code><a class="hanchor" href="#the-generic-verbs-and-drift" aria-label="#">#</a></h2>
 <p><code>delonix get</code>/<code>describe</code>/<code>delete &lt;plural&gt;</code> 是按 Kind，通过
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/verbs.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/verbs.rs</code></a> 里的三份清单 —— <code>GET_ROUTES</code>、
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/verbs.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/verbs.rs</code></a> 里的三份清单 —— <code>GET_ROUTES</code>、
 <code>DESCRIBE_ROUTES</code> 和 <code>DELETE_ROUTES</code> —— 加上每个动词各一个、调用该 Kind 自己的
 <code>cmd_ls</code>、<code>cmd_describe</code> 和 <code>remove_for_replace</code> 的分支来路由的。一个回答不了这些动词的
 Kind，就把障碍写进 <code>no_verb_reason</code>（<code>Stack</code> 是从文件读的，<code>Workload</code> 在 load 时就降级了，
@@ -460,13 +460,13 @@ Kind，就把障碍写进 <code>no_verb_reason</code>（<code>Stack</code> 是�
 <p><code>delonix drift</code> 会拿 <code>last-applied</code> 印记和机器上实际持有的状态做比较，大多数 Kind 都可以
 从自己的 store 里枚举出来。如果你的 <code>actual()</code> 需要已解析的文档才能回答 —— 节点没有一份能
 自己列出这个 Kind 的注册表，就像 <code>NetworkPolicy</code> 是以 nft 规则的形式挂在目标上一样 —— 就把
-它加进 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/drift.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/drift.rs</code></a> 里的 <code>DOC_SCOPED</code>。
+它加进 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/drift.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/drift.rs</code></a> 里的 <code>DOC_SCOPED</code>。
 <code>doc_scoped_matches_the_stack_wiring</code> 会读 <code>stack.rs</code>（调用点<strong>以及</strong> <code>actual</code> 的函数
 签名），一旦清单和接线对不上就会失败；一个接收了 <code>docs</code> 却把它们晾在一边的模块（<code>fn
 actual(_docs: …)</code>）不该出现在这份清单里。</p>
 <h2 id="namespaces-and-completion">命名空间与补全<a class="hanchor" href="#namespaces-and-completion" aria-label="#">#</a></h2>
 <p>如果这个 Kind 是带命名空间的（<code>namespaced != Namespaced::Never</code>），它还需要在
-<code>NAMESPACE_SOURCES</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>）里有一条 —— 要么是
+<code>NAMESPACE_SOURCES</code>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>）里有一条 —— 要么是
 读取该 Kind 自己 store 的 <code>NsSource::Store(fn)</code>，要么是命名空间实际落在另一个 Kind 的记录
 上时的 <code>NsSource::Via("OtherKind — reason")</code>（比如一个 <code>Pod</code> 的命名空间是记在它成员
 <code>Container</code> 身上的）。否则 <code>every_namespaced_kind_declares_a_source</code> 会失败 —— 漏掉这一点
@@ -480,7 +480,7 @@ actual(_docs: …)</code>）不该出现在这份清单里。</p>
 <li>一个带 <code>JsonSchema</code> 的 spec 结构体；<code>TYPED_KINDS</code> 和 <code>manifest_schema</code>（<code>schema.rs</code>）
    里的分支 —— 或者在 <code>untyped_hint</code> 里说明为什么没有。</li>
 <li><code>manifest.rs</code> —— <code>filled_spec</code>（<code>spec_with_defaults</code>）里的分支、<code>spec_fields_for</code> 里的
-   分支，以及 <code>stack_group_sample</code> 里的样例；分组要写进 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a>。</li>
+   分支，以及 <code>stack_group_sample</code> 里的样例；分组要写进 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/examples/core/stack.yaml" target="_blank" rel="noopener"><code>examples/core/stack.yaml</code></a>。</li>
 <li><code>stack.rs</code> —— <code>desired_of</code>、<code>actual_of</code>、<code>converge_and_stamp</code>、<code>stamp_all</code>、
    <code>destroy_one</code>、<code>presence</code> 里的分支，以及 <code>run_layers</code> 里调用该 Kind 自己 <code>apply(docs)</code>
    的那一层。</li>
@@ -491,8 +491,8 @@ actual(_docs: …)</code>）不该出现在这份清单里。</p>
    <code>GET_ROUTES</code>/<code>DESCRIBE_ROUTES</code>/<code>DELETE_ROUTES</code>，或者在 <code>no_verb_reason</code> 里写理由。</li>
 <li><code>drift.rs</code> —— 只有当 <code>actual()</code> 真的需要文档本身时，才加进 <code>DOC_SCOPED</code>。</li>
 <li>如果带命名空间：在 <code>NAMESPACE_SOURCES</code>（<code>complete.rs</code>）里加一条。</li>
-<li>代码里每一个新的面向用户的字符串都用英文写，并在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>
-    里翻译；<code>DX-CDNN</code> 字典（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>）里新增的错误码，
+<li>代码里每一个新的面向用户的字符串都用英文写，并在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>
+    里翻译；<code>DX-CDNN</code> 字典（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>）里新增的错误码，
     也需要它的葡语文本（<code>every_dictionary_text_has_a_portuguese_translation</code>）。运行
     <code>python3 scripts/lang_ratchet.py</code>。</li>
 <li>用代码树的二进制程序执行 <code>delonix manifest schema &gt; docs/schema/v1/delonix.json</code>，再
@@ -508,7 +508,7 @@ actual(_docs: …)</code>）不该出现在这份清单里。</p>
 <p><strong>下一篇：</strong><a href="contributing-workflow.html">贡献流程</a> —— worktree、版本对齐、语言规则、什么
 时候要写 ADR，以及怎么把改动发出去。</p>
 <nav class="pager"><a href="coding-conventions.html"><span>← 上一页</span>编码规范</a><a class="next" href="engineering-process.html"><span>下一页 →</span>Engineering process (canonical)</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/adding-a-kind.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/adding-a-kind.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/adding-a-kind.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/adding-a-kind.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

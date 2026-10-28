@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/coding-conventions.html">EN · English</option><option value="../pt-AO/coding-conventions.html">PT-AO · Português (Angola)</option><option value="../fr-FR/coding-conventions.html" selected>FR-FR · Français</option><option value="../zh-CN/coding-conventions.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Changer le thème de couleur" title="Changer le thème de couleur"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -217,10 +217,10 @@ n'ayez pas à deviner les règles ni à inventer les vôtres. Après elle, vous 
 <ul>
 <li><strong>Imposé (gate)</strong> : un job de CI échoue si vous l'enfreignez. Le gate (contrôle CI) est nommé,
   vous pouvez donc l'exécuter en local (voir <a href="build-and-test.html#the-gates-ci-runs">Construire et tester</a>).</li>
-<li><strong>Décidé (ADR/AGENTS.md)</strong> : un Architecture Decision Record <strong>accepté</strong> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> ou une
-  section de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> le tranche. Aucun gate ne le vérifie encore, c'est donc la revue qui le fait.</li>
+<li><strong>Décidé (ADR/AGENTS.md)</strong> : un Architecture Decision Record <strong>accepté</strong> dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> ou une
+  section de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> le tranche. Aucun gate ne le vérifie encore, c'est donc la revue qui le fait.</li>
 <li><strong>Proposé (ADR, pas encore décidé)</strong> : la seule source écrite est un ADR dont le statut est encore
-  <strong>Proposed</strong> (voir la colonne de statut de <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>). C'est la
+  <strong>Proposed</strong> (voir la colonne de statut de <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>). C'est la
   direction dans laquelle évolue le code, et la revue l'applique, mais elle peut encore changer ;
   lorsque l'ADR est accepté ou rejeté, l'étiquette change avec lui.</li>
 <li><strong>Convention (observée)</strong> : le code le fait de manière cohérente et rien ne l'a mis par écrit. Les
@@ -248,7 +248,7 @@ ce que contient chaque crate dans <a href="crates.html">Crates</a>, les idiomes 
 <tr>
 <td><strong>rustfmt</strong></td>
 <td>Le formatage. <strong>Aucun fichier de configuration</strong> : il n'y a ni <code>rustfmt.toml</code> ni <code>.rustfmt.toml</code> à la racine, ce sont donc les valeurs par défaut qui s'appliquent.</td>
-<td><strong>Imposé (gate)</strong> : le job de CI <code>fmt</code> exécute <code>cargo fmt --all --check</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a>). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style : « <code>cargo fmt</code> defaults, no custom config ».</td>
+<td><strong>Imposé (gate)</strong> : le job de CI <code>fmt</code> exécute <code>cargo fmt --all --check</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a>). <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style : « <code>cargo fmt</code> defaults, no custom config ».</td>
 </tr>
 <tr>
 <td><strong>clippy</strong></td>
@@ -257,27 +257,27 @@ ce que contient chaque crate dans <a href="crates.html">Crates</a>, les idiomes 
 </tr>
 <tr>
 <td><strong><code>[workspace.lints]</code></strong></td>
-<td>Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine déclare exactement un lint de workspace : <code>[workspace.<wbr>lints.<wbr>clippy] undocumented_unsafe_blocks = "deny"</code>. Chaque manifeste membre contient <code>[lints] workspace = true</code>.</td>
+<td>Le <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine déclare exactement un lint de workspace : <code>[workspace.<wbr>lints.<wbr>clippy] undocumented_unsafe_blocks = "deny"</code>. Chaque manifeste membre contient <code>[lints] workspace = true</code>.</td>
 <td><strong>Imposé (gate)</strong> : clippy. Il a été introduit par la phase P0 de l'ADR-0040 (« <code>[workspace.lints]</code> (<code>undocumented_unsafe_blocks = deny</code>) »), un ADR encore <strong>Proposed</strong> ; le gate s'applique quoi qu'il en soit.</td>
 </tr>
 <tr>
 <td><strong>cargo-deny</strong></td>
-<td>Les avis RUSTSEC et les crates retirés (yanked), uniquement des licences permissives (ni GPL ni AGPL), crates.io comme seul registre, aucune source git. La section <code>[bans]</code> de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> (versions dupliquées et jokers, réglée sur avertissement) n'est <strong>pas</strong> évaluée en CI.</td>
-<td><strong>Imposé (gate)</strong> : le job de CI <code>deny</code> exécute <code>check advisories licenses sources</code> avec <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>. <strong>Convention (observée)</strong> : chaque avis ignoré dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> porte un commentaire donnant sa raison — aucun gate ne vérifie que ce commentaire existe.</td>
+<td>Les avis RUSTSEC et les crates retirés (yanked), uniquement des licences permissives (ni GPL ni AGPL), crates.io comme seul registre, aucune source git. La section <code>[bans]</code> de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> (versions dupliquées et jokers, réglée sur avertissement) n'est <strong>pas</strong> évaluée en CI.</td>
+<td><strong>Imposé (gate)</strong> : le job de CI <code>deny</code> exécute <code>check advisories licenses sources</code> avec <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>. <strong>Convention (observée)</strong> : chaque avis ignoré dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> porte un commentaire donnant sa raison — aucun gate ne vérifie que ce commentaire existe.</td>
 </tr>
 <tr>
-<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></strong></td>
+<td><strong><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></strong></td>
 <td>Le portugais dans les identifiants, les commentaires et les chaînes visibles par l'utilisateur (LANG-01, voir <a href="#2-language-of-the-code">§2</a>).</td>
-<td><strong>Imposé (gate)</strong> : job de CI <code>lang</code>, base de référence dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>.</td>
+<td><strong>Imposé (gate)</strong> : job de CI <code>lang</code>, base de référence dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>.</td>
 </tr>
 <tr>
-<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></strong></td>
+<td><strong><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></strong></td>
 <td>La direction des couches, répertoire du crate = couche, les versions uniquement à la racine, les noms de consommateurs, et les ratchets de dette listés dans <a href="architecture.html#layers-and-the-allowed-direction">Architecture</a> (voir <a href="#4-structure-where-code-goes">§4</a> et <a href="#5-internal-api-and-boundaries">§5</a>).</td>
-<td><strong>Imposé (gate)</strong> : job de CI <code>arch</code>, base de référence dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a>.</td>
+<td><strong>Imposé (gate)</strong> : job de CI <code>arch</code>, base de référence dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a>.</td>
 </tr>
 <tr>
-<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></strong></td>
-<td>Le contrat de nœud sous <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> (voir <a href="#54-the-node-contract">§5.4</a>).</td>
+<td><strong><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></strong></td>
+<td>Le contrat de nœud sous <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> (voir <a href="#54-the-node-contract">§5.4</a>).</td>
 <td><strong>Imposé (gate)</strong> : job de CI <code>contract</code>.</td>
 </tr>
 </tbody>
@@ -294,26 +294,26 @@ propres à rustc, les lints de nommage de rustc (<code>non_snake_case</code>, <c
 <code>non_upper_case_globals</code>) sont imposés eux aussi. Les fonctions et variables en <code>snake_case</code>, les
 types en <code>UpperCamelCase</code> et les constantes en <code>SCREAMING_SNAKE_CASE</code> ne sont pas un choix de style ici.</p>
 <p><code>#[allow(clippy::…)]</code> existe dans l'arborescence, par exemple <code>#[allow(clippy::too_many_arguments)]</code>
-dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> et <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>.
+dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> et <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>.
 <strong>Non décidé</strong> : aucune règle ne dit quand un <code>allow</code> est acceptable. Si vous en ajoutez un, mettez un
 commentaire <code>// why</code> à côté, comme pour toute autre exception (voir <a href="#10-comments-and-documentation">§10</a>).</p>
 <hr />
 <h2 id="2-language-of-the-code">2. Langue du code<a class="hanchor" href="#2-language-of-the-code" aria-label="#">#</a></h2>
 <ul>
 <li><strong>Les identifiants, les commentaires et les messages sont écrits en anglais.</strong> <strong>Imposé (gate)</strong> :
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>. <strong>Décidé</strong> : AGENTS.md § « Língua do código: inglês (LANG-01) ». Le
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>. <strong>Décidé</strong> : AGENTS.md § « Língua do código: inglês (LANG-01) ». Le
   ratchet analyse chaque fichier <code>.rs</code>, <code>.py</code>, <code>.ts</code>, <code>.go</code> et <code>.yml</code>/<code>.yaml</code> en dehors de <code>target/</code>,
   <code>third_party/</code> et assimilés. Il compte trois choses :</li>
 <li><strong>identifiants</strong> : tout nom déclaré par <code>fn</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>const</code>, <code>static</code>,
     <code>type</code>, <code>mod</code>, <code>union</code> ou <code>let</code> dont les segments <code>snake_case</code>/<code>camelCase</code> contiennent un mot de
-    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_pt_lexicon.txt" target="_blank" rel="noopener"><code>scripts/lang_pt_lexicon.txt</code></a> ;</li>
+    <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_pt_lexicon.txt" target="_blank" rel="noopener"><code>scripts/lang_pt_lexicon.txt</code></a> ;</li>
 <li><strong>commentaires</strong> : les lignes <code>//</code>, <code>///</code> et <code>//!</code> contenant un mot du lexique ;</li>
 <li><strong>texte utilisateur</strong> : les littéraux de 8 caractères ou plus à l'intérieur de <code>format!</code>,
     <code>println!</code>, <code>eprintln!</code>, <code>panic!</code>, <code>anyhow!</code>, <code>bail!</code>, <code>expect</code> ou <code>unimplemented!</code>.</li>
 <li><strong>Le portugais n'atteint l'opérateur qu'à travers le catalogue.</strong> <strong>Décidé</strong> : AGENTS.md §
-  « i18n (fonte EN + catálogo pt.po embutido) » et <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § « If you add or change a CLI
+  « i18n (fonte EN + catálogo pt.po embutido) » et <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § « If you add or change a CLI
   command ». Le texte anglais va dans le code source. Le portugais va dans
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, que <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> embarque avec
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, que <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> embarque avec
   <code>include_str!</code>.</li>
 <li><code>po::t("…")</code> pour une chaîne fixe.</li>
 <li>
@@ -330,7 +330,7 @@ Err(Error::Invalid(super::po::tf(
 </li>
 <li>
 <p>Le texte de <code>--help</code> est lui aussi en anglais dans le code source, traduit à l'exécution par
-    <code>po::translate_help</code>. <strong>Imposé (gate)</strong> : <code>help_i18n_tests</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a>.
+    <code>po::translate_help</code>. <strong>Imposé (gate)</strong> : <code>help_i18n_tests</code> dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a>.
     <code>todo_o_help_de_comando_tem_traducao_pt</code> est strict pour l'aide des commandes, et
     <code>o_help_dos_argumentos_so_pode_encolher</code> est un ratchet sur <code>ARG_HELP_PENDING</code> pour l'aide des
     flags. Une nouvelle commande ou un nouveau flag nécessite une entrée dans <code>pt.po</code>.</p>
@@ -352,10 +352,10 @@ Err(Error::Invalid(super::po::tf(
 <h2 id="3-naming">3. Nommage<a class="hanchor" href="#3-naming" aria-label="#">#</a></h2>
 <h3 id="31-crates-and-directories">3.1 Crates et répertoires<a class="hanchor" href="#31-crates-and-directories" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Le répertoire est la couche.</strong> Un crate se trouve dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> ou <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, ou bien c'est un binaire dans
+<li><strong>Le répertoire est la couche.</strong> Un crate se trouve dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
+  <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> ou <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, ou bien c'est un binaire dans
   <code>bins/</code>. Le répertoire doit correspondre à l'entrée du crate dans la table <code>LAYERS</code>. <strong>Imposé
-  (gate)</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>misplaced()</code> / <code>LAYER_DIR</code>. Un nouveau crate entre dans
+  (gate)</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>misplaced()</code> / <code>LAYER_DIR</code>. Un nouveau crate entre dans
   <code>LAYERS</code> <strong>et</strong> dans le bon répertoire dans le même commit.</li>
 <li><strong>Convention de nommage cible pour les crates nouveaux ou restructurés.</strong> <strong>Proposé (ADR, pas encore
   décidé)</strong> : ADR-0040 D2.1.</li>
@@ -397,7 +397,7 @@ Err(Error::Invalid(super::po::tf(
   <code>delonix-truenas</code>, <code>delonix-security-runtime</code>. L'ADR-0040 renomme chacun d'eux dans la phase qui le
   restructure, « jamais deux fois ». <strong>Ne renommez pas un crate en dehors de sa phase.</strong>
 - <strong>Le chemin de chaque crate est écrit une seule fois</strong>, dans <code>[workspace.dependencies]</code> du
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine. Les membres dépendent les uns des autres avec <code>{ workspace = true }</code>.
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine. Les membres dépendent les uns des autres avec <code>{ workspace = true }</code>.
   <strong>Décidé</strong> : AGENTS.md § « A direcção das dependências é um portão (ADR-0040, fase P0) », et le
   commentaire en tête de <code>[workspace.dependencies]</code>.</p>
 <h3 id="32-modules-and-files">3.2 Modules et fichiers<a class="hanchor" href="#32-modules-and-files" aria-label="#">#</a></h3>
@@ -410,18 +410,18 @@ Err(Error::Invalid(super::po::tf(
   <code>cmd/container.rs:cmd_run</code>/<code>cmd_start</code>/<code>cmd_stop</code>. AGENTS.md § « CLI (<code>delonix</code>) » énonce la
   partie un-module-par-groupe.</li>
 <li><strong>Les adaptateurs d'un port de calcul</strong> vont dans un fichier nommé d'après la préoccupation du port,
-  pas d'après la technologie : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>, <code>.../run_host.rs</code>,
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>, <code>.../vm_network.rs</code>,
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>. <strong>Convention (observée)</strong>.</li>
+  pas d'après la technologie : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>, <code>.../run_host.rs</code>,
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>, <code>.../vm_network.rs</code>,
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>. <strong>Convention (observée)</strong>.</li>
 </ul>
 <h3 id="33-types-traits-functions-constants">3.3 Types, traits, fonctions, constantes<a class="hanchor" href="#33-types-traits-functions-constants" aria-label="#">#</a></h3>
 <ul>
 <li><strong>Les ports sont nommés d'après la capacité, pas d'après la technologie.</strong> <strong>Proposé (ADR, pas
   encore décidé)</strong> : l'ADR-0040 D3 liste les ports : <code>WorkloadRuntime</code>, <code>SandboxProvider</code>, <code>VmProvider</code>, <code>NetworkProvider</code>, <code>StorageProvider</code>,
   <code>ImageRegistry</code>, <code>ImageStore</code>, … Ceux qui existent aujourd'hui sont dans
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>,
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>,
   <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) et <code>.../launch.rs</code> (<code>WorkloadRuntime</code>). L'ancien
-  <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>) coexiste avec le <code>VmProvider</code> de
+  <code>VmBackend</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>) coexiste avec le <code>VmProvider</code> de
   l'ADR-0044 (<code>vm_provider.rs</code>) pendant que la P4 y fait passer les backends.</li>
 <li><strong>Les implémentations hôte d'un port s'appellent <code>Host&lt;Thing&gt;</code>.</strong> <strong>Convention (observée)</strong> :
   <code>delonix-linux/src/workload.rs:HostWorkload</code> (implémente <code>WorkloadRuntime</code>),
@@ -435,7 +435,7 @@ Err(Error::Invalid(super::po::tf(
 <li><strong>Les constantes</strong> sont en <code>SCREAMING_SNAKE_CASE</code> (<strong>Imposé (gate)</strong>, lint rustc sous clippy
   <code>-D warnings</code>). <strong>Les noms de Kind sont eux aussi des constantes, jamais des littéraux de chaîne
   répétés</strong> (<strong>Décidé</strong> : AGENTS.md § « Os Kinds ganham grupos e nomes definitivos » ; les constantes
-  se trouvent dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> : <code>pub const VM: &amp;str = "VirtualMachine";</code>).</li>
+  se trouvent dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> : <code>pub const VM: &amp;str = "VirtualMachine";</code>).</li>
 </ul>
 <h3 id="34-test-names">3.4 Noms des tests<a class="hanchor" href="#34-test-names" aria-label="#">#</a></h3>
 <ul>
@@ -454,13 +454,13 @@ Err(Error::Invalid(super::po::tf(
 <h3 id="35-cli-commands-and-flags">3.5 Commandes et flags de la CLI<a class="hanchor" href="#35-cli-commands-and-flags" aria-label="#">#</a></h3>
 <ul>
 <li><strong>Commandes groupées, <code>delonix &lt;group&gt; &lt;verb&gt;</code>.</strong> Pas de raccourcis plats au niveau supérieur.
-  <strong>Décidé</strong> : AGENTS.md § « Reorganização da raiz da CLI (v0.30.0) » ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> (les
+  <strong>Décidé</strong> : AGENTS.md § « Reorganização da raiz da CLI (v0.30.0) » ; <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> (les
   raccourcis de niveau supérieur ont été supprimés en v1.0.0).</li>
 <li><strong>Les verbes suivent Docker/Podman/kubectl</strong> lorsqu'un tel verbe existe. <strong>Décidé</strong> : AGENTS.md §
-  les sprints « Reestruturação da CLI (semântica Docker/Podman/kubectl) » ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> §
+  les sprints « Reestruturação da CLI (semântica Docker/Podman/kubectl) » ; <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> §
   « Estável ».</li>
 <li>Les verbes de liste utilisent <code>ls</code> (<code>network ls</code>, <code>volume ls</code>, <code>image ls</code>…). <code>image list</code> a été
-    ramené à <code>ls</code> en v2.0.0 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>).</li>
+    ramené à <code>ls</code> en v2.0.0 (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>).</li>
 <li><code>create</code> ne fait que créer, et refuse un nom existant avec le code de sortie 5 sauf avec
     <code>--force</code>. L'upsert est un verbe distinct (<code>secret set</code>). <code>apply</code> est un « ensure present »
     idempotent. <strong>Décidé</strong> : AGENTS.md § « Sprint 1: <code>secret create</code> vs <code>secret set</code> ».</li>
@@ -472,10 +472,10 @@ Err(Error::Invalid(super::po::tf(
 <li><strong>Les changements incompatibles sont des coupures nettes, sans alias.</strong> L'ancienne forme doit
   échouer avec <code>unrecognized subcommand</code>, et ne jamais faire silencieusement autre chose. Avant de
   couper, recherchez (grep) les appelants internes dans <strong>tout</strong> le workspace. <strong>Décidé</strong> :
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § « Como uma quebra é feita ». Les groupes listés comme stables dans ce
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § « Como uma quebra é feita ». Les groupes listés comme stables dans ce
   fichier ne peuvent être cassés que dans une release majeure.</li>
 <li><strong>Une commande accessible par plusieurs chemins doit être câblée sur tous</strong> (par exemple
-  <code>vm pull</code> / <code>image vm pull</code> / <code>image --vm pull</code>). <strong>Décidé</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> ; voir
+  <code>vm pull</code> / <code>image vm pull</code> / <code>image --vm pull</code>). <strong>Décidé</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> ; voir
   <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Flux de contribution</a>.</li>
 <li><strong>Les modifications de feuilles mettent à jour la base de référence de la CLI</strong>
   (<code>scripts/cli-tree.sh --update</code>) dans le même commit. <strong>Imposé (gate)</strong> : voir
@@ -488,7 +488,7 @@ Err(Error::Invalid(super::po::tf(
   (<code>&lt;group&gt;.delonix.io/v1alpha1</code>). <strong>Décidé</strong> : AGENTS.md § « Identidade e fronteira do
   motor » et § « Os Kinds ganham grupos » (l'ADR-0020, qui a introduit les groupes, est encore
   <strong>Proposed</strong>). Chaque Kind est <strong>une ligne</strong> dans
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (<code>KindFacts</code> : <code>kind</code>, <code>plural</code>, <code>short</code>,
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (<code>KindFacts</code> : <code>kind</code>, <code>plural</code>, <code>short</code>,
   <code>api_version</code>, <code>domain</code>, <code>form</code>, <code>in_stack</code>, <code>converges</code>, …). <code>delonix api-resources</code> affiche cette
   table. Ajouter un Kind touche aussi des tables que rien ne dérive de <code>kinds.rs</code> (<code>hot_fields</code>,
   <code>NAMESPACE_SOURCES</code>, <code>TYPED_KINDS</code>, le schéma généré). Les tests échouent tant que chacune n'est pas
@@ -508,11 +508,11 @@ cpu_affinity: Option&lt;String&gt;,
 </code></pre></div>
 <p>Autres exemples : <code>delonix-compute/src/pod.rs:PodSpec.restart_policy</code> (<code>rename = "restartPolicy"</code>),
   <code>cmd/service.rs:ServiceSelector.match_labels</code> (<code>rename = "matchLabels"</code>). Le schéma publié
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>) est <strong>généré</strong> à partir de ces structs, et un test vérifie qu'il leur
-  correspond (ADR-0007). Le schéma des manifestes est déclaré <strong>stable</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § « O
+  (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>) est <strong>généré</strong> à partir de ces structs, et un test vérifie qu'il leur
+  correspond (ADR-0007). Le schéma des manifestes est déclaré <strong>stable</strong> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § « O
   schema dos manifestos »).
 - <strong>Les enregistrements internes</strong> (le JSON sous la racine d'état) gardent les noms de champs Rust en
-  <code>snake_case</code>. Voir <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>net_mode</code>, <code>namespace</code>).
+  <code>snake_case</code>. Voir <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>net_mode</code>, <code>namespace</code>).
   <strong>Convention (observée)</strong>.</p>
 <h3 id="37-environment-variables">3.7 Variables d'environnement<a class="hanchor" href="#37-environment-variables" aria-label="#">#</a></h3>
 <ul>
@@ -521,7 +521,7 @@ cpu_affinity: Option&lt;String&gt;,
   <code>bins/</code>.</li>
 <li><strong>Pour la télémétrie, lisez les variables standard <code>OTEL_*</code></strong>, et non un nouvel alias <code>DELONIX_*</code>.
   <strong>Proposé (ADR, pas encore décidé)</strong> : ADR-0040 D6. C'est la cible, pas le code d'aujourd'hui :
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> lit <code>DELONIX_OTLP_ENDPOINT</code> pour l'exportateur
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> lit <code>DELONIX_OTLP_ENDPOINT</code> pour l'exportateur
   OTLP, et de l'ensemble standard uniquement <code>OTEL_SERVICE_NAME</code>. N'ajoutez pas de nouvelle variable
   de télémétrie <code>DELONIX_*</code>, et ne supprimez pas <code>DELONIX_OTLP_ENDPOINT</code> en dehors de la phase qui la
   migre.</li>
@@ -535,13 +535,13 @@ cpu_affinity: Option&lt;String&gt;,
 <h3 id="38-exit-codes-and-dx_-codes">3.8 Codes de sortie et codes <code>DX_*</code><a class="hanchor" href="#38-exit-codes-and-dx_-codes" aria-label="#">#</a></h3>
 <ul>
 <li><strong>Les codes de sortie sont dérivés du type d'erreur en un seul endroit</strong> : la fonction exhaustive
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs:for_error</code></a>. Les classes sont 1 générique,
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs:for_error</code></a>. Les classes sont 1 générique,
   2 usage, 3 <code>NOT_RUNNING</code>, 4 <code>NOT_FOUND</code>, 5 <code>CONFLICT</code>, 69 <code>UNAVAILABLE</code>, 74 <code>IO</code>,
   77 <code>NO_PERMISSION</code>, 124 <code>TIMEOUT</code>. Chaque erreur a aussi une identité textuelle stable,
   <code>Error::code()</code>, qui renvoie une chaîne <code>DX_*</code>. <strong>Imposé (gate)</strong> : le match n'a pas de branche
   <code>_ =&gt;</code>, donc une nouvelle variante arrête le build jusqu'à ce que quelqu'un la classe. Le test
   <code>the_text_class_and_the_number_cannot_diverge</code> maintient les deux en phase. <strong>Décidé</strong> : AGENTS.md §
-  « Códigos de saída com classe (v0.49.0) » ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § « Códigos de saída ».</li>
+  « Códigos de saída com classe (v0.49.0) » ; <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § « Códigos de saída ».</li>
 <li><strong>Vous ne choisissez pas un nombre, vous renvoyez la bonne variante.</strong> « Ça n'existe pas » est
   <code>Error::NotFound</code>, « ça existe déjà » est <code>Error::Conflict</code>, « il manque un outil sur cet hôte » est
   <code>Error::Unavailable</code>. Un nouveau nombre exige un vrai producteur. <strong>Décidé</strong> : documentation de module
@@ -550,7 +550,7 @@ cpu_affinity: Option&lt;String&gt;,
 <hr />
 <h2 id="4-structure-where-code-goes">4. Structure : où va le code<a class="hanchor" href="#4-structure-where-code-goes" aria-label="#">#</a></h2>
 <h3 id="41-the-layers-and-the-direction">4.1 Les couches et la direction<a class="hanchor" href="#41-the-layers-and-the-direction" aria-label="#">#</a></h3>
-<p>La direction autorisée est écrite en un seul endroit, <code>ALLOWED</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.
+<p>La direction autorisée est écrite en un seul endroit, <code>ALLOWED</code> dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.
 <strong>Imposé (gate)</strong> :</p>
 <div class="tablewrap"><table>
 <thead>
@@ -586,7 +586,7 @@ cpu_affinity: Option&lt;String&gt;,
 phase de l'ADR-0040 qui la supprime, et une exception qui ne s'applique plus échoue aussi
 (<code>EXCEPTIONS</code>). La table des couches générée et les exceptions actuelles se trouvent dans
 <a href="architecture.html#layers-and-the-allowed-direction">Architecture</a>.</p>
-<p>D'autres règles structurelles, chacune <strong>Imposé (gate)</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> :</p>
+<p>D'autres règles structurelles, chacune <strong>Imposé (gate)</strong> par <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> :</p>
 <ul>
 <li><strong>La fondation et les contextes restent exempts de dépendances lourdes.</strong> <code>tokio</code>, <code>axum</code>, <code>hyper</code>,
   <code>tonic</code>, <code>reqwest</code>, <code>clap</code>, <code>ratatui</code>, <code>serde_yaml</code>, <code>rmcp</code>, OpenTelemetry et <code>prometheus-client</code> y
@@ -599,7 +599,7 @@ phase de l'ADR-0040 qui la supprime, et une exception qui ne s'applique plus éc
   racine, car un membre ne peut pas désactiver ce que la racine active (<code>inline_versions()</code>).</li>
 <li><strong>Les bibliothèques n'affichent rien.</strong> Le ratchet <code>library_prints</code> compte les
   <code>println!</code>/<code>eprintln!</code>/<code>print!</code> en dehors de <code>bins/</code>. Émettez plutôt du <code>tracing</code> (par exemple
-  <code>tracing::warn!</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>) et laissez l'interface présenter la
+  <code>tracing::warn!</code> dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>) et laissez l'interface présenter la
   sortie. <strong>Décidé</strong> : AGENTS.md § « A direcção das dependências é um portão (ADR-0040, fase P0) »
   (« Uma biblioteca não escreve para o terminal; emite <code>tracing</code> »).</li>
 <li><strong>Les bibliothèques ne réexécutent pas le binaire du moteur lui-même.</strong> Le ratchet <code>self_exec_sites</code>
@@ -713,7 +713,7 @@ Proposed, même si les crates qu'ils décrivent existent déjà.</p>
 </tr>
 <tr>
 <td>Un provider distant ou enfichable (API d'hyperviseur, API de NAS)</td>
-<td>un crate provider dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>. <strong>Écrivez d'abord un ADR</strong></td>
+<td>un crate provider dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>. <strong>Écrivez d'abord un ADR</strong></td>
 <td>ADR-0008, ADR-0009 ; <a href="contributing-workflow.html#when-to-write-an-adr">Flux de contribution</a></td>
 </tr>
 <tr>
@@ -788,7 +788,7 @@ fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
 <li><strong>La connaissance propre à un backend vit dans le backend.</strong> Par exemple,
   <code>VmBackend::ip_is_predicted()</code> indique si l'IP d'une VM a été prédite, au lieu que le site d'appel
   vérifie <code>backend.contains("cloud-hypervisor")</code>. <strong>Décidé</strong> : ADR-0008, cité dans le commentaire de
-  documentation de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>.</li>
+  documentation de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>.</li>
 <li><strong>Un adaptateur ne dépend pas d'un autre adaptateur.</strong> Ce dont il a besoin d'une autre préoccupation
   lui arrive sous forme de hook ou de port, câblé par la racine de composition. <strong>Imposé (gate)</strong> :
   <code>ALLOWED</code> (adapter → foundation, context). <strong>Convention (observée)</strong> : le commentaire de
@@ -819,10 +819,10 @@ pub trait NetworkProvider {
   (<code>delonix_model::Error</code>), qui porte le code <code>DX_*</code>. <strong>Proposé (ADR, pas encore décidé)</strong> :
   ADR-0040 P3.
   <strong>Imposé (gate)</strong> : le ratchet <code>shared_error_imports</code> de <code>arch_fitness.py</code> (<code>SHARED_ERROR</code>,
-  limité à <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> et <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) compte les imports
+  limité à <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> et <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) compte les imports
   <code>use delonix_model::{…Error/Result…}</code> qui font du type partagé le
   type de résultat propre du crate. Le type partagé peut toujours être nommé à l'intérieur d'une impl
-  <code>From</code>. L'implémentation de référence est <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a> :</li>
+  <code>From</code>. L'implémentation de référence est <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a> :</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-rust">impl From&lt;Error&gt; for Dx {
     fn from(e: Error) -&gt; Self {
@@ -845,9 +845,9 @@ pub trait NetworkProvider {
   L'erreur propre d'un crate voyage dans la classe partagée avec son code : un <code>match</code> sur une
   variante cesse de la reconnaître sans que le compilateur ne dise rien. <strong>Décidé</strong> : ADR-0043 D4 (Accepted).
   <strong>Imposé (gate)</strong> : le ratchet <code>raw_error_variant_matches</code> de <code>arch_fitness.py</code>
-  (<code>RAW_VARIANT_MATCH</code>, qui ignore <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/</code></a>), dont la base de référence est 0 —
+  (<code>RAW_VARIANT_MATCH</code>, qui ignore <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/</code></a>), dont la base de référence est 0 —
   tout nouveau <code>match</code> de ce type fait échouer la CI. Les méthodes se trouvent dans
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>.</p>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>.</p>
 <h3 id="53-visibility">5.3 Visibilité<a class="hanchor" href="#53-visibility" aria-label="#">#</a></h3>
 <ul>
 <li><strong>Privé par défaut.</strong> À l'intérieur du crate de la CLI, utilisez <code>pub(crate)</code> pour ce qu'un autre
@@ -861,9 +861,9 @@ pub trait NetworkProvider {
   <strong>Décidé</strong> : AGENTS.md § « <code>delonix_sdn::Net</code> foi APAGADO — e é breaking para quem usa a biblioteca ».</li>
 </ul>
 <h3 id="54-the-node-contract">5.4 Le contrat de nœud<a class="hanchor" href="#54-the-node-contract" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> est la source de vérité des deux encodages, gRPC et HTTP/JSON.
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> en est généré. <strong>Ne modifiez jamais le fichier OpenAPI à la main.</strong>
-<strong>Imposé (gate)</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> exécute <code>buf format</code>, <code>buf lint</code>, <code>buf breaking</code>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> est la source de vérité des deux encodages, gRPC et HTTP/JSON.
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> en est généré. <strong>Ne modifiez jamais le fichier OpenAPI à la main.</strong>
+<strong>Imposé (gate)</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> exécute <code>buf format</code>, <code>buf lint</code>, <code>buf breaking</code>
 contre le dernier tag qui contient <code>proto/</code>, vérifie le mappage HTTP de chaque RPC, et vérifie que le
 fichier OpenAPI est identique au fichier généré. <strong>Décidé</strong> : AGENTS.md § « O contrato de nó é um
 portão » (qui cite l'ADR-0040 P1 ; l'ADR-0040 D4 est encore <strong>Proposed</strong>).</p>
@@ -887,9 +887,9 @@ portão » (qui cite l'ADR-0040 P1 ; l'ADR-0040 D4 est encore <strong>Proposed
 <h3 id="55-the-engine-knows-no-consumer">5.5 Le moteur ne connaît aucun consommateur<a class="hanchor" href="#55-the-engine-knows-no-consumer" aria-label="#">#</a></h3>
 <p>Le moteur ne sait pas qui l'utilise. Aucun nom de plateforme, de control plane, de console ou d'agent,
 et aucune notion de tenant, de compte, de plan ou de facturation, ne peut apparaître dans <code>crates/</code>,
-<code>bins/</code>, <code>proto/</code>, le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine ou le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a>, <strong>commentaires compris</strong>.</p>
+<code>bins/</code>, <code>proto/</code>, le <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine ou le <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a>, <strong>commentaires compris</strong>.</p>
 <ul>
-<li><strong>Noms de consommateurs.</strong> <strong>Imposé (gate)</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>consumer_mentions()</code>
+<li><strong>Noms de consommateurs.</strong> <strong>Imposé (gate)</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>consumer_mentions()</code>
   applique l'expression régulière <code>CONSUMER_NAMES</code>, une liste fixe de noms, à ces chemins. Un nom qui
   n'est pas dans la liste n'est pas détecté.</li>
 <li><strong>Concepts de tenant, de compte, de plan et de facturation.</strong> <strong>Décidé</strong> : AGENTS.md § « Identidade
@@ -965,7 +965,7 @@ let rc = unsafe {
 - <strong>Fichiers temporaires : utilisez <code>delonix_state::write_private_temp</code>.</strong> Il ouvre avec un nom
   unique, <code>O_EXCL</code> et le mode <code>0600</code>, et ne suit donc jamais un lien symbolique piégé. N'utilisez pas
   un nom fixe ou dérivé du pid dans <code>/tmp</code>. <strong>Décidé</strong> : AGENTS.md § « Auditoria de segurança #3 »,
-  passagem 2 ; commentaire de documentation dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>. <strong>Convention (observée)</strong> :
+  passagem 2 ; commentaire de documentation dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>. <strong>Convention (observée)</strong> :
   <code>delonix-sdn/src/bpf.rs</code>, <code>delonix-linux/src/run_host.rs</code>.
 - <strong>Fichiers qui doivent être privés ou atomiques : utilisez <code>write_atomic_mode(path, bytes, Some(0o600))</code>.</strong>
   Il fixe le mode à la création et publie par un renommage atomique. N'écrivez jamais le fichier pour
@@ -991,7 +991,7 @@ let rc = unsafe {
 <h2 id="8-state-and-concurrency">8. État et concurrence<a class="hanchor" href="#8-state-and-concurrency" aria-label="#">#</a></h2>
 <ul>
 <li><strong>La séquence lire–modifier–écrire passe par <code>update</code>, jamais par <code>load</code> → mutation → <code>save</code>.</strong>
-  <code>Store::update</code> et <code>JsonStore::update</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>)
+  <code>Store::update</code> et <code>JsonStore::update</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>)
   prennent un <code>flock</code>, <strong>relisent sous le verrou</strong>, appliquent votre closure et écrivent de manière
   atomique. Une closure qui renvoie <code>false</code> annule l'écriture. La CLI, le serveur CRI et les
   rafraîchissements en arrière-plan touchent tous les mêmes enregistrements en parallèle, et sans le
@@ -1040,7 +1040,7 @@ let c = store.update(id_or_name, |c| match f(c) {
   <a href="rust-primer.html#39-tests">03 § 3.9</a>.</li>
 <li><strong>Le pur d'abord.</strong> Placez la décision dans une fonction pure et testez-la comme des données. Tout ce
   qui a besoin de vrais namespaces, de cgroups ou d'un holder réseau est validé en direct ou avec
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>. <strong>Décidé</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (« Write a unit test for any new pure function ») ;
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>. <strong>Décidé</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (« Write a unit test for any new pure function ») ;
   AGENTS.md § « IaC nativo » (<code>reconcile.rs</code> est pur pour pouvoir être testé comme des données).</li>
 <li><strong>Noms</strong> : des phrases en anglais qui énoncent le comportement (voir <a href="#34-test-names">§3.4</a>).</li>
 <li><strong>Les tests ne touchent jamais l'état réel de l'hôte.</strong> Donnez aux stores une racine temporaire.
@@ -1053,7 +1053,7 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li><strong>Un test supprime son répertoire temporaire à chaque sortie.</strong> Un assert qui échoue, un <code>return</code>
   anticipé et une vérification sautée sont aussi des sorties : la suppression vit donc dans une
   garde avec <code>Drop</code>, pas dans une ligne à la fin. Gardez le répertoire dans un <code>tempfile::TempDir</code>
-  (déclaré une seule fois dans le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine). Une racine qu'un binaire de tests entier
+  (déclaré une seule fois dans le <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine). Une racine qu'un binaire de tests entier
   partage via <code>DELONIX_ROOT</code> utilise le bail de <code>delonix-sdn/tests/network_alloc_race.rs</code>. Un
   dossier nommé d'après le pid sous <code>temp_dir()</code> avec un <code>remove_dir_all</code> à la fin est l'ancien
   idiome : ne le copiez pas. Depuis le 2026-09-28, aucun test ne le fait plus. Un arbre extrait
@@ -1062,7 +1062,7 @@ let c = store.update(id_or_name, |c| match f(c) {
   namespace, un subuid mappé, un hyperviseur), donnez-lui <code>0755</code>. Un socket Unix a besoin d'un
   chemin court (<code>sun_path</code> fait 108 octets) : utilisez <code>tempfile::tempdir_in("/tmp")</code>
   (<code>/tmp/.tmpXXXXXX/x.sock</code> fait 22 octets), et non un chemin littéral sous <code>/tmp</code> avec le pid,
-  qu'un assert qui échoue laisse derrière lui. <strong>Imposé (gate)</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fait
+  qu'un assert qui échoue laisse derrière lui. <strong>Imposé (gate)</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fait
   échouer le job <code>test</code> pour tout ce que les tests laissent dans leur <code>TMPDIR</code> (la baseline est vide
   depuis #572) et pour toute entrée nouvelle dans <code>/tmp</code>, jugée par rapport à une liste prise juste
   avant <code>cargo test</code> (<code>--before</code>). Les deux recensements s'exécutent aussi quand un test échoue.</li>
@@ -1082,7 +1082,7 @@ let c = store.update(id_or_name, |c| match f(c) {
   qu'échantillonnée, générez de la charge et répétez. <strong>Décidé</strong> : AGENTS.md § « Um <code>exec</code> logo a
   seguir ao <code>run -d</code> corria no HOST ».</li>
 <li><strong>Les régions générées ne contiennent aucun décompte volatil</strong> (lignes, tests, commits). <strong>Décidé</strong> :
-  docstring de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (« Deliberately NOT generated: line counts, test counts, commit
+  docstring de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (« Deliberately NOT generated: line counts, test counts, commit
   counts »). Une <strong>mesure écrite à la main</strong> cite la valeur mesurée avec la date de la mesure, jamais un
   total courant. <strong>Décidé</strong> : AGENTS.md § « A bateria mede o <code>--help</code> de tudo e EXECUTA um quarto »
   (« Cita-se a fracção medida e a data, nunca o total »). La question de savoir si des décomptes peuvent
@@ -1094,7 +1094,7 @@ let c = store.update(id_or_name, |c| match f(c) {
 <ul>
 <li><strong>Les commentaires expliquent le <em>pourquoi</em>, pas le <em>quoi</em>.</strong> Écrivez-en un pour une contrainte
   cachée, un contournement d'un bug précis, ou un invariant que le code ne rend pas évident. Les
-  commentaires qui reformulent le code sont supprimés en revue. <strong>Décidé</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
+  commentaires qui reformulent le code sont supprimés en revue. <strong>Décidé</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
 <li><strong>Lorsqu'une décision a été mesurée, dites ce qui a été mesuré.</strong> « Measured: … » vaut mieux que
   « should ». La documentation de module de <code>exitcode.rs</code> et de <code>reconcile.rs</code> sert de modèle.
   <strong>Convention (observée)</strong>.</li>
@@ -1105,17 +1105,17 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li><strong>Les commentaires sont en anglais et ne nomment aucun consommateur.</strong> Le ratchet de langue et le gate
   des consommateurs analysent tous deux les commentaires. <strong>Imposé (gate)</strong>.</li>
 <li><strong>N'ajoutez pas d'abstractions, de flags de configuration ni de gestion d'erreurs pour des cas qui ne
-  peuvent pas se produire.</strong> <strong>Décidé</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
+  peuvent pas se produire.</strong> <strong>Décidé</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
 <li><strong>Lorsque vous déplacez une frontière, mettez à jour ses traces dans la même modification</strong> :</li>
 <li>un ADR <strong>avant</strong> le code, pour un nouveau provider, un port, un daemon, une dépendance externe dans
     un crate du moteur, une frontière de privilège, ou une modification du contrat ou des couches. Les
-    ADR acceptés ne sont jamais réécrits ; un nouvel ADR les remplace (<strong>Décidé</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> ;
+    ADR acceptés ne sont jamais réécrits ; un nouvel ADR les remplace (<strong>Décidé</strong> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> ;
     <a href="contributing-workflow.html#when-to-write-an-adr">Flux de contribution</a>) ;</li>
-<li>la section de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> qui décrit la zone. Une section obsolète à cet endroit induit en erreur la
-    personne suivante, et <strong>les conflits dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> se résolvent en gardant les deux côtés</strong>
+<li>la section de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> qui décrit la zone. Une section obsolète à cet endroit induit en erreur la
+    personne suivante, et <strong>les conflits dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> se résolvent en gardant les deux côtés</strong>
     (<strong>Décidé</strong> : AGENTS.md § « Método: um worktree por sessão ») ;</li>
-<li>les artefacts générés : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>, la base de
-    référence de la CLI, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, et les régions générées de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> via
+<li>les artefacts générés : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>, la base de
+    référence de la CLI, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, et les régions générées de <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> via
     <code>python3 scripts/dev_docs.py</code> (<strong>Imposé (gate)</strong> ; voir
     <a href="publishing-docs.html">Publier la documentation</a>).</li>
 </ul>
@@ -1160,7 +1160,7 @@ votre PR :</p>
    adaptateurs ne dépendent pas d'adaptateurs. → <a href="#51-ports-and-adapters">§5.1</a></li>
 <li>Les échecs d'adaptateur/provider utilisent un <code>Error</code> de crate qui se convertit en
    <code>delonix_model::Error</code>. → <a href="#52-errors-per-crate-adr-0040-p3">§5.2</a></li>
-<li>Si vous avez touché <code>proto/</code> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> passe, avec une requête par RPC, une
+<li>Si vous avez touché <code>proto/</code> : <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> passe, avec une requête par RPC, une
    identité explicite et un OpenAPI régénéré. → <a href="#54-the-node-contract">§5.4</a></li>
 <li>Aucun nom de consommateur nulle part dans <code>crates/</code>, <code>bins/</code> ou <code>proto/</code>, commentaires compris. →
    <a href="#55-the-engine-knows-no-consumer">§5.5</a></li>
@@ -1178,13 +1178,13 @@ votre PR :</p>
     <a href="#35-cli-commands-and-flags">§3.5</a></li>
 <li>Kinds et champs de manifeste : une ligne dans <code>kinds.rs</code>, des champs en <code>camelCase</code> avec les
     anciennes graphies en alias, et le schéma régénéré. → <a href="#36-kinds-api-groups-and-manifest-fields">§3.6</a></li>
-<li>L'ADR, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> et la documentation générée sont mis à jour si une frontière a bougé. →
+<li>L'ADR, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> et la documentation générée sont mis à jour si une frontière a bougé. →
     <a href="#10-comments-and-documentation">§10</a></li>
 </ol>
 <hr />
 <p><strong>Suivant :</strong> <a href="adding-a-kind.html">Ajouter un Kind</a> — la table, le schéma et le câblage du réconciliateur dont un nouveau Kind déclaratif a besoin, illustrés par un cas réel.</p>
 <nav class="pager"><a href="service-names-and-hosts.html"><span>← Précédent</span>Comment les noms atteignent /etc/hosts</a><a class="next" href="adding-a-kind.html"><span>Suivant →</span>Ajouter un Kind</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/coding-conventions.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/coding-conventions.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/fr-FR/coding-conventions.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/coding-conventions.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>

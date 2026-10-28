@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/cloud-native-standards.html">EN · English</option><option value="../pt-AO/cloud-native-standards.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/cloud-native-standards.html">FR-FR · Français</option><option value="../zh-CN/cloud-native-standards.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -290,25 +290,25 @@ e relaciona-se com a especificação de duas formas:</p>
 <ol>
 <li><strong>Produz bundles para runtimes OCI.</strong> <code>delonix image export &lt;image&gt; &lt;dir&gt;</code> escreve
    <code>&lt;dir&gt;/rootfs</code> e <code>&lt;dir&gt;/config.json</code> para que <code>runc run -b &lt;dir&gt;</code> possa correr a imagem.
-   - <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a>: o <code>cmd_export</code> desempacota o rootfs através de
-     <code>ImageStore::export_rootfs</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a>) e constrói a config
+   - <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a>: o <code>cmd_export</code> desempacota o rootfs através de
+     <code>ImageStore::export_rootfs</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a>) e constrói a config
      com <code>build_runtime_spec</code>.
    - O <code>build_runtime_spec</code> constrói a config a partir dos tipos <code>oci_spec::runtime</code> (o crate
-     <code>oci-spec</code>, fixado no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz) em vez de JSON escrito à mão. O seu doc comment lista
+     <code>oci-spec</code>, fixado no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz) em vez de JSON escrito à mão. O seu doc comment lista
      o que faltava a um bundle anterior escrito à mão (mounts padrão, capabilities efectivas,
      caminhos mascarados/só de leitura).</li>
 <li><strong>Implementa os mesmos mecanismos de forma nativa.</strong> O <code>fn spawn</code> e o <code>container_init</code> em
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> fazem o que um runtime OCI faz a partir de um
+   <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> fazem o que um runtime OCI faz a partir de um
    <code>config.json</code>: namespaces, <code>pivot_root</code>, capabilities, seccomp, caminhos mascarados. A
    especificação de execução que consomem não é um <code>config.json</code> mas o <code>RunOpts</code>
-   (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run_opts.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run_opts.rs</code></a>), que todas as frentes (CLI, Kinds, compose,
+   (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/run_opts.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run_opts.rs</code></a>), que todas as frentes (CLI, Kinds, compose,
    API Docker, CRI) produzem.</li>
 </ol>
 <p><strong>Estado de conformidade / lacunas.</strong></p>
 <ul>
 <li>Nenhuma suite de conformidade do runtime-spec foi corrida contra o Delonix. Nem podia: não há um
   ponto de entrada que consuma bundles contra o qual a correr.</li>
-<li><strong>Os hooks OCI não estão implementados.</strong> O <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>
+<li><strong>Os hooks OCI não estão implementados.</strong> O <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>
   (Proposto) regista porquê: não há consumidor concreto, e correr um binário do host nomeado por um
   spec de container é a classe de segurança que o projecto já põe atrás de um spike. O closure
   <code>StartedHook</code> em processo no <code>delonix-linux</code> parece semelhante mas não é o protocolo OCI.</li>
@@ -316,8 +316,8 @@ e relaciona-se com a especificação de duas formas:</p>
   entrega, não como uma tradução da configuração completa de um container.</li>
 </ul>
 <p><strong>Por onde começar a ler.</strong> <code>cmd_export</code> e <code>build_runtime_spec</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a> → <code>export_rootfs</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a> → <code>spawn</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a> → <code>export_rootfs</code> em
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a> → <code>spawn</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
 <hr />
 <h2 id="132-oci-image-specification">13.2 OCI Image Specification<a class="hanchor" href="#132-oci-image-specification" aria-label="#">#</a></h2>
 <p><strong>O que é o padrão.</strong> A <a href="https://github.com/opencontainers/image-spec">OCI Image Specification</a>
@@ -331,13 +331,13 @@ formato de directório <em>image layout</em> (<code>oci-layout</code>, <code>ind
   (tar, gzip, zstd), e aplicar as layers por ordem, whiteouts incluídos.</li>
 <li>Ler e escrever o image layout ao trocar imagens sem registo.</li>
 </ul>
-<p><strong>Como o Delonix o implementa.</strong> Tudo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a>:</p>
+<p><strong>Como o Delonix o implementa.</strong> Tudo em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a>:</p>
 <ul>
 <li><strong>Store endereçado por conteúdo</strong>: <code>src/cas.rs</code> (<code>Cas</code>), com o <code>ImageStore</code> em <code>src/image.rs</code>.</li>
 <li><strong>Layers como lowers do overlay</strong>: o <code>ImageStore::prepare_overlay</code> (<code>src/overlay.rs</code>) escreve um
   ficheiro <code>overlay-lowers</code> ao lado do <code>merged/</code> do container, e é o próprio init do container que o
   monta. As layers são partilhadas entre containers, não copiadas (vê as notas sobre containers que
-  partilham layers no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> e o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> para a API
+  partilham layers no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> e o <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> para a API
   de mount).</li>
 <li><strong>Media type da layer pelo número mágico</strong>: o helper ao lado de <code>DOCKER_MANIFEST_MEDIA_TYPE</code> em
   <code>src/registry.rs</code> detecta gzip, zstd ou tar simples.</li>
@@ -372,7 +372,7 @@ listagem de tags, e o fluxo de autenticação por token que a maioria dos regist
   digest como hash.</li>
 <li>Enviar os blobs (com verificação de existência) e depois o manifest.</li>
 </ul>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>:</p>
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>:</p>
 <ul>
 <li>O <code>parse_reference</code> separa <code>registry/repo:tag@digest</code> (incluindo a forma combinada <code>tag@digest</code>).</li>
 <li><code>pull_from_registry_with_creds</code> / <code>pull_from_registry_with_creds_full</code> fazem pull de uma imagem de
@@ -396,7 +396,7 @@ listagem de tags, e o fluxo de autenticação por token que a maioria dos regist
 <ul>
 <li>Não existe nenhuma corrida de conformidade do distribution-spec para o cliente.</li>
 <li>O <code>list_remote_tags</code> lê só a primeira página de <code>tags/list</code> (sem paginação por <code>Link</code>). As notas
-  do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> chamam a isto irrelevante para o punhado de tags que uma imagem VM tem; importaria
+  do <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> chamam a isto irrelevante para o punhado de tags que uma imagem VM tem; importaria
   para um repositório grande.</li>
 <li>O motor não implementa o lado <em>servidor</em> de um registo, excepto o registo local descartável acima.</li>
 </ul>
@@ -419,7 +419,7 @@ de <code>--container-runtime-endpoint</code>.</p>
 <li>Dizer ao kubelet qual é o seu driver de cgroup (<code>RuntimeConfig</code>), honrar os limites de recursos,
   reportar estatísticas para o eviction, e escrever os logs no formato de log do CRI.</li>
 </ul>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>, binário <code>delonix-cri</code>
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>, binário <code>delonix-cri</code>
 (também <code>delonix serve cri</code>):</p>
 <ul>
 <li><strong>Contrato</strong>: <code>proto/api.proto</code> declara <code>package runtime.v1</code> com
@@ -433,10 +433,10 @@ de <code>--container-runtime-endpoint</code>.</p>
   seu doc comment regista a medição que obrigou a isto (2026-09-15, k8s 1.36.4): não responder nada
   fazia o kubelet assumir <code>systemd</code>, o systemd retirava o <code>cpuset</code> dos slices de pod vazios, e o
   kubelet matava pods em ciclo.</li>
-<li><strong>Modelo de recursos do kubelet</strong>: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>.
+<li><strong>Modelo de recursos do kubelet</strong>: <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>.
   O <code>cgroup_parent</code> do kubelet é validado por <code>KubeCgroupParent::parse</code>
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>) e consumido em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a>; o <code>delonix-linux</code> tem <code>transient_scope_argv</code> para
+  (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>) e consumido em
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a>; o <code>delonix-linux</code> tem <code>transient_scope_argv</code> para
   colocar um container num scope systemd debaixo de um slice de pod.</li>
 <li><strong>Tecto de capabilities</strong>: <code>CapCeiling</code> (<code>src/cap_ceiling.rs</code>), configurado por
   <code>DELONIX_CRI_CAP_CEILING</code> e <code>DELONIX_CRI_CAP_CEILING_MODE</code>, e visível no <code>crictl info</code> como
@@ -449,16 +449,16 @@ de <code>--container-runtime-endpoint</code>.</p>
 </ul>
 <p><strong>Estado de conformidade / lacunas.</strong></p>
 <ul>
-<li><strong>Medido com o <code>critest</code> do projecto original</strong> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>):
+<li><strong>Medido com o <code>critest</code> do projecto original</strong> (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>):
   cri-tools <code>critest</code> <strong>v1.36.0</strong>, motor <code>delonix-cri</code> <strong>v0.63.1</strong>, rootless, <strong>2026-08-25</strong>:
   <strong>79 passaram, 24 falharam, 19 saltadas, de 103 specs corridas</strong> (122 na suite). Falhas por área
   nesse documento: perfis AppArmor por container, propagação de mounts, partes do security context,
   image manager (pull por digest, <code>Uid</code>/<code>Username</code>), port-forward por streaming, OOM, e algumas
-  specs isoladas. Esse número é anterior a várias correcções do CRI registadas no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; não
-  voltou a ser medido desde então. Reproduz com <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>.</li>
-<li><strong>Exercitado à mão com o <code>crictl</code></strong> a 2026-09-11 (segundo o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>): version, info, images,
+  specs isoladas. Esse número é anterior a várias correcções do CRI registadas no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; não
+  voltou a ser medido desde então. Reproduz com <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>.</li>
+<li><strong>Exercitado à mão com o <code>crictl</code></strong> a 2026-09-11 (segundo o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>): version, info, images,
   e o ciclo <code>runp → create → start → exec</code>.</li>
-<li><strong>Validado contra um kubelet real</strong> (k8s 1.36.4, 2026-09-15, segundo o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> e o doc comment
+<li><strong>Validado contra um kubelet real</strong> (k8s 1.36.4, 2026-09-15, segundo o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> e o doc comment
   de <code>engine_cgroup_driver</code>): control plane de nó único estável, CoreDNS a correr com CNI em modo
   root.</li>
 <li><strong>RPCs não implementados</strong> (devolvem <code>UNIMPLEMENTED</code>): <code>UpdateContainerResources</code>,
@@ -491,16 +491,16 @@ operações passadas em <code>CNI_COMMAND</code> com a configuração no stdin.<
 <p><strong>Como o Delonix o implementa.</strong> Existem dois providers de rede, e o CNI é um deles:</p>
 <ul>
 <li><strong>SDN nativa</strong> (a omissão para containers): o netns holder rootless, bridge, IPAM, firewall
-  nftables — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (vê <a href="cloud-native-primer.html">4.5</a> e
+  nftables — <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (vê <a href="cloud-native-primer.html">4.5</a> e
   <a href="architecture.html">Arquitectura</a>).</li>
-<li><strong>Camada do protocolo CNI</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>, pura e testável.
+<li><strong>Camada do protocolo CNI</strong>: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>, pura e testável.
   <code>list_conf_files</code>, <code>parse_config</code>, <code>load_default</code>, <code>resolve_plugin</code>, <code>add</code> (encadeia o
   <code>prevResult</code>), <code>del</code>, <code>plugin_dirs</code> (a partir do <code>CNI_PATH</code>), <code>readiness</code> (a config faz parse <strong>e</strong>
   todos os binários, <code>ipam.type</code> incluído, estão no <code>CNI_PATH</code>), <code>attach_named_netns</code>,
   <code>detach_named_netns</code>, <code>set_netns_sysctls</code>.</li>
 <li><strong>Onde o CNI é usado</strong>:</li>
 <li><strong>CRI, modo root</strong>: a rede do pod é sempre a cadeia CNI do nó, no host, como no containerd. O
-    <code>run_pod_sandbox</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>) cria
+    <code>run_pod_sandbox</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>) cria
     <code>/run/netns/cri-&lt;id&gt;</code> e chama <code>delonix_sdn::cni::attach_named_netns</code>. O <code>NetworkReady</code> vem de
     <code>root_cni_readiness</code> (<code>src/runtime_svc.rs</code>), o mesmo facto sobre o qual o sandbox actua.</li>
 <li><strong>CRI, rootless</strong>: opt-in com <code>DELONIX_CNI=1</code> mais uma conflist (<code>enabled_conf</code>); os plugins
@@ -512,15 +512,15 @@ operações passadas em <code>CNI_COMMAND</code> com a configuração no stdin.<
 <li>O <code>cni.rs</code> documenta suporte às versões de configuração 0.4.0 e 1.0.0. O <code>CHECK</code> existe como
   variante de <code>Command_</code> mas <strong>nunca é invocado</strong>; <code>GC</code> e <code>STATUS</code> não estão implementados.</li>
 <li>O <code>runtimeConfig</code> não é passado aos plugins, por isso o <code>hostPort</code> através do plugin <code>portmap</code> não
-  funciona num sandbox CNI em modo root (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, notas de 2026-09-15).</li>
+  funciona num sandbox CNI em modo root (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, notas de 2026-09-15).</li>
 <li>Medido com uma cadeia bridge/host-local real num nó kubeadm (2026-09-15, k8s 1.36.4, segundo o
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>): nó <code>Ready</code>, CoreDNS a servir, DNS de Service resolvido a partir de outro pod. Não
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>): nó <code>Ready</code>, CoreDNS a servir, DNS de Service resolvido a partir de outro pod. Não
   medido: mais do que um nó, e o caminho CNI rootless depois de ser refactorizado para partilhar o
   corpo do <code>ADD</code>.</li>
 <li>Nenhuma ferramenta de conformidade de plugins CNI foi corrida contra o lado do runtime.</li>
 </ul>
-<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a> (comentário do módulo, <code>add</code>,
-<code>readiness</code>) → <code>run_pod_sandbox</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>
+<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a> (comentário do módulo, <code>add</code>,
+<code>readiness</code>) → <code>run_pod_sandbox</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>
 → <code>root_cni_readiness</code> em <code>src/runtime_svc.rs</code>.</p>
 <hr />
 <h2 id="136-container-storage-interface-csi">13.6 Container Storage Interface (CSI)<a class="hanchor" href="#136-container-storage-interface-csi" aria-label="#">#</a></h2>
@@ -534,22 +534,22 @@ um plugin Controller como serviço de longa duração.</p>
 <p><strong>Como o Delonix o implementa.</strong> <strong>Não implementa CSI.</strong> O armazenamento é servido pelo próprio
 <code>kind: Volume</code> do motor:</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a>: volumes nomeados (<code>&lt;root&gt;/volumes/&lt;name&gt;/_data</code>) e
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a>: volumes nomeados (<code>&lt;root&gt;/volumes/&lt;name&gt;/_data</code>) e
   bind mounts, ambos <code>MS_BIND</code>, sintaxe <code>-v</code> do Docker. O <code>HostVolumes</code> implementa a porta
-  <code>StorageProvider</code> do contexto de compute (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>).</li>
+  <code>StorageProvider</code> do contexto de compute (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>).</li>
 <li>Armazenamento de rede (NFS, CIFS/SMB, WebDAV) montado como volume, e um provisionador de
-  armazenamento contra uma API de NAS (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>,
-  crate <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>).</li>
+  armazenamento contra uma API de NAS (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>,
+  crate <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>).</li>
 </ul>
 <p><strong>Estado de conformidade / lacunas.</strong> Não implementado, por decisão:
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> (Proposto). Um plugin Node do CSI é um serviço
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> (Proposto). Um plugin Node do CSI é um serviço
 permanente, e o motor é daemonless por desenho. O ADR só reabre quando uma necessidade concreta
 nomear especificamente o protocolo CSI <strong>e</strong> a questão do daemon tiver o seu próprio ADR aceite.
 Regista também o caminho prático que não precisa de código aqui (um provisionador NFS externo
 contra o mesmo servidor).</p>
-<p><strong>Por onde começar a ler.</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a> → <code>StorageProvider</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>.</p>
+<p><strong>Por onde começar a ler.</strong> <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a> → <code>StorageProvider</code> em
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>.</p>
 <hr />
 <h2 id="137-container-device-interface-cdi">13.7 Container Device Interface (CDI)<a class="hanchor" href="#137-container-device-interface-cdi" aria-label="#">#</a></h2>
 <p><strong>O que é o padrão.</strong> A <a href="https://github.com/cncf-tags/container-device-interface">Container Device Interface</a>
@@ -562,10 +562,10 @@ do dispositivo, como os de cada dispositivo, hooks incluídos.</p>
 <p><strong>Como o Delonix o implementa.</strong> Como <strong>consumidor</strong> de specs geradas por uma ferramenta do
 fabricante (<code>nvidia-ctk cdi generate</code>), nunca como ferramenta de descoberta de drivers:</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>: <code>is_cdi_qualified</code>, <code>ensure_cdi_available</code>,
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>: <code>is_cdi_qualified</code>, <code>ensure_cdi_available</code>,
   <code>resolve_cdi_device</code>, <code>expand_gpu_devices</code>; directórios de specs <code>/etc/cdi</code> e depois
   <code>/var/run/cdi</code>.</li>
-<li>O <code>HostDevices</code> implementa a porta <code>DeviceResolver</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>),
+<li>O <code>HostDevices</code> implementa a porta <code>DeviceResolver</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>),
   transformando as edits nos mesmos mounts, lista de dispositivos e ambiente que o <code>-v</code> e o
   <code>--device</code> produzem. É o próprio init do container que os aplica antes do <code>pivot_root</code>; nenhum
   segundo processo entra no container por PID.</li>
@@ -576,16 +576,16 @@ fabricante (<code>nvidia-ctk cdi generate</code>), nunca como ferramenta de desc
 <ul>
 <li><strong>Os hooks não são executados.</strong> Um <code>ldconfig -r &lt;rootfs&gt;</code> em melhor esforço substitui o hook
   <code>createContainer</code> habitual, e uma spec que declare hooks produz um aviso visível. É o único custo
-  nomeado do <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>.</li>
+  nomeado do <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>.</li>
 <li>O comentário do módulo regista uma medição contra uma spec do <code>nvidia-ctk</code> 1.20.0
   (<code>cdiVersion</code> 0.7.0): os <code>containerEdits</code> de topo levam a maior parte dos nós de dispositivo e
   todos os mounts, por isso ler só as edits por dispositivo parte o CUDA. O comentário não dá data,
-  e não voltou a ser medido para esta página. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> lista a precedência exacta entre os dois
+  e não voltou a ser medido para esta página. O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> lista a precedência exacta entre os dois
   directórios, e se o <code>ldconfig -r</code> chega, como «por confirmar num host GPU real».</li>
 </ul>
-<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a> (comentário do módulo,
+<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a> (comentário do módulo,
 <code>resolve_cdi_device</code>, <code>HostDevices</code>) → <code>DeviceResolver</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>.</p>
 <hr />
 <h2 id="138-the-workload-api-own-kinds-and-the-node-contract">13.8 A API de workloads: Kinds próprios e o contrato de nó<a class="hanchor" href="#138-the-workload-api-own-kinds-and-the-node-contract" aria-label="#">#</a></h2>
 <p><strong>O que é o padrão.</strong> Aqui não há padrão externo, de propósito. O motor expõe os seus próprios
@@ -596,27 +596,27 @@ a API do Kubernetes.</p>
 <p><strong>O que uma implementação tem de fazer</strong> (as regras próprias do motor):</p>
 <ul>
 <li>Publicar o schema dos manifestos gerado a partir do código, não escrito à mão
-  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>).</li>
+  (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>).</li>
 <li>Planear, aplicar e detectar deriva com um diff de três vias, e nunca ignorar um campo em silêncio.</li>
 <li>Servir um contrato de nó sobre gRPC e HTTP/JSON no mesmo socket local, com o documento OpenAPI
-  gerado a partir do protobuf (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>,
-  Proposto; <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0041-node-local-contract-for-the-control-plane-agent.md" target="_blank" rel="noopener">ADR-0041</a>).</li>
+  gerado a partir do protobuf (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>,
+  Proposto; <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0041-node-local-contract-for-the-control-plane-agent.md" target="_blank" rel="noopener">ADR-0041</a>).</li>
 </ul>
 <p><strong>Como o Delonix o implementa.</strong></p>
 <ul>
-<li>Tabela de Kinds: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (o <code>api_version</code>, o domínio, a
+<li>Tabela de Kinds: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (o <code>api_version</code>, o domínio, a
   convergência e o teardown de cada Kind). Reconciliador: <code>src/reconcile.rs</code>.</li>
-<li>Schema publicado: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>.</li>
-<li>Contrato de nó: <code>proto/delonix/node/v1/*.proto</code>, com <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado e verificado
-  por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>. Servido em parte pelo <code>delonix serve node-api</code>
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>): <code>NodeService.ListProviders</code> em gRPC e como
+<li>Schema publicado: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>.</li>
+<li>Contrato de nó: <code>proto/delonix/node/v1/*.proto</code>, com <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado e verificado
+  por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>. Servido em parte pelo <code>delonix serve node-api</code>
+  (<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>): <code>NodeService.ListProviders</code> em gRPC e como
   <code>GET /v1/providers</code>; os outros RPCs respondem <code>UNIMPLEMENTED</code>.</li>
 </ul>
 <p><strong>Estado de conformidade / lacunas.</strong> Garantido por gates de CI (o teste do schema,
 <code>contract_gate.py</code>), não por uma suite externa. Vê <a href="architecture.html">Arquitectura</a> e
 <a href="system-design-interview.html">System design</a>.</p>
-<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> →
-<code>src/reconcile.rs</code> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>.</p>
+<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> →
+<code>src/reconcile.rs</code> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>.</p>
 <hr />
 <h2 id="139-docker-engine-api-subset-a-de-facto-interface">13.9 Subconjunto da Docker Engine API — uma interface de facto<a class="hanchor" href="#139-docker-engine-api-subset-a-de-facto-interface" aria-label="#">#</a></h2>
 <p><strong>O que é o padrão.</strong> A <a href="https://docs.docker.com/reference/api/engine/">Docker Engine API</a> <strong>não é
@@ -625,7 +625,7 @@ compose, kind, frameworks de teste). Está incluída aqui porque é uma superfí
 interoperabilidade.</p>
 <p><strong>O que uma implementação tem de fazer.</strong> Responder ao <code>/_ping</code> e à negociação de versão, e depois
 às rotas que uma dada ferramenta chama, com as formas JSON e os códigos de estado do Docker.</p>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>, servido por
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>, servido por
 <code>delonix serve docker-api [--addr unix://&lt;socket&gt;]</code>:</p>
 <ul>
 <li><code>API_VERSION</code> é <code>"1.43"</code>, <code>MIN_API_VERSION</code> é <code>"1.24"</code>; os prefixos de versão são retirados para
@@ -646,7 +646,7 @@ interoperabilidade.</p>
 <li>O modelo de rede do Docker (<code>NetworkingConfig</code>) não é traduzido.</li>
 </ul>
 <p><strong>Por onde começar a ler.</strong> <code>API_MATRIX</code> e <code>API_UNIMPLEMENTED</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> → o <code>match</code> de despacho no mesmo ficheiro →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> → o <code>match</code> de despacho no mesmo ficheiro →
 <code>tests/compat/docker_api_smoke.py</code>.</p>
 <hr />
 <h2 id="1310-compose-specification-a-de-facto-spec">13.10 Compose Specification — uma especificação de facto<a class="hanchor" href="#1310-compose-specification-a-de-facto-spec" aria-label="#">#</a></h2>
@@ -656,7 +656,7 @@ especificação aberta mantida pelo projecto Compose, <strong>não um padrão CN
 <p><strong>O que uma implementação tem de fazer.</strong> Fazer parsing do modelo, ordenar os serviços por
 <code>depends_on</code> (com as suas condições), criar redes e volumes, e não mudar em silêncio o significado
 de um ficheiro.</p>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/compose.rs</code></a>
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/compose.rs</code></a>
 (<code>delonix compose up|down|ps|logs|config</code>): um tradutor para <code>RunOpts</code> e para os documentos
 <code>Image</code>/<code>Network</code>/<code>Volume</code> próprios do motor, com a pertença derivada das labels.</p>
 <p><strong>Estado de conformidade / lacunas.</strong></p>
@@ -675,7 +675,7 @@ de um ficheiro.</p>
 métricas e logs, com o protocolo OTLP para os exportar para um collector.</p>
 <p><strong>O que uma implementação tem de fazer.</strong> Emitir spans com atributos de recurso (pelo menos
 <code>service.name</code>), exportá-los por OTLP (gRPC ou HTTP), e fazer flush antes de o processo sair.</p>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>:</p>
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>:</p>
 <ul>
 <li>Logs estruturados através de <code>tracing</code> (<code>DELONIX_LOG</code>, <code>DELONIX_LOG_FORMAT=json</code>).</li>
 <li><strong>Traces por OTLP/HTTP protobuf</strong> quando <code>DELONIX_OTLP_ENDPOINT</code> está definido
@@ -693,7 +693,7 @@ métricas e logs, com o protocolo OTLP para os exportar para um collector.</p>
   spans. O caminho fiável é o <code>delonix-cri</code>, de longa duração.</li>
 </ul>
 <p><strong>Por onde começar a ler.</strong> Comentário do módulo, <code>init</code> e <code>build_otlp_layer</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>.</p>
 <hr />
 <h2 id="1312-prometheus-exposition-format">13.12 Formato de exposição Prometheus<a class="hanchor" href="#1312-prometheus-exposition-format" aria-label="#">#</a></h2>
 <p><strong>O que é o padrão.</strong> O <a href="https://prometheus.io/docs/instrumenting/exposition_formats/">formato de exposição Prometheus</a>
@@ -703,21 +703,21 @@ alvo de scrape serve em <code>GET /metrics</code>.</p>
 tipos de métrica estáveis, depressa o suficiente para o timeout do scrape.</p>
 <p><strong>Como o Delonix o implementa.</strong></p>
 <ul>
-<li>Um registo partilhado: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> (<code>encode</code>, e setters
+<li>Um registo partilhado: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> (<code>encode</code>, e setters
   como <code>set_containers</code>, <code>set_vms</code>, <code>set_memory</code>, <code>set_network</code>, <code>set_storage</code>), construído sobre o
   crate <code>prometheus-client</code>.</li>
 <li><code>delonix-cri</code>: um listener <code>/metrics</code> opcional, activado por <code>DELONIX_METRICS_ADDR</code>
   (<code>src/lib.rs</code>, <code>metrics_handler</code>), separado do socket gRPC.</li>
-<li><code>delonix-mgmt</code>: <code>/metrics</code> no seu socket local (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a>,
+<li><code>delonix-mgmt</code>: <code>/metrics</code> no seu socket local (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a>,
   <code>metrics</code>). Os campos baratos são calculados a cada scrape; os caros (percorrer o disco) são
   actualizados em background para os scrapes continuarem rápidos.</li>
 <li>Os dois handlers servem <code>application/openmetrics-text; version=1.0.0; charset=utf-8</code>.</li>
 </ul>
 <p><strong>Estado de conformidade / lacunas.</strong> Não está registada nenhuma corrida de
 <code>promtool check metrics</code>. Os gauges caros podem estar desactualizados até um intervalo de
-actualização; as notas no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> explicam porque se escolheu esse compromisso.</p>
-<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> →
-<code>metrics_handler</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a> → <code>metrics</code> e
+actualização; as notas no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> explicam porque se escolheu esse compromisso.</p>
+<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> →
+<code>metrics_handler</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a> → <code>metrics</code> e
 <code>src/dashstats.rs</code> no <code>delonix-mgmt</code>.</p>
 <hr />
 <h2 id="1313-supply-chain-sbom-spdx-signatures-slsa-provenance">13.13 Supply chain: SBOM (SPDX), assinaturas, proveniência SLSA<a class="hanchor" href="#1313-supply-chain-sbom-spdx-signatures-slsa-provenance" aria-label="#">#</a></h2>
@@ -735,21 +735,21 @@ com o artefacto; assinar de forma a que a verificação falhe perante adulteraç
 proveniência aos ficheiros exactos publicados.</p>
 <p><strong>Como o Delonix o implementa.</strong></p>
 <ul>
-<li><strong>SBOM dos binários da release</strong>: o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> escreve SPDX 2.3 a partir do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a>. O
+<li><strong>SBOM dos binários da release</strong>: o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> escreve SPDX 2.3 a partir do <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a>. O
   passo «SBOM (SPDX 2.3, do Cargo.lock)» do <code>release.yml</code> escreve <code>delonix-sbom.spdx.json</code> e
   acrescenta-o ao <code>SHA256SUMS</code>, por isso o SBOM fica coberto pela assinatura.</li>
 <li><strong>Assinatura da release</strong>: o <code>release.yml</code> assina o <code>SHA256SUMS</code> com minisign e verifica-o com a
-  chave pública embutida em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (<code>MINISIGN_PUBKEY</code>). Se a chave estiver configurada
+  chave pública embutida em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (<code>MINISIGN_PUBKEY</code>). Se a chave estiver configurada
   e faltar o segredo, a release falha em vez de sair sem assinatura.</li>
 <li><strong>Proveniência SLSA</strong>: o passo «Proveniência (SLSA) dos binários» do <code>release.yml</code> usa
   <code>actions/attest-build-provenance</code> sobre os binários publicados <code>delonix</code>, <code>delonix-cri</code> e
-  <code>delonix-mcp</code>. Verifica com <code>gh attestation verify &lt;file&gt; --repo angolardevops/delonix-runtime</code>.</li>
-<li><strong>Assinaturas de imagem, compatíveis com cosign</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a>. O
+  <code>delonix-mcp</code>. Verifica com <code>gh attestation verify &lt;file&gt; --repo ngolacloud/delonix</code>.</li>
+<li><strong>Assinaturas de imagem, compatíveis com cosign</strong>: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a>. O
   <code>sign_image</code> (por trás de <code>delonix image sign</code>) publica um payload simple-signing ECDSA P-256
   como o artefacto <code>.sig</code>; o <code>verify_signature</code> (por trás de <code>image pull --verify &lt;key&gt;</code> e de
   <code>image verify</code>) verifica a assinatura e que o payload nomeia o digest da imagem. As imagens VM
-  usam o mesmo mecanismo (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a>).</li>
-<li><strong>Scan de imagens</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>. O <code>extract_sbom</code> lê as bases de
+  usam o mesmo mecanismo (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a>).</li>
+<li><strong>Scan de imagens</strong>: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>. O <code>extract_sbom</code> lê as bases de
   dados <code>apk</code>/<code>dpkg</code> (e os requirements de Python) directamente das layers no CAS sem correr a
   imagem; o <code>advisories_from_osv</code> ingere feeds OSV.</li>
 </ul>
@@ -763,9 +763,9 @@ proveniência aos ficheiros exactos publicados.</p>
   CycloneDX; nenhum código Rust do motor escreve SPDX.</li>
 <li>Não está registada neste repositório nenhuma corrida de um validador SPDX nem do <code>slsa-verifier</code>.</li>
 </ul>
-<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> → os passos de SBOM, minisign e proveniência em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>.</p>
+<p><strong>Por onde começar a ler.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> → os passos de SBOM, minisign e proveniência em
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>.</p>
 <hr />
 <h2 id="1314-virtual-machines-kvm-virtio-uefi-cloud-init-nocloud">13.14 Máquinas virtuais: KVM, virtio, UEFI, cloud-init NoCloud<a class="hanchor" href="#1314-virtual-machines-kvm-virtio-uefi-cloud-init-nocloud" aria-label="#">#</a></h2>
 <p><strong>O que são os padrões.</strong></p>
@@ -782,16 +782,16 @@ proveniência aos ficheiros exactos publicados.</p>
 </ul>
 <p><strong>O que uma implementação tem de fazer.</strong> Dar ao convidado dispositivos virtio e um firmware pelo
 qual consiga arrancar, e entregar-lhe um seed NoCloud cuja configuração de rede bata com a sua NIC.</p>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm</code></a>:</p>
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm</code></a>:</p>
 <ul>
 <li><strong>Backends atrás de uma porta</strong>: <code>trait VmBackend</code> e <code>register_backend</code> em <code>src/lib.rs</code>. O Cloud
   Hypervisor (VMM em Rust sobre <code>/dev/kvm</code>) e o libvirt/QEMU são locais; o Proxmox VE é um provider
-  remoto (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>). Vê <a href="microvm-setup.html">Construir microVMs</a>.</li>
+  remoto (<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>). Vê <a href="microvm-setup.html">Construir microVMs</a>.</li>
 <li><strong>virtio</strong>: o <code>libvirt_domain_xml</code> gera o disco principal como <code>bus='virtio'</code> (<code>vda</code>), as NICs
   como <code>&lt;model type='virtio'/&gt;</code>, e os volumes partilhados como virtio-9p.</li>
 <li><strong>Firmware UEFI para o Cloud Hypervisor</strong>: o <code>DEFAULT_CH_FIRMWARES</code> prefere o EDK2 <code>CLOUDHV.fd</code>
   ao <code>hypervisor-fw</code>. O seu doc comment regista porquê: com o <code>hypervisor-fw</code> as imagens do projecto
-  não arrancam; com o EDK2 arrancam (medido a 2026-08-12, segundo o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). O libvirt usa um
+  não arrancam; com o EDK2 arrancam (medido a 2026-08-12, segundo o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). O libvirt usa um
   <code>&lt;loader&gt;</code> <code>pflash</code>.</li>
 <li><strong>cloud-init NoCloud</strong>: <code>src/cloudinit.rs</code>. <code>build_user_data</code>, <code>build_network_config</code> (DHCP na NIC
   primária <strong>casada por MAC</strong>, a partir de <code>mac_for</code>, porque casar por nome parte os convidados com
@@ -803,12 +803,12 @@ qual consiga arrancar, e entregar-lhe um seed NoCloud cuja configuração de red
 <li>O Cloud Hypervisor não suporta virtio-9p; <code>spec.volumes</code> numa VM CH é recusado (o virtio-fs
   precisaria do daemon <code>virtiofsd</code>, que não está ligado).</li>
 <li>O <code>delonix-vm-base:fedora-42</code> não arranca com o EDK2 do Cloud Hypervisor, incluindo a imagem
-  original do fabricante (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, 2026-08-12); o arranque directo do kernel funciona.</li>
-<li>A live migration é um NO-GO: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>.</li>
-<li>As imagens VM publicadas são só amd64: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>.</li>
+  original do fabricante (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, 2026-08-12); o arranque directo do kernel funciona.</li>
+<li>A live migration é um NO-GO: <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>.</li>
+<li>As imagens VM publicadas são só amd64: <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>.</li>
 </ul>
 <p><strong>Por onde começar a ler.</strong> <code>trait VmBackend</code> e <code>create_with</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> → <code>src/cloudinit.rs</code> → <code>libvirt_domain_xml</code> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> → <code>src/cloudinit.rs</code> → <code>libvirt_domain_xml</code> →
 <code>DEFAULT_CH_FIRMWARES</code>.</p>
 <hr />
 <h2 id="1315-linux-cgroup-v2-and-systemd-delegation">13.15 Linux: cgroup v2 e delegação do systemd<a class="hanchor" href="#1315-linux-cgroup-v2-and-systemd-delegation" aria-label="#">#</a></h2>
@@ -823,7 +823,7 @@ na raiz está disponível para a sessão que chama.</p>
 <code>delonix.slice</code>, rootless debaixo de <code>user@&lt;uid&gt;.service/dlx-containers</code>) está em
 <a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">Manual de cloud native 4.2</a>; a árvore e a
 regra de delegação em si estão em <a href="linux-foundations.html#cgroups-v2">Fundações de Linux</a>. O que
-importa para o contrato, em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>:</p>
+importa para o contrato, em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>:</p>
 <ul>
 <li>O <code>cgroup_limits_apply</code> responde a «os limites vão aplicar-se aqui?» sem arrancar um container. Em
   rootless, sonda o cgroup <em>actual</em> do processo (<code>delegated_base_usable</code>), não o cgroup raiz do host;
@@ -832,18 +832,18 @@ importa para o contrato, em <a class="src" href="https://github.com/angolardevop
   delegado debaixo de um slice de pod (ADR-0038).</li>
 </ul>
 <p><strong>Estado de conformidade / lacunas.</strong> Um scope de sessão SSH simples não é delegado; o remédio é
-<code>systemd-run --user --scope -p Delegate=yes</code> (medido a 2026-08-04, segundo o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). Sem
+<code>systemd-run --user --scope -p Delegate=yes</code> (medido a 2026-08-04, segundo o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). Sem
 delegação, o <code>container run</code> recusa <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> com exit 69
-(<code>preflight_resource_limits</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>;
+(<code>preflight_resource_limits</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>;
 <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> corre sem imposição, com um aviso). Essa sonda só cobre a base
 <code>memory</code>/<code>cpu</code>/<code>pids</code>; <code>--cpuset</code>, <code>--io-weight</code> e as flags <code>--device-*-bps</code>/<code>--device-*-iops</code> têm
 a sua própria sonda por controlador (<code>preflight_controller_limits</code>) e são recusadas com saída 69
 quando o cgroup do container não tem <code>cpuset</code>/<code>io</code> — o normal num Ubuntu de fábrica, onde o
 <code>user@.service</code> recebe <code>cpu memory pids</code> e um scope <code>Delegate=yes</code> não consegue receber mais. O
 remédio é um drop-in de root no <code>user@.service</code> (<code>Delegate=cpu cpuset io memory pids</code>). Vê
-<a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Ambiente</a> e o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
+<a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Ambiente</a> e o <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
 <p><strong>Por onde começar a ler.</strong> <code>cgroup_limits_apply</code> → <code>user_service_base</code> → <code>try_delegated_base</code> →
-<code>transient_scope_argv</code>, todos em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
+<code>transient_scope_argv</code>, todos em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
 <hr />
 <h2 id="1316-model-context-protocol-mcp-not-a-cncf-standard">13.16 Model Context Protocol (MCP) — não é um padrão CNCF<a class="hanchor" href="#1316-model-context-protocol-mcp-not-a-cncf-standard" aria-label="#">#</a></h2>
 <p><strong>O que é o padrão.</strong> O <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> é um protocolo
@@ -851,18 +851,18 @@ JSON-RPC através do qual um cliente de IA chama <em>tools</em> e lê <em>resour
 <strong>Não é um padrão CNCF, OCI nem Kubernetes</strong>; aparece aqui porque é uma das interfaces do motor.</p>
 <p><strong>O que uma implementação tem de fazer.</strong> Servir JSON-RPC sobre um transporte (stdio ou HTTP),
 declarar as capacidades do servidor, e descrever as entradas das tools com JSON Schema.</p>
-<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> (binário <code>delonix-mcp</code>, também
+<p><strong>Como o Delonix o implementa.</strong> <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> (binário <code>delonix-mcp</code>, também
 <code>delonix mcp serve</code>), construído sobre o crate <code>rmcp</code>:</p>
 <ul>
 <li><strong>Só stdio</strong>: um filho em primeiro plano do cliente de IA, que sai quando o stdin fecha. Não é um
-  daemon (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>).</li>
+  daemon (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>).</li>
 <li>As entradas das tools são tipadas e validadas por schema; as saídas são texto JSON. As tools levam
   uma classe de risco (<code>src/risk.rs</code>) e as chamadas são auditadas (<code>src/audit.rs</code>).</li>
 <li>O único principal é o uid local, a mesma fronteira do <code>delonix-mgmt</code>.</li>
 </ul>
 <p><strong>Estado de conformidade / lacunas.</strong> Sem transporte HTTP e sem saída estruturada das tools, por
 decisão (vê o comentário do módulo). Nenhuma ferramenta de conformidade MCP foi corrida.</p>
-<p><strong>Por onde começar a ler.</strong> Comentário do módulo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a> →
+<p><strong>Por onde começar a ler.</strong> Comentário do módulo em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a> →
 <code>src/risk.rs</code> → <code>src/audit.rs</code>.</p>
 <hr />
 <h2 id="1317-summary-table">13.17 Tabela-resumo<a class="hanchor" href="#1317-summary-table" aria-label="#">#</a></h2>
@@ -883,7 +883,7 @@ verificas a afirmação, não uma promessa.</p>
 <td>OCI Runtime Spec</td>
 <td><code>delonix-linux</code> (mecanismos nativos); bundle do <code>image export</code> via <code>build_runtime_spec</code></td>
 <td>parcial — produz bundles, não é um runtime que consuma bundles; sem hooks</td>
-<td>13.1, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a></td>
+<td>13.1, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a></td>
 </tr>
 <tr>
 <td>OCI Image Spec</td>
@@ -901,7 +901,7 @@ verificas a afirmação, não uma promessa.</p>
 <td>CRI (<code>runtime.v1</code>)</td>
 <td><code>delonix-cri</code></td>
 <td>parcial — critest v1.36.0: 79/103 passaram, motor v0.63.1, 2026-08-25; kubelet 1.36.4 validado a 2026-09-15</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">cri-conformance.md</a>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">cri-conformance.md</a>, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
 </tr>
 <tr>
 <td>CNI</td>
@@ -913,7 +913,7 @@ verificas a afirmação, não uma promessa.</p>
 <td>CSI</td>
 <td>nenhum (<code>kind: Volume</code>, <code>delonix-volume</code>, <code>delonix-truenas</code>)</td>
 <td>não implementado — precisa de um daemon</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a></td>
 </tr>
 <tr>
 <td>CDI</td>
@@ -923,9 +923,9 @@ verificas a afirmação, não uma promessa.</p>
 </tr>
 <tr>
 <td>Kinds do motor + contrato de nó</td>
-<td><code>delonix-stack</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a></td>
+<td><code>delonix-stack</code>, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a></td>
 <td>implementado (API própria) — garantido por gates de CI</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
 </tr>
 <tr>
 <td>Docker Engine API (de facto)</td>
@@ -953,7 +953,7 @@ verificas a afirmação, não uma promessa.</p>
 </tr>
 <tr>
 <td>SBOM SPDX</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> no <code>release.yml</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> no <code>release.yml</code></td>
 <td>parcial — árvore de dependências Rust dos binários; o scanner de imagens não emite SPDX</td>
 <td>13.13</td>
 </tr>
@@ -961,7 +961,7 @@ verificas a afirmação, não uma promessa.</p>
 <td>Assinaturas (compatíveis com cosign, minisign)</td>
 <td><code>delonix-oci::sign</code>; minisign no <code>release.yml</code></td>
 <td>parcial — por chave; sem keyless, sem transparency log</td>
-<td>13.13, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a></td>
+<td>13.13, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a></td>
 </tr>
 <tr>
 <td>Proveniência SLSA</td>
@@ -973,7 +973,7 @@ verificas a afirmação, não uma promessa.</p>
 <td>KVM / virtio / UEFI</td>
 <td><code>delonix-vm</code> (Cloud Hypervisor, libvirt)</td>
 <td>implementado — sem virtio-9p no Cloud Hypervisor; sem live migration</td>
-<td>13.14, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a></td>
+<td>13.14, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a></td>
 </tr>
 <tr>
 <td>cloud-init NoCloud</td>
@@ -985,24 +985,24 @@ verificas a afirmação, não uma promessa.</p>
 <td>cgroup v2 + delegação do systemd (Linux)</td>
 <td><code>delonix-linux</code></td>
 <td>implementado — os limites precisam de um scope delegado</td>
-<td>13.15, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a></td>
+<td>13.15, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a></td>
 </tr>
 <tr>
 <td>MCP (não CNCF)</td>
 <td><code>delonix-mcp</code></td>
 <td>parcial — só stdio</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a></td>
 </tr>
 </tbody>
 </table></div>
 <p>Quando mudares um destes componentes, actualiza a sua linha e a sua secção no mesmo pull request.
 Se voltares a correr uma suite de conformidade, substitui o número, a data e a versão em conjunto, e
-actualiza primeiro o documento de origem (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a> para o
+actualiza primeiro o documento de origem (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a> para o
 CRI).</p>
 <hr />
 <p><strong>Seguinte:</strong> <a href="environment-variables.html">Variáveis de ambiente (<code>DELONIX_*</code>)</a> — cada variável <code>DELONIX_*</code> que o código lê, a sua omissão, e quais baixam uma fronteira.</p>
 <nav class="pager"><a href="publishing-docs.html"><span>← Anterior</span>Publicar a documentação</a><a class="next" href="plano-conformidade-oci-cri.html"><span>Seguinte →</span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/cloud-native-standards.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/cloud-native-standards.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/cloud-native-standards.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/cloud-native-standards.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

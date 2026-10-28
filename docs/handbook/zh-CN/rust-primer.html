@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/rust-primer.html">EN · English</option><option value="../pt-AO/rust-primer.html">PT-AO · Português (Angola)</option><option value="../fr-FR/rust-primer.html">FR-FR · Français</option><option value="../zh-CN/rust-primer.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -213,10 +213,10 @@ th:first-child,td:first-child{white-space:nowrap}
 <p><strong>阅读之前：</strong> <a href="cloud-native-primer.html">云原生入门</a>（示例用到其中的词汇），以及基础 Rust（<a href="https://doc.rust-lang.org/book/">The Rust Programming Language</a> 第 1–10 章）。</p>
 <p>这不是一篇 Rust 教程。它是<em>阅读这个仓库</em>所需要的那部分 Rust，每个概念都钉在一个你可以打开的文件上。如果某个概念对你来说是新的，"延伸阅读"链接会指向官方资料；回到这里看引擎是怎么用它的。读完之后，你就能打开工作区里的任何一个 crate，一路追踪它的错误类型、trait、<code>unsafe</code> 块和测试，而不会被语言本身绊住。</p>
 <p>路径都是相对于仓库根目录的。符号的命名是为了方便你 <code>grep</code>——行号被有意省略了，因为它们随每个 PR 都会变动。</p>
-<p>固定下来的工具链写在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 里（一个固定的 <code>channel</code>，加上 <code>rustfmt</code> 和 <code>clippy</code>）。<code>rustup</code> 会自动遵守它，所以你构建时用的编译器和 CI 一样。</p>
+<p>固定下来的工具链写在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 里（一个固定的 <code>channel</code>，加上 <code>rustfmt</code> 和 <code>clippy</code>）。<code>rustup</code> 会自动遵守它，所以你构建时用的编译器和 CI 一样。</p>
 <hr />
 <h2 id="31-the-cargo-workspace">3.1 Cargo 工作区（The Cargo workspace）<a class="hanchor" href="#31-the-cargo-workspace" aria-label="#">#</a></h2>
-<p>这个仓库是一个 Cargo <strong>workspace</strong>（工作区）：根目录有一个 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>，里面是 <code>[workspace] members = [...]</code>，每个 crate 各有一个自己的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>。这里有三条约定值得注意：</p>
+<p>这个仓库是一个 Cargo <strong>workspace</strong>（工作区）：根目录有一个 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>，里面是 <code>[workspace] members = [...]</code>，每个 crate 各有一个自己的 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>。这里有三条约定值得注意：</p>
 <ol>
 <li><strong>每一个路径和每一个版本号都只写一次，写在根目录里。</strong> 根目录有一张 <code>[workspace.dependencies]</code> 表，列出了引擎自己的 crate（用 <code>path</code>）以及每一个第三方 crate（用 <code>version</code>）。一个成员 crate 从不写版本号；它写的是：</li>
 </ol>
@@ -227,10 +227,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
 </code></pre></div>
-<p>一个成员可以加上 <code>features = [...]</code>，仅此而已。<code>default-features = false</code> 留在根目录里，因为一个成员没办法关掉工作区已经打开的默认特性。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（函数 <code>inline_versions</code>）会在某个成员写了自己的版本号时让构建失败。</p>
+<p>一个成员可以加上 <code>features = [...]</code>，仅此而已。<code>default-features = false</code> 留在根目录里，因为一个成员没办法关掉工作区已经打开的默认特性。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（函数 <code>inline_versions</code>）会在某个成员写了自己的版本号时让构建失败。</p>
 <ol start="2">
 <li>
-<p><strong>目录就是层（layer）。</strong> Crate 分别位于 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>，二进制程序位于 <code>bins/</code>（ADR-0040）。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 会拒绝一个目录和它声明的层不匹配的 crate，也会拒绝一条指向不被允许方向的依赖。层的规则会在课程后面讲到，见
+<p><strong>目录就是层（layer）。</strong> Crate 分别位于 <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>、<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>、<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>、<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>、<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>，二进制程序位于 <code>bins/</code>（ADR-0040）。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 会拒绝一个目录和它声明的层不匹配的 crate，也会拒绝一条指向不被允许方向的依赖。层的规则会在课程后面讲到，见
    <a href="architecture.html#layers-and-the-allowed-direction">架构 — 层与允许的依赖方向</a>。</p>
 </li>
 <li>
@@ -249,7 +249,7 @@ libc = { workspace = true }
 <hr />
 <h2 id="32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 错误处理：一个 <code>Error</code>，退出码由它的类型派生而来<a class="hanchor" href="#32-errors-one-error-and-exit-codes-derived-from-its-type" aria-label="#">#</a></h2>
 <p>几乎引擎里每一个可能失败的函数都返回 <code>delonix_model::Result&lt;T&gt;</code>，这是对定义在
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a> 里的那个共享枚举的一个别名。这个枚举位于纯粹的基础 crate <code>delonix-model</code> 里，引擎里的任何其他 crate 都可以依赖它。一些适配器定义了自己的错误类型，再把它转换成这一个（<a href="coding-conventions.html">编码约定</a> §5.2）。它是用
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a> 里的那个共享枚举的一个别名。这个枚举位于纯粹的基础 crate <code>delonix-model</code> 里，引擎里的任何其他 crate 都可以依赖它。一些适配器定义了自己的错误类型，再把它转换成这一个（<a href="coding-conventions.html">编码约定</a> §5.2）。它是用
 <a href="https://docs.rs/thiserror"><code>thiserror</code></a> 构建的：<code>#[derive(Error)]</code> 会根据
 <code>#[error("...")]</code> 属性生成 <code>Display</code>，<code>#[from]</code> 会生成 <code>From</code> 实现，这样 <code>?</code> 就能自动转换一个更底层的错误：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/error.rs
@@ -257,8 +257,8 @@ libc = { workspace = true }
 Io(#[from] std::io::Error),
 </code></pre></div>
 <p>这些变体说的是<strong>调用者接下来该做什么</strong>，而不是哪个子系统出了故障：<code>NotFound</code>、<code>NotRunning</code>、<code>Conflict</code>、<code>Unavailable</code>（缺少某个工具或内核特性）、<code>Timeout</code>、<code>Invalid</code>、<code>Registry</code>、给一次失败的系统调用用的 <code>Runtime { context, message }</code>，等等。每个变体上的 doc comment 都解释了它为什么存在；在新增一个变体之前先读一读它们。</p>
-<p>这些变体在<strong>一个地方</strong>变成<strong>进程退出码</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>，函数 <code>for_error</code>。CLI 重新导出了这个模块（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a> 里的
-<code>pub use delonix_model::exitcode;</code>），<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> 调用
+<p>这些变体在<strong>一个地方</strong>变成<strong>进程退出码</strong>：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>，函数 <code>for_error</code>。CLI 重新导出了这个模块（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a> 里的
+<code>pub use delonix_model::exitcode;</code>），<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> 调用
 <code>std::process::exit(cmd::exitcode::for_error(&amp;e))</code>。</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/exitcode.rs
 pub fn for_error(e: &amp;Error) -&gt; i32 {
@@ -280,7 +280,7 @@ Rust by Example ——<a href="https://doc.rust-lang.org/rust-by-example/error/m
 <a href="https://docs.rs/thiserror">docs.rs 上的 <code>thiserror</code></a>。</p>
 <hr />
 <h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 作为端口的 trait：<code>VmBackend</code> 与后端注册表<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
-<p>引擎通过 <strong>trait</strong>（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> 里的 <code>VmBackend</code>（它是从 <code>delonix-vm</code> 挪过去的，<code>delonix-vm</code> 会重新导出它，这样一个 provider crate 不必依赖某个适配器就能实现它）：</p>
+<p>引擎通过 <strong>trait</strong>（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> 里的 <code>VmBackend</code>（它是从 <code>delonix-vm</code> 挪过去的，<code>delonix-vm</code> 会重新导出它，这样一个 provider crate 不必依赖某个适配器就能实现它）：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">pub trait VmBackend {
     fn id(&amp;self) -&gt; &amp;&#x27;static str;
     fn available(&amp;self) -&gt; bool;
@@ -291,8 +291,8 @@ Rust by Example ——<a href="https://doc.rust-lang.org/rust-by-example/error/m
     // ... more methods, many with default bodies
 }
 </code></pre></div>
-<p>实现有：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的 <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> 里的 <code>ProxmoxBackend</code>。trait 里带有<strong>默认实现体</strong>的方法（比如 <code>auto_selectable</code>）让一个新后端可以继承一份合理的行为，只覆盖不一样的那部分。</p>
+<p>实现有：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的 <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> 里的 <code>ProxmoxBackend</code>。trait 里带有<strong>默认实现体</strong>的方法（比如 <code>auto_selectable</code>）让一个新后端可以继承一份合理的行为，只覆盖不一样的那部分。</p>
 <p>后端是在运行时挑选出来的，所以它们被当作 <strong>trait 对象</strong>来处理，也就是
 <code>Box&lt;dyn VmBackend&gt;</code>。它们是通过一个工厂（factory）注册表创建出来的：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm_backend.rs
@@ -307,11 +307,11 @@ static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegis
 <li>之所以要求 <code>Send + Sync</code>，是因为这张表是一个进程范围的 <code>static</code>；这个约束限制的是闭包，而不是 <code>VmBackend</code> 这个 trait 本身。</li>
 <li><code>OnceLock</code> 惰性地初始化这张表（<code>builtin_backends()</code> 会播种两个本地后端），
   <code>RwLock</code> 让 <code>register_backend</code> 可以在启动时再加一个第三方后端。二进制程序在
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）里就是这么做的：provider
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）里就是这么做的：provider
   的 crate 只负责构建 <code>BackendRegistration</code>（<code>delonix_proxmox::registration</code>），由组合根把它交给
   <code>delonix_vm::register_backend</code>。</li>
 </ul>
-<p>这个设计背后的决定记在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 <code>VmNetwork</code> 这个端口，保存在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 靠前位置的一个 <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> 里）。</p>
+<p>这个设计背后的决定记在 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 <code>VmNetwork</code> 这个端口，保存在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 靠前位置的一个 <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> 里）。</p>
 <p>并不是每个端口都是 trait 对象。VM 用例把它们的端口当作<strong>泛型参数</strong>来接收：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm.rs
 pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
@@ -324,9 +324,9 @@ pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
 }
 </code></pre></div>
 <p>原因是 trait 对象的一条规则：带有泛型方法的 trait 不是 <em>dyn-compatible</em>（对象安全）的，而
-<code>StateRepository&lt;T&gt;</code> 恰好有一个（<code>update&lt;F&gt;</code>，在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>
+<code>StateRepository&lt;T&gt;</code> 恰好有一个（<code>update&lt;F&gt;</code>，在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>
 里）。所以这个 engine 是泛型的，就像 <code>container run</code> 的 <code>resolve_run&lt;I, S, D, H&gt;</code> 一样，由每个
-调用方挑选具体类型：<code>delonix-vm</code> 在 <code>engine</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>）里构建
+调用方挑选具体类型：<code>delonix-vm</code> 在 <code>engine</code>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>）里构建
 <code>VmEngine&lt;JsonStore&lt;Vm&gt;, RegistryBackends, QemuImgDisks, CloudLocaldsSeed&gt;</code>，而 <code>vm::tests</code> 里的
 测试则在一个内存中的 store 和一些会记录调用的假实现之上构建一个。泛型的代价是每种组合都有一份
 代码副本（单态化，monomorphization）；好处是不必为了适配 <code>dyn</code> 而改造任何端口。</p>
@@ -351,17 +351,17 @@ pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
 <tr>
 <td><a href="https://docs.rs/nix"><code>nix</code></a></td>
 <td>相对安全的封装：<code>clone</code>、<code>setns</code>、<code>unshare</code>、<code>pivot_root</code>、<code>fork</code>、<code>mount</code>、信号</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的 <code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的 <code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/libc"><code>libc</code></a></td>
 <td><code>nix</code> 没有封装的原始调用，或者结构体的确切布局很重要的地方</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a>（<code>peer_uid</code>）里的 <code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code>；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a> 里的 <code>libc::flock</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a>（<code>peer_uid</code>）里的 <code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code>；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a> 里的 <code>libc::flock</code></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/rustix"><code>rustix</code></a></td>
 <td>新的挂载 API（<code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>）</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的 <code>fsopen_overlay</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的 <code>fsopen_overlay</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -371,7 +371,7 @@ pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 </code></pre></div>
 <h3 id="where-the-container-is-born">容器诞生的地方<a class="hanchor" href="#where-the-container-is-born" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>fn spawn</code> 以这样结尾：</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>fn spawn</code> 以这样结尾：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// SAFETY: single-threaded; the child mounts the container and does `exec`.
 let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i32)) };
 </code></pre></div>
@@ -384,9 +384,9 @@ let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i
 <p>正因为这个原因，这个仓库有两条具体的规则，两条都在注释里解释过，值得你去读一读：</p>
 <ul>
 <li><strong><code>serve docker-api</code> 绝不在进程内调用 <code>spawn</code>。</strong>
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> 里、重新执行（re-exec）那个辅助函数上方的 doc comment 解释道，这个服务器是一个多线程的 tokio 运行时，所以它会重新执行这个二进制程序本身（<code>__apirun &lt;spec.json&gt;</code>），以此得到一个全新的、单线程的进程，让 <code>clone</code> 的前提条件重新成立。</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> 里、重新执行（re-exec）那个辅助函数上方的 doc comment 解释道，这个服务器是一个多线程的 tokio 运行时，所以它会重新执行这个二进制程序本身（<code>__apirun &lt;spec.json&gt;</code>），以此得到一个全新的、单线程的进程，让 <code>clone</code> 的前提条件重新成立。</li>
 <li><strong>在原始 <code>fork</code> 之后，只能做异步信号安全的事情。</strong>
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>reexec_mapped</code> 和
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>reexec_mapped</code> 和
   <code>reexec_mapped_hold</code> 会在 fork <em>之前</em> 就把每一次内存分配都预先算好。
   <code>reexec_mapped_hold</code> 上的注释还记录了为什么它们用原始的 <code>fork</code>，而不是
   <code>std::process::Command</code> + <code>pre_exec</code>：<code>Command::spawn</code> 会等子进程到达
@@ -395,7 +395,7 @@ let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i
 <h3 id="the-new-mount-api-and-why-it-exists-here">新的挂载 API，以及它为什么会出现在这里<a class="hanchor" href="#the-new-mount-api-and-why-it-exists-here" aria-label="#">#</a></h3>
 <p><code>mount_overlay_if_marked</code> 通过 <code>rustix::mount::fsopen</code>，再对每一层调用一次
 <code>fsconfig_set_string(&amp;fs, "lowerdir+", lower)</code>，来挂载一个容器的 overlay 根。经典的 <code>mount(2)</code> 把所有选项都打包进一个页大小的 <code>data</code> 字符串里，对于层数很多的镜像，内核会把它默默地截断。这个测量和这个决定都记在
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 <code>///</code> 注释，会解释促使它这么写的那次故障。</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 <code>///</code> 注释，会解释促使它这么写的那次故障。</p>
 <p><strong>延伸阅读：</strong> The Rust Book ——<a href="https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html">Unsafe Rust</a>；
 <a href="https://doc.rust-lang.org/nomicon/">Rustonomicon</a>（尤其是
 <a href="https://doc.rust-lang.org/nomicon/ffi.html">FFI</a>）；man 手册页
@@ -414,22 +414,22 @@ let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i
 pub cloud_init: Option&lt;bool&gt;,
 </code></pre></div>
 <p>这里，<code>None</code>（也就是每一份在这个字段存在之前写下的记录）被读作"是"；一个普通的 <code>bool</code> 会默认为 <code>false</code>，从而悄悄改变旧镜像的行为。你会在
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> 里看到同样的推理：
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> 里看到同样的推理：
 <code>Mount::propagation</code> 是一个 <code>Option</code>（<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>），而 <code>Mount::optional</code> 是一个带 <code>#[serde(default)]</code> 的普通
 <code>bool</code>，因为 <code>false</code> 正是每一份更老的记录本来的意思。</p>
-<p><strong>清单。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 用
+<p><strong>清单。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 用
 <code>serde_yaml::Deserializer::from_str(text)</code> 解析多文档的 YAML，得到
 <code>ManifestDoc</code>，它的 <code>spec</code> 会一直保持一个原始的 <code>serde_yaml::Value</code>，直到拥有该 Kind 的代码把它反序列化成自己类型化的 spec 为止。</p>
 <p><strong>自动生成的 schema。</strong> Spec 类型会 derive <code>schemars::JsonSchema</code>（比如
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a> 里的 <code>PodSpec</code>），
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 会从它们生成出已发布的 JSON Schema
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。留意那里的一句注释：schemars 遵守 <code>#[serde(rename)]</code>，但不遵守 <code>#[serde(alias)]</code>。</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a> 里的 <code>PodSpec</code>），
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 会从它们生成出已发布的 JSON Schema
+（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。留意那里的一句注释：schemars 遵守 <code>#[serde(rename)]</code>，但不遵守 <code>#[serde(alias)]</code>。</p>
 <p><strong>延伸阅读：</strong> <a href="https://serde.rs/">serde.rs</a> ——
 <a href="https://serde.rs/field-attrs.html">字段属性</a>（<code>default</code>、<code>skip_serializing_if</code>、<code>alias</code>）；
 <a href="https://docs.rs/serde_yaml"><code>serde_yaml</code></a>；<a href="https://docs.rs/schemars"><code>schemars</code></a>。</p>
 <hr />
 <h2 id="36-the-cli-clap-derive-and-translated-output">3.6 CLI：clap 的 derive 与翻译后的输出<a class="hanchor" href="#36-the-cli-clap-derive-and-translated-output" aria-label="#">#</a></h2>
-<p><code>delonix</code> 这个二进制程序就是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>。它的顶层是
+<p><code>delonix</code> 这个二进制程序就是 <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>。它的顶层是
 <code>src/main.rs</code> 里的一个 <a href="https://docs.rs/clap"><code>clap</code></a> derive：
 <code>#[derive(Parser)] struct Cli</code> 里有一个全局的 <code>--l18n</code> 标志和
 <code>#[command(subcommand)] cmd: Cmd</code>，其中 <code>enum Cmd</code> 是一个
@@ -452,19 +452,19 @@ pub cloud_init: Option&lt;bool&gt;,
 <h2 id="37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 异步与 gRPC——以及为什么引擎的大部分是同步的<a class="hanchor" href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous" aria-label="#">#</a></h2>
 <p>核心引擎是<strong>同步</strong>的：CLI 启动，用阻塞式的系统调用和文件 I/O 完成自己的工作，然后退出。没有守护进程，也没有常驻的异步运行时。异步代码只出现在服务某个协议的那些<em>接口</em>里：</p>
 <ul>
-<li><strong>CRI 服务器</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>。gRPC 的桩代码是在构建时生成的：<code>build.rs</code> 调用
+<li><strong>CRI 服务器</strong>——<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>。gRPC 的桩代码是在构建时生成的：<code>build.rs</code> 调用
   <code>tonic_build::configure()...compile_protos(&amp;["proto/api.proto"], &amp;["proto"])</code>。这需要安装<strong><code>protoc</code></strong>（CI 会安装 <code>protobuf-compiler</code>）；缺少
   <code>protoc</code> 是第一次构建时最常见的失败原因。<code>src/lib.rs</code> 里的
   <code>serve_blocking</code> 会创建自己的
   <code>tokio::runtime::Builder::new_multi_thread()</code> 运行时，处理函数通过
   <code>src/runtime_svc.rs</code> 里的 <code>blocking</code> 辅助函数，把阻塞式的引擎工作挪出异步工作线程——否则一次 <code>clone</code>，或者对 <code>delonix</code> 的一次 shell-out，都会把 tokio 的工作线程拖住。</li>
-<li><strong>L7 反向代理</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> 在它自己的 tokio 运行时上直接使用 <a href="https://docs.rs/hyper"><code>hyper</code></a>（<code>hyper::service::service_fn</code>）。</li>
-<li><strong>MCP 服务器</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> 通过 stdio
+<li><strong>L7 反向代理</strong>——<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> 在它自己的 tokio 运行时上直接使用 <a href="https://docs.rs/hyper"><code>hyper</code></a>（<code>hyper::service::service_fn</code>）。</li>
+<li><strong>MCP 服务器</strong>——<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> 通过 stdio
   （<code>rmcp::transport::io::stdio</code>）使用 <a href="https://docs.rs/rmcp"><code>rmcp</code></a>。</li>
-<li><strong>遥测（telemetry）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>
+<li><strong>遥测（telemetry）</strong>——<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>
   用一个带<em>阻塞式</em> HTTP 客户端的专用线程导出 OpenTelemetry span，这正是为了让同步的 CLI 不需要一个运行时。</li>
 </ul>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 下的节点契约是一个独立的 protobuf API，有它自己的门禁（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>、<code>buf</code>）；见<a href="build-and-test.html">构建与测试</a>。</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 下的节点契约是一个独立的 protobuf API，有它自己的门禁（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>、<code>buf</code>）；见<a href="build-and-test.html">构建与测试</a>。</p>
 <p><strong>延伸阅读：</strong> <a href="https://rust-lang.github.io/async-book/">Rust 中的异步编程</a>；
 <a href="https://tokio.rs/tokio/tutorial">Tokio 教程</a>；
 <a href="https://docs.rs/tonic"><code>tonic</code></a> 与 <a href="https://docs.rs/tonic-build"><code>tonic-build</code></a>；
@@ -491,7 +491,7 @@ self.save(&amp;c)?;
 <code>Arc&lt;std::sync::RwLock&lt;Arc&lt;Vec&lt;Route&gt;&gt;&gt;&gt;</code> 持有代理的可热替换路由表
 （<code>cmd/ingress_proxy.rs</code> 里的 <code>SharedRoutes</code>），dashboard 通过一个
 <code>Arc&lt;Mutex&lt;...&gt;&gt;</code>（<code>cmd/dash.rs</code>）共享它那份较慢的采样数据。</p>
-<p>你还会在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a> 里遇到一个相关的想法：<strong>typestate</strong> 模式，生命周期状态被表示成类型，非法的转换根本编译不过去（它的 doc test 里就包含 <code>compile_fail</code> 的例子）。</p>
+<p>你还会在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a> 里遇到一个相关的想法：<strong>typestate</strong> 模式，生命周期状态被表示成类型，非法的转换根本编译不过去（它的 doc test 里就包含 <code>compile_fail</code> 的例子）。</p>
 <p><strong>延伸阅读：</strong> The Rust Book ——
 <a href="https://doc.rust-lang.org/book/ch16-03-shared-state.html">共享状态并发</a>，
 <a href="https://doc.rust-lang.org/book/ch15-03-drop.html"><code>Drop</code></a>；
@@ -502,14 +502,14 @@ self.save(&amp;c)?;
 <h2 id="39-tests">3.9 测试<a class="hanchor" href="#39-tests" aria-label="#">#</a></h2>
 <ul>
 <li><strong>单元测试写在代码旁边</strong>，放在文件末尾的 <code>#[cfg(test)] mod tests { ... }</code> 里。许多纯函数存在的理由，正是为了让一个决策能像数据一样被测试（比如
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> 里的 <code>reconcile::plan</code>）。</li>
-<li><strong>集成测试</strong>放在 <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/*.rs</code> 里，只使用该 crate 的公开 API。例子：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> 在一个 unix 套接字上启动 CRI 服务器，再用<em>自动生成的 gRPC 客户端</em>和它对话（这也是为什么 <code>build.rs</code> 要设 <code>build_client(true)</code> 的原因）。<code>crates/providers/*/tests/live.rs</code> 下的测试需要一个真实的 provider，是可选启用（opt-in）的。</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> 里的 <code>reconcile::plan</code>）。</li>
+<li><strong>集成测试</strong>放在 <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/*.rs</code> 里，只使用该 crate 的公开 API。例子：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> 在一个 unix 套接字上启动 CRI 服务器，再用<em>自动生成的 gRPC 客户端</em>和它对话（这也是为什么 <code>build.rs</code> 要设 <code>build_client(true)</code> 的原因）。<code>crates/providers/*/tests/live.rs</code> 下的测试需要一个真实的 provider，是可选启用（opt-in）的。</li>
 <li><strong>属性测试（property test）</strong>用的是 <a href="https://docs.rs/proptest"><code>proptest</code></a>：见
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a>（<code>proptest! { ... }</code>）。</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a>（<code>proptest! { ... }</code>）。</li>
 <li><strong>Doc test</strong> 也会被运行——包括 <code>typestate.rs</code> 里那些 <code>compile_fail</code> 代码块。</li>
 <li><strong>基准测试（benchmark）</strong>用的是 <a href="https://docs.rs/criterion"><code>criterion</code></a>
-  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>）。</li>
-<li><strong>命名。</strong> 测试的名字描述的是被证明的那个行为。许多既有的测试用的是葡萄牙语名字；新的标识符用英文（LANG-01，由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> 作为一个棘轮强制执行）。</li>
+  （<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>）。</li>
+<li><strong>命名。</strong> 测试的名字描述的是被证明的那个行为。许多既有的测试用的是葡萄牙语名字；新的标识符用英文（LANG-01，由 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> 作为一个棘轮强制执行）。</li>
 <li><strong>测试不能碰主机的真实状态。</strong> 拿一个临时目录传进去（各个 store 都接受一个根路径），而不是调用那些会解析出真实状态根目录的代码。任何需要真实命名空间、cgroup 或者网络 holder 的东西，都属于<a href="build-and-test.html">构建与测试</a>里讲的现场（live）/ E2E 验证。</li>
 </ul>
 <p><strong>延伸阅读：</strong> The Rust Book ——<a href="https://doc.rust-lang.org/book/ch11-01-writing-tests.html">编写测试</a>，
@@ -521,7 +521,7 @@ rustdoc ——<a href="https://doc.rust-lang.org/rustdoc/write-documentation/doc
 <thead>
 <tr>
 <th>工具</th>
-<th>CI 命令（来自 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>）</th>
+<th>CI 命令（来自 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>）</th>
 <th>它会抓住什么</th>
 </tr>
 </thead>
@@ -543,13 +543,13 @@ rustdoc ——<a href="https://doc.rust-lang.org/rustdoc/write-documentation/doc
 </tr>
 <tr>
 <td>cargo-deny</td>
-<td>带 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> 的 <code>EmbarkStudios/<wbr>cargo-deny-action</code></td>
+<td>带 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> 的 <code>EmbarkStudios/<wbr>cargo-deny-action</code></td>
 <td>RUSTSEC 安全公告、许可证、crate 来源</td>
 </tr>
 </tbody>
 </table></div>
-<p>这个仓库还有一些 Python 门禁（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>、
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> 等等）。完整列表以及如何在本地逐一运行它们，见
+<p>这个仓库还有一些 Python 门禁（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>、
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> 等等）。完整列表以及如何在本地逐一运行它们，见
 <a href="build-and-test.html">构建与测试</a>。</p>
 <p><strong>延伸阅读：</strong> <a href="https://doc.rust-lang.org/clippy/">Clippy</a>，
 <a href="https://rust-lang.github.io/rustfmt/">rustfmt</a>，
@@ -557,7 +557,7 @@ rustdoc ——<a href="https://doc.rust-lang.org/rustdoc/write-documentation/doc
 <hr />
 <p><strong>下一步：</strong> <a href="environment.html">准备你的环境</a>——一台能构建这棵树、能跑现场（live）路径的主机，以及那些看起来像引擎 bug 的主机陷阱。</p>
 <nav class="pager"><a href="cloud-native-primer.html"><span>← 上一页</span>云原生入门</a><a class="next" href="environment.html"><span>下一页 →</span>准备你的环境</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/rust-primer.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/rust-primer.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/rust-primer.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/rust-primer.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
