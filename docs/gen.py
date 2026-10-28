@@ -3340,18 +3340,44 @@ aside.toc a:hover{color:var(--accent);text-decoration:none}
 @media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
 @media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
 main{padding:1.4rem 1.2rem 4rem;max-width:none}}
+
+/* Pesquisa Ctrl/Cmd+K — modal vendored, sem CDN, temas claro/escuro via vars */
+.search-trigger{appearance:none;display:flex;align-items:center;gap:.4rem;width:100%;margin:.1rem 0 .6rem;
+padding:.4rem .55rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted);
+font:inherit;font-size:.86rem;cursor:pointer;text-align:left}
+.search-trigger:hover{border-color:var(--accent);color:var(--ink)}
+.search-trigger .kbd{margin-left:auto;font-size:.68rem;border:1px solid var(--line);border-radius:5px;
+padding:.05rem .32rem;color:var(--muted)}
+.search-overlay{position:fixed;inset:0;z-index:1000;display:none;align-items:flex-start;justify-content:center;
+background:rgba(8,10,16,.5);padding:12vh 1rem 1rem}
+.search-overlay.open{display:flex}
+.search-panel{width:100%;max-width:640px;background:var(--bg);border:1px solid var(--line);border-radius:12px;
+box-shadow:0 18px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;max-height:72vh;overflow:hidden}
+.search-head{display:flex;align-items:center;gap:.55rem;padding:.7rem .9rem;border-bottom:1px solid var(--line)}
+.search-head svg{flex:none;width:18px;height:18px;color:var(--muted)}
+.search-input{flex:1;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:1rem}
+.search-esc{flex:none;font-size:.68rem;border:1px solid var(--line);border-radius:5px;padding:.1rem .35rem;color:var(--muted)}
+.search-results{list-style:none;margin:0;padding:.3rem;overflow-y:auto}
+.search-results li{padding:.5rem .6rem;border-radius:8px;cursor:pointer;scroll-margin:.4rem}
+.search-results li.active,.search-results li:hover{background:var(--accent-soft)}
+.search-results .r-title{font-weight:600;color:var(--ink);font-size:.94rem}
+.search-results li.active .r-title{color:var(--accent)}
+.search-results .r-sec{font-size:.78rem;color:var(--accent);margin-left:.4rem;font-weight:500}
+.search-results .r-ex{font-size:.82rem;color:var(--muted);margin-top:.15rem;line-height:1.35;
+display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.search-results mark{background:var(--accent-soft);color:var(--accent);padding:0 .12em;border-radius:3px}
+.search-empty{padding:1.3rem;text-align:center;color:var(--muted);font-size:.9rem}
 """
 
 
-def sidebar(active, depth=0):
-    p = "../" * depth
-    # (section PT, section EN, [(href, label PT, label EN), ...]) — the 14
-    # guides grouped by theme (Get started/Concepts/Guides/Reference), in
-    # the style of kubectl's quick-reference (Concepts/Tasks/Tutorials/
-    # Reference) instead of one flat list. Same hrefs/labels as always —
-    # pure reorganization, zero new page.
-    doc_groups = [
-        ("Começar", "Get started", [
+# (section PT, section EN, [(href, label PT, label EN), ...]) — the 14
+# guides grouped by theme (Get started/Concepts/Guides/Reference), in the
+# style of kubectl's quick-reference (Concepts/Tasks/Tutorials/Reference)
+# instead of one flat list. Hoisted to module scope so the sidebar AND the
+# search index (`build_search_index()`) read the SAME bilingual page list —
+# never a second copy of the titles/URLs.
+DOC_GROUPS = [
+    ("Começar", "Get started", [
             ("index.html", "Início", "Home"),
             ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
             ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", "Full project: Delonix Temp"),
@@ -3378,6 +3404,11 @@ def sidebar(active, depth=0):
             ("comparacao.html", "Delonix vs Docker vs Podman", "Delonix vs Docker vs Podman"),
         ]),
     ]
+
+
+def sidebar(active, depth=0):
+    p = "../" * depth
+    doc_groups = DOC_GROUPS
 
     def link_bi(href, pt, en):
         cls = ' class="on"' if href == active else ""
@@ -3434,6 +3465,10 @@ def sidebar(active, depth=0):
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
 <span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
 </div></div>
+<button class="search-trigger" type="button" data-search-open aria-haspopup="dialog" aria-controls="search-overlay">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:15px;height:15px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<span class="lang-pt">Pesquisar</span><span class="lang-en">Search</span>
+<span class="kbd">Ctrl K</span></button>
 {doc_html}
 <h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
 {cmd_html}
@@ -3543,26 +3578,31 @@ function isVisibleForLang(el,lang){
   return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
 }
 function buildToc(){
-  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
-      aside=document.getElementById('pagetoc');
-  if(!main||!nav)return;
+  var main=document.querySelector('main');
+  if(!main)return;
   var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  // Âncoras estáveis: ids atribuídos a TODOS os h2/h3 visíveis, em ordem de
+  // documento, com um único mapa de dedup — a MESMA regra que o índice de
+  // pesquisa aplica em Python (build_search_index), para `url#slug` bater.
+  var used={};
+  [].slice.call(main.querySelectorAll('h2,h3')).forEach(function(h){
+    if(!isVisibleForLang(h,lang))return;
+    var label=visibleHeadingText(h);
+    var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+    while(used[slug])slug+='-x';
+    used[slug]=1;h.id=slug;
+  });
+  var nav=document.getElementById('toc-nav'),aside=document.getElementById('pagetoc');
+  if(!nav)return;
   var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
     return isVisibleForLang(h,lang);
   });
   nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
   if(aside)aside.style.display='';
-  var used={};
   heads.forEach(function(h){
-    var label=visibleHeadingText(h);
-    if(!h.id){
-      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
-      while(used[slug])slug+='-x';
-      used[slug]=1;h.id=slug;
-    }
     var a=document.createElement('a');
-    a.href='#'+h.id;a.textContent=label;
+    a.href='#'+h.id;a.textContent=visibleHeadingText(h);
     nav.appendChild(a);
   });
 }
@@ -3591,8 +3631,143 @@ function initLangToggle(){
   });
 }
 
+// ---- Pesquisa Ctrl/Cmd+K (índice estático search-index.json, vendored) ----
+var SEARCH_I18N={
+  pt:{ph:'Pesquisar na documentação…',aria:'Pesquisar na documentação',list:'Resultados da pesquisa',
+      none:'Sem resultados para',hint:'Escreve para pesquisar'},
+  en:{ph:'Search the documentation…',aria:'Search the documentation',list:'Search results',
+      none:'No results for',hint:'Type to search'}
+};
+var searchData=null,searchLoading=false,searchItems=[],searchActive=-1,lastFocus=null;
+function docsBase(){return window.__DOCS_BASE__||'';}
+function curLang(){return document.documentElement.getAttribute('data-lang')||'pt';}
+function fold(s){return (s||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');}
+function loadIndex(cb){
+  if(searchData){cb();return;}
+  if(searchLoading)return;
+  searchLoading=true;
+  fetch(docsBase()+'search-index.json').then(function(r){return r.json();}).then(function(d){
+    searchData=d;searchLoading=false;cb();
+  }).catch(function(){searchData=[];searchLoading=false;cb();});
+}
+function markText(text,terms){
+  text=text||'';
+  var ft=fold(text),ranges=[];
+  terms.forEach(function(t){
+    var from=0,i;
+    while((i=ft.indexOf(t,from))>=0){ranges.push([i,i+t.length]);from=i+t.length;}
+  });
+  if(!ranges.length)return esc(text);
+  ranges.sort(function(a,b){return a[0]-b[0];});
+  var out='',pos=0;
+  ranges.forEach(function(r){
+    if(r[0]<pos)return;
+    out+=esc(text.slice(pos,r[0]))+'<mark>'+esc(text.slice(r[0],r[1]))+'</mark>';
+    pos=r[1];
+  });
+  return out+esc(text.slice(pos));
+}
+function runQuery(q){
+  var lang=curLang(),terms=fold(q).split(/\\s+/).filter(Boolean),out=[];
+  if(!terms.length)return out;
+  (searchData||[]).forEach(function(rec){
+    var title=(rec.title&&rec.title[lang])||'';
+    var text=(rec.text&&rec.text[lang])||'';
+    var exc=(rec.excerpt&&rec.excerpt[lang])||'';
+    if(rec.kind==='section'&&!text)return;   // registo não é deste idioma
+    if(rec.kind==='page'&&!title)return;
+    var ftitle=fold(title),ftext=fold(text),hay=fold(title+' '+text+' '+exc);
+    var ok=true,score=0;
+    terms.forEach(function(t){
+      if(hay.indexOf(t)<0){ok=false;return;}
+      if(ftitle.indexOf(t)>=0)score+=4;
+      if(ftext.indexOf(t)>=0)score+=2;
+      score+=1;
+    });
+    if(rec.kind==='page')score+=1;
+    if(ok)out.push({rec:rec,score:score,title:title,text:text,exc:exc});
+  });
+  out.sort(function(a,b){return b.score-a.score;});
+  return out.slice(0,40);
+}
+function hrefFor(rec,lang){
+  var slug=rec.slug&&rec.slug[lang];
+  return docsBase()+rec.url+(slug?('#'+slug):'');
+}
+function renderResults(q){
+  var ul=document.getElementById('search-results');if(!ul)return;
+  var lang=curLang(),terms=fold(q).split(/\\s+/).filter(Boolean);
+  var res=runQuery(q);
+  searchItems=[];searchActive=-1;ul.innerHTML='';
+  if(!q){ul.innerHTML='<li class="search-empty" role="presentation">'+esc(SEARCH_I18N[lang].hint)+'</li>';return;}
+  if(!res.length){ul.innerHTML='<li class="search-empty" role="presentation">'+esc(SEARCH_I18N[lang].none)+' “'+esc(q)+'”</li>';return;}
+  res.forEach(function(r,idx){
+    var li=document.createElement('li');
+    li.setAttribute('role','option');li.id='search-opt-'+idx;li.setAttribute('aria-selected','false');
+    var sec=r.rec.kind==='section'?('<span class="r-sec">'+markText(r.text,terms)+'</span>'):'';
+    li.innerHTML='<div class="r-title">'+markText(r.title,terms)+sec+'</div>'+
+      (r.exc?('<div class="r-ex">'+markText(r.exc,terms)+'</div>'):'');
+    var href=hrefFor(r.rec,lang);
+    li.addEventListener('click',function(){location.href=href;});
+    searchItems.push({href:href,el:li});
+    ul.appendChild(li);
+  });
+  setActive(0);
+}
+function setActive(i){
+  if(!searchItems.length)return;
+  if(searchActive>=0&&searchItems[searchActive]){
+    searchItems[searchActive].el.classList.remove('active');
+    searchItems[searchActive].el.setAttribute('aria-selected','false');
+  }
+  searchActive=(i+searchItems.length)%searchItems.length;
+  var it=searchItems[searchActive];
+  it.el.classList.add('active');it.el.setAttribute('aria-selected','true');
+  it.el.scrollIntoView({block:'nearest'});
+  var inp=document.getElementById('search-input');if(inp)inp.setAttribute('aria-activedescendant',it.el.id);
+}
+function openSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  loadIndex(function(){var inp=document.getElementById('search-input');if(inp&&inp.value)renderResults(inp.value);});
+  lastFocus=document.activeElement;
+  ov.classList.add('open');ov.removeAttribute('aria-hidden');
+  var lang=curLang(),inp=document.getElementById('search-input');
+  inp.placeholder=SEARCH_I18N[lang].ph;inp.setAttribute('aria-label',SEARCH_I18N[lang].aria);
+  var ul=document.getElementById('search-results');if(ul)ul.setAttribute('aria-label',SEARCH_I18N[lang].list);
+  inp.value='';renderResults('');
+  setTimeout(function(){inp.focus();},0);
+}
+function closeSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  ov.classList.remove('open');ov.setAttribute('aria-hidden','true');
+  if(lastFocus&&lastFocus.focus)lastFocus.focus();
+}
+function initSearch(){
+  var ov=document.getElementById('search-overlay');if(!ov)return;
+  var inp=document.getElementById('search-input');
+  [].slice.call(document.querySelectorAll('[data-search-open]')).forEach(function(b){
+    b.addEventListener('click',function(e){e.preventDefault();openSearch();});
+  });
+  inp.addEventListener('input',function(){renderResults(inp.value);});
+  ov.addEventListener('mousedown',function(e){if(e.target===ov)closeSearch();});
+  document.addEventListener('keydown',function(e){
+    var open=ov.classList.contains('open');
+    if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();open?closeSearch():openSearch();return;}
+    if(!open)return;
+    if(e.key==='Escape'){e.preventDefault();closeSearch();}
+    else if(e.key==='ArrowDown'){e.preventDefault();setActive(searchActive+1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();setActive(searchActive-1);}
+    else if(e.key==='Enter'){e.preventDefault();if(searchActive>=0&&searchItems[searchActive])location.href=searchItems[searchActive].href;}
+    else if(e.key==='Tab'){e.preventDefault();inp.focus();}   // trap de foco simples: 1 campo
+  });
+}
+function scrollToHash(){
+  if(!location.hash)return;
+  try{var el=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(el)el.scrollIntoView();}catch(e){}
+}
+
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();initLangToggle();buildToc();highlightAll();
+  initThemeToggle();initLangToggle();buildToc();highlightAll();initSearch();scrollToHash();
 });
 })();</script>"""
 
@@ -3606,8 +3781,31 @@ FOOTER_EN = ('Delonix Engine · Apache-2.0 · '
 FOOTER_HTML = bi("span", FOOTER_PT, FOOTER_EN)
 TOC_HEADING_HTML = bi("span", "Nesta página", "On this page")
 
+# Material recolhido por `page()` para o índice de pesquisa (uma entrada por
+# página gerada), consumido no fim por `build_search_index()`.
+_SEARCH_PAGES = []
+
+# Marcação do modal de pesquisa, partilhada por todas as páginas. Rótulos
+# bilingues por CSS (lang-pt/lang-en); placeholder/aria-label são postos pelo
+# JS conforme o idioma activo. Começa escondido (sem classe `open`).
+SEARCH_MODAL_HTML = """<div class="search-overlay" id="search-overlay" role="dialog" aria-modal="true" aria-label="Pesquisa / Search" aria-hidden="true">
+<div class="search-panel">
+<div class="search-head">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<input class="search-input" id="search-input" type="text" role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="true" aria-activedescendant="" autocomplete="off" spellcheck="false" placeholder="Pesquisar / Search">
+<span class="search-esc" aria-hidden="true">Esc</span>
+</div>
+<ul class="search-results" id="search-results" role="listbox" aria-label="Resultados / Results"></ul>
+</div>
+</div>"""
+
 
 def page(path, title, body, depth=0):
+    # Guarda o material desta página para o índice de pesquisa — `page()` é o
+    # único sítio por onde TODAS as páginas passam, logo o índice sai das
+    # mesmas estruturas que o site, nunca de uma segunda fonte.
+    _SEARCH_PAGES.append({"path": path, "title": title, "body": body})
+    base = "../" * depth
     doc = f"""<!DOCTYPE html>
 <html lang="pt">
 <head>
@@ -3626,6 +3824,8 @@ def page(path, title, body, depth=0):
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5>{TOC_HEADING_HTML}</h5><nav id="toc-nav"></nav></div></aside>
 </div>
+{SEARCH_MODAL_HTML}
+<script>window.__DOCS_BASE__={base!r};</script>
 {SITE_JS}
 </body>
 </html>"""
@@ -6384,6 +6584,165 @@ delonix container rm -f delonix-temp</code></pre>
 """
 
 
+# ---------------------------------------------------------------------------
+# Índice de pesquisa (Ctrl/Cmd+K) — gerado a partir das MESMAS páginas que o
+# site (`_SEARCH_PAGES`, recolhido por `page()`) e dos títulos bilingues da nav
+# (`DOC_GROUPS`/`GROUPS`), escrito em `docs/search-index.json` versionável. O
+# modal carrega-o uma vez por `fetch` (vendored, mesma origem — zero CDN).
+# ---------------------------------------------------------------------------
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _plain(fragment):
+    """HTML → texto nu: tira tags, desfaz entidades, colapsa espaços."""
+    return _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", fragment))).strip()
+
+
+def _slug(label):
+    """Mesmo slug que o `buildToc` do JS: minúsculas, não-[a-z0-9] → '-',
+    sem '-' nas pontas. Acentos caem (não são a-z) tal como no JS."""
+    s = re.sub(r"[^a-z0-9]+", "-", label.lower())
+    s = re.sub(r"^-|-$", "", s)
+    return s or "sec"
+
+
+def _dedup(slug, used):
+    while used.get(slug):
+        slug += "-x"
+    used[slug] = 1
+    return slug
+
+
+def _class_lang(tag_html):
+    m = re.search(r"class\s*=\s*[\"']([^\"']*)[\"']", tag_html)
+    if not m:
+        return None
+    cls = m.group(1)
+    if "lang-pt" in cls:
+        return "pt"
+    if "lang-en" in cls:
+        return "en"
+    return None
+
+
+def _excerpt(region, lang):
+    """Excerto de um idioma: remove os blocos marcados com o OUTRO idioma
+    (span/p/div/li) e depois reduz a texto nu, truncado."""
+    other = "lang-en" if lang == "pt" else "lang-pt"
+    cleaned = re.sub(
+        r"<(span|p|div|li)\b[^>]*" + other + r"[^>]*>.*?</\1>", " ", region, flags=re.S
+    )
+    t = _plain(cleaned)
+    return t[:160].rstrip()
+
+
+_HEAD_TOKEN_RE = re.compile(
+    r"(?P<divopen><div\b[^>]*>)"
+    r"|(?P<divclose></div>)"
+    r"|(?P<head><(?P<hl>h[23])\b[^>]*>.*?</(?P=hl)>)",
+    re.S,
+)
+
+
+def _extract_sections(body):
+    """Extrai os h2/h3 em ordem de documento com texto PT/EN e âncora por
+    idioma. O idioma de cada cabeçalho vem da classe do próprio <hN>, senão
+    do <div> antecessor mais próximo (índice duplica secções inteiras por
+    idioma), senão é bilingue. Os slugs replicam o dedup do `buildToc`."""
+    div_stack = []
+    heads = []
+    for m in _HEAD_TOKEN_RE.finditer(body):
+        if m.group("divopen"):
+            lang = _class_lang(m.group("divopen"))
+            if lang is None:
+                lang = div_stack[-1] if div_stack else None
+            div_stack.append(lang)
+        elif m.group("divclose"):
+            if div_stack:
+                div_stack.pop()
+            continue
+        else:
+            full = m.group("head")
+            level = int(m.group("hl")[1])
+            open_tag = re.match(r"<h[23]\b[^>]*>", full).group(0)
+            inner = full[len(open_tag):-len("</h%d>" % level)]
+            own = _class_lang(open_tag)
+            ctx = div_stack[-1] if div_stack else None
+            eff = own or ctx  # None => bilingue (visível nos dois idiomas)
+            pt_span = re.search(r"<span[^>]*lang-pt[^>]*>(.*?)</span>", inner, re.S)
+            en_span = re.search(r"<span[^>]*lang-en[^>]*>(.*?)</span>", inner, re.S)
+            region = body[m.end():m.end() + 1400]
+            # O antecessor lang-xx manda mesmo quando o <hN> traz spans dos dois
+            # idiomas (ex.: cartões do index duplicados nos blocos pt E en): o
+            # `buildToc` só vê o cabeçalho no idioma do bloco, logo o texto/slug
+            # têm de sair só desse idioma, senão o dedup `-x` não bate.
+            if eff == "pt":
+                t = _plain(pt_span.group(1)) if pt_span else _plain(inner)
+                pt_text, en_text, vis_pt, vis_en = t, "", True, False
+            elif eff == "en":
+                t = _plain(en_span.group(1)) if en_span else _plain(inner)
+                pt_text, en_text, vis_pt, vis_en = "", t, False, True
+            elif pt_span and en_span:
+                pt_text = _plain(pt_span.group(1))
+                en_text = _plain(en_span.group(1))
+                vis_pt = vis_en = True
+            else:
+                t = _plain(inner)
+                pt_text, en_text, vis_pt, vis_en = t, t, True, True
+            heads.append({
+                "level": level, "pt": pt_text, "en": en_text,
+                "vis_pt": vis_pt, "vis_en": vis_en, "region": region,
+            })
+    used_pt, used_en = {}, {}
+    for h in heads:
+        h["slug_pt"] = _dedup(_slug(h["pt"]), used_pt) if h["vis_pt"] and h["pt"] else ""
+        h["slug_en"] = _dedup(_slug(h["en"]), used_en) if h["vis_en"] and h["en"] else ""
+    return heads
+
+
+def _page_titles_bi():
+    m = {}
+    for _spt, _sen, entries in DOC_GROUPS:
+        for href, pt, en in entries:
+            m[href] = (pt, en)
+    for name in GROUPS:
+        # Nomes de comando são neutros em idioma (p.ex. "delonix run").
+        m["comandos/%s.html" % name] = (GROUPS[name]["title"], GROUPS[name]["title"])
+    return m
+
+
+def build_search_index():
+    titles = _page_titles_bi()
+    records = []
+    for pg in _SEARCH_PAGES:
+        url, body = pg["path"], pg["body"]
+        tpt, ten = titles.get(url, (pg["title"], pg["title"]))
+        no_heads = re.sub(r"<h[1-6]\b[^>]*>.*?</h[1-6]>", " ", body, flags=re.S)
+        records.append({
+            "url": url, "kind": "page", "level": 1,
+            "title": {"pt": tpt, "en": ten},
+            "text": {"pt": tpt, "en": ten},
+            "slug": {"pt": "", "en": ""},
+            "excerpt": {"pt": _excerpt(no_heads, "pt"), "en": _excerpt(no_heads, "en")},
+        })
+        for h in _extract_sections(body):
+            records.append({
+                "url": url, "kind": "section", "level": h["level"],
+                "title": {"pt": tpt, "en": ten},
+                "text": {"pt": h["pt"], "en": h["en"]},
+                "slug": {"pt": h["slug_pt"], "en": h["slug_en"]},
+                "excerpt": {
+                    "pt": _excerpt(h["region"], "pt") if h["vis_pt"] else "",
+                    "en": _excerpt(h["region"], "en") if h["vis_en"] else "",
+                },
+            })
+    out = os.path.join(ROOT, "search-index.json")
+    with open(out, "w") as f:
+        json.dump(records, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"search-index.json: {len(records)} registos ({len(_SEARCH_PAGES)} páginas)")
+
+
 def main():
     # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
     # último token do output inteiro deixou de ser a versão.
@@ -6435,6 +6794,7 @@ def main():
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))
     for n, g in GROUPS.items():
         group_page(n, g)
+    build_search_index()
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
     print(f"docs geradas (delonix {ver}) em {ROOT}")
 
