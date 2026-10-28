@@ -1,7 +1,7 @@
 {
-  "self_exec_sites": 29,
-  "library_prints": 82,
-  "env_writes": 23,
+  "self_exec_sites": 35,
+  "library_prints": 109,
+  "env_writes": 24,
   "shared_error_imports": 3,
   "raw_error_variant_matches": 0,
   "context_spawns": 0
