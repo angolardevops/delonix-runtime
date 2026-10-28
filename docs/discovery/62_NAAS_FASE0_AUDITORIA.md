@@ -82,6 +82,10 @@ motor (CLI / stack apply / node API)
       └─ NetworkZone ──► NetworkZoneProvider (Proxmox; escolhido pela CONTAGEM de providers)
 ```
 
+> ⚠️ **Desenho / não implementado** — a env var `DELONIX_NET_PROVIDER` (acima) descreve
+> uma seleção de provider planeada; **0 leitores no código Rust a 2026-10-28**
+> (`grep` em `crates`/`src` = 0). Não a ler como funcionalidade real.
+
 ## 3. Ownership por recurso (um escritor, ou o conflito que existe)
 
 | Recurso | Escritor(es) hoje | Veredicto |
