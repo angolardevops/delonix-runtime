@@ -17084,6 +17084,7 @@ msgstr "e apaga também os buckets/objectos que o utilizador S3 ainda possui (de
 
 msgid "S3-compatible object stores (buckets): ls/inspect/rm."
 msgstr "Object stores (buckets) compatíveis com S3: ls/inspect/rm."
+
 # ---- oci-runtime (RT-4, ADR-0080): about dos comandos + help das flags ----
 
 msgid "OCI runtime (runc-compatible CLI): create/start/state/kill/delete a container from a bundle. The engine's own init behind the runc contract, so it can sit where runc/crun do (ADR-0080)"
