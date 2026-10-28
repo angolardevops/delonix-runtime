@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 34 crates.
+[README.md](README.md) para a arquitectura dos 35 crates.
 
 ## Arranque rápido (ler isto; o resto consulta-se por secção)
 
@@ -8522,7 +8522,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (34 crates)
+## Arquitetura (35 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -8549,6 +8549,7 @@ antes de qualquer commit:
 | `delonix-provider-btrfs` | driver de pool `btrfs` (ADR-0067 P2): um volume é um subvolume com a marca de posse; as quotas por qgroup e o `create-pool`/`destroy-pool` passam pelo helper |
 | `delonix-provider-zfs` | driver de pool `zfs` (ADR-0067 P3): datasets com a posse numa propriedade `delonix.io:owner`; as operações privilegiadas passam pelo helper |
 | `delonix-provider-lvm` | driver de pool `lvm-thin` (ADR-0067 P4): volumes finos com etiquetas de posse, recusa a 95% de dados ou metadados; tudo pelo helper |
+| `delonix-provider-ceph` | suporte Ceph nativo (ADR-0081): quatro superfícies de um mesmo cluster alcançadas pela porta `Run` do storage (nunca a linkar `librados`) — RADOS (`ceph status`), RBD (um `StoragePoolDriver` de bloco), CephFS (um volume por subvolume) e RGW (identidades e buckets S3) |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
 | `delonix-scanner` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
