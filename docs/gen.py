@@ -1738,6 +1738,72 @@ VERBATIM da flag, para os dois nunca poderem divergir.""",
 # parte em vez de dentro de `GROUPS` para não obrigar a tocar em 26 entradas
 # grandes já existentes; `group_page` funde os dois por chave.
 GROUPS_EN = {
+    "backup": {
+        "tagline": "Backup of ONE resource — container, pod, vm or stack — into a tar.gz.",
+        "intro": """Not to be confused with <code>system snapshot create</code>, which takes the whole
+NODE. Here the archive carries the resource record and the DATA of the volumes it uses — not the
+image nor the rootfs, because a measured rootfs is 435 MB against 1.5 KB of record, and the image is
+content-addressed and re-downloads. The VM is the exception: its overlay IS its state, so that one
+travels (the golden base does not). <b>Nothing has to stop</b>: a container (or all members of a
+pod/stack, together) is held in the cgroup v2 <i>freezer</i> during the snapshot — no process can
+write while <code>tar</code> reads, and the PID does not change; a VM goes through libvirt's external
+snapshot, running on a temporary overlay while the real disk is copied, then settling back onto it.
+The guarantee is <b>crash consistency</b>, exactly what a power cut leaves — a journalled filesystem
+and any write-ahead-log database recover from it. What it is NOT: memory is not saved, so a process
+is not resumed mid-flight (that is CRIU) and an app with state only in RAM loses it —
+<code>--stop</code> and <code>--quiesce</code> are the two ways to ask for more, and each says what it
+costs. The destination can be a folder or a <code>volume:&lt;name&gt;</code>, which is how the archive
+lands on a NAS. Being a daemonless engine, <code>backup schedule</code> installs a <b>systemd user
+timer</b>: <code>--max-for-day N</code> spaces N runs across the day, and <code>--cron</code>
+translates the crontab expression — refusing what it cannot express rather than approximating.
+<code>schedule</code> <b>also takes the first archive, now</b>: a schedule whose first run is hours
+away leaves whoever installed it with no backup and the impression of having one. <code>restore</code>
+unpacks into a working folder BEFORE touching anything — a truncated archive then costs nothing — and
+refuses while the resource is running (<code>--force</code> stops it, restores, and starts it again).
+The <code>&lt;kind&gt;</code> is no longer positional: the archive already records what it carries,
+and <code>--kind</code> stays for anyone who wants a mismatch to be refused.""",
+    },
+    "config": {
+        "tagline": "A local preference, never a context: get, set, unset.",
+        "intro": """Just one key today, <code>output</code> (<code>table</code>|<code>json</code>),
+persisted in <code>config.json</code> under this host's <code>DELONIX_ROOT</code>. Never a remote
+context: the specification wanted <code>endpoint</code>/<code>identity</code>/<code>tls</code>, and
+that is exactly what ADR-0010 refused — the remote management API stays local until someone names a
+concrete consumer to reopen it.<br><br>
+<code>namespace</code> was left out on purpose: unlike <code>output</code>, which has ONE read point
+(<code>resolve_output</code>, called wherever this CLI takes <code>-o/--output</code>), a namespace
+default would be read by a dozen commands with no common point — building it just because the
+specification asked for more keys would be the field the system ignores that this repository has
+already paid for more than once.""",
+    },
+    "namespace": {
+        "tagline": "Isolation namespaces: ls, describe — who stands on each side of the boundary.",
+        "intro": """A namespace <strong>has no record of its own</strong>: it exists while something is
+in it, so this group DERIVES — just like <code>cluster ls</code> (from labels) and <code>pod
+ls</code>. There is no <code>create</code>/<code>rm</code> on purpose: an empty namespace would be a
+resource with a lifecycle, quotas and teardown — ADR matter, not a listing.<br><br>
+The boundary is nftables chains on the <code>forward</code> hook, and traffic between two containers
+on the SAME bridge only reaches it through <code>br_netfilter</code>. Without it every rule installs,
+every command reports success, and the namespaces <strong>do not isolate</strong> — which is why
+<code>ls</code> says so out loud when the host is not filtering, and <code>describe</code>
+distinguishes <em>no</em> from <em>don't know</em>.""",
+    },
+    "oci-runtime": {
+        "tagline": "runc-compatible runtime CLI (ADR-0080): run a container from an OCI bundle, with the engine's own init behind the runc contract.",
+        "intro": """The contract that Kubernetes, Docker and Podman speak to the lowest level is
+runc's: <code>create</code>/<code>start</code>/<code>state</code>/<code>kill</code>/<code>delete</code>
+over an <strong>OCI bundle</strong> (a directory with <code>config.json</code> + an already-extracted
+<code>rootfs/</code>). This group exposes exactly that contract on top of <code>delonix</code>'s init —
+so <code>delonix oci-runtime</code> can take the place where <code>runc</code> or <code>crun</code> sit
+today.<br><br>
+State lives under <code>--root</code> (default <code>$XDG_RUNTIME_DIR/delonix-runtime</code> in
+rootless, or <code>/run/delonix-runtime</code>), apart from the image store: the bundle already brings
+the <code>rootfs/</code>, so <strong>no image and no unpack are needed</strong>. The work is to
+translate <code>config.json</code> (args, env, cwd, hostname, delegated limits, user namespace,
+seccomp) into the engine's <code>Container</code> + <code>RunSpec</code>. Fields with no real support
+in rootless (<code>hooks</code>, AppArmor, non-delegated resource controllers) are <strong>refused by
+name</strong>, with the reason — never silently ignored.""",
+    },
     "bucket": {
         "tagline": "S3 object storage (buckets): ls, inspect, rm.",
         "intro": """The imperative side of <code>kind: ObjectStorage</code> (ADR-0081): list, inspect
@@ -3294,6 +3360,7 @@ pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-r
 overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
+.help-note{font-size:.76rem;color:var(--muted);margin:0 0 .35rem;font-style:italic}
 .tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
 .tok-comment{color:var(--tok-comment);font-style:italic}
 .tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
@@ -3451,7 +3518,7 @@ THEME_INIT_JS = """<script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
 var l=localStorage.getItem('delonix-docs-lang');
-if(l)document.documentElement.setAttribute('data-lang',l);
+if(l){document.documentElement.setAttribute('data-lang',l);document.documentElement.lang=(l==='en'?'en':'pt');}
 }catch(e){}})();</script>"""
 
 # JS partilhado por todas as páginas: toggle de tema (persistido), índice
@@ -3586,6 +3653,7 @@ function initLangToggle(){
     var eff=document.documentElement.getAttribute('data-lang')||'pt';
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
+    document.documentElement.lang=(next==='en'?'en':'pt');
     try{localStorage.setItem(KEY,next);}catch(e){}
     buildToc();
   });
@@ -3605,15 +3673,50 @@ FOOTER_EN = ('Delonix Engine · Apache-2.0 · '
              ' · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.')
 FOOTER_HTML = bi("span", FOOTER_PT, FOOTER_EN)
 TOC_HEADING_HTML = bi("span", "Nesta página", "On this page")
+# Os blocos `<div class='help'>` embebem o `--help` REAL do clap, que é só-EN.
+# Em vez de tentar traduzir a saída do binário, rotula-se o bloco (bilingue)
+# para o leitor PT saber que o que se segue é a saída verbatim, em inglês.
+HELP_NOTE_HTML = bi("div", "Saída real do binário (em inglês).",
+                    "Real output of the binary (English).", cls="help-note")
+
+# URL base do GitHub Pages (modo "branch → /docs", sem CNAME/domínio próprio).
+# NÃO se usa uma tag <base> HTML: os links do site são relativos com
+# profundidade variável (`../kinds.html`, `comandos/x.html`) e um <base>
+# resolvê-los-ia todos contra a raiz, partindo a navegação. Serve só de origem
+# para os URLs ABSOLUTOS de `canonical`/`og:url`, calculados por página.
+SITE_BASE = "https://ngolacloud.github.io/delonix"
+SITE_NAME = "Delonix Engine"
+SITE_DESCRIPTION = ("Engine de containers e microVMs daemonless, rootless-first, "
+                    "em Rust — referência gerada do --help real do binário.")
 
 
 def page(path, title, body, depth=0):
+    # `canonical`/`og:url` absolutos a partir do caminho da própria página
+    # (independente da profundidade); a raiz colapsa `index.html` para `/`.
+    canon = SITE_BASE + "/" + ("" if path == "index.html" else path)
+    # O index chama-se já "Delonix Engine" — sem isto o <title> saía duplicado
+    # ("Delonix Engine · Delonix Engine").
+    page_title = (html.escape(title) if title == SITE_NAME
+                  else f"{html.escape(title)} · {html.escape(SITE_NAME)}")
+    og_title = html.escape(title)
+    desc = html.escape(SITE_DESCRIPTION)
+    canon_e = html.escape(canon)
     doc = f"""<!DOCTYPE html>
 <html lang="pt">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Delonix Engine</title>
+<title>{page_title}</title>
+<meta name="description" content="{desc}">
+<link rel="canonical" href="{canon_e}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{html.escape(SITE_NAME)}">
+<meta property="og:title" content="{og_title}">
+<meta property="og:description" content="{desc}">
+<meta property="og:url" content="{canon_e}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{og_title}">
+<meta name="twitter:description" content="{desc}">
 {THEME_INIT_JS}
 <style>{CSS}</style>
 </head>
@@ -3690,7 +3793,7 @@ def group_page(name, g):
     # descarta (nunca se duplica), mantendo o bloco de código a começar já
     # em "Usage:".
     _, top_rest = split_help_intro(top_help)
-    body.append(f"<div class='help'><pre><code>{html.escape(top_rest)}</code></pre></div>")
+    body.append(f"<div class='help'>{HELP_NOTE_HTML}<pre><code>{html.escape(top_rest)}</code></pre></div>")
     if g.get("examples"):
         body.append(f"<h2>{bi('span', 'Exemplos', 'Examples')}</h2>" + examples_html(g["examples"], EXAMPLES_EN.get((name, None)), (name, None)))
     if g.get("extra"):
@@ -3704,7 +3807,7 @@ def group_page(name, g):
             for para in sub_intro.split("\n\n"):
                 if para.strip():
                     body.append(f"<p class='intro'>{render_prose(para.strip())}</p>")
-        body.append(f"<div class='help'><pre><code>{html.escape(sub_rest)}</code></pre></div>")
+        body.append(f"<div class='help'>{HELP_NOTE_HTML}<pre><code>{html.escape(sub_rest)}</code></pre></div>")
         if meta.get("notes"):
             notes_en = NOTES_EN.get((name, sub))
             if notes_en:
@@ -4595,6 +4698,21 @@ main{max-width:1280px}
     page("c4.html", "Modelo C4 e system design", body)
 
 
+def _md_slug(value, separator):
+    """Slugify partilhado pelos cabeçalhos do `md_page` E pelas âncoras do
+    índice escrito à mão nessas páginas.
+
+    O slugify por omissão do Python-Markdown despia os acentos para ASCII e
+    colapsava corridas de espaços, por isso uma âncora do índice como
+    `#1-antes-de-começar` (acentos mantidos) ou `#7-...--a-vm-declarada`
+    (` — ` escrito como `--`) nunca batia com o `id` gerado do cabeçalho. Este
+    mantém os caracteres de palavra Unicode e mapeia CADA espaço para o
+    separador SEM colapsar — a convenção que esses índices já usam — logo o
+    índice e os cabeçalhos aterram no mesmo `id`."""
+    value = re.sub(r"[^\w\s-]", "", value).strip().lower()
+    return re.sub(r"\s", separator, value)
+
+
 def md_page(src_name, out_name, title):
     """Uma página do site a partir de um `.md` do repositório.
 
@@ -4606,8 +4724,18 @@ def md_page(src_name, out_name, title):
     import markdown
 
     src = open(os.path.join(ROOT, src_name)).read()
-    body = markdown.markdown(src, extensions=["tables", "fenced_code", "toc"])
-    page(out_name, title, body)
+    body = markdown.markdown(
+        src,
+        extensions=["tables", "fenced_code", "toc"],
+        extension_configs={"toc": {"slugify": _md_slug}},
+    )
+    # Estes guias são escritos SÓ em português; o toggle de idioma não traduz o
+    # corpo Markdown. Em vez de mostrar texto PT a um leitor EN em silêncio,
+    # rotula-se explicitamente (o aviso só aparece com data-lang="en").
+    banner = ('<div class="callout warn lang-en"><b>Portuguese only.</b> '
+              "This guide is authored in Portuguese; the language toggle does "
+              "not translate its body.</div>")
+    page(out_name, title, banner + body)
 
 
 def subcommands_of(group):
