@@ -867,7 +867,7 @@ check "migrate assess de um ficheiro inexistente diz 4" 4 \
 # names the project from `name:` and keeps the second network. Three defects
 # this sample found (2026-10-11) are the three greps: `<<` refused,
 # `name:` ignored, the second network dropped with a warning.
-SAMPLE="$REPO/examples/compose-webapp/compose.yaml"
+SAMPLE="$REPO/examples/_labs/compose-webapp/compose.yaml"
 check "migrate assess: the compose-webapp sample is fully served" 0 \
   "$BIN" migrate assess -f "$SAMPLE" --detailed-exitcode
 check "compose config: the sample's project is its name: and web keeps both networks" ok bash -c \
@@ -1423,7 +1423,7 @@ YAML
 # campo — `share.storageRef` é a grafia que o `kind: ShareVolume` usava e
 # continua a ser um alias de `share.from`, para que um manifesto que só renomeie
 # o Kind não tenha de renomear também o campo. É a promessa que o
-# examples/sharevolume.yaml faz por escrito, e ninguém a exercitava.
+# examples/storage/volume.yaml (bloco share) faz por escrito, e ninguém a exercitava.
 #
 # Dentro do bloco `share:`, e não em `spec.storageRef` — medido: um
 # `spec.storageRef` solto é campo DESCONHECIDO, sai um WARNING e o apply devolve
@@ -9024,14 +9024,14 @@ check "policy unset: sem política declarada diz que não há nada a remover" ok
 
 # --- `manifest`: validar e renderizar -----------------------------------------
 check "manifest validate: um exemplo publicado resolve todas as referências" ok bash -c "
-  '$BIN' manifest validate -f '$REPO/examples/netroute.yaml' 2>&1 | grep -q 'all references resolved'"
+  '$BIN' manifest validate -f '$REPO/examples/networking/networkroute.yaml' 2>&1 | grep -q 'all references resolved'"
 check "manifest validate: um apiVersion desconhecido é recusado pelo nome" ok bash -c "
   printf 'apiVersion: x\nkind: Network\nmetadata:\n  name: a\n' >'$OUT/bad-manifest.yaml'
   out=\$('$BIN' manifest validate -f '$OUT/bad-manifest.yaml' 2>&1); rc=\$?
   [ \$rc -ne 0 ] || { echo 'aceitou um apiVersion que o motor não conhece'; exit 1; }
   grep -q \"unknown apiVersion 'x'\" <<<\"\$out\" || { echo 'recusou sem nomear o apiVersion'; exit 1; }"
 check "manifest render: materializa os defaults que o documento não escreve" ok bash -c "
-  out=\$('$BIN' manifest render -f '$REPO/examples/netroute.yaml' 2>&1) || exit 1
+  out=\$('$BIN' manifest render -f '$REPO/examples/networking/networkroute.yaml' 2>&1) || exit 1
   grep -q '^kind: Network' <<<\"\$out\" || { echo 'não renderizou o Kind'; exit 1; }
   grep -q 'driver:' <<<\"\$out\" || { echo 'não materializou o default do driver'; exit 1; }"
 

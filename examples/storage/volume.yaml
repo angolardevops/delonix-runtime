@@ -1,0 +1,221 @@
+# ============================================================================
+# kind: Volume — volume com nome (os dados sobrevivem a `container rm`)
+# kind: Volume — a named volume (data survives `container rm`)
+#
+# PT: UM só Kind, VÁRIAS formas MUTUAMENTE EXCLUSIVAS (por isso um documento
+#     cada): um volume local, um driver de rede cru, um bloco de partilha de
+#     rede (`nfs:`/`cifs:`/`webdav:` — o NOME do bloco É o tipo), uma fatia de
+#     OUTRO volume (`share:`), aprovisionamento numa NAS (`provision:`) e um
+#     volume alocado numa storage pool (`pool:`). `quota` e `alertPct` aplicam-se
+#     a todas as formas. `kind: Storage` e `kind: ShareVolume` foram ABSORVIDOS
+#     aqui (o load recusa-os e nomeia esta forma); `storageRef` sobrevive como
+#     alias de `share.from` e `options` como alias de `mountOptions`.
+# EN: ONE Kind, SEVERAL MUTUALLY EXCLUSIVE shapes (hence one document each): a
+#     local volume, a raw network driver, a network-share block
+#     (`nfs:`/`cifs:`/`webdav:` — the block's NAME is the type), a slice of
+#     ANOTHER volume (`share:`), provisioning on a NAS (`provision:`) and a
+#     volume allocated in a storage pool (`pool:`). `quota` and `alertPct` apply
+#     to every shape. `kind: Storage` and `kind: ShareVolume` were FOLDED in here
+#     (the load refuses them and names this form); `storageRef` survives as an
+#     alias of `share.from`, and `options` as an alias of `mountOptions`.
+#
+# PT: Um workload consome qualquer volume da MESMA forma: `-v <nome>:/caminho`
+#     (container), `volumes:` (pod/stack), ou `spec.volumes` numa VM (9p libvirt).
+# EN: A workload consumes any volume the SAME way: `-v <name>:/path` (container),
+#     `volumes:` (pod/stack), or `spec.volumes` on a VM (libvirt 9p).
+#
+# PT: Aplicar:  delonix stack apply -f examples/storage/volume.yaml
+# EN: Apply:    delonix stack apply -f examples/storage/volume.yaml
+# ============================================================================
+
+# ── Secret de apoio — credenciais das partilhas de rede abaixo ───────────────
+#    Supporting Secret — credentials for the network shares below
+# PT: As credenciais vivem num `kind: Secret` (cofre cifrado) e NUNCA em texto no
+#     manifesto — é a razão de existir do `passwordSecret`. Texto só aqui porque
+#     é um exemplo (o apply avisa-te disso).
+# EN: Credentials live in a `kind: Secret` (encrypted vault), NEVER in cleartext
+#     in the manifest — that is the reason `passwordSecret` exists. Cleartext
+#     only here because this is an example (the apply warns you about it).
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: nas-creds
+spec:
+  stringData:
+    password: troca-me          # PT: senha SMB/WebDAV | EN: SMB/WebDAV password
+    apiKey: dummy-truenas-key    # PT: chave de API TrueNAS | EN: TrueNAS API key
+
+# ── 1. local — volume local simples (o caso comum) ──────────────────────────
+#      local — a plain local volume (the common case)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: local-data
+  labels:                       # PT: ficam no volume; carregam também o carimbo de posse do stack | EN: stored on the volume; also carry the stack ownership stamp
+    app: demo
+spec:
+  driver: local                 # PT: local (default) — omite para local | EN: local (default) — omit for local
+  quota: 2G                     # PT: tecto de tamanho (monitorizado em rootless, rígido como root) | EN: size cap (monitored in rootless, hard as root)
+  alertPct: 80                  # PT: % de uso acima da qual `ls`/`describe` mostram WARN (default 90) | EN: usage % above which `ls`/`describe` show WARN (default 90)
+
+# ── 2. driver cru — montar um export NFS sem o bloco amigável ────────────────
+#      raw driver — mount an NFS export without the friendly block
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: raw-nfs
+spec:
+  driver: nfs                        # PT: driver não-local | EN: non-local driver
+  device: "10.0.0.5:/mnt/pool/raw"   # PT: "server:/export"; só com driver: nfs | EN: "server:/export"; only with driver: nfs
+  mountOptions: "vers=4.1,soft"      # PT: opções de `mount -o` (alias: options) | EN: `mount -o` options (alias: options)
+
+# ── 3. nfs: — partilha NFS (TrueNAS, Synology, nfs-kernel-server) ────────────
+#      nfs: — an NFS share (TrueNAS, Synology, nfs-kernel-server)
+# PT: Este é o volume que uma VM consome por `spec.volumes` (9p libvirt) — ver
+#     examples/compute/virtualmachine.yaml.
+# EN: This is the volume a VM consumes via `spec.volumes` (libvirt 9p) — see
+#     examples/compute/virtualmachine.yaml.
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: nfs-media
+spec:
+  nfs:
+    server: 10.0.0.5                 # PT: host ou IP da NAS (obrigatório) | EN: NAS host or IP (required)
+    share: /mnt/pool/media           # PT: caminho do export NFS (obrigatório) | EN: NFS export path (required)
+    readOnly: false                  # PT: true = montado só-leitura | EN: true = mounted read-only
+    mountOptions: "vers=4.1,soft"    # PT: opções extra de `mount -o` | EN: extra `mount -o` options
+  quota: 500G
+  alertPct: 85
+
+# ── 4. cifs: — partilha SMB/CIFS (Samba, Windows, TrueNAS SMB) ───────────────
+#      cifs: — an SMB/CIFS share (Samba, Windows, TrueNAS SMB)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: cifs-backups
+spec:
+  cifs:
+    server: nas.local                # PT: obrigatório | EN: required
+    share: backups                   # PT: nome da partilha SMB, sem barra inicial (obrigatório) | EN: SMB share name, no leading slash (required)
+    username: delonix                # PT: utilizador SMB | EN: SMB user
+    passwordSecret: nas-creds        # PT: lê a chave `password` deste Secret (preferido) | EN: reads key `password` from this Secret (preferred)
+    # password: troca-me             # PT: alternativa inline (desencorajada) | EN: inline alternative (discouraged)
+    readOnly: false
+    mountOptions: "vers=3.0"
+
+# ── 5. webdav: — partilha WebDAV (Nextcloud, ownCloud) ───────────────────────
+#      webdav: — a WebDAV share (Nextcloud, ownCloud)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: webdav-cloud
+spec:
+  webdav:
+    server: cloud.example.com        # PT: host, ou URL completo (http://host:port) para forçar o esquema | EN: host, or full URL (http://host:port) to override the scheme
+    share: /remote.php/dav/files/delonix   # PT: caminho dentro do endpoint WebDAV | EN: path inside the WebDAV endpoint
+    username: delonix
+    passwordSecret: nas-creds
+    readOnly: false
+
+# ── 6. share: — fatia isolada e com quota própria de OUTRO volume ────────────
+#      share: — an isolated, individually-quota'd slice of ANOTHER volume
+# PT: Um subdirectório real do mount do volume-pai (`nfs-media` acima),
+#     registado como volume próprio: vários workloads partilham UM export de NAS
+#     sem verem os dados nem esgotarem a quota uns dos outros. `metadata.namespace`
+#     é OPCIONAL — ausente = raiz sem dono (não é o tenant `default`). Exclusivo
+#     com nfs/cifs/webdav, device, driver não-local e provision.
+# EN: A real subdirectory of the parent's mount (`nfs-media` above), registered
+#     as its own volume: several workloads share ONE NAS export without seeing
+#     each other's data or exhausting each other's quota. `metadata.namespace` is
+#     OPTIONAL — absent = the unscoped root (not the `default` tenant). Exclusive
+#     with nfs/cifs/webdav, device, a non-local driver and provision.
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: team-share
+  namespace: teamA                   # PT: escopa o nome e o directório de dados; omite = raiz sem dono | EN: scopes the name and data dir; omit = unscoped root
+spec:
+  share:
+    from: nfs-media                  # PT: obrigatório — o volume-pai de onde talhar (alias: storageRef) | EN: required — the parent volume to carve out of (alias: storageRef)
+  quota: 5G                          # PT: quota SOFT desta fatia (uso medido + alerta); omite = ilimitada | EN: SOFT quota for this slice (measured usage + alert); omit = unlimited
+  alertPct: 90
+
+# ── 7. provision.truenas: — criar o dataset/quota/export numa NAS e montar ───
+#      provision.truenas: — create the dataset/quota/export on a NAS, then mount
+# PT: OPCIONAL (ADR-0009); sem este bloco o Kind comporta-se exactamente como
+#     antes. Cria na NAS: o dataset, a sua quota, o dono/modo do mountpoint e um
+#     export NFS restrito às redes listadas. `server`/`share` do mount são
+#     DERIVADOS do que o aparelho reportou, nunca escritos duas vezes. Destruir
+#     o lado remoto (irreversível): `delonix volume rm truenas-dados --destroy-remote`.
+# EN: OPTIONAL (ADR-0009); without this block the Kind behaves exactly as before.
+#     Makes on the NAS: the dataset, its quota, the owner/mode of the mountpoint
+#     and an NFS export restricted to the listed networks. The mount's
+#     `server`/`share` are DERIVED from what the appliance reported, never written
+#     twice. Destroy the remote side (irreversible):
+#     `delonix volume rm truenas-dados --destroy-remote`.
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: truenas-dados
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83    # PT: obrigatório; o esquema é teu (http:// põe a chave em claro) | EN: required; the scheme is yours (http:// puts the key on the wire in clear)
+      apiKeySecret: nas-creds        # PT: Secret com a chave `apiKey` (ou `token`); preferido a uma conta | EN: Secret with key `apiKey` (or `token`); preferred over an account
+      insecureTLS: true              # PT: um TrueNAS de fábrica serve um certificado auto-assinado | EN: a stock TrueNAS serves a self-signed certificate
+      dataset: tank/dados            # PT: obrigatório: <pool>/<nome>; a pool tem de existir | EN: required: <pool>/<name>; the pool must already exist
+      quota: 2G                      # PT: quota NA NAS (mínimo 1 GiB) | EN: quota ON THE NAS (min 1 GiB)
+      owner:
+        uid: 1000                    # PT: obrigatório dentro de owner | EN: required inside owner
+        gid: 1000                    # PT: obrigatório dentro de owner | EN: required inside owner
+        mode: "0770"                 # PT: octal, entre aspas (um 0770 nu em YAML é o decimal 770) | EN: octal, quoted (a bare 0770 in YAML is decimal 770)
+      share:                         # PT: omite este bloco para aprovisionar sem exportar | EN: drop this block to provision without exporting
+        networks: ["192.168.122.0/24"]   # PT: CIDRs autorizados a montar (tem de ser não-vazio) | EN: CIDRs allowed to mount (must be non-empty)
+        readOnly: false
+        maprootUser: root
+        maprootGroup: root
+
+# ── 7b. provision.truenas: com conta em vez de chave de API ──────────────────
+#       provision.truenas: with account credentials instead of an API key
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: truenas-account
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83
+      username: truenas_admin        # PT: nome da conta | EN: account name
+      passwordSecret: nas-creds      # PT: Secret com a chave `password` (ou `password:` inline) | EN: Secret with key `password` (or inline `password:`)
+      insecureTLS: true
+      dataset: tank/account
+
+# ── 8. pool: — volume alocado numa storage pool (ADR-0067) ───────────────────
+#      pool: — a volume allocated in a storage pool (ADR-0067)
+# PT: `pool` é o NOME de um `kind: StoragePool` (ver storagepool.yaml). Precisa
+#     de `size` (nesta forma o tamanho É o limite, não há `quota`); exclusivo com
+#     qualquer outro backing. A pool tem de estar declarada no allowlist do nó e
+#     aplicada antes.
+# EN: `pool` is the NAME of a `kind: StoragePool` (see storagepool.yaml). Needs a
+#     `size` (here the size IS the limit, there is no `quota`); exclusive with
+#     every other backing. The pool must be in the node's allowlist and applied
+#     first.
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: pg-data
+spec:
+  pool: fast                         # PT: o `kind: StoragePool` chamado `fast` | EN: the `kind: StoragePool` named `fast`
+  size: 10G                          # PT: tamanho pedido à pool (obrigatório com pool) | EN: size asked of the pool (required with pool)
+  alertPct: 85

@@ -1,0 +1,103 @@
+# ============================================================================
+# kind: GitOpsSource — um repositório git de onde o nó reconcilia (ADR-0021)
+# kind: GitOpsSource — a git repository this node reconciles from (ADR-0021)
+#
+# PT: Aplicar escreve um registo e, com `sync.automated: true`, um timer systemd
+#     (`delonix-gitops-<namespace>.<name>.timer`). Cada disparo corre UMA passagem
+#     e termina — nada fica residente:
+#       fetch do ref → resolve a commit → verifica a assinatura (quando pedido)
+#       → lê o YAML sob `path` da árvore do commit → guarda → planeia → aplica
+#     Um commit que não carrega, falha a guarda/o grafo, ou planeia uma acção que
+#     `safety` bloqueia deixa o stack a correr intacto; `delonix gitops status`
+#     nomeia-o. `reconcile <name>` corre uma passagem à mão; `suspend`/`resume`
+#     param e retomam as passagens sem um commit.
+# EN: Applying writes a record and, with `sync.automated: true`, a systemd timer
+#     (`delonix-gitops-<namespace>.<name>.timer`). Each fire runs ONE pass and
+#     exits — nothing stays resident:
+#       fetch the ref → resolve to a commit → verify the signature (when asked)
+#       → read the YAML under `path` from the commit's tree → guard → plan → apply
+#     A commit that does not load, fails the guard/graph, or plans an action
+#     `safety` blocks leaves the running stack untouched; `delonix gitops status`
+#     names it. `reconcile <name>` runs a pass by hand; `suspend`/`resume` stop
+#     and restart the passes without a commit.
+#
+# PT: DOIS stacks, nunca um: o stack que aplica ESTE ficheiro (o bootstrap:
+#     `delonix stack apply -f … --name bootstrap`) declara só a fonte; as
+#     passagens aplicam o repositório em `spec.stack` (default
+#     `gitops.<namespace>.<name>`). Um apply/plan/prune/validate à mão do stack
+#     das passagens é recusado (DX-1601).
+# EN: TWO stacks, never one: the stack that applies THIS file (the bootstrap:
+#     `delonix stack apply -f … --name bootstrap`) declares only the source; the
+#     passes apply the repository into `spec.stack` (default
+#     `gitops.<namespace>.<name>`). A hand-run apply/plan/prune/validate of the
+#     passes' own stack is refused (DX-1601).
+#
+# PT: As credenciais são NOMEADAS, nunca embutidas: cada `*Ref` é um kind: Secret
+#     que já existe no nó antes da fonte ser aplicada.
+#       secretRef      → chave `identity`         (a chave SSH privada)
+#       knownHostsRef  → chave `known_hosts`      (os host keys fixados)
+#       trustedKeysRef → chave `allowed_signers`  (um ficheiro SSH allowed_signers)
+# EN: Credentials are NAMED, never carried: each `*Ref` is a kind: Secret that
+#     already exists on the node before the source is applied.
+#       secretRef      → key `identity`         (the SSH private key)
+#       knownHostsRef  → key `known_hosts`      (the pinned host keys)
+#       trustedKeysRef → key `allowed_signers`  (an SSH allowed_signers file)
+#
+# PT: Aplicar:  delonix stack apply -f examples/gitops/gitopssource.yaml --name bootstrap
+# EN: Apply:    delonix stack apply -f examples/gitops/gitopssource.yaml --name bootstrap
+# ============================================================================
+
+# ── 1. ssh + commits assinados — a fonte de produção, tudo declarado ────────
+#      ssh + signed commits — the production source, everything declared
+---
+apiVersion: gitops.delonix.io/v1alpha1
+kind: GitOpsSource
+metadata:
+  name: production
+  namespace: production
+spec:
+  source:
+    url: ssh://git@git.example.org/infra/web.git   # PT: também file:///<path> e https:// (anónimo) | EN: also file:///<path> and https:// (anonymous)
+    ref: refs/heads/main                            # PT: um branch ou tag, resolvido a commit primeiro | EN: a branch or a tag, resolved to a commit first
+    path: environments/production                   # PT: paths escondidos (.github/…) nunca são lidos | EN: hidden paths (.github/…) are never read
+    interval: 60s                                   # PT: de 15s a 24h | EN: 15s to 24h
+    secretRef: web-deploy-key                        # PT: Secret com a chave SSH privada, sob `identity` (OBRIGATÓRIO em ssh://) | EN: Secret with the SSH private key, under `identity` (REQUIRED for ssh://)
+    knownHostsRef: git-known-hosts                   # PT: Secret com os host keys fixados, sob `known_hosts` (OBRIGATÓRIO em ssh://) | EN: Secret with the pinned host keys, under `known_hosts` (REQUIRED for ssh://)
+    signedCommitsRequired: true                      # PT: recusa um commit cuja assinatura SSH não seja de trustedKeysRef | EN: refuse a commit whose SSH signature is not from trustedKeysRef
+    trustedKeysRef: web-signers                       # PT: Secret com um allowed_signers SSH, sob `allowed_signers` (anda a par de signedCommitsRequired) | EN: Secret with an SSH allowed_signers, under `allowed_signers` (goes together with signedCommitsRequired)
+  sync:
+    automated: true                                  # PT: instala o timer; false = regista e só corre com `gitops reconcile` | EN: installs the timer; false = registers and runs only on `gitops reconcile`
+  safety:
+    allow: [Create, Update]                          # PT: as acções que uma passagem pode tomar; Adopt/Replace/Reboot são opt-in; Delete é prune; Conflict nunca | EN: the actions a pass may take; Adopt/Replace/Reboot are opt-in; Delete is prune; Conflict never
+    prune: false                                     # PT: Delete só corre com prune: true | EN: Delete runs only with prune: true
+    maximumDeletes: 5                                # PT: o máximo que uma passagem pode podar | EN: the most a single pass may prune
+    protectedResources:
+      - Volume/*                                     # PT: <Kind>/<nome> ou <Kind>/* que uma passagem nunca poda | EN: <Kind>/<name> or <Kind>/* a pass never prunes
+    kinds: []                                        # PT: vazio = o conjunto default; nomeia VirtualMachine, SystemContainer, NetworkZone, NetworkGateway, StoragePool, Gateway ou IPPool para deixar um entrar | EN: empty = the default set; name VirtualMachine, SystemContainer, NetworkZone, NetworkGateway, StoragePool, Gateway or IPPool to let one in
+  stack: production-web                              # PT: o stack onde uma passagem aplica (default gitops.<ns>.<name>); nunca o stack que aplica este ficheiro | EN: the stack a pass applies into (default gitops.<ns>.<name>); never the stack that applies this file
+
+# ── 2. https anónimo — leitura pública, sem credenciais nem assinatura ──────
+#      anonymous https — public read, no credentials and no signature
+---
+apiVersion: gitops.delonix.io/v1alpha1
+kind: GitOpsSource
+metadata:
+  name: public-addons
+  namespace: default
+spec:
+  source:
+    url: https://github.com/example/addons.git      # PT: https:// é anónimo — sem credenciais no URL (um Secret https:// não está implementado) | EN: https:// is anonymous — no credentials in the URL (an https:// credential is not implemented)
+    ref: refs/tags/v1.4.0                            # PT: uma tag fixa; refs/heads/<branch> para seguir um branch | EN: a pinned tag; refs/heads/<branch> to follow a branch
+    path: manifests                                  # PT: directório dentro do repositório; vazio = a raiz | EN: directory inside the repository; empty = the root
+    interval: 5m                                     # PT: de 15s a 24h | EN: 15s to 24h
+    # PT: secretRef/knownHostsRef/trustedKeysRef são SÓ para ssh:// — recusados aqui.
+    # EN: secretRef/knownHostsRef/trustedKeysRef are ssh:// ONLY — refused here.
+    signedCommitsRequired: false                     # PT: anda a par de trustedKeysRef: ambos ausentes aqui | EN: goes together with trustedKeysRef: both absent here
+  sync:
+    automated: false                                 # PT: sem timer — corres `delonix gitops reconcile public-addons` do teu próprio escalonador | EN: no timer — you run `delonix gitops reconcile public-addons` from your own scheduler
+  safety:
+    allow: [Create, Update]
+    prune: false
+    maximumDeletes: 5
+    kinds: []
+  stack: cluster-addons                              # PT: um stack próprio, distinto do bootstrap | EN: a stack of its own, distinct from the bootstrap

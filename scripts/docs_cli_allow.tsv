@@ -22,9 +22,9 @@
 
 # --- PROSA ---------------------------------------------------------------
 docs/c4.html	delonix netns	rótulo mermaid do re-exec interno `delonix netns holder`, não um comando público
-docs/kinds.html	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»
-docs/kinds.html	delonix values also	comentário YAML sobre valores aceites, não uma invocação
-examples/pod.yaml	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»
+docs/kinds.html	delonix extension	comentário YAML bilingue: «extensão delonix» (um campo do motor), não uma invocação
+docs/kinds.html	delonix spellings also	comentário YAML sobre as grafias de valores aceites, não uma invocação
+docs/kinds.html	delonix does not provision the	comentário YAML: contraste (o delonix não provisiona o LB do control-plane), não uma invocação
 docs/comandos/cluster.html	delonix picks a free one	prosa do `--help` do clap: «Omit = delonix picks a free one»
 docs/comandos/cluster.html	delonix generates its own	prosa do `--help` do clap
 docs/comandos/cluster.html	delonix honours the fields it can	prosa do `--help` do clap no `--config`: «delonix honours the fields it can (…) e RECUSA o resto»

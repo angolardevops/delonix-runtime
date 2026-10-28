@@ -705,7 +705,7 @@ contabilidade do libvirt, por isso o <code>preserve_snapshots</code> despeja o X
 que muda a cada define).</p>
 <h3 id="declarative">Declarativo<a class="hanchor" href="#declarative" aria-label="#">#</a></h3>
 <p>O <code>kind: VirtualMachine</code> (<code>compute.delonix.io/v1alpha1</code>) espelha o <code>vm create</code>; um exemplo completo
-e anotado é o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>. Um <code>kind: Workload</code> com <code>type: microvm</code> baixa para uma
+e anotado é o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/compute/virtualmachine.yaml" target="_blank" rel="noopener"><code>examples/compute/virtualmachine.yaml</code></a>. Um <code>kind: Workload</code> com <code>type: microvm</code> baixa para uma
 <code>VirtualMachine</code> com o backend <strong>forçado</strong> a <code>cloud-hypervisor</code>; pedir outro backend é um erro
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Os dois foram <em>corridos</em> num root de rascunho:</p>
 <div class="code"><div class="code-head"><span class="lang">yaml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-yaml">apiVersion: compute.delonix.io/v1alpha1

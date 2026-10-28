@@ -492,7 +492,7 @@ kaeso-db18            5433        127.0.0.1 (host only)
 Uma rede de empresa em miniatura: DNS autoritativo, DHCP, autenticação de
 utilizadores, um posto de trabalho, armazenamento em NAS e uma firewall.
 
-Ficheiros em [`examples/lab-rede/`](../examples/lab-rede/). Tudo o que se segue foi
+Ficheiros em [`examples/_labs/lab-rede/`](../examples/_labs/lab-rede/). Tudo o que se segue foi
 executado; as saídas são as reais.
 
 ### Topologia
@@ -563,7 +563,7 @@ Os manifestos trazem `SSH_KEY_PLACEHOLDER`, para poderem ser partilhados sem a c
 de ninguém lá dentro:
 
 ```bash
-cd examples/lab-rede
+cd examples/_labs/lab-rede
 mkdir -p /tmp/labrun/cloud-init
 KEY=$(cat ~/.ssh/id_ed25519.pub)
 for n in dns dhcp samba cliente; do

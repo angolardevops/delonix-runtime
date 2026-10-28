@@ -1,0 +1,116 @@
+# ============================================================================
+# kind: Dependency (alias: KnowDepends) — alcançabilidade DIRIGIDA entre containers
+# kind: Dependency (alias: KnowDepends) — DIRECTED reachability between workloads
+#
+# PT: Ao contrário de uma Network (bidireccional), abre UM sentido: `from` alcança
+#     `to`, mas `to` NÃO inicia para `from` — e `to` deixa de ficar exposto a todos
+#     os outros na rede. Caso clássico: a app conhece a DB, a DB não conhece a app.
+#     É AÇÚCAR: no load cada Dependency é reescrita para um `kind: NetworkPolicy`
+#     com `direction: ingress` no `to` (default-deny + um allow por `from`, nomeando
+#     o peer por WORKLOAD para sobreviver a restarts). Várias Dependency para o
+#     mesmo `to` acumulam e fundem-se numa só política. Corre
+#     `delonix stack apply --dry-run` para ver a política real.
+# EN: Unlike a Network (bidirectional), it opens ONE direction: `from` reaches `to`,
+#     but `to` does NOT initiate towards `from` — and `to` stops being exposed to
+#     everyone else on the network. Classic case: the app knows the DB, the DB does
+#     not know the app. It is SUGAR: at load each Dependency is rewritten into a
+#     `kind: NetworkPolicy` with `direction: ingress` on `to` (default-deny + one
+#     allow per `from`, naming the peer by WORKLOAD so it survives restarts). Several
+#     Dependencies for the same `to` accumulate and merge into one policy. Run
+#     `delonix stack apply --dry-run` to see the real policy.
+#
+# PT: Campos spec: from (obrigatório, string), to (string ou lista), ports (lista),
+#     proto. A regra nomeia o peer por workload, não por IP — o endereço de um
+#     container vem da SDN e muda num restart.
+# EN: spec fields: from (required, string), to (string or list), ports (list), proto.
+#     The rule names the peer by workload, not by IP — a container's address comes
+#     from the SDN and changes on a restart.
+#
+# PT: Aplicar:  delonix stack apply -f examples/networking/dependency.yaml
+# EN: Apply:    delonix stack apply -f examples/networking/dependency.yaml
+# ============================================================================
+
+# ── 0. Recursos de apoio INLINE — a rede e os workloads ──────────────────────
+#      Supporting resources INLINE — the network and the workloads
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: db }
+spec:
+  network: appnet
+  containers:
+    - name: db
+      image: "postgres:16-alpine"
+      env:
+        - { name: POSTGRES_PASSWORD, value: example }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: cache }
+spec:
+  network: appnet
+  containers:
+    - name: cache
+      image: "redis:7-alpine"
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: app }
+spec:
+  network: appnet
+  containers:
+    - name: app
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: worker }
+spec:
+  network: appnet
+  containers:
+    - name: worker
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+
+# ── 1. todos os campos, `to` como um nome único — app alcança db só em TCP/5432
+#      every field, `to` as a single name — app may reach db on TCP/5432 only
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: app-knows-db }
+spec:
+  from: app                    # PT: quem INICIA (o "conhecedor") | EN: who INITIATES (the one that "knows")
+  to: db                       # PT: o alvo protegido | EN: the protected target
+  ports: ["5432"]              # PT: portas de `to` abertas a `from`; vazio/omitido = qualquer | EN: ports of `to` opened to `from`; empty/omitted = any
+  proto: tcp                   # PT: tcp | udp | any (default any) | EN: tcp | udp | any (default any)
+
+# ── 2. `to` como LISTA — uma declaração protege dois alvos de uma vez ────────
+#      `to` as a LIST — one declaration protecting two targets at once
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: app-knows-cache }
+spec:
+  from: app
+  to: [cache, worker]
+  ports: ["6379", "9000"]      # PT: várias portas | EN: several ports
+  proto: tcp
+
+# ── 3. acumulação — um segundo `from` para o mesmo `to` (db) ─────────────────
+#      accumulation — a second `from` for the same `to` (db)
+#
+# PT: Fundido com o documento 1, db aceita app (5432/tcp) E worker (qualquer porta/proto).
+# EN: Merged with document 1, db accepts app (5432/tcp) AND worker (any port, any proto).
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: worker-knows-db }
+spec:
+  from: worker
+  to: db

@@ -94,7 +94,7 @@ Kubernetes suportada. Construí-la exige o laboratório da §5.
 | 8 | Preflight recusa uso incorrecto | argumento inválido | **PASS** — rc=2 |
 | 9 | `shellcheck` do preflight | `shellcheck dist/delonix-node-preflight.sh` | **PASS** — limpo |
 | 10 | As 10 recusas, ponta a ponta pela CLI real | `delonix cluster apply -f` com cada manifesto inválido | **PASS** — DX-1701/1702/1703/1704/1705/1706 e o aviso de campo desconhecido, todos com rc=1 |
-| 11 | Exemplo novo válido | `delonix manifest validate -f examples/cluster-cilium.yaml` | **PASS** |
+| 11 | Exemplo novo válido | `delonix manifest validate -f examples/cluster/kubernetescluster.yaml` | **PASS** |
 | 12 | Testes unitários e de contrato | `cargo test -p delonix-runtime-bin --bin delonix` (suites afectadas) | **PASS** — 212 testes |
 | 13 | Requisitos de CRI do agente Cilium | inspecção do DaemonSet renderizado | **PASS por leitura** — ver §3.1 |
 | 14 | `fmt`, gate da superfície da CLI, schema publicado, traduções PT | `cargo fmt --check`, `scripts/cli-tree.sh --gate`, os testes de deriva | **PASS** — 273 folhas batem com a linha de base |
@@ -387,7 +387,7 @@ kubectl delete pod -l run --all --wait
 #   com --cni-offline. CRITÉRIO: instala sem rede; sem a cache, DX-6704.
 
 # 14. Idempotência (B12)
-delonix cluster apply -f examples/cluster-cilium.yaml
+delonix cluster apply -f examples/cluster/kubernetescluster.yaml
 #   CRITÉRIO: converge sem duplicar nada, e rc=0. Com OUTRO perfil: DX-6703, e
 #   o cluster fica intocado.
 

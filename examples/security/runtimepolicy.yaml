@@ -1,0 +1,56 @@
+# ============================================================================
+# kind: RuntimePolicy — o tecto de admissão deste nó (M04, ADR-0026)
+# kind: RuntimePolicy — this node's admission ceiling (M04, ADR-0026)
+#
+# PT: O limite que ESTE host impõe ao que pode correr. Dá forma de manifesto ao
+#     ficheiro `<root>/policy.json`, o MESMO que `container run`/`vm create` já
+#     consultam antes de criar o que quer que seja. Cada campo arranca em «sem
+#     opinião», por isso uma política só declara o que quer restringir.
+# EN: The ceiling THIS host puts on what may run. It gives a manifest form to the
+#     file `<root>/policy.json`, the SAME one `container run`/`vm create` already
+#     check before anything is created. Every field starts at "no opinion", so a
+#     policy states only what it wants to restrict.
+#
+# PT: SINGLETON de nó. Seja qual for o `metadata.name`, o apply escreve sempre o
+#     ÚNICO `policy.json` — um manifesto declara no máximo UM documento
+#     RuntimePolicy (um segundo é recusado por `stack validate`/`apply`).
+# EN: A node-wide SINGLETON. Whatever `metadata.name` says, apply always writes
+#     the ONE `policy.json` — a manifest declares at most ONE RuntimePolicy
+#     document (a second is refused by `stack validate`/`apply`).
+#
+# PT: Converge como qualquer Kind (um campo mudado é aplicado de facto), mas NÃO
+#     desce sozinho: remover este documento e correr `stack apply --prune` (ou
+#     `stack destroy`) deixa o tecto como estava. A única forma de o baixar é
+#     `delonix policy unset` (pede confirmação, ou `--force`).
+# EN: It converges like any Kind (a changed field really is applied), but does
+#     NOT come down on its own: removing this document and running `stack apply
+#     --prune` (or `stack destroy`) leaves the ceiling as it was. The only way
+#     down is `delonix policy unset` (asks for confirmation, or `--force`).
+#
+# PT: Aplicar:  delonix stack apply -f examples/security/runtimepolicy.yaml
+# EN: Apply:    delonix stack apply -f examples/security/runtimepolicy.yaml
+# ============================================================================
+
+# ── 1. o tecto do nó — todos os 13 campos, explícitos ───────────────────────
+#      the node ceiling — all 13 fields, made explicit
+---
+apiVersion: security.delonix.io/v1alpha1
+kind: RuntimePolicy
+metadata:
+  name: node-ceiling
+spec:
+  mode: enforce                         # PT: `enforce` (recusa, default) ou `warn` (deixa passar e reporta) | EN: `enforce` (refuse, default) or `warn` (allow and report)
+  denyPrivileged: true                  # PT: recusa `container run --privileged` | EN: refuse `container run --privileged`
+  denyHostNetwork: true                 # PT: recusa `--net host` (o modo de rede DEFAULT deste motor) | EN: refuse `--net host` (this engine's DEFAULT network mode)
+  denyLatestTag: true                   # PT: recusa imagem de container sem tag ou com `:latest` | EN: refuse a container image with no tag or `:latest`
+  allowedRegistries: [ghcr.io, docker.io]   # PT: só estes registos podem ser puxados; vazio = sem opinião | EN: only these registries may be pulled; empty = no opinion
+  workloadSecurity: baseline            # PT: único perfil em v1 — recusa aquilo de que `--privileged` é feito (caps além do baseline PSS, namespaces PID/IPC do host, seccomp/apparmor unconfined, binds de host-path, devices do host, lista masked/ro custom que larga os defaults); omitido = sem opinião | EN: the only v1 profile — refuses what `--privileged` is made of (caps beyond the PSS baseline, the host PID/IPC namespaces, seccomp/apparmor unconfined, host-path binds, host devices, a custom masked/ro list that drops the defaults); omitted = no opinion
+  denyDevicePassthrough: true           # PT: recusa `vm create --device` (VFIO PCI passthrough) — dá ao guest DMA ao hardware do host | EN: refuse `vm create --device` (VFIO PCI passthrough) — hands the guest DMA to host hardware
+  denyLatestVmImage: true               # PT: recusa imagem de disco de VM sem tag ou `:latest` (separado de denyLatestTag: um build `--vmfile` marca `<nome>:latest`) | EN: refuse a VM disk image with no tag or `:latest` (separate from denyLatestTag: a `--vmfile` build tags `<name>:latest`)
+  allowedImageUrlHosts: [cloud.debian.org]  # PT: hosts de onde um `vm create --url-img` qcow2 pode ser trazido; vazio = sem opinião | EN: hosts a `vm create --url-img` qcow2 may be fetched from; empty = no opinion
+  allowedSourcePrefixes: [10.10.0.0/16]     # PT: GRANT — prefixos canónicos a.b.c.d/len que `--allow-source` pode usar; vazio = nenhum | EN: GRANT — canonical a.b.c.d/len prefixes `--allow-source` may use; empty = none
+  allowSourceCheckOptOut: false         # PT: GRANT — true deixa um container usar `--no-source-check`; ausente = recusado | EN: GRANT — true lets a container use `--no-source-check`; absent = refused
+  denyPrivateEgress: true               # PT: recusa egress novo de um workload para espaço privado (10/8, 172.16/12, 192.168/16, 100.64/10) pelo uplink do nó | EN: refuse new egress from a workload to private space (10/8, 172.16/12, 192.168/16, 100.64/10) through the node's uplink
+  allowedEgressPrefixes: [10.0.0.0/8]   # PT: GRANT — destinos privados ainda alcançáveis com denyPrivateEgress ligado; vazio = nenhum | EN: GRANT — private destinations still reachable while denyPrivateEgress is on; empty = none
+  # PT: Em efeito: `delonix get runtimepolicies` e `delonix describe runtimepolicy node-ceiling` mostram o que está a vigorar.
+  # EN: In effect: `delonix get runtimepolicies` and `delonix describe runtimepolicy node-ceiling` show what is enforced.

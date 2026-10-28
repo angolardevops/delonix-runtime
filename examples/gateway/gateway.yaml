@@ -1,0 +1,121 @@
+# ============================================================================
+# kind: Gateway — expõe UMA porta TCP local à internet pública (via túnel)
+# kind: Gateway — exposes ONE local TCP port to the public internet (via a tunnel)
+#
+# PT: Através de um provider externo (pinggy/ngrok/cloudflare). De propósito
+#     single-purpose: faz só o transporte de saída. Para publicar VÁRIOS backends
+#     atrás de um só URL público, aponta `localPort` para a porta do proxy do
+#     `kind: HTTPRoute` (ver httproute.yaml) — esse é que faz o routing L7 por
+#     Host/path; o firewall L4 é `kind: NetworkPolicy`. Cada provider é uma CLI
+#     real já instalada: pinggy (zero binário extra, só `ssh`), ngrok (precisa do
+#     agente `ngrok` no PATH), cloudflare (precisa de `cloudflared` no PATH).
+# EN: Through a third-party provider (pinggy/ngrok/cloudflare). Deliberately
+#     single-purpose: it only does the outbound transport. To publish MANY backends
+#     behind one public URL, point `localPort` at the `kind: HTTPRoute` proxy's port
+#     (see httproute.yaml) — that is what does the L7 Host/path routing; the L4
+#     firewall is `kind: NetworkPolicy`. Each provider is a real, already-installed
+#     CLI: pinggy (zero extra binary, just `ssh`), ngrok (needs the `ngrok` agent on
+#     PATH), cloudflare (needs `cloudflared` on PATH).
+#
+# PT: `token` e `tokenSecretRef` são duas formas da MESMA credencial: usa UMA por
+#     documento. Só pode viver UM túnel ngrok de cada vez (a API local do agente
+#     tem porta fixa).
+# EN: `token` and `tokenSecretRef` are two ways to give the SAME credential: use ONE
+#     per document. Only ONE ngrok tunnel can be alive at a time (its local agent API
+#     has a fixed port).
+#
+# PT: Aplicar:  delonix stack apply -f examples/gateway/gateway.yaml
+#     Equivalente num comando, sem manifesto (pinggy é o provider default):
+#       delonix net tunnel expose 80
+# EN: Apply:    delonix stack apply -f examples/gateway/gateway.yaml
+#     One-shot equivalent, no manifest (pinggy is the default provider):
+#       delonix net tunnel expose 80
+# ============================================================================
+
+# ── 1. Mínimo — pinggy free, sem conta e sem binário extra ───────────────────
+#      Minimal — pinggy free tier, no account and no extra binary
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: public-min
+spec:
+  provider: pinggy            # PT: forma escalar = seleccionar sem opções | EN: scalar form = select with no options
+  localPort: 80               # PT: porta local a expor (ex. o proxy HTTPRoute, ou uma porta publicada) | EN: local port to expose (e.g. the HTTPRoute proxy, or a published port)
+
+# ── 2. pinggy com pro token literal (funciona, mas prefere tokenSecretRef) ───
+#      pinggy with a pro token given literally (works, but prefer tokenSecretRef)
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: public-pinggy-pro
+spec:
+  provider:
+    type: pinggy              # PT: pinggy | ngrok | cloudflare | EN: pinggy | ngrok | cloudflare
+    spec:                     # PT: o que só esse serviço entende | EN: what only that service understands
+      token: "REPLACE-WITH-PINGGY-PRO-TOKEN"   # PT: token literal — prefere tokenSecretRef num manifesto | EN: literal token — prefer tokenSecretRef in a manifest
+  localPort: 8080
+
+# ── 3. Secret de token — stringData sob spec, chave `token` ──────────────────
+#      Token Secret — stringData under spec, key `token`
+---
+# PT: O provider lê a credencial da chave `token` deste Secret (valor placeholder).
+# EN: The provider reads the credential from this Secret's `token` key (placeholder value).
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: tunnel-token
+spec:
+  stringData:
+    token: "REPLACE-WITH-PROVIDER-TOKEN"
+
+# ── 4. ngrok com hostname reservado e o token lido de um Secret ──────────────
+#      ngrok with a reserved hostname and the token read from a Secret
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: public-ngrok
+spec:
+  provider:
+    type: ngrok
+    spec:
+      hostname: demo.ngrok.app       # PT: hostname custom/reservado — ngrok usa-o como --url | EN: custom/reserved hostname — ngrok uses it as --url
+      tokenSecretRef: tunnel-token   # PT: kind: Secret cuja chave `token` tem o authtoken | EN: kind: Secret whose `token` key holds the authtoken
+  localPort: 8080
+
+# ── 5. cloudflare NAMED tunnel — cloudflared tunnel run --token ... ──────────
+#      cloudflare NAMED tunnel — cloudflared tunnel run --token ...
+---
+# PT: Corre um túnel que já criaste. `hostname` é só informativo — a rota vive no
+#     dashboard da Cloudflare. `insecureSkipTlsVerify` salta a verificação do cert
+#     self-signed do backend LOCAL (origin https://localhost:<localPort>); o URL
+#     público tem sempre um certificado real.
+# EN: Runs a tunnel you already created. `hostname` is informational only — the route
+#     lives in the Cloudflare dashboard. `insecureSkipTlsVerify` skips verification of
+#     the LOCAL backend's self-signed cert (origin https://localhost:<localPort>); the
+#     public URL always has a real certificate.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: public-cloudflare
+spec:
+  provider:
+    type: cloudflare
+    spec:
+      hostname: app.example.com
+      tokenSecretRef: tunnel-token
+  localPort: 8443
+  insecureSkipTlsVerify: true        # PT: só afecta o backend LOCAL; no-op em pinggy | EN: only affects the LOCAL backend; no-op for pinggy
+
+# ── 6. cloudflare quick tunnel — sem token (URL efémero trycloudflare.com) ───
+#      cloudflare quick tunnel — no token at all (an ephemeral trycloudflare.com URL)
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: public-cloudflare-quick
+spec:
+  provider: cloudflare
+  localPort: 80

@@ -680,7 +680,7 @@ below, or when a table names a path that no longer exists.</p>
 </tr>
 <tr>
 <td><code>examples/</code></td>
-<td>Example manifests per Kind, a multi-file network lab (<code>lab-rede/</code>) and a small complete project (<code>delonix-temp/</code>). The CI <code>docs</code> job dry-runs every <code>examples/*.yaml</code>, so a deprecated or broken example fails the build.</td>
+<td>Example manifests grouped by API group in sub-folders (<code>compute/</code>, <code>networking/</code>, <code>gateway/</code>, <code>storage/</code>, <code>artifact/</code>, <code>core/</code>, <code>security/</code>, <code>gitops/</code>, <code>cluster/</code>), one bilingual file per Kind; plus <code>_labs/</code> (a multi-file network lab <code>lab-rede/</code>, a <code>compose-webapp/</code> sample and a small complete project <code>delonix-temp/</code>). The CI <code>docs</code> job walks the tree and dry-runs every manifest (pruning <code>_labs/</code>), so a deprecated or broken example fails the build.</td>
 <td>Every feature that adds or changes a Kind.</td>
 <td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
 </tr>

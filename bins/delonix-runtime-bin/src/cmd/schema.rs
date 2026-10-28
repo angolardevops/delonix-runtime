@@ -86,7 +86,7 @@ const TYPED_KINDS: &[&str] = &[
 /// type has no such list, so nothing put the second spelling anywhere.
 ///
 /// Found by validating `examples/` against the generated schema, which rejected
-/// `examples/cluster-ssh.yaml` — a published, working manifest — with «'ip' is a
+/// `examples/cluster/kubernetescluster.yaml` — a published, working manifest — with «'ip' is a
 /// required property», five times over. `address` is the CANONICAL name in the
 /// templates and `ip` is the compatibility spelling, so the schema was demanding
 /// the one nobody is told to write.
@@ -325,7 +325,7 @@ fn typed_spec_parts(
     // k8s Pod shape (`spec.containers[]`, still limited to one container).
     // `container::apply` picks between them by the presence of
     // `spec.containers`, so the schema has to offer both — describing only
-    // the flat one would reject `examples/pod.yaml`, which is a documented,
+    // the flat one would reject `examples/compute/pod.yaml`, which is a documented,
     // working manifest.
     let spec = if kind == k::CONTAINER {
         let pod = generator.subschema_for::<super::container::PodSpec>();
@@ -552,13 +552,13 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // `Vm` has the same duality in `network`: a plain string in the flat
             // form, a mapping in the grouped one (`normalize_vm_spec`). Found the
             // same way as the Container case — by validating `examples/` against
-            // the generated schema, where `examples/vm.yaml` was rejected for a
+            // the generated schema, where `examples/compute/virtualmachine.yaml` was rejected for a
             // shape the engine accepts.
             // `Dependency.to` is the same duality by a different mechanism: a
             // `deserialize_with = "string_or_vec"` that takes `to: db` as well
             // as `to: [db, cache]`. schemars describes the DECLARED type
             // (`Vec<String>`) and cannot see the custom deserializer, so the
-            // scalar form — the one `examples/dependency.yaml` uses — would be
+            // scalar form — the one `examples/networking/dependency.yaml` uses — would be
             // rejected for a shape the engine accepts.
             //
             // The SECOND shape is named per field rather than assumed to be an
@@ -1189,7 +1189,7 @@ mod tests {
     /// agravante de o campo ser obrigatório.
     ///
     /// Encontrado a validar os `examples/` contra o schema gerado, que recusava
-    /// o `examples/cluster-ssh.yaml` — publicado e a funcionar — cinco vezes com
+    /// o `examples/cluster/kubernetescluster.yaml` — publicado e a funcionar — cinco vezes com
     /// «'ip' is a required property». `address` é o nome CANÓNICO nos templates,
     /// por isso o schema exigia justamente o que ninguém é mandado escrever.
     #[test]
@@ -1280,7 +1280,7 @@ mod tests {
     /// `kind: Container` has two valid spec shapes — the flat one and the k8s
     /// Pod shape (`spec.containers[]`). `container::apply` picks between them by
     /// the presence of `spec.containers`, so describing only the flat one would
-    /// reject `examples/pod.yaml`, a documented working manifest.
+    /// reject `examples/compute/pod.yaml`, a documented working manifest.
     #[test]
     fn kind_container_aceita_a_forma_plana_e_a_forma_pod() {
         let s = manifest_schema(Some("Container")).unwrap();

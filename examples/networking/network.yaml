@@ -1,0 +1,154 @@
+# ============================================================================
+# kind: Network — uma rede definida pelo utilizador; os containers entram com `--net <nome>`
+# kind: Network — a user-defined network; containers join it with `--net <name>`
+#
+# PT: Um `Network` nativo é um plano L2/L3 local do nó, escolhido por `driver`:
+#     `bridge` (default, uma bridge local), `overlay` (VXLAN entre nós, opcional
+#     cifrado por WireGuard), `macvlan`/`ipvlan` (endereço directo no segmento da
+#     NIC pai). O MESMO kind descreve ainda um segmento realizado por um provider
+#     de cluster (Proxmox/SDN) — nesse caso leva `spec.provider` e nenhum campo
+#     nativo; o documento nunca nomeia o endpoint da infra (vem do provider que o
+#     runtime tem configurado).
+# EN: A native `Network` is a node-local L2/L3 plane chosen by `driver`: `bridge`
+#     (default, a local bridge), `overlay` (VXLAN between nodes, optionally
+#     WireGuard-encrypted), `macvlan`/`ipvlan` (an address directly on the parent
+#     NIC's segment). The SAME kind also describes a segment realized by a cluster
+#     provider (Proxmox/SDN) — then it carries `spec.provider` and no native field;
+#     the document never names the infra endpoint (it comes from the provider the
+#     runtime has configured).
+#
+# PT: Campos spec nativos: driver, subnet, gateway, parent, vni, peers, wgIp
+#     (alias wg_ip). Nenhum campo é inventado — são os de NETWORK_SPEC_FIELDS.
+# EN: Native spec fields: driver, subnet, gateway, parent, vni, peers, wgIp
+#     (alias wg_ip). No field is invented — these are NETWORK_SPEC_FIELDS.
+#
+# PT: Aplicar:  delonix stack apply -f examples/networking/network.yaml
+# EN: Apply:    delonix stack apply -f examples/networking/network.yaml
+# ============================================================================
+
+# ── 1. bridge — todos os campos relevantes de bridge, explícitos ─────────────
+#      bridge — every bridge-relevant field spelled out
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-bridge-full
+  labels:
+    tier: backend             # PT: labels livres (as marcas de posse são postas pelo apply) | EN: free-form labels (ownership stamps are added by apply)
+  annotations:
+    example.io/purpose: "all bridge fields"
+spec:
+  driver: bridge              # PT: bridge (default) | macvlan | ipvlan | overlay | EN: bridge (default) | macvlan | ipvlan | overlay
+  subnet: 10.201.0.0/16       # PT: CIDR da rede; omitir = escolhe um /16 livre | EN: CIDR of the network; omit to auto-pick a free /16
+  gateway: 10.201.0.1         # PT: endereço do gateway; omitir = .1 do subnet | EN: gateway address; omit to default to .1 of the subnet
+
+# ── 2. bridge por defeito — tudo omitido, driver=bridge, subnet auto ─────────
+#      bridge default — everything omitted, driver=bridge, subnet auto-picked
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-bridge-default
+spec: {}                      # PT: driver cai em bridge, subnet é escolhido | EN: driver defaults to bridge, subnet is auto-picked
+
+# ── 3. overlay (VXLAN) entre nós — vni + peers, em claro ─────────────────────
+#      overlay (VXLAN) between nodes — vni + peers, clear-text
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-overlay-plain
+spec:
+  driver: overlay
+  vni: 42                     # PT: identificador da rede VXLAN | EN: VXLAN network identifier
+  peers:                      # PT: outros nós do overlay, pelo IP de underlay | EN: other nodes of the overlay, by underlay IP
+    - 192.168.1.11
+    - 192.168.1.12
+
+# ── 4. overlay cifrado (transporte WireGuard) — peers "<ip>=<wg_pubkey>=<wg_ip>"
+#      encrypted overlay (WireGuard transport) — peers "<ip>=<wg_pubkey>=<wg_ip>"
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-overlay-encrypted
+spec:
+  driver: overlay
+  vni: 77
+  wgIp: 10.250.0.1            # PT: IP do túnel WireGuard deste nó (alias: wg_ip) | EN: this node's WireGuard tunnel IP (alias: wg_ip)
+  peers:
+    - "192.168.1.11=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==10.250.0.2"
+
+# ── 5. macvlan — o container ganha endereço no segmento L2 da NIC pai ────────
+#      macvlan — the container gets an address on the parent NIC's L2 segment
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-macvlan
+spec:
+  driver: macvlan
+  parent: eth0                # PT: NIC do host onde o macvlan assenta | EN: host NIC the macvlan sits on
+  subnet: 192.168.50.0/24
+  gateway: 192.168.50.1
+
+# ── 6. ipvlan — como macvlan, mas todos partilham o MAC da NIC pai ───────────
+#      ipvlan — like macvlan, but all share the parent's MAC
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-ipvlan
+spec:
+  driver: ipvlan
+  parent: eth0
+  subnet: 192.168.60.0/24
+
+# ── 7. provider Proxmox/SDN — segmento realizado por um provider de cluster ──
+#      provider Proxmox/SDN — segment realized by a cluster provider
+#
+# PT: NÃO é `kind: NetworkZone` — é `kind: Network` com `spec.provider` (ADR-0070,
+#     ADR-0071). Tudo fora de `provider` é neutro; `provider.spec` é tipado pelo
+#     provider que `provider.type` nomeia, e uma chave que ele não tenha é recusada.
+#     metadata.name é o id do vnet na SDN. `zone` é partilhada pelos seus vnets
+#     (criada com o primeiro, removida com o último); o que `dns` diz tem de ser
+#     igual em todas as redes da zona. Sem provider configurado, `apply` recusa;
+#     `stack validate` não precisa de um.
+# EN: NOT `kind: NetworkZone` — it is `kind: Network` with `spec.provider` (ADR-0070,
+#     ADR-0071). Everything outside `provider` is neutral; `provider.spec` is typed
+#     for the provider `provider.type` names, and a key it does not have is refused.
+#     metadata.name is the vnet's SDN id. `zone` is shared by its vnets (created with
+#     the first, removed with the last); whatever `dns` says must be identical on
+#     every network of that zone. With no provider configured `apply` refuses;
+#     `stack validate` does not need one.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: labnet1 }
+spec:
+  subnet: 10.80.0.0/24
+  gateway: 10.80.0.1
+  provider:
+    type: proxmox             # PT: o provider que realiza o segmento | EN: the provider that realizes the segment
+    spec:
+      zone: lab               # PT: a zona SDN em que o vnet vive | EN: the SDN zone this vnet lives in
+      alias: "lab network 1"  # PT: rótulo do vnet na SDN | EN: the vnet's SDN alias
+      dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]   # PT: gama DHCP do vnet | EN: the vnet's DHCP range
+      reservations:
+        - { ip: 10.80.0.20, mac: "BC:24:11:00:00:20" }        # PT: reserva por MAC literal | EN: reservation by literal MAC
+        - { ip: 10.80.0.21, workload: "VirtualMachine/web-1" } # PT: ou por workload VM (o MAC resolve-se depois do VM existir) | EN: or by VM workload (MAC resolved once the VM exists)
+      dns:                    # PT: por zona (todas as redes da zona têm de concordar) | EN: per zone (all networks of the zone must agree)
+        server: pdns          # PT: controlador DNS registado no cluster (o motor nunca o cria) | EN: DNS controller registered on the cluster (the engine never creates one)
+        zone: lab.example     # PT: a zona DNS onde os registos A/PTR são escritos | EN: the DNS zone the A/PTR records are written to
+        reverseServer: pdns   # PT: controlador dos PTR; opcional | EN: controller for the PTR records; optional
+      ipam: pve               # PT: controlador IPAM da zona; `pve` quando omitido | EN: the zone's IPAM controller; `pve` when omitted
+---
+# PT: Segunda rede da MESMA zona `lab` — forma mínima: só o provider e a zona.
+# EN: Second network of the SAME `lab` zone — minimal form: just the provider and zone.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: labnet2 }
+spec:
+  provider:
+    type: proxmox
+    spec: { zone: lab }

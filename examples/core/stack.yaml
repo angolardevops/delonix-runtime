@@ -1,0 +1,366 @@
+# ============================================================================
+# kind: Stack — agregado que agrupa uma app inteira num só documento
+# kind: Stack — the aggregate that groups a whole app in one document
+#
+# PT: Um Stack reúne redes, contentores, volumes, … (à maneira de um
+#     k8s-Service). Ao carregar, expande-se nos recursos constituintes, que
+#     seguem o apply normal por-Kind EM ORDEM DE DEPENDÊNCIA (a ordem que
+#     `delonix stack plan --fields` imprime — a ordem da tabela de Kinds, não uma
+#     lista mantida aqui). Cada filho herda o namespace do Stack salvo se definir
+#     o seu, e pode levar `labels:`/`annotations:` ao lado de `name:`. Um item de
+#     grupo é `{ name, namespace?, labels?, annotations?, spec }`: `spec` é
+#     exactamente o `spec` do Kind que o grupo representa.
+# EN: A Stack bundles networks, containers, volumes, … (k8s-Service-like). At load
+#     time it expands into its constituent resources, which then flow through the
+#     normal per-Kind apply IN DEPENDENCY ORDER (the order `delonix stack plan
+#     --fields` prints — the order of the Kind table, not a list kept here). Each
+#     child inherits the Stack's namespace unless it sets its own, and can carry
+#     `labels:`/`annotations:` next to `name:`. A group item is
+#     `{ name, namespace?, labels?, annotations?, spec }`: `spec` is exactly the
+#     `spec` of the Kind the group stands for.
+#
+# PT: Este exemplo usa TODOS os grupos que um Stack aceita (o teste
+#     `the_stack_example_names_every_group` falha se faltar um), por isso serve de
+#     referência de como cada um se parece. Para um Kind sozinho com todas as suas
+#     opções, ver examples/full-<kind>.yaml.
+# EN: This example uses EVERY group a Stack accepts (the test
+#     `the_stack_example_names_every_group` fails if one is missing), so it doubles
+#     as the reference for what each one looks like. For a single Kind with all of
+#     its options, see examples/full-<kind>.yaml.
+#
+#   grupo / group        Kind               referência / reference
+#   runtimePolicies      RuntimePolicy      full-runtimepolicy.yaml
+#   secrets              Secret             core/secret.yaml
+#   networks             Network            full-network.yaml
+#   networkRoutes        NetworkRoute       full-networkroute.yaml
+#   networkZones         NetworkZone        networkzone.yaml
+#   storagePools         StoragePool        full-volume.yaml
+#   volumes              Volume             full-volume.yaml
+#   objectStorages       ObjectStorage      storage/objectstorage.yaml
+#   images               Image              full-image.yaml
+#   apps                 App                full-app.yaml
+#   vms                  VirtualMachine     full-virtualmachine.yaml
+#   systemContainers     SystemContainer    systemcontainer.yaml
+#   containers           Container          full-container.yaml
+#   pods                 Pod                full-pod.yaml
+#   services             Service            full-service.yaml
+#   ingress              Ingress            full-ingress.yaml
+#   firewallPolicies     NetworkPolicy      full-networkpolicy.yaml
+#   networkAccessRules   NetworkAccessRule  full-networkaccessrule.yaml
+#   networkGateways      NetworkGateway     networkgateway.yaml
+#   ipPools              IPPool             full-ippool.yaml
+#   httpRoutes           HTTPRoute          full-httproute.yaml
+#   gateways             Gateway            full-gateway.yaml
+#   gitopsSources        GitOpsSource       full-gitopssource.yaml
+#   workloads            Workload           full-workload.yaml   (rebaixado ao carregar / lowered at load)
+#   dependencies         Dependency         full-dependency.yaml (rebaixado ao carregar / lowered at load)
+#
+# PT: `tunnels:` é a grafia antiga de `gateways:` e ainda carrega. Não agrupáveis:
+#     `Stack` (não encaixa noutro) e `KubernetesCluster` (procedimento remoto por
+#     SSH, não um recurso deste nó — ver full-kubernetescluster.yaml).
+# EN: `tunnels:` is the old spelling of `gateways:` and still loads. Not groupable:
+#     `Stack` (does not nest) and `KubernetesCluster` (a remote procedure over SSH,
+#     not a resource of this node — see full-kubernetescluster.yaml).
+#
+# PT: Aplicar:  delonix stack apply -f examples/core/stack.yaml
+# EN: Apply:    delonix stack apply -f examples/core/stack.yaml
+# ============================================================================
+
+# ── 1. O Stack blog — um documento que nomeia todos os grupos ───────────────
+#      The blog Stack — one document naming every group
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata:
+  name: blog
+  namespace: default
+spec:
+  # PT: O tecto de admissão do nó, antes de tudo: aplica-se antes de cada grupo
+  #     abaixo, no MESMO apply. Baixá-lo nunca é automático — remover este bloco e
+  #     re-aplicar deixa policy.json intacto; `delonix policy unset` é a única descida.
+  # EN: The node's admission ceiling, first of all: it applies before every other
+  #     group below, in the SAME apply. Lowering it is never automatic — removing
+  #     this block and re-applying leaves policy.json untouched; `delonix policy
+  #     unset` is the only way down.
+  runtimePolicies:
+    - name: node-ceiling
+      spec:
+        denyPrivileged: true
+        denyLatestTag: true     # PT: obriga tags fixas — nenhuma imagem abaixo usa :latest | EN: forces fixed tags — no image below uses :latest
+
+  # PT: Secrets primeiro: tudo abaixo pode referenciá-los. | EN: Secrets first: everything below may reference them.
+  secrets:
+    - name: db-credentials
+      spec:
+        stringData:
+          POSTGRES_PASSWORD: change-me
+
+  networks:
+    - name: blog-net
+      spec:
+        driver: bridge
+    - name: blog-back
+      spec:
+        driver: bridge
+
+  # PT: Uma rota diz que as duas redes TÊM caminho; as políticas abaixo é que
+  #     decidem o que passa. | EN: A route says the two networks HAVE a path; the
+  #     policies below still decide what is allowed across it.
+  networkRoutes:
+    - name: net-to-back
+      spec:
+        from: blog-net
+        to: blog-back
+
+  # PT: SDN nativa do cluster — realizada pelo NetworkZoneProvider que o RUNTIME
+  #     tiver configurado (hoje: Proxmox, via DELONIX_PROXMOX_URL), nunca nomeado
+  #     aqui. Aplicar sem provider recusa com erro claro (adenda ADR-0049).
+  # EN: Cluster-native SDN — realized by whichever NetworkZoneProvider the RUNTIME
+  #     has configured (today: Proxmox, via DELONIX_PROXMOX_URL), never named here.
+  #     Applying without a provider refuses with a clear error (ADR-0049 addendum).
+  networkZones:
+    - name: dc1
+      spec:
+        vnets:
+          - name: prod
+            alias: "Production VLAN"
+
+  # PT: Um pool de armazenamento que o administrador do nó declarou em
+  #     /etc/delonix/storage-pools.yaml (ADR-0067). O Stack só diz que o motor o
+  #     usa, e quão longe pode ser sobre-alocado; o driver é do administrador.
+  # EN: A storage pool the node's administrator declared in
+  #     /etc/delonix/storage-pools.yaml (ADR-0067). The Stack only says the engine
+  #     uses it, and how far it may be over-allocated; the driver is the admin's.
+  storagePools:
+    - name: fast
+      spec:
+        alertPct: 85
+
+  volumes:
+    - name: db-data
+      spec:
+        quota: 5G          # PT: tecto duro dos dados do volume | EN: hard cap on the volume's data
+        alertPct: 80       # PT: avisa aos 80% de uso | EN: warn when it is 80% full
+
+  # PT: Armazenamento de objectos S3 (ver storage/objectstorage.yaml). `cephRgw`
+  #     provisiona uma identidade S3 no gateway Ceph do nó; `external` aponta para
+  #     um store teu. As credenciais ficam em secret/<nome>-s3.
+  # EN: S3-compatible object storage (see storage/objectstorage.yaml). `cephRgw`
+  #     provisions an S3 identity on the node's Ceph gateway; `external` points at a
+  #     store you already run. Credentials land in secret/<name>-s3.
+  objectStorages:
+    - name: media
+      spec:
+        backend: cephRgw
+        bucket: media
+        cephRgw:
+          endpoint: http://rgw.internal:80
+
+  images:
+    - name: alpine-base
+      spec:
+        pull: alpine:3.20  # PT: `pull` e `build` são alternativas; ver full-image.yaml | EN: `pull` and `build` are alternatives; see full-image.yaml
+
+  # PT: Cloud Native Buildpacks: código entra, imagem sai (ver full-app.yaml).
+  # EN: Cloud Native Buildpacks: source in, image out (see full-app.yaml).
+  apps:
+    - name: shop
+      spec:
+        source: .
+        image: shop:1.0           # PT: com tag, não :latest — a runtimePolicy acima nega :latest | EN: tagged, not :latest — the runtimePolicy above denies :latest
+
+  # PT: Um microVM/VM na mesma SDN. Precisa de imagem ou disco de VM no host para aplicar.
+  # EN: A microVM/VM on the same SDN. Needs a VM image or disk on the host to apply.
+  vms:
+    - name: worker
+      spec:
+        disk: delonix-vm-base:ubuntu-24.04
+        vcpus: 1
+        memory: 1G
+        network: blog-net
+
+  # PT: Um system container: um userland inteiro no provider remoto configurado do
+  #     runtime (hoje: nó Proxmox, via DELONIX_PROXMOX_URL), nunca nomeado aqui. O
+  #     motor puxa a imagem; memória/swap/cores mudam em sítio, o resto recria (ADR-0058).
+  # EN: A system container: a whole userland on the runtime's configured remote
+  #     provider (today: a Proxmox node, via DELONIX_PROXMOX_URL), never named here.
+  #     The engine pulls the image; memory/swap/cores change in place, the rest
+  #     recreates (ADR-0058).
+  systemContainers:
+    - name: tools
+      spec:
+        image: alpine:3.20
+        entrypoint: ["/bin/sleep", "infinity"]
+        memory: 256M
+        cores: 1
+
+  containers:
+    - name: web
+      labels: { app: web }     # PT: o que o Service abaixo selecciona | EN: what the Service below selects by
+      spec:
+        image: nginx:1.27-alpine  # PT: com tag, não :latest | EN: tagged, not :latest
+        network: blog-net
+        ports: ["8080:80"]
+        expose: 80         # PT: auto-registo no proxy L7 como web.<ns>.delonix.internal | EN: auto-register in the L7 proxy as web.<namespace>.delonix.internal
+    - name: db
+      spec:
+        image: postgres:16
+        network: blog-net
+        secret: [db-credentials]
+        volumes: ["db-data:/var/lib/postgresql/data"]
+
+  # PT: Um pod: vários contentores a partilhar UM namespace de rede (localhost entre eles).
+  # EN: A pod: several containers sharing ONE network namespace (localhost between them).
+  pods:
+    - name: worker-pod
+      spec:
+        containers:
+          - name: app
+            image: nginx:1.27-alpine
+          - name: sidecar
+            image: alpine:3.20
+            command: ["sleep", "infinity"]
+
+  # PT: DNS round-robin sobre cada contentor que o selector casa, sob
+  #     web.<ns>.delonix.internal. Sem VIP, sem daemon.
+  # EN: Round-robin DNS over every container the selector matches, under
+  #     web.<namespace>.delonix.internal. No VIP, no daemon.
+  services:
+    - name: web
+      spec:
+        selector: { matchLabels: { app: web } }
+        port: 80
+
+  # PT: Um conjunto de endereços do host que uma rota pode reclamar com `spec.pool`.
+  #     Só `announce: local` é construído: o endereço já tem de estar numa interface.
+  # EN: A set of host addresses a route can claim with `spec.pool`. Only
+  #     `announce: local` is built: the address must already be on an interface.
+  ipPools:
+    - name: edge
+      spec:
+        addresses: ["127.0.0.10-127.0.0.12"]
+
+  # PT: Ingress L7 à maneira do Kubernetes: host/path → serviço de backend.
+  # EN: Kubernetes-shaped L7 Ingress: host/path → backend service.
+  ingress:
+    - name: blog-ingress
+      spec:
+        rules:
+          - host: blog.example.ao
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service: { name: web, port: { number: 80 } }
+
+  # PT: Firewall L4 por contentor. Cada item é o estado desejado INTEIRO de uma direcção.
+  # EN: Per-container L4 firewall. Each item is the WHOLE desired state of one direction.
+  firewallPolicies:
+    # PT: (o ingress de `db` é da Dependency abaixo, e duas políticas para o mesmo
+    #     alvo+direcção são recusadas — esta protege `web`.)
+    # EN: (`db` ingress is owned by the Dependency below, and two policies for the same
+    #     target+direction are refused — so this one protects `web`.)
+    - name: web-ingress
+      spec:
+        target: web
+        direction: ingress
+        defaultPolicy: deny
+        rules:
+          - { action: allow, proto: tcp, port: "80", from: 10.0.0.0/8 }
+    - name: web-egress
+      spec:
+        target: web
+        direction: egress
+        defaultPolicy: allow
+
+  # PT: UMA regra incremental: ao contrário de uma firewallPolicy, ADICIONA às
+  #     regras do alvo em vez de substituir a direcção, e removê-la remove só a si.
+  # EN: ONE incremental rule: unlike a firewallPolicy it ADDS to the target's rules
+  #     instead of replacing the direction, and removing it removes only itself.
+  networkAccessRules:
+    - name: web-metrics
+      spec:
+        target: web
+        direction: ingress
+        proto: tcp
+        port: "9113"
+        from: 10.0.0.0/8
+
+  # PT: Alias+regra de perímetro num GatewayProvider externo (ADR-0051) —
+  #     `provider: opnsense` tem de estar registado (DELONIX_OPNSENSE_URL + credencial)
+  #     antes de `stack apply` chegar aqui.
+  # EN: A perimeter alias+rule on an external GatewayProvider (ADR-0051) —
+  #     `provider: opnsense` must already be registered (DELONIX_OPNSENSE_URL and a
+  #     credential) before `stack apply` reaches here.
+  networkGateways:
+    - name: block-untrusted
+      spec:
+        provider: opnsense
+        aliases:
+          - name: trusted-net
+            kind: network
+            content: ["10.0.0.0/24"]
+            description: internal trusted range
+        rules:
+          - description: allow-trusted-to-web
+            source: trusted-net
+            destination: 10.0.0.0/8
+            protocol: TCP
+
+  # PT: Proxy reverso L7 nativo, mesmo motor que `ingress:` (ambos fundem num só proxy).
+  # EN: Native L7 reverse proxy, same engine as `ingress:` (both merge into one proxy).
+  httpRoutes:
+    - name: blog-api
+      spec:
+        entrypoints:
+          - { port: 8081 }
+        rules:
+          - host: api.blog.example.ao
+            paths:
+              - path: /
+                backend: { service: web, port: 80 }
+
+  # PT: Alcançabilidade dirigida: `web` pode chegar a `db`, `db` não é exposto aos outros.
+  # EN: Directed reachability: `web` may reach `db`, `db` is not exposed to the others.
+  dependencies:
+    - name: web-knows-db
+      spec:
+        from: web
+        to: db
+        ports: ["5432"]
+        proto: tcp
+
+  # PT: Um Workload é rebaixado ao carregar para o container/pod/VM que o `type` nomeia.
+  # EN: A Workload is lowered at load into the container/pod/VM its `type` names.
+  workloads:
+    - name: batch
+      spec:
+        type: container
+        container:
+          image: alpine:3.20
+          command: ["sleep", "infinity"]
+
+  # PT: Túnel público para um porto local (kind: Gateway). pinggy não precisa de conta.
+  #     (`tunnels:` é a grafia antiga deste grupo e ainda carrega.)
+  # EN: Public tunnel to a local port (kind: Gateway). pinggy needs no account.
+  #     (`tunnels:` is the old spelling of this group and still loads.)
+  gateways:
+    - name: blog-public
+      spec:
+        provider: pinggy
+        localPort: 8080
+
+  # PT: Uma fonte de pull (kind: GitOpsSource, ADR-0021): um repositório de onde
+  #     este stack reconcilia. `sync.automated: false` regista-o sem timer;
+  #     `delonix gitops reconcile web-infra` faz uma passagem à mão.
+  # EN: A pull source (kind: GitOpsSource, ADR-0021): a repository this stack
+  #     reconciles from. `sync.automated: false` registers it without a timer;
+  #     `delonix gitops reconcile web-infra` runs one pass by hand.
+  gitopsSources:
+    - name: web-infra
+      spec:
+        source:
+          url: file:///srv/git/web-infra.git
+          ref: refs/heads/main
+          path: environments/production

@@ -22,6 +22,12 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use delonix_model::{Error, Result};
+// A backend may name a Pod (ADR-0046), whose members are `delonix_compute::Container`
+// records carrying the pod's address as a label — `container_ips` reads them below.
+use delonix_compute::Container;
+// The legacy-pod fallback (a pod created before the pod-IP label existed) recomputes
+// the address from the netns, exactly like `pod::pod_ip` does.
+use delonix_sdn::infra;
 
 /// `delonix httproute` — inspect/tear down the L7 reverse-proxy of the HTTPRoutes.
 /// (`apply` is done via `stack apply`/`<kind> apply` — this group is operational.)
@@ -800,16 +806,101 @@ struct IngressTls {
 
 use super::ingress_proxy::{self, Listener, ProxyConfig, Route, TlsMaterial};
 
-/// Map container-name → IP on the SDN (from the record). Only containers with an IP
-/// (on a custom network) can serve as a backend — those of `--net host/none` have no
-/// IP reachable by the proxy in the holder netns.
+/// Pure core of [`container_ips`]: turn a list of records into a name→IP map, with no
+/// store and no netns I/O, so it can be unit-tested. Two kinds of record answer a
+/// backend by name, and the ORDER is load-bearing:
+///
+/// 1. A **standalone container on a custom network** carries its own `ip` — the
+///    address the proxy reaches it on. This was the whole of the old behaviour, and it
+///    runs FIRST so that a real container always wins a name clash (the same rule
+///    `resolve_config` states at «a container wins a name clash»).
+/// 2. A **Pod member** (ADR-0046) runs `--net host` inside the pod's shared netns, so
+///    its own `ip` is `None`; the pod's address lives on every member under
+///    [`POD_IP_LABEL`](super::pod::POD_IP_LABEL), written at attach time. The static
+///    validator (`stack.rs`, `declared(&[CONTAINER, POD, VM])`) accepts a route that
+///    names the POD, so the runtime has to resolve that name — otherwise the apply
+///    fails with «backend has no IP on the SDN» on a manifest the validator passed.
+///    We therefore map the POD NAME → pod IP, and for completeness each
+///    `<pod>-<member>` record name too. `or_insert` keeps step 1's standalone
+///    container (and any pod already seen) on a name clash.
+///
+/// Legacy pods (created before the IP label existed) carry no [`POD_IP_LABEL`] and are
+/// resolved by the netns-reading fallback in the wrapper, not here — see [`container_ips`].
+fn container_ips_from(list: Vec<Container>) -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    // Step 1 — standalone containers with an IP of their own (precedence).
+    for c in &list {
+        if let Some(ip) = &c.ip {
+            m.entry(c.name.clone()).or_insert_with(|| ip.clone());
+        }
+    }
+    // Step 2 — pods: group members by POD_LABEL (same idiom as `pod::pods_by_label`),
+    // resolve the shared address from any member's POD_IP_LABEL (it is identical on
+    // every member — the one netns), and publish it under the pod name AND each member.
+    let mut pods: std::collections::BTreeMap<&str, Vec<&Container>> =
+        std::collections::BTreeMap::new();
+    for c in &list {
+        if let Some(pod) = c.labels.get(super::pod::POD_LABEL) {
+            pods.entry(pod.as_str()).or_default().push(c);
+        }
+    }
+    for (pod, members) in pods {
+        // No label on any member means a legacy pod; the wrapper does the netns
+        // fallback — here we only resolve what the label already knows.
+        let Some(ip) = members
+            .iter()
+            .find_map(|c| c.labels.get(super::pod::POD_IP_LABEL).cloned())
+        else {
+            continue;
+        };
+        // The pod NAME is what a route names (and what the validator promised);
+        // `<pod>-<member>` is added for completeness. `or_insert` never pisa a real
+        // container from step 1 nor an already-resolved pod.
+        m.entry(pod.to_string()).or_insert_with(|| ip.clone());
+        for c in &members {
+            m.entry(c.name.clone()).or_insert_with(|| ip.clone());
+        }
+    }
+    m
+}
+
+/// Map container/Pod-name → IP on the SDN (from the records). Only backends with an IP
+/// reachable from the holder netns qualify: a container on a custom network (its own
+/// `ip`), or a Pod — whose members run `--net host` with the pod address on a label
+/// (see [`container_ips_from`], which does the pure mapping).
+///
+/// The one thing that needs the store (and a netns read) lives here: a **legacy pod**
+/// created before [`POD_IP_LABEL`](super::pod::POD_IP_LABEL) existed has no label, so
+/// the pure core leaves it out. Those pods are all on the default bridge, where
+/// recomputing the address from the netns is correct — the exact fallback
+/// [`pod::pod_ip`] uses. It is kept out of `container_ips_from` because it is I/O.
 fn container_ips() -> std::collections::HashMap<String, String> {
     let mut m = std::collections::HashMap::new();
     if let Ok((_, cstore)) = super::util::open_stores() {
         if let Ok(list) = cstore.list() {
-            for c in list {
-                if let Some(ip) = c.ip {
-                    m.insert(c.name, ip);
+            // Capture pod→member names BEFORE moving `list` into the pure core, so the
+            // legacy fallback below still has the names to publish (only Strings are
+            // cloned, never the records).
+            let mut pod_members: std::collections::BTreeMap<String, Vec<String>> =
+                std::collections::BTreeMap::new();
+            for c in &list {
+                if let Some(pod) = c.labels.get(super::pod::POD_LABEL) {
+                    pod_members
+                        .entry(pod.clone())
+                        .or_default()
+                        .push(c.name.clone());
+                }
+            }
+            m = container_ips_from(list);
+            // Legacy pods: the label-only core could not answer them. Same fallback as
+            // `pod::pod_ip` — correct because every such pod sits on the default bridge.
+            for (pod, members) in pod_members {
+                if m.contains_key(&pod) {
+                    continue; // the label already answered — the modern, common case
+                }
+                let ip = infra::container_ip(&super::pod::pod_netns_name(&pod));
+                for name in std::iter::once(pod).chain(members) {
+                    m.entry(name).or_insert_with(|| ip.clone());
                 }
             }
         }
@@ -1956,6 +2047,79 @@ mod tests {
         );
         v.insert("down".to_string(), Err("it has no IP yet".to_string()));
         (c, v)
+    }
+
+    /// G1 / ADR-0046 regression: `container_ips` must answer a backend that names a
+    /// POD. A standalone container maps by its own `ip` as it always did; a pod's
+    /// members run `--net host` with `ip == None` and the address on a label, so the
+    /// map has to resolve the POD NAME (what `stack.rs`'s validator accepts) and each
+    /// `<pod>-<member>` name to that label IP. A label-less record with no `ip` (a
+    /// `--net host`/VM-path record) contributes nothing. Exercises the pure core so no
+    /// store is needed.
+    #[test]
+    fn container_ips_is_pod_aware_and_a_real_container_still_wins() {
+        // A standalone container on a custom network: carries its own address.
+        let standalone = |name: &str, ip: &str| {
+            let mut c = Container::new(
+                format!("id-{name}"),
+                name.into(),
+                "nginx".into(),
+                vec![],
+                "0".into(),
+            );
+            c.ip = Some(ip.into());
+            c
+        };
+        // A pod member as the store holds one: `--net host` so its own `ip` is None,
+        // membership under POD_LABEL, and the shared pod address under POD_IP_LABEL.
+        // `name` is the full `<pod>-<short>` record name.
+        let member = |pod: &str, short: &str, pod_ip: &str| {
+            let mut c = Container::new(
+                format!("id-{pod}-{short}"),
+                format!("{pod}-{short}"),
+                "nginx".into(),
+                vec![],
+                "0".into(),
+            );
+            c.labels
+                .insert(crate::cmd::pod::POD_LABEL.to_string(), pod.to_string());
+            c.labels
+                .insert(crate::cmd::pod::POD_IP_LABEL.to_string(), pod_ip.to_string());
+            c
+        };
+
+        // (1) a plain container maps name → its own ip, exactly as before.
+        let m = container_ips_from(vec![standalone("web", "10.1.0.5")]);
+        assert_eq!(m.get("web").map(String::as_str), Some("10.1.0.5"));
+
+        // (2) a pod `web` with one member `web-web`: resolves BY THE POD NAME (what the
+        // validator accepts) and, for completeness, by the member name too — both to
+        // the shared pod IP, even though the member's own `ip` is None.
+        let m = container_ips_from(vec![member("web", "web", "10.89.0.5")]);
+        assert_eq!(m.get("web").map(String::as_str), Some("10.89.0.5"));
+        assert_eq!(m.get("web-web").map(String::as_str), Some("10.89.0.5"));
+
+        // (3) a record with neither an `ip` nor a pod label (a `--net host`/VM-path
+        // container) adds nothing — the VM/host path is left untouched.
+        let m = container_ips_from(vec![Container::new(
+            "id-bare".into(),
+            "bare".into(),
+            "nginx".into(),
+            vec![],
+            "0".into(),
+        )]);
+        assert!(m.is_empty());
+
+        // Name clash: a real container `web` and a pod also named `web`. Step 1 inserts
+        // the container first and `or_insert` keeps it — «a container wins a name
+        // clash», coherent with `resolve_config`. The member name has no clash and
+        // still resolves to the pod IP.
+        let m = container_ips_from(vec![
+            standalone("web", "10.1.0.9"),
+            member("web", "web", "10.89.0.5"),
+        ]);
+        assert_eq!(m.get("web").map(String::as_str), Some("10.1.0.9"));
+        assert_eq!(m.get("web-web").map(String::as_str), Some("10.89.0.5"));
     }
 
     #[test]

@@ -92,7 +92,7 @@ Le groupe doit ensuite être prouvé de bout en bout, dans `bins/delonix-runtime
 - `manifest.rs`, **`stack_group_sample`** — le `spec` minimal d'un enfant du groupe et le Kind
   qu'il devient ; `every_stack_group_loads` parcourt chaque groupe et échoue sur un groupe sans
   échantillon.
-- **`examples/stack.yaml`** — doit mentionner le groupe ; `the_stack_example_names_every_group`
+- **`examples/core/stack.yaml`** — doit mentionner le groupe ; `the_stack_example_names_every_group`
   échoue sinon. Ce fichier est aussi ce qu'affiche la page Kinds du site utilisateur.
 - `schema.rs`, **`every_stack_group_is_typed_against_its_kinds_own_spec`** — les éléments du groupe
   sont typés contre la propre spec du Kind, donc le Kind a besoin de sa branche `TYPED_KINDS`
@@ -269,7 +269,7 @@ Pour un Kind qui se comporte comme `Service` (primaire, converge, a un démontag
    (`schema.rs`) — ou une entrée dans `untyped_hint` expliquant pourquoi pas.
 3. `manifest.rs` — un bras dans `filled_spec` (`spec_with_defaults`), un bras dans
    `spec_fields_for`, et un échantillon dans `stack_group_sample` ; le groupe dans
-   `examples/stack.yaml`.
+   `examples/core/stack.yaml`.
 4. `stack.rs` — des branches dans `desired_of`, `actual_of`, `converge_and_stamp`, `stamp_all`,
    `destroy_one`, `presence`, et une couche dans `run_layers` appelant le propre `apply(docs)` du
    Kind.

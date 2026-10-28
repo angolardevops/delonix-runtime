@@ -186,7 +186,7 @@ broken image. It is also why `verify-boot.sh` leaves it out.
 **TrueNAS was proved on :80, but `kind: Volume` provisioning talks to :443.**
 The appliance's factory certificate is not verifiable from anywhere else, so
 that path needs `insecureTLS: true` — or a certificate you install yourself.
-See `examples/provision-truenas.yaml`.
+See `examples/storage/volume.yaml` (cenário provision).
 
 The Proxmox and TrueNAS passwords are set by the answer file / RPC call, so
 changing them for your own builds is an edit to `answer-*.toml` or the

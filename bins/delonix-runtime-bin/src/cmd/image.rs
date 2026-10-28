@@ -177,6 +177,23 @@ pub(crate) struct BuildSpec {
     target: Option<String>,
 }
 
+/// Accepted keys of the `spec.build` block, for the nested unknown-field
+/// warning. Must carry every accepted spelling — `BuildSpec` has no
+/// `deny_unknown_fields`, so without this a typo inside `build:` (`platfrom:`,
+/// `contex:`) is swallowed: the top-level `IMAGE_SPEC_FIELDS` guard only sees
+/// the spec's own keys (`pull`/`build`/`pullSecret`) and accepts `build` as a
+/// whole, the same gap `Volume`/`ObjectStorage` close with their own nested
+/// guards. The ordering mirrors `BuildSpec`'s declaration.
+pub(crate) const BUILD_FIELDS: &[&str] = &[
+    "context", "file", "tag", "buildArgs", "noCache", "secrets", "platform", "target",
+];
+
+/// Warns about unknown keys INSIDE the `build:` block — the top-level guard only
+/// sees the spec's own keys. Called from the manifest load.
+pub(crate) fn warn_unknown_nested(doc: &ManifestDoc) {
+    manifest::warn_unknown_fields_in(doc, "build", BUILD_FIELDS);
+}
+
 fn default_context() -> PathBuf {
     PathBuf::from(".")
 }
@@ -1657,5 +1674,55 @@ mod tests {
         assert!(container_references_image("sha256:abc", &img));
         assert!(container_references_image("abc", &img));
         assert!(!container_references_image("sha256:def", &img));
+    }
+
+    /// `BUILD_FIELDS` must list EXACTLY the keys `BuildSpec` serialises — no
+    /// `deny_unknown_fields` protects the nested guard, so a field added to
+    /// `BuildSpec` without being added here would start getting swallowed by the
+    /// warning, and a stale entry would quietly accept a key the struct dropped.
+    /// Every field serialises (none carries `skip_serializing_if`), so a round
+    /// trip pins the hot table to the struct — the discipline
+    /// `reconciled_fields_match_the_hot_table` keeps for ObjectStorage.
+    #[test]
+    fn build_fields_match_the_build_spec() {
+        let b: BuildSpec = serde_yaml::from_str(
+            "context: .\nfile: Dockerfile\ntag: img:latest\nbuildArgs: [FOO=bar]\nnoCache: true\nsecrets: []\nplatform: linux/amd64\ntarget: builder\n",
+        )
+        .unwrap();
+        let serde_yaml::Value::Mapping(m) = serde_yaml::to_value(&b).unwrap() else {
+            panic!("a BuildSpec serialises as a mapping");
+        };
+        let mut keys: Vec<String> = m
+            .keys()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect();
+        keys.sort_unstable();
+        let mut expected: Vec<String> = BUILD_FIELDS.iter().map(|s| s.to_string()).collect();
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
+    }
+
+    fn image_doc(build_block: &str) -> ManifestDoc {
+        serde_yaml::from_str(&format!(
+            "apiVersion: delonix.io/v1\nkind: Image\nmetadata: {{ name: web }}\nspec:\n  build:\n{build_block}"
+        ))
+        .unwrap()
+    }
+
+    /// A typo inside `build:` is CAUGHT (not swallowed as the top-level guard
+    /// did), and a block with only legitimate keys emits nothing. The counter is
+    /// a monotonic global shared with other tests, so the detection asserts a
+    /// strict increase (safe under parallelism); the "no warning" half is proven
+    /// by `build_fields_match_the_build_spec`, never by an equality on the count.
+    #[test]
+    fn a_typo_in_the_build_block_is_detected() {
+        let before = manifest::unknown_field_warnings();
+        warn_unknown_nested(&image_doc(
+            "    context: .\n    tag: img:latest\n    platfrom: linux/arm64\n",
+        ));
+        assert!(
+            manifest::unknown_field_warnings() > before,
+            "a typo inside build: must be warned about"
+        );
     }
 }

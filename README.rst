@@ -463,6 +463,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Docker/Podman root aliases: each is the SAME flag struct and handler as the ``container <verb>`` / ``image <verb>`` it shortcuts, so you change only the executable name. ``wait`` is polymorphic (container ids vs manifest ``-f``) — see the stability doc.
    * - ``volume``
      - Named volumes, bind mounts, network shares and per-tenant slices: create (including ``--driver nfs|cifs|smb|webdav --opt key=value`` and ``--parent``), ls, describe, inspect, snapshot, prune, rm.
+   * - ``bucket``
+     - S3-compatible object stores (``kind: ObjectStorage``): ls, inspect, rm. ``cephRgw`` provisions a tenant S3 identity on the node's Ceph Object Gateway (keys land in a generated Secret); ``external`` references an S3 you already run.
    * - ``secret``
      - Encrypted-at-rest secret vault — the producer of ``run --secret``: create, set, unset, ls, inspect, rotate, rotate-key, apply.
    * - ``policy``

@@ -1,0 +1,126 @@
+# ============================================================================
+# kind: NetworkAccessRule — UMA regra de firewall INCREMENTAL por documento
+# kind: NetworkAccessRule — ONE INCREMENTAL firewall rule per document
+#
+# PT: Ao contrário de `kind: NetworkPolicy`, que SUBSTITUI o estado inteiro de uma
+#     direcção a cada apply (e recusa dois documentos para o mesmo alvo+direcção),
+#     várias NetworkAccessRule para o MESMO container ACUMULAM — cada uma retirável
+#     sozinha: tira-a do manifesto e reaplica com --prune e só essa é retirada; a
+#     outra fica intacta. Reaplicar o mesmo documento substitui só a regra que ele
+#     possui ("o último comando ganha" para o mesmo match). Só actua em workloads
+#     numa rede SDN custom.
+# EN: Unlike `kind: NetworkPolicy`, which REPLACES a whole direction's state on each
+#     apply (and refuses two documents for the same target+direction), several
+#     NetworkAccessRule for the SAME container ACCUMULATE — each removable on its
+#     own: drop it from the manifest and re-apply with --prune and only that one is
+#     retired; the other stays. Re-applying the same document replaces only the rule
+#     it owns ("the last command wins" for the same match). It only acts on workloads
+#     on a custom SDN network.
+#
+# PT: Campos spec: target*, direction*, port*, action, proto, from (* = obrigatório).
+#     A identidade da regra é o metadata.name. É o primitivo declarativo
+#     incremental (ADR-0028); não substitui `net ingress`/`net egress` e não tem
+#     verbo de CLI próprio — aplica-se como qualquer outro Kind.
+# EN: spec fields: target*, direction*, port*, action, proto, from (* = required).
+#     The rule's identity is metadata.name. It is the incremental declarative
+#     primitive (ADR-0028); it does not replace `net ingress`/`net egress` and has
+#     no CLI verb of its own — it is applied like any other Kind.
+#
+# PT: Aplicar:  delonix stack apply -f examples/networking/networkaccessrule.yaml
+# EN: Apply:    delonix stack apply -f examples/networking/networkaccessrule.yaml
+# ============================================================================
+
+# ── 0. Recursos de apoio INLINE — a rede e o workload alvo ───────────────────
+#      Supporting resources INLINE — the network and the target workload
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: appnet
+  containers:
+    - name: web
+      image: "nginx:alpine"
+
+# ── 1. todos os campos explícitos — allow TCP/8080 para `web` de um CIDR ─────
+#      every field explicitly set — allow TCP/8080 into `web` from one CIDR
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-8080-from-lan }
+spec:
+  target: web                  # PT: o workload a que a regra se aplica | EN: the workload the rule applies to
+  direction: ingress           # PT: ingress (tráfego PARA o workload) | egress (DELE) | EN: ingress (traffic TO the workload) | egress (FROM it)
+  action: allow                # PT: allow (aceita, default) | deny (dropa) | EN: allow (accept, default) | deny (drop)
+  proto: tcp                   # PT: tcp | udp | any (default any) | EN: tcp | udp | any (default any)
+  port: "8080"                 # PT: uma porta, um intervalo "n-m", ou "*" (qualquer) | EN: a port, a range "n-m", or "*" (any)
+  from: 10.0.0.0/24            # PT: CIDR da outra ponta (origem no ingress); omitir = qualquer | EN: CIDR of the other end (source on ingress); omit = anywhere
+
+# ── 2. acumula com a regra 1 no mesmo alvo — 2ª regra ingress independente ───
+#      accumulates with rule 1 on the same target — a 2nd independent ingress rule
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-metrics-from-monitoring }
+spec:
+  target: web                  # PT: o MESMO alvo — acumula, não substitui | EN: the SAME target — accumulates, does not replace
+  direction: ingress
+  proto: tcp
+  port: "9090"
+  from: 10.1.0.0/24
+
+# ── 3. intervalo de portas, UDP, defaults de action (allow) e from (qualquer)
+#      port range, UDP, defaults for action (allow) and from (anywhere)
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-udp-range }
+spec:
+  target: web
+  direction: ingress
+  proto: udp
+  port: "5000-5100"
+
+# ── 4. deny explícito de uma origem abusiva, qualquer protocolo e porta ──────
+#      explicit deny of one abusive source, any protocol, any port
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-block-bad-host }
+spec:
+  target: web
+  direction: ingress
+  action: deny
+  proto: any
+  port: "*"
+  from: 203.0.113.7/32
+
+# ── 5. EGRESS — `from` nomeia o CIDR de DESTINO que o workload pode alcançar ─
+#      EGRESS — `from` names the DESTINATION CIDR the workload may reach
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-egress-https }
+spec:
+  target: web
+  direction: egress
+  action: allow
+  proto: tcp
+  port: "443"
+  from: 0.0.0.0/0
+
+# ── 6. forma mínima — só os campos obrigatórios (direction + port + target) ──
+#      minimal form — only the required fields (direction + port + target)
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-minimal }
+spec:
+  target: web
+  direction: egress
+  port: "53"

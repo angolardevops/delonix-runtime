@@ -1,0 +1,92 @@
+# ============================================================================
+# kind: Image — garantir que uma imagem está presente: PUXAR ou CONSTRUIR
+# kind: Image — ensure an image is present: PULL it or BUILD it
+#
+# PT: `pull` e `build` são MUTUAMENTE EXCLUSIVOS (um documento cada). Puxar é
+#     idempotente; a identidade de uma imagem é a sua REFERÊNCIA, não o
+#     `metadata.name`. `pullSecret` nomeia um `kind: Secret` com as credenciais
+#     do registo — só faz sentido com `pull:` (um `build:` produz a imagem
+#     localmente e não autentica em lado nenhum, por isso um pullSecret aí é
+#     recusado). Uma imagem construída NÃO converge: não há cache de build, cada
+#     apply reconstrói e substitui a tag.
+# EN: `pull` and `build` are MUTUALLY EXCLUSIVE (one document each). A pull is
+#     idempotent; an image's identity is its REFERENCE, not `metadata.name`.
+#     `pullSecret` names a `kind: Secret` with the registry credentials — only
+#     meaningful with `pull:` (a `build:` produces the image locally and
+#     authenticates nowhere, so a pullSecret there is refused). A built image does
+#     NOT converge: there is no build cache, every apply rebuilds and replaces the
+#     tag.
+#
+# PT: Aplicar:  delonix stack apply -f examples/artifact/image.yaml
+# EN: Apply:    delonix stack apply -f examples/artifact/image.yaml
+# ============================================================================
+
+# ── 1. pull — puxar uma imagem pública (idempotente) ────────────────────────
+#      pull — pull a public image (idempotent)
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: alpine
+spec:
+  pull: alpine:3.19            # PT: puxa esta referência | EN: pull this reference
+
+# ── Secret de apoio — credenciais do registo privado abaixo ──────────────────
+#    Supporting Secret — registry credentials for the private pull below
+# PT: Da ENVIRONMENT (nada secreto fica no manifesto; é a forma que um job de CI
+#     tem). Alternativa: `stringData: { username, password }` (texto no ficheiro).
+# EN: From the ENVIRONMENT (nothing secret is written in the manifest; the shape
+#     a CI job has). Alternative: `stringData: { username, password }` (cleartext).
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: registry-cred
+spec:
+  fromEnv:
+    username: REGISTRY_USER
+    password: REGISTRY_TOKEN
+
+# ── 2. pull privado — credenciais nomeadas pelo manifesto ────────────────────
+#      private pull — credentials named by the manifest
+# PT: Sem `pullSecret`, um pull usa o cofre de credenciais da MÁQUINA
+#     (`delonix image login`) — estado por-máquina que um manifesto não carrega,
+#     logo aplicava limpo no host onde alguém fez login e falhava em todos os
+#     outros. Nomear um Secret torna o documento auto-suficiente.
+# EN: Without `pullSecret`, a pull uses the MACHINE's credential vault
+#     (`delonix image login`) — per-machine state a manifest cannot carry, so it
+#     applied cleanly on the host where someone logged in and failed on every
+#     other one. Naming a Secret makes the document self-contained.
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: private-app
+spec:
+  pull: ghcr.io/angolardevops/private-app:1.0
+  pullSecret: registry-cred    # PT: `kind: Secret` com username+password; só com pull | EN: `kind: Secret` with username+password; only with pull
+
+# ── 3. build — construir a partir de um Delonixfile/Dockerfile ───────────────
+#      build — build from a Delonixfile/Dockerfile (every build field)
+# PT: Todos os campos de BuildSpec. Só `tag` é obrigatório; os restantes espelham
+#     as flags do CLI (`delonix image build`).
+# EN: Every BuildSpec field. Only `tag` is required; the rest mirror the CLI's
+#     flags (`delonix image build`).
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: app-built
+spec:
+  build:
+    tag: app:dev                     # PT: obrigatório — a tag a produzir | EN: required — the tag to produce
+    context: .                       # PT: directório de contexto (default ".") | EN: build context directory (default ".")
+    file: Delonixfile                # PT: caminho do ficheiro (default: ./Delonixfile, depois ./Dockerfile) | EN: file path (default: ./Delonixfile, then ./Dockerfile)
+    target: runtime                  # PT: multi-stage: construir até esta etapa (nome ou índice) | EN: multi-stage: build up to this stage (name or index)
+    platform: linux/amd64            # PT: arquitectura-alvo, como o --platform do CLI | EN: target architecture, like the CLI's --platform
+    noCache: true                    # PT: ignora a cache de camadas, como --no-cache | EN: bypass the layer cache, like --no-cache
+    buildArgs:                       # PT: overrides de ARG, KEY=VALUE (só para ARGs que o ficheiro declara) | EN: ARG overrides KEY=VALUE (only for ARGs the file declares)
+      - VERSION=1.2.3
+      - CHANNEL=stable
+    secrets:                         # PT: segredos de build, `id=<nome>,src=<path>`; usados com | EN: build-time secrets, `id=<name>,src=<path>`; used with
+      - id=npmrc,src=./npmrc.txt     #     RUN --mount=type=secret,id=npmrc — nunca fica numa camada / never lands in a layer

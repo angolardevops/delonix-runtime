@@ -1562,8 +1562,8 @@ pub static ENTRIES: &[Entry] = &[
         group: "Declarative",
         examples: &[
             ("the routes from the manifest in this directory", "delonix net httproute apply"),
-            ("from a file of your own — a re-apply reloads by SIGHUP, same pid, no dropped connection", "delonix net httproute apply -f examples/httproute.yaml"),
-            ("listeners and TLS are fixed when the proxy starts: changing a port means `httproute rm` and then this again", "delonix net httproute apply -f examples/httproute.yaml"),
+            ("from a file of your own — a re-apply reloads by SIGHUP, same pid, no dropped connection", "delonix net httproute apply -f examples/gateway/httproute.yaml"),
+            ("listeners and TLS are fixed when the proxy starts: changing a port means `httproute rm` and then this again", "delonix net httproute apply -f examples/gateway/httproute.yaml"),
         ],
         see_also: &["get", "net httproute rm", "stack apply", "secret create"],
     },
@@ -1874,7 +1874,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Declarative",
         examples: &[
             ("apply only the `kind: Network` documents of a manifest, idempotent by name", "delonix network apply -f delonix-manifest.yaml"),
-            ("the networks of a shipped example, leaving the other kinds alone", "delonix network apply -f examples/network.yaml"),
+            ("the networks of a shipped example, leaving the other kinds alone", "delonix network apply -f examples/networking/network.yaml"),
         ],
         see_also: &["stack apply", "stack plan", "network create", "volume apply"],
     },
@@ -1970,7 +1970,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Workloads",
         examples: &[
             ("which pods exist and which containers each one holds", "delonix get pods"),
-            ("create one from a manifest — N containers on ONE IP, reaching each other over localhost", "delonix pod create -f examples/pod-multi.yaml"),
+            ("create one from a manifest — N containers on ONE IP, reaching each other over localhost", "delonix pod create -f examples/compute/pod.yaml"),
             ("the logs of a chosen member", "delonix pod logs web --container api"),
         ],
         see_also: &["pod create", "container run", "workload ls", "stack apply"],
@@ -1979,7 +1979,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "pod create",
         group: "Lifecycle",
         examples: &[
-            ("N containers sharing one netns — same IP and `localhost` between them, like a k8s Pod", "delonix pod create -f examples/pod-multi.yaml"),
+            ("N containers sharing one netns — same IP and `localhost` between them, like a k8s Pod", "delonix pod create -f examples/compute/pod.yaml"),
             ("from the default manifest in the current directory", "delonix pod create"),
         ],
         see_also: &["get", "describe", "stack apply"],
@@ -2034,7 +2034,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("what the node currently refuses, if anything", "delonix get runtimepolicy"),
             ("the full detail — mode, every rule, the file it lives in", "delonix describe runtimepolicy node-ceiling"),
-            ("raise or tighten it declaratively, like any other Kind", "delonix stack apply -f examples/full-runtimepolicy.yaml"),
+            ("raise or tighten it declaratively, like any other Kind", "delonix stack apply -f examples/security/runtimepolicy.yaml"),
         ],
         see_also: &["policy unset", "get", "describe", "stack apply"],
     },
@@ -2116,7 +2116,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Declarative",
         examples: &[
             ("create the `kind: Secret` documents of the manifest in this directory", "delonix secret apply"),
-            ("from a file of your own, so the vault is provisioned from git like everything else", "delonix secret apply -f examples/secret.yaml"),
+            ("from a file of your own, so the vault is provisioned from git like everything else", "delonix secret apply -f examples/core/secret.yaml"),
         ],
         see_also: &["secret create", "stack apply", "manifest schema"],
     },
@@ -2978,7 +2978,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Declarative",
         examples: &[
             ("apply the `kind: VirtualMachine` documents of ./delonix-manifest.yaml — idempotent by name, so it creates or recovers", "delonix vm apply"),
-            ("from a manifest of your own", "delonix vm apply -f examples/vm.yaml"),
+            ("from a manifest of your own", "delonix vm apply -f examples/compute/virtualmachine.yaml"),
         ],
         see_also: &["vm init", "stack apply", "stack plan", "vm create"],
     },
@@ -3215,7 +3215,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Declarative",
         examples: &[
             ("apply only the `kind: Volume` documents of a manifest, idempotent by name", "delonix volume apply -f delonix-manifest.yaml"),
-            ("the volumes of a shipped example, leaving the other kinds untouched", "delonix volume apply -f examples/volume.yaml"),
+            ("the volumes of a shipped example, leaving the other kinds untouched", "delonix volume apply -f examples/storage/volume.yaml"),
         ],
         see_also: &["stack apply", "stack plan", "volume create", "volume ls"],
     },

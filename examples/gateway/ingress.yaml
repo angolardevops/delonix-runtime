@@ -1,0 +1,151 @@
+# ============================================================================
+# kind: Ingress — Ingress L7/HTTP no formato Kubernetes (networking.k8s.io/v1)
+# kind: Ingress — Kubernetes-shaped L7/HTTP Ingress (networking.k8s.io/v1)
+#
+# PT: É a forma k8s (host/path → backend service) do MESMO proxy L7 embutido do
+#     `kind: HTTPRoute` — Compat→HTTPRoute: compila para o mesmo proxy e compõe-se
+#     com todo o Ingress/HTTPRoute do manifesto num ÚNICO proxy com UM certificado
+#     (sem SNI). O antigo `kind: Ingress`-como-firewall L4 desapareceu — o firewall
+#     L4 é hoje `kind: NetworkPolicy` (ver ../networking/networkpolicy.yaml).
+# EN: It is the k8s shape (host/path → backend service) of the SAME embedded L7
+#     proxy as `kind: HTTPRoute` — Compat→HTTPRoute: it compiles to that proxy and
+#     is composed with every Ingress/HTTPRoute of the manifest into a SINGLE proxy
+#     with ONE certificate (no SNI). The old `kind: Ingress`-as-L4-firewall is gone
+#     — the L4 firewall is now `kind: NetworkPolicy` (see
+#     ../networking/networkpolicy.yaml).
+#
+# PT: Os backends TÊM de ser `kind: Container` com IP numa rede SDN custom (não
+#     --net host/none). Sem efeito (aceites por fidelidade k8s): `ingressClassName`
+#     (o proxy embutido é a única classe), `tls[].hosts` (reportado como não
+#     aplicado), `pathType: Exact` (servido como prefixo, com aviso), uma lista
+#     `tls` com mais de uma entrada (só a primeira conta) e portas nomeadas
+#     (`port.name` é recusado: usa `port.number`).
+# EN: Backends MUST be `kind: Container` with an IP on a custom SDN network (not
+#     --net host/none). No effect (accepted for k8s fidelity): `ingressClassName`
+#     (the embedded proxy is the only class), `tls[].hosts` (reported as not
+#     applied), `pathType: Exact` (served as a prefix, warned), a `tls` list longer
+#     than one (only the first is used) and named ports (`port.name` is refused:
+#     use `port.number`).
+#
+# PT: Aplicar:  delonix stack apply -f examples/gateway/ingress.yaml
+# EN: Apply:    delonix stack apply -f examples/gateway/ingress.yaml
+# ============================================================================
+
+# ── 1. Backends — rede SDN + containers que o Ingress nomeia ─────────────────
+#      Backends — SDN network + containers the Ingress names
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: sdn-demo
+spec:
+  driver: bridge              # PT: o proxy L7 só alcança backends na SDN | EN: the L7 proxy only reaches backends on the SDN
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web
+spec:
+  image: "nginx:alpine"       # PT: nginx serve em :80 | EN: nginx serves on :80
+  network: sdn-demo
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: api
+spec:
+  image: "caddy:alpine"       # PT: caddy:alpine serve em :80 | EN: caddy:alpine serves on :80
+  network: sdn-demo
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: docs
+spec:
+  image: "httpd:2.4-alpine"   # PT: httpd serve em :80 | EN: httpd serves on :80
+  network: sdn-demo
+
+# ── 2. secretRef — certificado BYO de um kind: Secret ────────────────────────
+#      secretRef — BYO certificate from a kind: Secret
+---
+# PT: Par PEM sob tls_crt / tls_key (tls.crt / tls.key também servem). Substitui
+#     os placeholders por um par real antes de servir tráfego real.
+# EN: PEM pair under tls_crt / tls_key (tls.crt / tls.key also work). Replace the
+#     placeholders with a real pair before serving real traffic.
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: shop-tls
+spec:
+  stringData:
+    tls_crt: "-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----"
+    tls_key: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----"
+
+# ── 3. Ingress completo — listeners, TLS, dois hosts, paths, defaultBackend ──
+#      Full Ingress — listeners, TLS, two hosts, paths, defaultBackend
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Ingress
+metadata:
+  name: shop
+spec:
+  ingressClassName: delonix          # PT: aceite por fidelidade k8s (o proxy embutido é a única classe) | EN: accepted for k8s fidelity (the embedded proxy is the only class)
+  entrypoints:                       # PT: extensão delonix: portas de listener. Omitir = 80 (+443 com tls) | EN: delonix extension: listener ports. Omit = 80 (+443 when tls is set)
+    - { port: 80 }
+    - { port: 443, tls: true }       # PT: termina TLS nesta porta | EN: terminate TLS on this port
+  tls:                               # PT: uma LISTA em k8s; este motor serve um só certificado (sem SNI) | EN: a LIST in k8s; this engine serves a single certificate (no SNI)
+    - hosts: [shop.example.ao]       # PT: aceite mas NÃO aplicado (sem SNI) | EN: accepted but NOT applied (no SNI)
+      secretName: shop-tls           # PT: kind: Secret com tls_crt/tls_key; omitir = self-signed | EN: kind: Secret with tls_crt/tls_key; omit = self-signed
+  rules:
+    - host: shop.example.ao          # PT: header Host a casar; omitir = qualquer host | EN: Host header to match; omit = any host
+      http:
+        paths:
+          - path: /
+            pathType: Prefix         # PT: casa por prefixo (Exact é servido como prefixo) | EN: matched by prefix (Exact is served as a prefix)
+            backend:
+              service:
+                name: web            # PT: nome de container, resolvido para o IP SDN no apply | EN: container name, resolved to its SDN IP at apply
+                port:
+                  number: 80         # PT: porta do container (portas nomeadas não são suportadas) | EN: container port (named ports are not supported)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80         # PT: caddy:alpine serve em :80 | EN: caddy:alpine serves on :80
+    - host: docs.example.ao          # PT: um segundo host no mesmo Ingress | EN: a second host in the same Ingress
+      http:
+        paths:
+          - path: /                  # PT: `path` default é / | EN: `path` defaults to /
+            backend:
+              service:
+                name: docs
+                port:
+                  number: 80
+  defaultBackend:                    # PT: catch-all quando nenhuma regra casa | EN: catch-all when no rule matches
+    service:
+      name: web
+      port:
+        number: 80
+
+# ── 4. Ingress mínimo — junta-se ao mesmo proxy, sem TLS, sem entrypoints ────
+#      Minimal Ingress — joins the same proxy, no TLS, no entrypoints
+---
+# PT: Sem `entrypoints`: default porta 80. Sem `tls`: só serve HTTP.
+# EN: No `entrypoints`: defaults to port 80. No `tls`: serves HTTP only.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Ingress
+metadata:
+  name: status
+spec:
+  rules:
+    - host: status.example.ao
+      http:
+        paths:
+          - path: /healthz
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80

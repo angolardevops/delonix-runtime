@@ -1,0 +1,79 @@
+# ============================================================================
+# kind: NetworkGateway — aliases, regras, NAT e políticas num appliance de perímetro
+# kind: NetworkGateway — aliases, rules, NAT and policies on a perimeter appliance
+#
+# PT: `spec.provider` nomeia um provider de gateway registado: `opnsense`,
+#     registado por DELONIX_OPNSENSE_URL e uma credencial — um par chave/segredo de
+#     API gerado (DELONIX_OPNSENSE_CREDENTIAL nomeia um `kind: Secret` com `key` e
+#     `secret`); a password de uma conta é recusada pelo appliance. `stack validate`
+#     não o contacta. Aliases aplicam-se antes das regras e removem-se depois (o
+#     appliance confere a origem de uma regra contra a tabela de aliases). Posse por
+#     marca `delonix-owner:<token>`: um alias/regra do mesmo nome sem a marca é
+#     recusado, nunca adoptado. Não há update in place — um spec mudado é removido e
+#     reaplicado.
+# EN: `spec.provider` names a registered gateway provider: `opnsense`, registered
+#     through DELONIX_OPNSENSE_URL and a credential — a generated API key/secret pair
+#     (DELONIX_OPNSENSE_CREDENTIAL names a `kind: Secret` with `key` and `secret`); an
+#     account's password is refused by the appliance. `stack validate` does not
+#     contact it. Aliases are applied before rules and removed after them (the
+#     appliance checks a rule's source against its alias table). Ownership via a
+#     `delonix-owner:<token>` mark: an alias/rule with the same name and no mark is
+#     refused, never adopted. There is no update in place — a changed spec is removed
+#     and applied again.
+#
+# PT: Campos spec: provider, aliases, rules, policies, nat. `policies` declara uma
+#     direcção da política de um alvo na forma de uma NetworkPolicy, baixada para
+#     regras de filtro do appliance (regra n em `sequence + n - 1`, default logo a
+#     seguir). `nat` declara SNAT/DNAT (ADR-0051). IPv4 apenas.
+# EN: spec fields: provider, aliases, rules, policies, nat. `policies` declares one
+#     direction of a target's policy in a NetworkPolicy shape, lowered to the
+#     appliance's filter rules (rule n at `sequence + n - 1`, default right after).
+#     `nat` declares SNAT/DNAT (ADR-0051). IPv4 only.
+#
+# PT: Aplicar:  delonix stack apply -f examples/networking/networkgateway.yaml
+# EN: Apply:    delonix stack apply -f examples/networking/networkgateway.yaml
+# ============================================================================
+
+# ── 1. edge — aliases, uma regra de filtro, NAT (SNAT+DNAT) e uma política ───
+#      edge — aliases, a filter rule, NAT (SNAT+DNAT) and a policy
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: edge }
+spec:
+  # PT: forma-bloco do ADR-0071; o escalar `provider: opnsense` é o mesmo.
+  # EN: ADR-0071 block form; the scalar `provider: opnsense` is the same thing.
+  provider: { type: opnsense }
+  aliases:
+    - name: delonix_web
+      kind: host               # PT: host | network | EN: host | network
+      content: ["10.20.0.10", "10.20.0.11"]
+      description: web tier
+  rules:
+    - description: office to web tier   # PT: a identidade da regra no appliance | EN: the rule's identity on the appliance
+      source: 192.168.1.0/24   # PT: um nome de alias, um CIDR, ou any | EN: an alias name, a CIDR, or any
+      destination: delonix_web
+      protocol: TCP            # PT: omitir para qualquer protocolo | EN: omit for any protocol
+  nat:
+    - description: lan source nat        # PT: a identidade da regra NAT no appliance | EN: the NAT rule's identity on the appliance
+      kind: snat               # PT: snat (source NAT) | dnat (destination NAT / port-forward) | EN: snat (source NAT) | dnat (destination NAT / port-forward)
+      interface: wan           # PT: o nome do appliance para a interface (lan|wan|opt1) | EN: the appliance's own name for the interface (lan|wan|opt1)
+      source: 10.77.0.0/24     # PT: snat: a rede traduzida, no seu endereço de rede | EN: snat: the network translated, at its network address
+      target: interface-address # PT: snat: `interface-address` (default) ou um endereço | EN: snat: `interface-address` (default) or an address
+    - description: forward https to web
+      kind: dnat               # PT: um port-forward | EN: a port forward
+      interface: wan
+      protocol: tcp            # PT: dnat: tcp | udp | EN: dnat: tcp | udp
+      port: 443                # PT: dnat: a porta no endereço da interface | EN: dnat: the port on the interface's address
+      target: 10.20.0.10       # PT: dnat: o endereço para onde se reencaminha (obrigatório) | EN: dnat: the address forwarded to (required)
+      targetPort: 8443         # PT: dnat: a porta no destino; default = port | EN: dnat: the port on the target; defaults to `port`
+  policies:
+    - name: web-in
+      target: delonix_web      # PT: um nome de alias, um prefixo, ou um endereço | EN: an alias name, a prefix, or an address
+      direction: ingress       # PT: ingress (para o alvo) | egress (dele) | EN: ingress (to the target) | egress (from it)
+      defaultPolicy: deny      # PT: o verdict da última regra; deny quando omitido | EN: the last rule's verdict; deny when omitted
+      sequence: 30000          # PT: a posição da primeira regra nas regras de filtro do appliance | EN: the first rule's position among the appliance's filter rules
+      rules:
+        - { proto: tcp, port: "443", from: 192.168.1.0/24 }
+        - { proto: tcp, port: "22", from: 10.9.0.0/24, log: true }       # PT: log: regista cada match | EN: log: logs every match
+        - { port: "8000-8080", action: deny, stateful: false }           # PT: stateful false: não guarda estado do fluxo | EN: stateful false: keeps no state for the flow

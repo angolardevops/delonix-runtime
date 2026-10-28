@@ -1,0 +1,139 @@
+# ============================================================================
+# kind: HTTPRoute — reverse-proxy L7/HTTP declarativo (estilo Gateway API)
+# kind: HTTPRoute — declarative L7/HTTP reverse proxy (Gateway API style)
+#
+# PT: Roteia por Host e/ou prefixo de path para containers backend. O proxy
+#     (hyper embutido) corre DENTRO do netns do holder — alcança os backends pelo
+#     IP interno da SDN — e publica as portas de entrada no host. O TLS termina no
+#     proxy (self-signed por omissão, ou um par PEM de um `kind: Secret`). TODOS
+#     os documentos HTTPRoute (e Ingress) do manifesto compõem UM só proxy: os
+#     listeners juntam-se por porta (TLS ganha na colisão), as rotas concatenam-se
+#     e há UM único certificado (sem SNI). `kind: Ingress` é a forma k8s do MESMO
+#     proxy (Compat→HTTPRoute, ver ingress.yaml); o firewall L4 é `kind:
+#     NetworkPolicy` (ver ../networking/networkpolicy.yaml).
+# EN: Routes by Host and/or path prefix to backend containers. The proxy (embedded
+#     hyper) runs INSIDE the holder netns — it reaches backends by their SDN IP —
+#     and publishes the entry ports on the host. TLS terminates at the proxy
+#     (self-signed by default, or a PEM pair from a `kind: Secret`). ALL HTTPRoute
+#     (and Ingress) documents of a manifest compose into ONE proxy: listeners are
+#     merged by port (TLS wins on collision), routes are concatenated, and there is
+#     a SINGLE certificate (no SNI). `kind: Ingress` is the k8s spelling of the SAME
+#     proxy (Compat→HTTPRoute, see ingress.yaml); the L4 firewall is `kind:
+#     NetworkPolicy` (see ../networking/networkpolicy.yaml).
+#
+# PT: Os backends TÊM de ser `kind: Container` com IP numa rede SDN custom (não
+#     --net host/none): cada container mantém o seu nome e IP, por isso a rota
+#     nomeia-o directamente.
+# EN: Backends MUST be `kind: Container` with an IP on a custom SDN network (not
+#     --net host/none): each container keeps its own name and IP, so a route names
+#     it directly.
+#
+# PT: Aplicar:  delonix stack apply -f examples/gateway/httproute.yaml
+# EN: Apply:    delonix stack apply -f examples/gateway/httproute.yaml
+# ============================================================================
+
+# ── 1. Backends — rede SDN + containers que as rotas nomeiam ─────────────────
+#      Backends — SDN network + containers the routes name
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: appnet
+spec:
+  driver: bridge              # PT: rede custom: dá IP interno aos backends | EN: custom network: gives backends an internal IP
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web
+spec:
+  image: "nginx:1.27-alpine"
+  network: appnet             # PT: numa rede custom, para o proxy o alcançar por IP | EN: on a custom network, so the proxy reaches it by IP
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: api
+spec:
+  image: "hashicorp/http-echo:latest"
+  command: ["-listen=:3000", "-text=hello from api"]   # PT: serve em :3000 | EN: serves on :3000
+  network: appnet
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: admin
+spec:
+  image: "hashicorp/http-echo:latest"
+  command: ["-listen=:9000", "-text=admin"]            # PT: serve em :9000 | EN: serves on :9000
+  network: appnet
+
+# ── 2. selfSigned (default) — rota principal, dois listeners ─────────────────
+#      selfSigned (default) — main route, two listeners
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata:
+  name: loja
+spec:
+  entrypoints:
+    - { port: 80 }            # PT: listener HTTP simples (tls default false) | EN: plain HTTP listener (tls defaults to false)
+    - { port: 443, tls: true } # PT: termina TLS aqui (exige spec.tls) | EN: TLS terminates here (requires spec.tls)
+  tls:
+    mode: selfSigned          # PT: selfSigned (default, cert gerado para os hosts) | secretRef | EN: selfSigned (default, cert generated for the hosts) | secretRef
+  rules:
+    - host: loja.exemplo.ao   # PT: casa pelo header Host: (omitir = qualquer Host) | EN: matched against the Host header (omit = any Host)
+      paths:
+        - path: /             # PT: prefixo de path; o prefixo mais longo ganha | EN: path prefix; the longest prefix wins
+          backend: { service: web, port: 80 }
+        - path: /api          # PT: prefixos mais específicos ganham | EN: more specific prefixes win
+          backend: { service: api, port: 3000 }
+
+# ── 3. secretRef — certificado BYO de um kind: Secret ────────────────────────
+#      secretRef — BYO certificate from a kind: Secret
+---
+# PT: Par PEM sob tls.crt / tls.key (tls_crt / tls_key também servem). Substitui
+#     os placeholders por um par real antes de servir tráfego real.
+# EN: PEM pair under tls.crt / tls.key (tls_crt / tls_key also work). Replace the
+#     placeholders with a real pair before serving real traffic.
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: painel-cert
+spec:
+  stringData:
+    tls.crt: "-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----"
+    tls.key: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----"
+---
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata:
+  name: painel
+spec:
+  entrypoints:
+    - { port: 8080 }          # PT: listener HTTP extra, junta-se aos de cima | EN: extra HTTP listener, merged with the ones above
+    - { port: 8443, tls: true }
+  tls:
+    mode: secretRef           # PT: usa o certificado do Secret em vez de um self-signed | EN: use the Secret's certificate instead of a self-signed one
+    secretRef: painel-cert    # PT: kind: Secret com tls.crt / tls.key | EN: kind: Secret holding tls.crt / tls.key
+  rules:
+    - host: admin.exemplo.ao
+      paths:
+        - path: /
+          backend: { service: admin, port: 9000 }
+
+# ── 4. catch-all — regra sem host (qualquer Host), sem entrypoints ───────────
+#      catch-all — a rule with no host (any Host), no entrypoints
+---
+# PT: Sem `host` casa QUALQUER Host (catch-all por path); `path` omitido = `/`.
+#     Sem `entrypoints`: default porta 80 (+443 com TLS se `tls` estivesse posto).
+# EN: No `host` matches ANY Host (a catch-all by path); `path` omitted defaults to
+#     `/`. No `entrypoints`: defaults to port 80 (plus 443 with TLS if `tls` were set).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata:
+  name: catch-all
+spec:
+  rules:
+    - paths:
+        - backend: { service: web, port: 80 }

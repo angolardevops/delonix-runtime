@@ -1,0 +1,66 @@
+# ============================================================================
+# kind: StoragePool — usar uma storage pool que o administrador declarou (ADR-0067)
+# kind: StoragePool — use a storage pool the administrator declared (ADR-0067)
+#
+# PT: Uma pool EXISTE porque o administrador a escreveu no allowlist do nó
+#     (/etc/delonix/storage-pools.yaml): o driver e o que a suporta (btrfs, zfs,
+#     lvm-thin, um directório, ceph) vêm de LÁ e só de lá. Este Kind diz apenas
+#     «o motor deste nó usa a pool chamada X, com este tecto de sobre-alocação» —
+#     nunca carrega device, path nem comando, e esses campos são recusados pelo
+#     NOME (não ignorados). O motor NUNCA cria nem destrói uma pool; apagar o Kind
+#     só deixa de a usar — a pool e o que está nela ficam. `metadata.name` TEM de
+#     ser uma pool do allowlist do nó.
+# EN: A pool EXISTS because the administrator wrote it into the node's allowlist
+#     (/etc/delonix/storage-pools.yaml): its driver and what backs it (btrfs, zfs,
+#     lvm-thin, a directory, ceph) come from THERE and there only. This Kind only
+#     says «this node's engine uses the pool called X, with this over-allocation
+#     ceiling» — it never carries a device, path or command, and those fields are
+#     refused by NAME (not ignored). The engine NEVER creates or destroys a pool;
+#     deleting the Kind just stops using it — the pool and whatever is in it stay.
+#     `metadata.name` MUST be a pool from the node's allowlist.
+#
+# PT: Depois de aplicada, aloca volumes nela com um `kind: Volume` que traz
+#     `pool: <nome>` + `size:` (ver volume.yaml, cenário 8), ou
+#     `delonix volume create <v> --pool <nome> --size 10G`. Lista o que o nó
+#     declarou com `delonix get storagepools`.
+# EN: Once applied, allocate volumes in it with a `kind: Volume` carrying
+#     `pool: <name>` + `size:` (see volume.yaml, scenario 8), or
+#     `delonix volume create <v> --pool <name> --size 10G`. List what the node
+#     declared with `delonix get storagepools`.
+#
+# PT: Aplicar:  delonix stack apply -f examples/storage/storagepool.yaml
+# EN: Apply:    delonix stack apply -f examples/storage/storagepool.yaml
+# ============================================================================
+
+# ── 1. mínimo — só o nome, usar os defaults ─────────────────────────────────
+#      minimal — just the name, use the defaults
+# PT: Sem `spec`: sem sobre-alocação (maxRatio 1.0, a soma dos tamanhos nunca
+#     excede a capacidade) e alerta aos 80% de uso.
+# EN: No `spec`: no over-allocation (maxRatio 1.0, allocated sizes never exceed
+#     capacity) and an alert at 80% usage.
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: StoragePool
+metadata:
+  name: fast          # PT: tem de existir no allowlist do nó | EN: must exist in the node's allowlist
+spec: {}
+
+# ── 2. com sobre-alocação e limiar de alerta próprio ────────────────────────
+#      with over-allocation and a custom alert threshold
+# PT: `overcommit.maxRatio` é a fracção da capacidade que a soma dos tamanhos
+#     alocados pode exceder (entre 0.01 e 100; 1.0 não permite sobre-alocação).
+#     `alertPct` é a % de uso da pool acima da qual uma alocação avisa (1..=99,
+#     default 80). Uma pool com ≥95% de uso recusa QUALQUER volume novo.
+# EN: `overcommit.maxRatio` is how far the sum of allocated sizes may exceed the
+#     pool's capacity (between 0.01 and 100; 1.0 allows no over-allocation).
+#     `alertPct` is the pool-usage % above which an allocation warns (1..=99,
+#     default 80). A pool at ≥95% usage refuses ANY new volume.
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: StoragePool
+metadata:
+  name: bulk
+spec:
+  overcommit:
+    maxRatio: 1.5     # PT: alocar até 150% da capacidade (thin/thin-provision) | EN: allocate up to 150% of capacity (thin provisioning)
+  alertPct: 70        # PT: avisa a partir de 70% de uso | EN: warn from 70% usage

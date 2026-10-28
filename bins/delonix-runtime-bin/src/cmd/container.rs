@@ -955,7 +955,7 @@ fn normalize_container_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
         // BUG THIS FIXES: only the grouped form was handled, and the `env` key
         // was removed BEFORE checking — so `env: { POSTGRES_PASSWORD: dev }` was
         // accepted and silently dropped. It shipped that way in
-        // `examples/dependency.yaml`, where it meant the example's Postgres came
+        // `examples/networking/dependency.yaml`, where it meant the example's Postgres came
         // up with no password variable at all. Accepted-then-ignored is the
         // failure mode this repo has removed everywhere else; it survived here
         // because nothing ever compared the parsed spec against the file.
@@ -1089,7 +1089,7 @@ fn first_time(seen: &std::sync::Mutex<Vec<String>>, line: &str) -> bool {
 /// Until this existed `metadata.labels` never reached a container: the doc was
 /// parsed, carried and printed by `describe`, and nothing put it on the record.
 /// A `Service` selects by the labels on `Container.labels`, so the published
-/// `examples/service.yaml` — which writes them under `metadata` — matched no
+/// `examples/networking/service.yaml` — which writes them under `metadata` — matched no
 /// workload. Found by applying a Stack for real, not by a test: the unit tests
 /// only ever asserted that the label survived into the document.
 fn with_metadata_labels(
@@ -8362,7 +8362,7 @@ ports: [\"0.0.0.0:8080:80\"]",
     }
 
     /// BUG REAL, apanhado a gerar o JSON Schema e presente num exemplo
-    /// PUBLICADO (`examples/dependency.yaml`): `env: { K: v }` — a forma que
+    /// PUBLICADO (`examples/networking/dependency.yaml`): `env: { K: v }` — a forma que
     /// qualquer pessoa vinda do compose ou do k8s escreve — era aceite e
     /// silenciosamente DESCARTADA, porque o `env` era removido antes de se
     /// verificar se a mapping era mesmo a forma agrupada. O Postgres do exemplo

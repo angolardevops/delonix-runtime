@@ -1,0 +1,58 @@
+# ============================================================================
+# kind: SystemContainer — um userland inteiro como uma unidade num nó provider (ADR-0058)
+# kind: SystemContainer — a whole userland run as one unit on a provider node (ADR-0058)
+#
+# PT: Não é um `kind: Container`: não há exec, logs nem exit status. A parte
+#     genérica (image, entrypoint, env, memory, cores, rootfs) é a intenção; o
+#     que só o nó Proxmox entende — a folga de swap e a bridge/VLAN do nó — vive
+#     inline em `provider.spec` (ADR-0071). O motor puxa a imagem, nunca o
+#     provider. A grafia antiga (`swap`/`network` no topo de `spec`) ainda carrega
+#     e significa o mesmo — mas não repitas o mesmo campo nos dois sítios.
+# EN: Not a `kind: Container`: no exec, logs or exit status. The generic part
+#     (image, entrypoint, env, memory, cores, rootfs) is the intent; what only
+#     the Proxmox node understands — the swap allowance and the node bridge/VLAN
+#     — lives inline in `provider.spec` (ADR-0071). The engine pulls the image,
+#     never the provider. The old spelling (`swap`/`network` at the top of
+#     `spec`) still loads and means the same — just don't write a field twice.
+#
+# PT: Aplicar:   delonix stack apply -f examples/compute/systemcontainer.yaml
+# EN: Apply:     delonix stack apply -f examples/compute/systemcontainer.yaml
+# ============================================================================
+
+# ── 1. bloco provider — o Proxmox, com swap + bridge/DHCP inline ─────────────
+#      provider block — Proxmox, with swap + bridge/DHCP inline
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: SystemContainer
+metadata: { name: edge-dns }
+spec:
+  image: alpine:3.20            # PT: o motor puxa-a (nunca o provider) | EN: the engine pulls it (never the provider)
+  memory: 256M                  # PT: RAM dada ao userland | EN: RAM given to the userland
+  cores: 1                      # PT: núcleos de CPU (cpuset) | EN: CPU cores (cpuset)
+  rootfs: 2                     # PT: tamanho do rootfs em GiB | EN: rootfs size in GiB
+  provider:
+    type: proxmox               # PT: único provider deste porte | EN: the only provider of this port
+    spec:
+      swap: 128M                # PT: folga de swap do contentor | EN: the container's swap allowance
+      network: { bridge: vmbr0, dhcp: true }   # PT: interface numa bridge do nó, IPv4 por DHCP | EN: interface on a node bridge, IPv4 via DHCP
+
+# ── 2. grafia antiga (swap/network no topo) + entrypoint/env e VLAN ──────────
+#      old spelling (swap/network at the top) + entrypoint/env and a VLAN
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: SystemContainer
+metadata: { name: edge-proxy }
+spec:
+  image: debian:12
+  entrypoint: ["/usr/sbin/nginx", "-g", "daemon off;"]   # PT: init do contentor (vazio => o da imagem) | EN: the container's init (empty => the image's)
+  env:                          # PT: ambiente (não-vazio substitui o da imagem por inteiro) | EN: environment (non-empty replaces the image's whole)
+    TZ: Africa/Luanda
+    LOG_LEVEL: info
+  memory: 512M
+  cores: 2
+  rootfs: 4
+  swap: 256M                    # PT: grafia antiga — igual a provider.spec.swap | EN: old spelling — same as provider.spec.swap
+  network:                      # PT: grafia antiga — igual a provider.spec.network | EN: old spelling — same as provider.spec.network
+    bridge: vmbr1
+    vlan: 20                    # PT: tag VLAN opcional da interface | EN: optional VLAN tag of the interface
+    dhcp: false                 # PT: interface up sem endereço | EN: interface up with no address

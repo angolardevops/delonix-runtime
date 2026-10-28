@@ -366,7 +366,7 @@ Volume (`provision.truenas`).
 
 **Nenhum kind está sem teste**: a CI (`ci.yml:476-490`) corre
 `stack apply --dry-run` + `stack validate` sobre cada `examples/*.yaml`, e o
-`examples/stack.yaml` carrega os 23 grupos. A lacuna é a de *corrida real*.
+`examples/core/stack.yaml` carrega os 23 grupos. A lacuna é a de *corrida real*.
 
 ### Os 9 kinds cujo `apply` nenhuma corrida real exercita
 

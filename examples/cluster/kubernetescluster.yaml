@@ -1,0 +1,175 @@
+# ============================================================================
+# kind: KubernetesCluster — um cluster kubeadm em três modos (um por documento)
+# kind: KubernetesCluster — a kubeadm cluster in three modes (one per document)
+#
+# PT: `spec.mode` é o discriminador e cada modo lê só o seu bloco:
+#       kind  → nós em containers, NESTA máquina (sem Docker, sem o binário kind)
+#       vm    → cada nó é uma microVM real da imagem dourada (isolamento de hipervisor)
+#       ssh   → hosts remotos que JÁ EXISTEM (bare-metal ou VMs de outrem)
+#     Os campos comuns (k8sVersion/podSubnet/serviceSubnet/cni) são partilhados;
+#     os específicos vivem no bloco do modo (`kind:`, `vm:`, `ssh:`).
+# EN: `spec.mode` is the discriminator and each mode reads only its own block:
+#       kind  → nodes as containers, on THIS machine (no Docker, no `kind` binary)
+#       vm    → every node is a real microVM from the golden image (hypervisor isolation)
+#       ssh   → remote hosts that ALREADY EXIST (bare metal or someone else's VMs)
+#     The common fields (k8sVersion/podSubnet/serviceSubnet/cni) are shared; the
+#     specific ones live in the mode's block (`kind:`, `vm:`, `ssh:`).
+#
+# PT: FORA do ciclo do stack. Um cluster NÃO é um recurso do nó — é um
+#     procedimento remoto por SSH. Por isso este Kind NÃO entra em
+#     `stack apply`/`--prune`/`destroy`. Aplica-se com o seu próprio comando:
+#       delonix cluster apply   -f examples/cluster/kubernetescluster.yaml
+#     e valida-se offline (sem tocar em máquina nenhuma) com:
+#       delonix stack validate  -f examples/cluster/kubernetescluster.yaml
+#       delonix manifest validate -f examples/cluster/kubernetescluster.yaml
+# EN: OUTSIDE the stack cycle. A cluster is NOT a node-local resource — it is a
+#     remote procedure over SSH. So this Kind does NOT take part in
+#     `stack apply`/`--prune`/`destroy`. Apply it with its own command:
+#       delonix cluster apply   -f examples/cluster/kubernetescluster.yaml
+#     and validate it offline (touching no machine) with:
+#       delonix stack validate  -f examples/cluster/kubernetescluster.yaml
+#       delonix manifest validate -f examples/cluster/kubernetescluster.yaml
+# ============================================================================
+
+# ── 1. modo kind — cluster local em containers, aqui mesmo ──────────────────
+#      mode kind — a local cluster in containers, right here
+---
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: kind-lab
+spec:
+  mode: kind
+  k8sVersion: "1.34"                 # PT: minor do Kubernetes | EN: Kubernetes minor version
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: default                       # PT: default = a CNI da imagem do nó (kindnet); none = não instala nenhuma | EN: default = the node image's CNI (kindnet); none = install none
+  controlPlane:
+    replicas: 1                      # PT: >1 exige controlPlaneEndpoint (LB/VIP) | EN: >1 requires controlPlaneEndpoint (LB/VIP)
+  workers:
+    replicas: 1
+  kind:                              # PT: só lido em mode: kind | EN: only read in mode: kind
+    image: kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a  # PT: fixada por digest — uma tag móvel tornaria o cluster irreprodutível | EN: pinned by digest — a moving tag would make the cluster irreproducible
+    apiServerPort: 6443              # PT: porta do HOST para o apiserver (o kubeconfig gerado aponta para cá) | EN: host port for the apiserver (the generated kubeconfig points here)
+
+# ── 2. modo ssh — hosts remotos já existentes, control-plane HA ─────────────
+#      mode ssh — remote hosts that already exist, HA control plane
+---
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: ssh-prod
+spec:
+  mode: ssh
+  k8sVersion: "1.34"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: none                          # PT: em produção costumas instalar a TUA CNI (Cilium, Calico…) | EN: in production you usually install YOUR own CNI (Cilium, Calico…)
+  controlPlaneEndpoint: "k8s-api.example.com:6443"   # PT: OBRIGATÓRIO com >1 control-plane (o delonix não provisiona o LB; aponta para um que tenhas) | EN: REQUIRED with >1 control-plane (delonix does not provision the LB; point at one you have)
+  controlPlane:
+    hosts:                           # PT: `hosts` (não `replicas`): as máquinas já existem | EN: `hosts` (not `replicas`): the machines already exist
+      - address: 10.0.0.11
+      - address: 10.0.0.12
+      - address: 10.0.0.13
+  workers:
+    hosts:
+      - address: 10.0.0.21
+      - address: 10.0.0.22
+  ssh:                               # PT: só lido em mode: ssh | EN: only read in mode: ssh
+    user: delonix                    # PT: precisa de sudo NOPASSWD nos hosts | EN: needs passwordless sudo on the hosts
+    keyPath: ~/.ssh/id_ed25519       # PT: nome canónico (`key` é a grafia legada) | EN: canonical name (`key` is the legacy spelling)
+    port: 22
+  etcd:
+    mode: stacked                    # PT: etcd nos control-planes (o default do kubeadm) | EN: etcd on the control-planes (the kubeadm default)
+
+# ── 3. modo vm — cada nó é uma microVM da imagem dourada ────────────────────
+#      mode vm — every node is a microVM from the golden image
+---
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: vm-lab
+spec:
+  mode: vm
+  k8sVersion: "1.34"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: none                          # PT: traz a tua CNI; `default` aqui serve UM nó só (recusado acima de um, DX-6701) — para mais nós usa um perfil (doc 4) | EN: bring your own CNI; `default` here serves ONE node only (refused above one, DX-6701) — for more nodes use a profile (doc 4)
+  controlPlane:
+    replicas: 1
+  workers:
+    replicas: 0
+  vm:                                # PT: só lido em mode: vm | EN: only read in mode: vm
+    image: k8s-golden                # PT: tag em `delonix vm image ls`; omitir = a única imagem local, se houver exactamente uma | EN: tag from `delonix vm image ls`; omit = the only local image, if there is exactly one
+    network: lab-net                 # PT: criada antes com `delonix network create` | EN: created beforehand with `delonix network create`
+    vcpus: 2                         # PT: por nó | EN: per node
+    memory: 2G                       # PT: por nó | EN: per node
+    sshKey: ~/.ssh/id_ed25519        # PT: chave privada para falar com as VMs; omitir = gera um par ed25519 em <root>/clusters/<name> | EN: private key to reach the VMs; omit = a key is generated under <root>/clusters/<name>
+    bootTimeout: 300s                # PT: espera por SSH depois do arranque | EN: wait for SSH after boot
+
+# ── 4. perfil CNI Cilium (modo vm) — a rede de pods instalada pelo bootstrap ─
+#      Cilium CNI profile (mode vm) — the pod network the bootstrap installs
+---
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: cilium-lab
+spec:
+  mode: vm
+  k8sVersion: "1.36"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: cilium                        # PT: um PERFIL (cilium/calico/flannel) fixado a versão + digest, instalado e esperado pelo bootstrap; `delonix cluster network profiles` imprime o estado de cada um | EN: a PROFILE (cilium/calico/flannel) pinned to a version + digest, installed and waited for by the bootstrap; `delonix cluster network profiles` prints the state of each
+  network:                           # PT: só lido quando `cni` nomeia um perfil que o lê (em default/none é RECUSADO, DX-1702) | EN: only read when `cni` names a profile that reads it (on default/none it is REFUSED, DX-1702)
+    dataplane: vxlan                 # PT: encapsulamento; omitir = vxlan (o único que nada pede à rede entre nós) | EN: encapsulation; omit = vxlan (the only mode that asks nothing of the network between nodes)
+    kubeProxy: iptables              # PT: iptables (default, o modo medido); ipvs; none (só Cilium) muda o `kubeadm init` e não se liga depois | EN: iptables (default, the measured mode); ipvs; none (Cilium only) changes `kubeadm init` and cannot be turned on later
+    experimental: true               # PT: reconhecimento EXPLÍCITO de que o perfil é experimental nesta release; sem ele o manifesto é recusado (DX-1705) | EN: an EXPLICIT acknowledgement that the profile is experimental in this release; without it the manifest is refused (DX-1705)
+    # mtu: 1450                       # PT: MTU do pod; omitir é recomendado (calculado de nodeMtu menos o overhead) | EN: pod MTU; omitting is recommended (computed from nodeMtu minus the overhead)
+    # nodeMtu: 1500                   # PT: o MTU real dos nós, quando não é 1500 | EN: the nodes' real MTU, when it is not 1500
+    # hubble: true                    # PT: observabilidade do Cilium (mais pods, mais recursos) | EN: Cilium's observability (more pods, more resources)
+    # multus: false                   # PT: interfaces extra — uma EXTENSÃO, nunca a rede primária | EN: extra interfaces — an EXTENSION, never the primary network
+    # offline: true                   # PT: instala só do cache local (`cluster network fetch`) | EN: install only from the local cache (`cluster network fetch`)
+    # interface: ens3                 # PT: quando a autodetecção da interface é ambígua | EN: when interface autodetection is ambiguous
+  controlPlane:
+    replicas: 1
+  workers:
+    replicas: 2                      # PT: possível agora — o perfil encaminha pods entre nós | EN: possible now — the profile routes pods between nodes
+  vm:
+    image: k8s-golden
+    network: lab-net
+    vcpus: 2
+    memory: 4G                       # PT: o agente Cilium pede mais do que uma bridge | EN: the Cilium agent asks for more than a bridge does
+    bootTimeout: 300s
+
+# ── 5. modo ssh com etcd EXTERNO dedicado (CA própria, nº ímpar de membros) ──
+#      mode ssh with a dedicated EXTERNAL etcd cluster (own CA, odd member count)
+---
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: ssh-etcd-prod
+spec:
+  mode: ssh                          # PT: etcd.mode external é suportado SÓ com mode: ssh | EN: etcd.mode external is supported ONLY with mode: ssh
+  k8sVersion: "1.34"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: none
+  controlPlaneEndpoint: "k8s-api.example.com:6443"
+  controlPlane:
+    hosts:
+      - address: 10.0.1.11
+      - address: 10.0.1.12
+      - address: 10.0.1.13
+  workers:
+    hosts:
+      - address: 10.0.1.21
+  ssh:
+    user: delonix
+    keyPath: ~/.ssh/id_ed25519
+    port: 22
+  etcd:
+    mode: external                   # PT: cluster etcd dedicado, criado e gerido pelo delonix | EN: a dedicated etcd cluster, created and managed by delonix
+    hosts:                           # PT: hosts etcd dedicados, que já têm de existir; nº ÍMPAR (1 = só dev/test, sem HA; 3, 5, … em produção) | EN: dedicated etcd hosts, which must already exist; ODD count (1 = dev/test only, no HA; 3, 5, … in production)
+      - address: 10.0.2.11
+      - address: 10.0.2.12
+      - address: 10.0.2.13

@@ -365,7 +365,7 @@ define 它都会变）。
 ### 声明式
 
 `kind: VirtualMachine`（`compute.delonix.io/v1alpha1`）映照着 `vm create`；一份带完整注释
-的例子是 `examples/vm.yaml`。带 `type: microvm` 的 `kind: Workload` 会降解为一个
+的例子是 `examples/compute/virtualmachine.yaml`。带 `type: microvm` 的 `kind: Workload` 会降解为一个
 `VirtualMachine`，后端被**强制**为 `cloud-hypervisor`；要求换成别的后端是一个错误
 （[ADR-0006](../../adr/0006-workload-type-microvm.md)）。下面两个都在一个临时根目录里
 *运行过*：
