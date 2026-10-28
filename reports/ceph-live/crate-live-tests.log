@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running tests/live.rs (/home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/debug/deps/live-0c3a90a48658b2d6)
+
+running 4 tests
+test cephfs_pool_probes_available ... [CephFS] probe Available; unstamped subvolume refused by release
+ok
+test rados_cluster_is_healthy ... [RADOS] ClusterHealth { status: "HEALTH_OK", fsid: "8ce5d316-a462-411e-8297-9ecb986608f1", mons: 1, osds_up: 3, osds_in: 3, pools: 11 }
+ok
+test rbd_block_volume_full_lifecycle ... [RBD] allocated "dlxlive" at /dev/rbd1
+[RBD] released dlxlive
+ok
+test rgw_user_and_buckets ... [RGW] user delonix ak=delonixkey
+[RGW] buckets: ["delonix-bucket"]
+[RGW] delonix-bucket objects=1 bytes=4096
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.99s
+

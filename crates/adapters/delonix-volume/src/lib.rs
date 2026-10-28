@@ -450,7 +450,15 @@ impl VolumeStore {
         if !Self::valid_name(name) {
             return Err(Error::InvalidName(name.to_string()));
         }
-        fs::create_dir_all(mountpoint)?;
+        // The data this records already lives at `mountpoint` — a share's
+        // carved-out directory, or a pool's allocation. A directory is made
+        // when it is not there yet (a share's first registration); a path that
+        // already exists is left as it is, so a block device a pool handed out
+        // (an RBD image at `/dev/rbdN`) is not mistaken for a directory to
+        // create.
+        if !mountpoint.exists() {
+            fs::create_dir_all(mountpoint)?;
+        }
         fs::create_dir_all(self.dir(name))?; // this store's own per-name bookkeeping dir
         let vol = if let Ok(mut existing) = self.inspect(name) {
             existing.mountpoint = mountpoint.to_string_lossy().into_owned();
