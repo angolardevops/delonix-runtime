@@ -77,6 +77,9 @@ for an OpenStack backend is.
      environment (`DELONIX_OPENSTACK_AUTH_URL`, `_REGION`, `_PROJECT_ID`,
      `DELONIX_OPENSTACK_SECRET` → a `kind: Secret` with an application credential);
      nothing connects until the backend is selected (the ADR-0008 registry closure);
+     > ⚠️ **Design / not implemented** — these `DELONIX_OPENSTACK_*` env vars name a
+     > proposed backend only; **0 readers in the Rust source as of 2026-10-28**
+     > (`crate delonix-openstack` does not exist). This ADR's Status is *Proposed*.
    - `manages_own_storage() = true`, `auto_selectable() = false`;
    - `--disk` addresses the cloud: `image:<glance-id-or-name>` (with a flavor chosen from
      `vcpus`/`memory` by exact match — **refused** when no flavor matches, never rounded);
