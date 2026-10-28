@@ -60,13 +60,13 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 | `$schema` do GitOps | URL de Pages com org+nome antigos: `angolardevops.github.io/delonix-runtime/schema/v1/delonix.json` (não resolve) | `gitops.md:225` → `gitops.html:376` | `ngolacloud.github.io/delonix/schema/v1/delonix.json` | 🔴 | `curl` ao URL devolve 200 |
 | `$schema` estabilidade | Idem `delonix.json` e `providers.json` | `cli-stability.md:368,448` → `estabilidade.html:548,616` | `ngolacloud.github.io/delonix/schema/v1/...` | 🔴 | `curl` 200 |
 | Instalador no roteiro | `curl … angolardevops.github.io/delonix-runtime/install.sh` (o site já usa `releases/latest/download/install.sh`) | `ROTEIRO-VIDEOS.md:48` | Alinhar com one-liner canónico (`gen.py:171` já correcto) | 🔴 | Comparar com `gen.py:171` |
-| Imagens golden VM | `ghcr.io/angolardevops/delonix-vm-{base,k8s,appliances}` descritas como **oficiais** (conflita com `ghcr.io/ngolacloud/delonix`) | `sovereignty-engine.md:104,120`; `dev/microvm-setup.md:255-257`; `guia-vm.html:1006`; `guia-vm-lab.md:967`; `adr/0036:64` | Alinhar org → `ngolacloud` (ou confirmar que goldens ficam em `angolardevops`) | 🟠 | Decisão do dono + `docker pull` |
+| Imagens golden VM | ✅ **VERIFICADO (Secção 2)** — golden vivem mesmo em `angolardevops`, por design. ghcr: `angolardevops/delonix-vm-{base,k8s,appliances}` → **200 (público)**; `ngolacloud/delonix` (controlo) → 403 (privado). Distinto da imagem do produto em `ngolacloud` | ghcr (token anónimo); `dev/microvm-setup.md` (`OFFICIAL_REPOS` em `cmd/vmimage.rs`) | Nota clarificadora em `dev/microvm-setup.md` (não realinhar) | 🟠 | ghcr `angolardevops/*` 200 ✅ |
 | Proveniência dos labs | 24 blocos "Validado em delonix **5.1.1** … 2026-10-24" | `gen.py:4937,4973,5016,5050,5087,5132,5261,5297,5339,5373,5410,5457`; `labs.html` 187…605; `labs/lab-*/README.md` | Re-correr labs e reetiquetar p/ **0.1.0**, ou marcar baseline histórica | 🟠 | Labs passam em 0.1.0 |
 | Conformidade medida | CRI/OCI/rede "medido na v5.1.1" | `network-compatibility.md:124`; `dev/plano-conformidade-oci-cri.md` (+ handbook 4 idiomas); `testing/folhas-inventario.md:17,316,544` | Re-medir na 0.1.0 ou marcar histórico explícito | 🟠 | Nova medição datada |
-| Versão anómala | `Delonix 0.53.0` (não bate 5.1.1 nem 0.1.0) | `comparacao-medida.md:34` | Corrigir p/ versão real medida (0.1.0) | 🟠 | — |
-| Fronteira de contrato | "Alteração de contrato **depois da v5.1.1**" | `cli-stability.md:75,131,140,150` → `estabilidade.html:216,269,277,286` | Reenquadrar fronteira para a nova linha 0.1.0 | 🟠 | — |
+| Versão anómala | ✅ **FEITO** — `Delonix 0.53.0` já corrigido em commit anterior da Secção 2 (não reaparece em `comparacao-medida.md`) | `comparacao-medida.md` | — | 🟠 | grep `0.53.0` = 0 ✅ |
+| Fronteira de contrato | ✅ **FEITO (Secção 2)** — 4 notas reenquadradas p/ "na linha 0.1.0" (5.1.x nomeada como baseline histórica na 1ª) | `cli-stability.md:75,131,140,150` → `estabilidade.html` | Reenquadrado p/ 0.1.0 | 🟠 | — |
 | Resíduo de marca | 346× "Delonix Runtime" como nome de produto (handbook 4 idiomas) | `handbook/**/*.html` | Substituir por "Delonix" na próxima regeneração do handbook | 🟢 | grep "Delonix Runtime" no handbook = 0 |
-| Extensão VS Code | `github.com/angolardevops/delonix-vscode` — org a confirmar | `estabilidade.html:558` | Confirmar onde vive a extensão; alinhar se necessário | 🟢 | Repo existe |
+| Extensão VS Code | ✅ **VERIFICADO (Secção 2)** — vive em `angolardevops/delonix-vscode` (**público**); `ngolacloud/delonix-vscode` → **404**. Referência correcta, sem alteração | GitHub API | — (confirmado) | 🟢 | `angolardevops` público ✅ |
 | Título duplicado | `<title>Delonix Engine · Delonix Engine</title>` | `index.html:6` | Corrigir template em `gen.py` | 🟢 | Ver `<title>` |
 | Metadados ausentes | Sem `<base>`, `canonical`, `og:`/`twitter:` em todo o site | `index.html` só tem `viewport`+`title` | Acrescentar meta (base `ngolacloud.github.io/delonix`) | 🟢 | Ver `<head>` |
 | Placeholders ghcr | `ghcr.io/angolardevops/{app,...}` como exemplo de utilizador | `gen.py:523,525`; `kinds.html:2125`; `comandos/{push,pull,image}.html` | Clarificar como placeholder | 🟢 | — |
@@ -110,7 +110,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 5. ✅ Contraste de tokens de código no tema claro. *(A)* **(FEITO — Secção 6; rácios ≥4,5:1)**
 6. ✅ Pesquisa Ctrl+K ausente (92 páginas sem pesquisa). *(A)* **(FEITO — Secção 7)**
 
-**🟠 Média:** imagens golden `angolardevops` vs `ngolacloud` *(B, por fazer)*; proveniência 5.1.1→0.1.0 (labs ✅ reetiquetados Sec 11; conformidade por re-medir); `Delonix 0.53.0` *(B, por fazer)*; ✅ botão de cópia (Sec 8); ✅ `--help` EN-only rotulado (Sec 9); ✅ taglines EN (Sec 9); ✅ `<html lang>` (Sec 9); ✅ âncoras guia-vm (Sec 9; manual traduzido adiado); ⏳ traduções stale do manual (adiado, Sec 9); ✅ FirewallPolicy/Tunnel na tagline (Sec 10); ✅ env vars de desenho (Sec 12).
+**🟠 Média:** ✅ imagens golden `angolardevops` (verificado público, por design — Sec 2); proveniência 5.1.1→0.1.0 (labs ✅ reetiquetados Sec 11; conformidade por re-medir); ✅ `Delonix 0.53.0` (corrigido); ✅ fronteira de contrato reenquadrada p/ 0.1.0 (Sec 2); ✅ botão de cópia (Sec 8); ✅ `--help` EN-only rotulado (Sec 9); ✅ taglines EN (Sec 9); ✅ `<html lang>` (Sec 9); ✅ âncoras guia-vm (Sec 9; manual traduzido adiado); ⏳ traduções stale do manual (adiado, Sec 9); ✅ FirewallPolicy/Tunnel na tagline (Sec 10); ✅ env vars de desenho (Sec 12).
 
 **🟢 Baixa:** 346× "Delonix Runtime" no handbook *(por fazer, regeneração do handbook)*; ✅ título duplicado (Sec 16); ✅ metadados (Sec 16); ✅ zh-CN na landing (Sec 3); ✅ labs ligados (Sec 3); ✅ nav mobile (Sec 5); ✅ cores fora de tokens (Sec 6).
 
@@ -118,7 +118,7 @@ Prioridade: 🔴 Alta · 🟠 Média · 🟢 Baixa.
 
 | Secção do pedido | Entradas da matriz que a alimentam |
 |---|---|
-| 2 — Referências repo/release | Todas as linhas 🔴/🟠 de **B** |
+| 2 — Referências repo/release | ✅ **FEITO** — 🔴 (schemas/instalador→`ngolacloud`) + 🟠 (golden `angolardevops` verificado público; `0.53.0`; fronteira→0.1.0; VS Code confirmado). Falta só re-medir conformidade 5.1.1→0.1.0 |
 | 3 — Navegação/redireccionamentos | ✅ **FEITO** — **C** (zh-CN landing, labs não ligados); `image→vm#image` já resolvia |
 | 4 — Introdução/onboarding | ✅ **FEITO** — `index` reescrita (4 percursos, comandos verificados no binário); liga ao glossário |
 | 5 — Layout/largura | ✅ **FEITO** — nav hambúrguer colapsável <840px (**A**) |

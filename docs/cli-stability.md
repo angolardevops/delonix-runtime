@@ -72,7 +72,7 @@ Concretamente, garante-se:
 > `delonix container run` promete, `delonix run` promete pela mesma linha. O
 > conjunto reintroduzido na primeira passagem foi o dos fluxos mais frequentes.
 
-> **Tabela completada depois da v5.1.1.** Os restantes verbos da tabela
+> **Tabela completada na linha 0.1.0** (o renumber que sucede à baseline histórica v5.1.x). Os restantes verbos da tabela
 > Docker/Podman entraram pelo mesmo mecanismo — subcomando `clap` de pleno
 > direito, MESMA struct de argumentos, MESMO handler do grupo: os de container
 > `kill`, `attach`, `stats`, e os de imagem `images` (alias de `image ls`),
@@ -128,7 +128,7 @@ Concretamente, garante-se:
 > comportamento; o que muda é para quem testa `[ $? -eq 1 ]` **à espera de uma
 > falha específica**. Ver a nota de migração no fim desta secção.
 
-> **Alteração de contrato depois da v5.1.1.** Com `--detailed-exitcode`, um
+> **Alteração de contrato na linha 0.1.0.** Com `--detailed-exitcode`, um
 > `stack plan` cujo plano tem um `Conflict` — um recurso com o carimbo
 > `delonix.io/stack` de outra stack — respondia `0`, porque um conflito não é uma
 > alteração. Passa a responder `5` (`DX-5601`), o mesmo que o `stack apply`
@@ -137,7 +137,7 @@ Concretamente, garante-se:
 > vermelho exactamente onde o `apply` ia falhar. Sem a flag, o `plan` continua a
 > responder `0`.
 
-> **Alteração de contrato depois da v5.1.1 (2).** O `stack plan` (e o `plan`)
+> **Alteração de contrato na linha 0.1.0 (2).** O `stack plan` (e o `plan`)
 > ganhou `--prune`, e passou a planear com as flags do `apply`. Sem `--prune`, um
 > recurso que esta stack possui e o manifesto já não declara continua listado
 > (`-`), mas como **mantido**: `changed: false` no `-o json` e fora do
@@ -147,7 +147,7 @@ Concretamente, garante-se:
 > gate dar `2` com recursos que saíram do manifesto passa a precisar de
 > `--prune`. O `action` continua `delete`, e o `planDigest` não muda.
 
-> **Alteração de contrato depois da v5.1.1 (3).** O `stack apply --dry-run` (e o
+> **Alteração de contrato na linha 0.1.0 (3).** O `stack apply --dry-run` (e o
 > `delonix apply --dry-run`, o mesmo caminho) só imprimia o manifesto com os
 > defaults e respondia `0` sem ler a máquina — um plano que o `apply` recusa
 > passava na pré-visualização. Continua a imprimir o mesmo manifesto no stdout,

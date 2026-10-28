@@ -256,6 +256,8 @@ a JSON metadata record (`VmImage`) per image. `delonix vm image ls` lists them w
 | `base` | `ghcr.io/angolardevops/delonix-vm-base` | base OS with the `delonix` engine, no Kubernetes (e.g. `ubuntu-24.04`) |
 | `appliances` | `ghcr.io/angolardevops/delonix-vm-appliances` | vendor appliances, no cloud-init |
 
+> The golden VM images live under the **`angolardevops`** org (public packages), by design — distinct from the product engine image at `ghcr.io/ngolacloud/delonix`. The repository names come from `OFFICIAL_REPOS` in `cmd/vmimage.rs`; the two orgs are not a mismatch.
+
 ```bash
 delonix vm image ls-remote                 # tags of the Kubernetes golden repo
 delonix vm image ls-remote --no-k8s        # tags of the base repo

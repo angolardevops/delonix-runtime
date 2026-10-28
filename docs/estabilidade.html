@@ -297,7 +297,7 @@ caminho de código a divergir, e o <code>--help</code> é o mesmo módulo a mód
 isso que entram na promessa de estabilidade acima, e não numa à parte: o que
 <code>delonix container run</code> promete, <code>delonix run</code> promete pela mesma linha. O
 conjunto reintroduzido na primeira passagem foi o dos fluxos mais frequentes.</p>
-<p><strong>Tabela completada depois da v5.1.1.</strong> Os restantes verbos da tabela
+<p><strong>Tabela completada na linha 0.1.0</strong> (o renumber que sucede à baseline histórica v5.1.x). Os restantes verbos da tabela
 Docker/Podman entraram pelo mesmo mecanismo — subcomando <code>clap</code> de pleno
 direito, MESMA struct de argumentos, MESMO handler do grupo: os de container
 <code>kill</code>, <code>attach</code>, <code>stats</code>, e os de imagem <code>images</code> (alias de <code>image ls</code>),
@@ -350,7 +350,7 @@ era <code>1</code> — «não existe» e «rebentou» eram o mesmo número. Cont
 <code>0</code> é sucesso e não-zero é falha, portanto um <code>if delonix …; then</code> não muda de
 comportamento; o que muda é para quem testa <code>[ $? -eq 1 ]</code> <strong>à espera de uma
 falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
-<p><strong>Alteração de contrato depois da v5.1.1.</strong> Com <code>--detailed-exitcode</code>, um
+<p><strong>Alteração de contrato na linha 0.1.0.</strong> Com <code>--detailed-exitcode</code>, um
 <code>stack plan</code> cujo plano tem um <code>Conflict</code> — um recurso com o carimbo
 <code>delonix.io/stack</code> de outra stack — respondia <code>0</code>, porque um conflito não é uma
 alteração. Passa a responder <code>5</code> (<code>DX-5601</code>), o mesmo que o <code>stack apply</code>
@@ -358,7 +358,7 @@ recusaria, e ganha ao <code>2</code>. Um gate escrito como «<code>0</code> pass
 resto é erro» fica certo sem mudança; quem só testava <code>[ $? -eq 0 ]</code> passa a ver
 vermelho exactamente onde o <code>apply</code> ia falhar. Sem a flag, o <code>plan</code> continua a
 responder <code>0</code>.</p>
-<p><strong>Alteração de contrato depois da v5.1.1 (2).</strong> O <code>stack plan</code> (e o <code>plan</code>)
+<p><strong>Alteração de contrato na linha 0.1.0 (2).</strong> O <code>stack plan</code> (e o <code>plan</code>)
 ganhou <code>--prune</code>, e passou a planear com as flags do <code>apply</code>. Sem <code>--prune</code>, um
 recurso que esta stack possui e o manifesto já não declara continua listado
 (<code>-</code>), mas como <strong>mantido</strong>: <code>changed: false</code> no <code>-o json</code> e fora do
@@ -367,7 +367,7 @@ poda respondia <code>2</code> para sempre, porque o <code>apply</code> que o aco
 Com <code>--prune</code> responde como antes: a remoção é uma alteração (<code>2</code>). Quem fazia o
 gate dar <code>2</code> com recursos que saíram do manifesto passa a precisar de
 <code>--prune</code>. O <code>action</code> continua <code>delete</code>, e o <code>planDigest</code> não muda.</p>
-<p><strong>Alteração de contrato depois da v5.1.1 (3).</strong> O <code>stack apply --dry-run</code> (e o
+<p><strong>Alteração de contrato na linha 0.1.0 (3).</strong> O <code>stack apply --dry-run</code> (e o
 <code>delonix apply --dry-run</code>, o mesmo caminho) só imprimia o manifesto com os
 defaults e respondia <code>0</code> sem ler a máquina — um plano que o <code>apply</code> recusa
 passava na pré-visualização. Continua a imprimir o mesmo manifesto no stdout,
