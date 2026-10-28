@@ -568,6 +568,11 @@ networkDefaults:
   a fonte declara-se com `stack apply`, como qualquer outro Kind. O registo e o
   estado de cada passagem em `$DELONIX_ROOT/gitops/` são estado interno (lê-se
   com `gitops status -o json`, nunca do disco).
+* **`oci-runtime`** (`create`/`start`/`state`/`kill`/`delete`, ADR-0080) — a CLI
+  compatível com o `runc`: o init do próprio motor por trás do contrato do runc,
+  para poder ocupar o lugar do `runc`/`crun`. Superfície nova e EXPERIMENTAL — o
+  contrato que ela imita é o do `runc`, não uma promessa própria deste motor, e
+  os verbos/estados podem ainda mudar enquanto a conformidade assenta.
 * **Tudo o que começa por `net netns`** — plumbing interno exposto por
   conveniência de depuração.
 * **O formato dos ficheiros de estado** em `$DELONIX_ROOT`. Lê-se pelo `inspect`,

@@ -17087,8 +17087,17 @@ msgstr "Object stores (buckets) compatíveis com S3: ls/inspect/rm."
 
 # ---- oci-runtime (RT-4, ADR-0080): about dos comandos + help das flags ----
 
-msgid "OCI runtime (runc-compatible CLI): create/start/state/kill/delete a container from a bundle. The engine's own init behind the runc contract, so it can sit where runc/crun do (ADR-0080)"
-msgstr "Runtime OCI (CLI compatível com o runc): create/start/state/kill/delete de um container a partir de um bundle. O init do próprio motor por trás do contrato do runc, para poder ocupar o lugar do runc/crun (ADR-0080)"
+msgid "OCI runtime (runc-compatible CLI): create/start/state/kill/delete a container from a bundle."
+msgstr "Runtime OCI (CLI compatível com o runc): create/start/state/kill/delete de um container a partir de um bundle."
+
+msgid ""
+"OCI runtime (runc-compatible CLI): create/start/state/kill/delete a container from a bundle.\n"
+"\n"
+"The engine's own init behind the runc contract, so it can sit where runc/crun do (ADR-0080)."
+msgstr ""
+"Runtime OCI (CLI compatível com o runc): create/start/state/kill/delete de um container a partir de um bundle.\n"
+"\n"
+"O init do próprio motor por trás do contrato do runc, para poder ocupar o lugar do runc/crun (ADR-0080)."
 
 msgid "Create a container from an OCI bundle WITHOUT starting it"
 msgstr "Cria um container a partir de um bundle OCI SEM o arrancar"
@@ -17110,3 +17119,32 @@ msgstr "Diretório de estado (o root por runtime, como o `runc --root`). Por omi
 
 msgid "Path to the OCI bundle (its `rootfs/` and `config.json`)"
 msgstr "Caminho do bundle OCI (o seu `rootfs/` e `config.json`)"
+
+# ---- oci-runtime: comentários dos exemplos do manual ----
+
+msgid "create a container from an OCI bundle, then start it"
+msgstr "cria um container a partir de um bundle OCI, depois arranca-o"
+
+msgid "its OCI state, the way runc reports it"
+msgstr "o seu estado OCI, tal como o runc o reporta"
+
+msgid "stage a container from a bundle without running it"
+msgstr "prepara um container a partir de um bundle sem o correr"
+
+msgid "run a container that was already created"
+msgstr "corre um container que já foi criado"
+
+msgid "print the OCI runtime-spec state JSON"
+msgstr "imprime o JSON de estado da runtime-spec OCI"
+
+msgid "send SIGTERM (the default)"
+msgstr "envia SIGTERM (o valor por omissão)"
+
+msgid "send a specific signal"
+msgstr "envia um sinal específico"
+
+msgid "tear down a stopped container's state"
+msgstr "desmonta o estado de um container parado"
+
+msgid "kill it first, then delete"
+msgstr "mata-o primeiro, depois apaga"
