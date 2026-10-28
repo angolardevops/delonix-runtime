@@ -188,11 +188,40 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .await
         .expect_err("a network is removed in default");
     assert_eq!(delete.code(), tonic::Code::InvalidArgument);
+    // ConnectContainer is served now: an empty request is rejected for its
+    // missing network/container (INVALID_ARGUMENT), not the 501 of an unserved
+    // route.
     let connect = nets
         .connect_container(delonix_node_api::proto::v1::ConnectContainerRequest::default())
         .await
-        .expect_err("not served yet");
-    assert_eq!(connect.code(), tonic::Code::Unimplemented);
+        .expect_err("network and container are required");
+    assert_eq!(connect.code(), tonic::Code::InvalidArgument);
+    // Pinning an address is in the contract and not served on this path.
+    let pinned = nets
+        .connect_container(delonix_node_api::proto::v1::ConnectContainerRequest {
+            network: "backend".into(),
+            container: "web".into(),
+            ipv4_address: "10.0.0.5".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("pinning an address is unimplemented");
+    assert_eq!(pinned.code(), tonic::Code::Unimplemented);
+
+    // PodService.CreatePod/DeletePod are served now: each refuses its empty
+    // identity before any re-exec, not the 501 of an unserved route.
+    let mut podsvc =
+        delonix_node_api::proto::v1::pod_service_client::PodServiceClient::new(channel.clone());
+    let create = podsvc
+        .create_pod(delonix_node_api::proto::v1::CreatePodRequest::default())
+        .await
+        .expect_err("a pod needs a name and a spec");
+    assert_eq!(create.code(), tonic::Code::InvalidArgument);
+    let delete = podsvc
+        .delete_pod(delonix_node_api::proto::v1::DeletePodRequest::default())
+        .await
+        .expect_err("a pod delete needs a name");
+    assert_eq!(delete.code(), tonic::Code::InvalidArgument);
 
     // The operation record, over gRPC: an id nothing was ever given is NOT_FOUND.
     let mut ops =
@@ -610,10 +639,6 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         }
     };
     for (method, path) in [
-        ("GET", "/v1/namespaces/default/containers"),
-        ("POST", "/v1/namespaces/default/containers/web:start"),
-        ("POST", "/v1/namespaces/default/networks/lab:connect"),
-        ("POST", "/v1/images:pull"),
         ("GET", "/v1/events:watch"),
         // A stream is served over gRPC; the REST encoding does not carry one.
         ("GET", "/v1/operations/op-1:watch"),
@@ -624,6 +649,61 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         assert_eq!(v["grpc_status"], 12, "{v}");
         assert_eq!(v["instance"], path, "{v}");
     }
+    // `StartContainer` (`:start`) is served now: the custom verb resolves and
+    // the container read-path refuses a container nothing ever created with
+    // 404 (DX-4000), decided before any launch — not the 501 of an unserved
+    // route.
+    let (status, _, v) = call("POST", "/v1/namespaces/default/containers/web:start", "").await;
+    assert_eq!((status, v["dx"].as_str()), (404, Some("DX-4000")), "{v}");
+    // `ListContainers` is served now: the container read-path answers 200 with
+    // a (possibly empty) list, read from the process's state root — unlike the
+    // routes above, which are still in the contract and not plumbed yet.
+    let (status, _, v) = call("GET", "/v1/namespaces/default/containers", "").await;
+    assert_eq!(status, 200, "ListContainers is served: {v}");
+    assert!(v["containers"].is_array(), "{v}");
+    // `ListPods` is served now: pods are derived from the container records, so a
+    // node with no pods answers 200 with an empty list.
+    let (status, _, v) = call("GET", "/v1/namespaces/default/pods", "").await;
+    assert_eq!(status, 200, "ListPods is served: {v}");
+    assert!(v["pods"].is_array(), "{v}");
+    // `ListImages` is served now: the image read-path answers 200 with a
+    // (possibly empty) list, read from the process's image store.
+    let (status, _, v) = call("GET", "/v1/images", "").await;
+    assert_eq!(status, 200, "ListImages is served: {v}");
+    // The ImageService mutations are ALL served now: each refuses the input it
+    // can reject before any work with 400 (INVALID_ARGUMENT) — not the 501 of
+    // an unserved route. (Pull/Push/Scan: empty reference; Build: no tag.)
+    for (method, path, body) in [
+        ("POST", "/v1/images:pull", r#"{"reference":""}"#),
+        ("POST", "/v1/images:delete", r#"{"reference":""}"#),
+        ("POST", "/v1/images:push", r#"{"reference":""}"#),
+        ("POST", "/v1/images:scan", r#"{"reference":""}"#),
+        ("POST", "/v1/images:build", r#"{"tags":[]}"#),
+        // StackService: plan/apply/destroy are served; each refuses an empty
+        // manifest with 400 — decided before any work, not the 501 of an
+        // unserved route.
+        ("POST", "/v1/stacks/dd:plan", r#"{"manifest":""}"#),
+        ("POST", "/v1/stacks/dd:apply", r#"{"manifest":""}"#),
+        ("POST", "/v1/stacks/dd:destroy", r#"{"manifest":""}"#),
+        // NetworkService.ConnectContainer is served: an empty container is
+        // refused before any re-exec, not the 501 of an unserved route.
+        (
+            "POST",
+            "/v1/namespaces/default/networks/lab:connect",
+            r#"{"container":""}"#,
+        ),
+        // PodService.CreatePod is served: an empty name is refused before the
+        // manifest is rendered.
+        ("POST", "/v1/namespaces/default/pods", r#"{"name":""}"#),
+    ] {
+        let (status, _, v) = call(method, path, body).await;
+        assert_eq!(
+            (status, v["grpc_status"].as_i64()),
+            (400, Some(3)),
+            "{method} {path}: {v}"
+        );
+    }
+    assert!(v["images"].is_array(), "{v}");
     // The network mutations are served. This router answers from the
     // process's state root, so only what they refuse before touching anything
     // is driven here: a network lives in `default`.

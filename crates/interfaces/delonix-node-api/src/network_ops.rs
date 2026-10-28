@@ -11,12 +11,16 @@
 //! in-use check the CLI goes through.
 
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use tonic::Status;
 
 use crate::networks::NAMESPACE;
 use crate::operations::{self, Begun};
-use crate::proto::v1::{CreateNetworkRequest, DeleteNetworkRequest, NetworkTopology, Operation};
+use crate::proto::v1::{
+    ConnectContainerRequest, Container, CreateNetworkRequest, DeleteNetworkRequest,
+    DisconnectContainerRequest, GetContainerRequest, NetworkTopology, Operation,
+};
 
 /// The gRPC metadata key that carries a failure's dictionary number, so the
 /// REST encoding answers with the same `DX-` code the CLI prints.
@@ -321,11 +325,210 @@ pub fn delete_with(
     )?))
 }
 
+/// `ConnectContainer` — hot-attaches a RUNNING container to a second network
+/// (`delonix network connect <network> <container>`). Returns the updated
+/// [`Container`] (`GetContainer` of the now multi-homed container).
+pub fn connect_in(root: &Path, req: &ConnectContainerRequest) -> Result<Container, Status> {
+    membership(
+        root,
+        "connect",
+        &req.network,
+        &req.container,
+        &req.namespace,
+        &req.ipv4_address,
+    )
+}
+
+/// `DisconnectContainer` — detaches a container from an extra network
+/// (`delonix network disconnect <network> <container>`). Returns the updated
+/// [`Container`].
+pub fn disconnect_in(root: &Path, req: &DisconnectContainerRequest) -> Result<Container, Status> {
+    membership(
+        root,
+        "disconnect",
+        &req.network,
+        &req.container,
+        &req.namespace,
+        &req.ipv4_address,
+    )
+}
+
+/// Shared connect/disconnect: both hot-plug a veth into a running container's
+/// netns (setns), so both go through the fork-safe re-exec seam, never an
+/// in-process fork. On success the container is read back and returned.
+fn membership(
+    root: &Path,
+    verb: &str,
+    network: &str,
+    container: &str,
+    namespace: &str,
+    ipv4_address: &str,
+) -> Result<Container, Status> {
+    if network.is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "{}Container: network is required",
+            cap(verb)
+        )));
+    }
+    if container.is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "{}Container: container is required",
+            cap(verb)
+        )));
+    }
+    if !ipv4_address.is_empty() {
+        return Err(Status::unimplemented(format!(
+            "{}Container: pinning ipv4_address is in the contract and the node API does not \
+             serve it yet — `delonix network {verb}` chooses the address",
+            cap(verb)
+        )));
+    }
+    let args = [
+        "network".to_string(),
+        verb.to_string(),
+        network.to_string(),
+        container.to_string(),
+    ];
+    reexec_membership(root, &args, &format!("network {verb}"))?;
+    // The contract returns the resource; read it back under its namespace.
+    crate::containers::get_in(
+        root,
+        &GetContainerRequest {
+            name: container.to_string(),
+            namespace: namespace.to_string(),
+        },
+    )
+}
+
+/// "connect" → "Connect", for the error prefix.
+fn cap(verb: &str) -> String {
+    let mut c = verb.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Re-exec `delonix network connect|disconnect …`, capturing stderr. A non-zero
+/// exit becomes an `InvalidArgument` (these are precondition failures — a
+/// slirp/host container, a network it is not attached to) carrying the CLI's
+/// own message, which the REST edge surfaces verbatim.
+fn reexec_membership(root: &Path, args: &[String], what: &str) -> Result<(), Status> {
+    let err_path = std::env::temp_dir().join(format!(
+        "delonix-node-net-{}-{}.err",
+        std::process::id(),
+        delonix_node::generate_id()
+    ));
+    let err_file = std::fs::File::create(&err_path)
+        .map_err(|e| Status::internal(format!("preparing `{what}`: {e}")))?;
+    let status = Command::new(delonix_node::dispatch::cli_bin())
+        .env("DELONIX_ROOT", root)
+        .env("DELONIX_INTERNAL", "1")
+        .env("NO_COLOR", "1")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(err_file))
+        .status();
+    let outcome = match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => {
+            let why = std::fs::read_to_string(&err_path).unwrap_or_default();
+            let why = why.trim();
+            // Strip the CLI's `error[DX-NNNN] <class>: ` prefix so the message
+            // reads cleanly; the class is already carried by the gRPC code.
+            let clean = strip_cli_error_prefix(why);
+            Err(if clean.is_empty() {
+                Status::internal(format!("`delonix {what}` exited {s}"))
+            } else if clean.contains("no such") || clean.contains("not found") {
+                Status::not_found(clean.to_string())
+            } else {
+                Status::invalid_argument(clean.to_string())
+            })
+        }
+        Err(e) => Err(Status::internal(format!(
+            "could not run `delonix {what}`: {e}"
+        ))),
+    };
+    let _ = std::fs::remove_file(&err_path);
+    outcome
+}
+
+/// Drops a leading `error[DX-NNNN] <class>: ` the CLI prints, leaving the human
+/// message. Leaves anything that does not match untouched.
+fn strip_cli_error_prefix(s: &str) -> &str {
+    let rest = match s.strip_prefix("error[") {
+        Some(r) => r,
+        None => return s,
+    };
+    // after `DX-NNNN] `
+    let rest = match rest.find("] ") {
+        Some(i) => &rest[i + 2..],
+        None => return s,
+    };
+    // after `<class>: ` (the first ": " following the code)
+    match rest.find(": ") {
+        Some(i) => rest[i + 2..].trim(),
+        None => rest.trim(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::proto::v1::{NetworkSpec, OperationState};
     use std::cell::Cell;
+
+    #[test]
+    fn membership_requires_network_and_container() {
+        let dir = tempfile::tempdir().unwrap();
+        let no_net = ConnectContainerRequest {
+            network: String::new(),
+            container: "web".into(),
+            namespace: String::new(),
+            ipv4_address: String::new(),
+        };
+        assert_eq!(
+            connect_in(dir.path(), &no_net).unwrap_err().code(),
+            tonic::Code::InvalidArgument
+        );
+        let no_container = DisconnectContainerRequest {
+            network: "backend".into(),
+            container: String::new(),
+            namespace: String::new(),
+            ipv4_address: String::new(),
+        };
+        assert_eq!(
+            disconnect_in(dir.path(), &no_container).unwrap_err().code(),
+            tonic::Code::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn pinning_an_address_is_unimplemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let req = ConnectContainerRequest {
+            network: "backend".into(),
+            container: "web".into(),
+            namespace: String::new(),
+            ipv4_address: "10.0.0.5".into(),
+        };
+        assert_eq!(
+            connect_in(dir.path(), &req).unwrap_err().code(),
+            tonic::Code::Unimplemented
+        );
+    }
+
+    #[test]
+    fn strips_the_cli_error_prefix() {
+        assert_eq!(
+            strip_cli_error_prefix(
+                "error[DX-1000] invalid argument: container 'web' is not attached"
+            ),
+            "container 'web' is not attached"
+        );
+        assert_eq!(strip_cli_error_prefix("plain message"), "plain message");
+    }
 
     /// The store half of the real create, without the dataplane: the tests'
     /// state root is not the process's, and the dataplane record follows the

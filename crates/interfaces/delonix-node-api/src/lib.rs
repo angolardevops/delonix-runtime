@@ -81,10 +81,21 @@ pub mod proto {
 }
 
 pub mod activation;
+pub mod container_exec;
+pub mod container_launch;
+pub mod container_logs;
+pub mod container_ops;
+pub mod container_update;
+pub mod containers;
 pub mod docs;
 pub mod events;
+pub mod image_ops;
+pub mod images;
 pub mod network_ops;
 pub mod networks;
+pub mod pod_ops;
+pub mod pods;
+pub mod stacks;
 pub mod node;
 pub mod operations;
 pub mod page;

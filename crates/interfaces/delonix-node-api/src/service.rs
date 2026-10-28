@@ -5,8 +5,12 @@ use std::pin::Pin;
 use axum::response::IntoResponse;
 use tonic::{Request, Response, Status};
 
+use crate::proto::v1::container_service_server::{ContainerService, ContainerServiceServer};
+use crate::proto::v1::image_service_server::{ImageService, ImageServiceServer};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
+use crate::proto::v1::pod_service_server::{PodService, PodServiceServer};
+use crate::proto::v1::stack_service_server::{StackService, StackServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
 use crate::proto::v1::storage_service_server::{StorageService, StorageServiceServer};
 use crate::proto::v1::virtual_machine_service_server::{
@@ -44,6 +48,22 @@ use crate::proto::v1::{
 use crate::proto::v1::{
     CreateVolumeRequest, DeleteVolumeRequest, GetVolumeRequest, ListVolumesRequest,
     ListVolumesResponse, Volume,
+};
+use crate::proto::v1::{
+    BuildImageRequest, DeleteImageRequest, GetImageRequest, Image, ListImagesRequest,
+    ListImagesResponse, PullImageRequest, PushImageRequest, ScanImageRequest,
+};
+use crate::proto::v1::{
+    CreatePodRequest, DeletePodRequest, GetPodRequest, ListPodsRequest, ListPodsResponse, Pod,
+};
+use crate::proto::v1::{
+    ApplyStackRequest, DestroyStackRequest, PlanStackRequest, StackPlan,
+};
+use crate::proto::v1::{
+    ContainerStats, CreateContainerRequest, DeleteContainerRequest, ExecRequest, ExecResponse,
+    GetContainerRequest, KillContainerRequest, ListContainersRequest, ListContainersResponse,
+    LogChunk, LogsRequest, StartContainerRequest, StatsRequest, StopContainerRequest,
+    UpdateContainerRequest, WaitContainerRequest, WaitContainerResponse,
 };
 use crate::{node, providers};
 
@@ -228,16 +248,26 @@ impl NetworkService for NodeApi {
 
     async fn connect_container(
         &self,
-        _req: Request<ConnectContainerRequest>,
+        req: Request<ConnectContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("NetworkService", "ConnectContainer"))
+        let req = req.into_inner();
+        blocking("network connect", move || {
+            crate::network_ops::connect_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn disconnect_container(
         &self,
-        _req: Request<DisconnectContainerRequest>,
+        req: Request<DisconnectContainerRequest>,
     ) -> Result<Response<Container>, Status> {
-        Err(unserved("NetworkService", "DisconnectContainer"))
+        let req = req.into_inner();
+        blocking("network disconnect", move || {
+            crate::network_ops::disconnect_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 
@@ -351,6 +381,180 @@ impl StorageService for NodeApi {
         blocking("rgw user", move || crate::storage::create_user(&req))
             .await?
             .map(Response::new)
+    }
+}
+
+#[tonic::async_trait]
+impl ImageService for NodeApi {
+    // Read half served from the OCI image store, in-process (no re-exec).
+    async fn get_image(&self, req: Request<GetImageRequest>) -> Result<Response<Image>, Status> {
+        let req = req.into_inner();
+        blocking("image", move || {
+            crate::images::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_images(
+        &self,
+        req: Request<ListImagesRequest>,
+    ) -> Result<Response<ListImagesResponse>, Status> {
+        let req = req.into_inner();
+        blocking("images", move || {
+            crate::images::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    // Pull (re-exec of `delonix pull`) and Delete (in-process `ImageStore`
+    // remove) are served. Push/build/scan stay unserved (501, DX-6001).
+    async fn pull_image(
+        &self,
+        req: Request<PullImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("image pull", move || {
+            crate::image_ops::pull_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn delete_image(
+        &self,
+        req: Request<DeleteImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("image delete", move || {
+            crate::image_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn push_image(
+        &self,
+        req: Request<PushImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("image push", move || {
+            crate::image_ops::push_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn build_image(
+        &self,
+        req: Request<BuildImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("image build", move || {
+            crate::image_ops::build_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn scan_image(
+        &self,
+        req: Request<ScanImageRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("image scan", move || {
+            crate::image_ops::scan_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+}
+
+#[tonic::async_trait]
+impl PodService for NodeApi {
+    // Read half derived from the container records (a pod is its members).
+    async fn get_pod(&self, req: Request<GetPodRequest>) -> Result<Response<Pod>, Status> {
+        let req = req.into_inner();
+        blocking("pod", move || crate::pods::get_in(&node::state_root(), &req))
+            .await?
+            .map(Response::new)
+    }
+
+    async fn list_pods(
+        &self,
+        req: Request<ListPodsRequest>,
+    ) -> Result<Response<ListPodsResponse>, Status> {
+        let req = req.into_inner();
+        blocking("pods", move || crate::pods::list_in(&node::state_root(), &req))
+            .await?
+            .map(Response::new)
+    }
+
+    // Create (from a `kind: Pod` manifest) and Delete (removing every member)
+    // re-exec the CLI that owns the pod construction — the same fork-safe seam
+    // Start/Exec use. Both answer with a terminal Operation.
+    async fn create_pod(
+        &self,
+        req: Request<CreatePodRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("pod create", move || {
+            crate::pod_ops::create_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn delete_pod(
+        &self,
+        req: Request<DeletePodRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("pod delete", move || {
+            crate::pod_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+}
+
+#[tonic::async_trait]
+impl StackService for NodeApi {
+    async fn plan_stack(
+        &self,
+        req: Request<PlanStackRequest>,
+    ) -> Result<Response<StackPlan>, Status> {
+        let req = req.into_inner();
+        blocking("stack plan", move || {
+            crate::stacks::plan_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn apply_stack(
+        &self,
+        req: Request<ApplyStackRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("stack apply", move || {
+            crate::stacks::apply_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn destroy_stack(
+        &self,
+        req: Request<DestroyStackRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("stack destroy", move || {
+            crate::stacks::destroy_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 
@@ -573,6 +777,160 @@ impl OperationService for NodeApi {
     }
 }
 
+#[tonic::async_trait]
+impl ContainerService for NodeApi {
+    async fn get_container(
+        &self,
+        req: Request<GetContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        let req = req.into_inner();
+        blocking("container", move || {
+            crate::containers::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_containers(
+        &self,
+        req: Request<ListContainersRequest>,
+    ) -> Result<Response<ListContainersResponse>, Status> {
+        let req = req.into_inner();
+        blocking("containers", move || {
+            crate::containers::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    // ---- lifecycle write-path + stats + logs + resize. `Exec` is the one the
+    // contract still carries unserved here (its own pass).
+
+    async fn create_container(
+        &self,
+        req: Request<CreateContainerRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("container create", move || {
+            let root = node::state_root();
+            let images = delonix_oci::ImageStore::open(&root)
+                .map_err(|e| crate::network_ops::status_of(&e.into()))?;
+            crate::container_launch::create_in(&root, &images, &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn update_container(
+        &self,
+        req: Request<UpdateContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        let req = req.into_inner();
+        blocking("container update", move || {
+            crate::container_update::update_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn delete_container(
+        &self,
+        req: Request<DeleteContainerRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("container delete", move || {
+            crate::container_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn start_container(
+        &self,
+        req: Request<StartContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        let req = req.into_inner();
+        blocking("container start", move || {
+            crate::container_launch::start_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn stop_container(
+        &self,
+        req: Request<StopContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        let req = req.into_inner();
+        blocking("container stop", move || {
+            crate::container_ops::stop_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn kill_container(
+        &self,
+        req: Request<KillContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        let req = req.into_inner();
+        blocking("container kill", move || {
+            crate::container_ops::kill_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn wait_container(
+        &self,
+        req: Request<WaitContainerRequest>,
+    ) -> Result<Response<WaitContainerResponse>, Status> {
+        let req = req.into_inner();
+        blocking("container wait", move || {
+            crate::container_launch::wait_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn stats(
+        &self,
+        req: Request<StatsRequest>,
+    ) -> Result<Response<ContainerStats>, Status> {
+        let req = req.into_inner();
+        blocking("container stats", move || {
+            crate::container_ops::stats_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    type ExecStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<ExecResponse, Status>> + Send + 'static>>;
+
+    async fn exec(
+        &self,
+        req: Request<tonic::Streaming<ExecRequest>>,
+    ) -> Result<Response<Self::ExecStream>, Status> {
+        let stream = crate::container_exec::serve(node::state_root(), req.into_inner()).await?;
+        Ok(Response::new(Box::pin(stream)))
+    }
+
+    type LogsStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<LogChunk, Status>> + Send + 'static>>;
+
+    async fn logs(&self, req: Request<LogsRequest>) -> Result<Response<Self::LogsStream>, Status> {
+        let req = req.into_inner();
+        // The backlog read is file I/O; the follow task it spawns lands on the
+        // runtime (a blocking-pool thread per poll), as `WatchEvents` does.
+        let stream = blocking("container logs", move || {
+            crate::container_logs::stream(node::state_root(), req, crate::container_logs::POLL)
+        })
+        .await??;
+        Ok(Response::new(Box::pin(stream)))
+    }
+}
+
 /// The router both transports share. The contract's REST routes are not
 /// listed here: they are resolved against the table `build.rs` generates from
 /// the `google.api.http` annotations ([`crate::transcode`]), in the fallback —
@@ -606,6 +964,10 @@ pub fn router() -> axum::Router {
             VolumeServiceServer::new(NodeApi),
         )
         .route_service(
+            &format!("/{}/*rest", ContainerServiceServer::<NodeApi>::NAME),
+            ContainerServiceServer::new(NodeApi),
+        )
+        .route_service(
             &format!("/{}/*rest", OperationServiceServer::<NodeApi>::NAME),
             OperationServiceServer::new(NodeApi),
         )
@@ -616,6 +978,18 @@ pub fn router() -> axum::Router {
         .route_service(
             &format!("/{}/*rest", StorageServiceServer::<NodeApi>::NAME),
             StorageServiceServer::new(NodeApi),
+        )
+        .route_service(
+            &format!("/{}/*rest", ImageServiceServer::<NodeApi>::NAME),
+            ImageServiceServer::new(NodeApi),
+        )
+        .route_service(
+            &format!("/{}/*rest", PodServiceServer::<NodeApi>::NAME),
+            PodServiceServer::new(NodeApi),
+        )
+        .route_service(
+            &format!("/{}/*rest", StackServiceServer::<NodeApi>::NAME),
+            StackServiceServer::new(NodeApi),
         )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
@@ -682,6 +1056,9 @@ async fn rest(
                 transcode::dispatch_network_service(&NodeApi, route.rpc, input).await
             }
             "VolumeService" => transcode::dispatch_volume_service(&NodeApi, route.rpc, input).await,
+            "ContainerService" => {
+                transcode::dispatch_container_service(&NodeApi, route.rpc, input).await
+            }
             "OperationService" => {
                 transcode::dispatch_operation_service(&NodeApi, route.rpc, input).await
             }
@@ -691,6 +1068,9 @@ async fn rest(
             "StorageService" => {
                 transcode::dispatch_storage_service(&NodeApi, route.rpc, input).await
             }
+            "ImageService" => transcode::dispatch_image_service(&NodeApi, route.rpc, input).await,
+            "PodService" => transcode::dispatch_pod_service(&NodeApi, route.rpc, input).await,
+            "StackService" => transcode::dispatch_stack_service(&NodeApi, route.rpc, input).await,
             _ => Err(transcode::not_served(route)),
         }
     };
@@ -717,6 +1097,8 @@ const MUTATIONS: &[&str] = &[
     "CreateSnapshot",
     "RestoreSnapshot",
     "DeleteSnapshot",
+    "CreateContainer",
+    "DeleteContainer",
 ];
 
 /// Puts a header's value in the request field it stands for. The same value

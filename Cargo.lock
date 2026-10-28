@@ -916,6 +916,7 @@ dependencies = [
  "delonix-linux",
  "delonix-model",
  "delonix-node",
+ "delonix-oci",
  "delonix-opnsense",
  "delonix-provider-ceph",
  "delonix-proxmox",
