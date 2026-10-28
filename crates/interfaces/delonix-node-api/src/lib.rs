@@ -32,10 +32,11 @@
 //! `If-Match`) makes a stale delete 412.
 //!
 //! `VolumeService` ([`volumes`] reads, [`volume_ops`] writes): `CreateVolume`
-//! of a local volume (quota, alert, labels) and `DeleteVolume` of a local
-//! volume or a share's record, on the same ledger; a remote share, a share,
-//! provisioning, a pool volume and `destroy_remote` answer `UNIMPLEMENTED`
-//! with the CLI command that does them. `OperationService.WatchOperation`
+//! of a local volume (quota, alert, labels) or a Ceph-provisioned pool volume
+//! (`spec.provision`), and `DeleteVolume` of a local volume, a share's record
+//! or a pool volume (its driver releases the data), on the same ledger; a
+//! remote share, a share and `destroy_remote` answer `UNIMPLEMENTED` with the
+//! CLI command that does them. `OperationService.WatchOperation`
 //! streams an operation until it ends (gRPC only: the REST encoding does not
 //! carry streams), and `CancelOperation` answers `FAILED_PRECONDITION`
 //! (DX-5002) — no served mutation has a cancellation point, and an operation
@@ -123,6 +124,10 @@ pub fn compose() {
         // ceilings — the same registration the CLI's `main` makes. Without it a
         // `CreateVirtualMachine` on Cloud Hypervisor is refused (DX-6515).
         delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
+        // The Ceph storage-pool drivers (ADR-0081): `CreateVolume` with a
+        // `spec.provision` naming a `ceph-rbd`/`cephfs` pool allocates through
+        // them. Registering does no I/O.
+        storage::register_pool_drivers();
     });
 }
 

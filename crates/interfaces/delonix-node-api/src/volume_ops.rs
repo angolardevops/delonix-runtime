@@ -10,20 +10,25 @@
 //! **What is served, and what is refused by name.** A LOCAL volume is created
 //! in the node's unscoped store — where `delonix volume create` puts it, and
 //! which the read half reports in `default` — with its quota (measured, the
-//! rootless model), alert threshold, labels and annotations. A remote share,
-//! a share of another volume, a provisioned volume and any namespace but
-//! `default` answer `UNIMPLEMENTED` with the CLI command that does it: each
-//! needs a piece (a credentials file, a provider, the share's carving rules)
-//! that lives in the CLI's composition today.
+//! rootless model), alert threshold, labels and annotations. A PROVISIONED
+//! volume (`spec.provision`) is carved out of a Ceph storage pool the
+//! administrator declared: the pool name is resolved in the allowlist, its
+//! driver (`ceph-rbd`, `cephfs`) allocates and maps the backing object, and
+//! the record names the pool (ADR-0067, ADR-0081; see [`crate::storage`]).
+//! A remote share, a share of another volume, and any namespace but `default`
+//! answer `UNIMPLEMENTED` with the CLI command that does it: each needs a piece
+//! (a credentials file, the share's carving rules) that lives in the CLI's
+//! composition today.
 //!
-//! A delete removes a local volume or a share's record, after the same
-//! in-use check `delonix volume rm` makes. **A delete that reports success
-//! has deleted**: the store removes the data before the record and stops at
-//! the first failure, and a volume whose data this process cannot read
-//! (owned by a mapped subuid) is refused before anything is removed
-//! (DX-6205) — removing what is readable would leave it half deleted. A
-//! volume in a storage pool or on a network share, and `destroy_remote`, are
-//! refused by name: their release goes through drivers the CLI composes.
+//! A delete removes a local volume or a share's record, and gives a pool
+//! volume's data back to its pool (the driver releases it) BEFORE removing the
+//! record, after the same in-use check `delonix volume rm` makes. **A delete
+//! that reports success has deleted**: the store removes the data before the
+//! record and stops at the first failure, and a volume whose data this process
+//! cannot read (owned by a mapped subuid) is refused before anything is removed
+//! (DX-6205) — removing what is readable would leave it half deleted. A network
+//! share, and `destroy_remote`, are refused by name: their release goes through
+//! drivers the CLI composes.
 
 use std::path::Path;
 
@@ -81,10 +86,13 @@ fn quota_of(spec: &crate::proto::v1::VolumeSpec) -> Result<(Option<u64>, Option<
     Ok((quota, alert))
 }
 
-/// [`operations::fingerprint_of`] of a `CreateVolume` request's content.
+/// [`operations::fingerprint_of`] of a `CreateVolume` request's content. The
+/// provisioning pool is part of it: the same name asked of a different pool is
+/// a different request, not a replay of the first.
 fn create_fingerprint(
     quota: Option<u64>,
     alert: Option<u8>,
+    provider: &str,
     labels: &std::collections::HashMap<String, String>,
     annotations: &std::collections::HashMap<String, String>,
 ) -> String {
@@ -93,6 +101,7 @@ fn create_fingerprint(
     operations::fingerprint_of(&[
         ("quota_bytes", &quota),
         ("alert_percent", &alert),
+        ("provision", provider),
         ("labels", &operations::canonical_map(labels)),
         ("annotations", &operations::canonical_map(annotations)),
     ])
@@ -107,6 +116,30 @@ pub fn create_work(root: &Path, req: &CreateVolumeRequest) -> delonix_model::Res
     let spec = req.spec.clone().unwrap_or_default();
     // Validated before the operation was acknowledged.
     let (quota, alert) = quota_of(&spec).unwrap_or_default();
+    // A provisioned volume: the pool driver allocates its data (resolved and
+    // sized before this ran), then the record names the pool so delete
+    // releases it and the reader reports where it lives.
+    if let Some(prov) = &spec.provision {
+        let size = quota.unwrap_or_default();
+        let alloc = crate::storage::provision_allocate(root, &req.name, size, prov)?;
+        store
+            .register_in_pool(&req.name, &alloc.path, size, alert, &prov.provider)
+            .map_err(engine)?;
+        if !req.labels.is_empty() || !req.annotations.is_empty() {
+            store
+                .set_metadata(&req.name, &pairs(&req.labels), &pairs(&req.annotations))
+                .map_err(engine)?;
+        }
+        delonix_node::events::emit(
+            root,
+            "volume",
+            "create",
+            &req.name,
+            &req.name,
+            Some(&format!("pool={}", prov.provider)),
+        );
+        return Ok(());
+    }
     store
         .create_with(&req.name, "local", None, None)
         .map_err(engine)?;
@@ -145,6 +178,13 @@ pub(crate) fn delete_work(root: &Path, entry: &Entry) -> delonix_model::Result<(
     }
     .map_err(engine)?;
     let name = &entry.volume.name;
+    // A pool volume's data is given back to its pool FIRST — the record is what
+    // says which pool holds it, so it goes last (ADR-0067). A release that
+    // fails stops the delete: a record removed with the object still in the
+    // pool would orphan it.
+    if let Some(pool) = entry.volume.pool.as_deref() {
+        crate::storage::provision_release(root, pool, name)?;
+    }
     store.remove_with(name, None).map_err(engine)?;
     delonix_node::events::emit(root, "volume", "remove", name, name, None);
     Ok(())
@@ -214,12 +254,11 @@ pub fn create_with(
             ))
         }
     }
-    if spec.provision.is_some() {
-        return Err(Status::unimplemented(
-            "CreateVolume: provisioning the backing share on a storage provider is in the \
-             contract and this engine does not do it on the node API yet (a `kind: Volume` \
-             with `provision:` applied by `delonix stack apply` does)",
-        ));
+    // A provisioned volume is carved out of a storage pool the administrator
+    // declared (ADR-0067, ADR-0081): resolved and sized here, before an
+    // operation exists; allocated by `create_work` once it does.
+    if let Some(prov) = &spec.provision {
+        crate::storage::check_provision(prov, spec.quota_bytes)?;
     }
     if !matches!(req.namespace.as_str(), "" | DEFAULT_NAMESPACE) {
         return Err(Status::unimplemented(format!(
@@ -230,8 +269,13 @@ pub fn create_with(
         )));
     }
     let (quota, alert) = quota_of(&spec)?;
+    let provider = spec
+        .provision
+        .as_ref()
+        .map(|p| p.provider.as_str())
+        .unwrap_or_default();
     let target = format!("Volume/{DEFAULT_NAMESPACE}/{}", req.name);
-    let fp = create_fingerprint(quota, alert, &req.labels, &req.annotations);
+    let fp = create_fingerprint(quota, alert, provider, &req.labels, &req.annotations);
     // The same request sent again is answered with the first answer — before
     // the "already exists" check, which the first request itself made true.
     if let Some(found) = operations::replay(root, "create", &target, &req.request_id, &fp)? {
@@ -285,13 +329,6 @@ pub(crate) fn delete_with(
         ));
     }
     let v = &entry.volume;
-    if v.pool.is_some() {
-        return Err(Status::unimplemented(format!(
-            "DeleteVolume: volume '{}' lives in a storage pool, whose driver releases it; this \
-             engine does not do that on the node API yet (`delonix volume rm {}` does)",
-            v.name, v.name
-        )));
-    }
     if delonix_volume::is_network_driver(&v.driver) {
         return Err(Status::unimplemented(format!(
             "DeleteVolume: volume '{}' is a {} share, whose mount and credentials file the CLI \
@@ -323,10 +360,11 @@ pub(crate) fn delete_with(
             )));
         }
     }
-    // A share's data is not under the record and is never removed here; a
-    // volume that owns its data has to be readable to the end, or the delete
-    // would stop half way.
-    if v.parent.is_none() {
+    // A share's data is not under the record and is never removed here, and a
+    // pool volume's data is in the pool (its driver releases it, not this
+    // process); a volume that owns its own data directory has to be readable
+    // to the end, or the delete would stop half way.
+    if v.parent.is_none() && v.pool.is_none() {
         let usage = delonix_volume::measure(Path::new(&v.mountpoint));
         if !usage.is_complete() {
             return Err(status_of(&delonix_model::Error::coded(
@@ -487,9 +525,12 @@ mod tests {
             }),
             Code::Unimplemented
         );
+        // An empty `provision.provider` names no pool: refused as the error,
+        // before any operation (and before the allowlist is even read), like
+        // the other undecided requests here.
         assert_eq!(
             with(&|r| r.spec.as_mut().unwrap().provision = Some(Default::default())),
-            Code::Unimplemented
+            Code::InvalidArgument
         );
         assert_eq!(operations_on_disk(root), 0);
         assert!(
@@ -650,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pool_or_network_volume_and_destroy_remote_are_refused_by_name() {
+    fn a_network_volume_and_destroy_remote_are_refused_by_name() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         create_in(root, &create_req("data", "")).unwrap();
@@ -676,5 +717,154 @@ mod tests {
             refused.message()
         );
         assert!(get(root, "nas").is_ok());
+    }
+
+    /// The whole round trip through the write half against the live MicroCeph:
+    /// `CreateVolume` with `spec.provision` carves an RBD image out of a
+    /// `ceph-rbd` pool and maps it, and `DeleteVolume` releases it — the image
+    /// is on the cluster between the two and gone after (ADR-0081).
+    ///
+    /// `#[ignore]`: it needs a cluster, so it runs only with `--ignored`, never
+    /// in the default suite (see `reports/ceph-live/cluster-access.md`). It
+    /// drives the same `create_in`/`delete_in` the gRPC and REST edges call,
+    /// through the real pool resolution and routing; only the `Run` is swapped
+    /// for one that runs the root map/mount through `sudo -n` (the helper's job
+    /// in production), the way the provider crate's own live tests do.
+    #[test]
+    #[ignore = "needs a live Ceph cluster with an 'rbdpool' RADOS pool: run with \
+                --ignored --test-threads=1 (see reports/ceph-live/cluster-access.md)"]
+    fn create_provisions_and_delete_releases_an_rbd_image_on_live_ceph() {
+        use delonix_storage::exec::{Output, Run};
+        use std::sync::Arc;
+
+        struct SudoRun;
+        impl Run for SudoRun {
+            fn run(&self, argv: &[String]) -> std::io::Result<Output> {
+                let out = std::process::Command::new("sudo")
+                    .arg("-n")
+                    .args(argv)
+                    .output()?;
+                Ok(Output {
+                    code: out.status.code(),
+                    stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                })
+            }
+        }
+
+        /// Does `rbd info rbdpool/<name>` find an image? (Through sudo, like the
+        /// driver.)
+        fn image_exists(name: &str) -> bool {
+            std::process::Command::new("sudo")
+                .args([
+                    "-n",
+                    "rbd",
+                    "--conf",
+                    "/etc/ceph/ceph.conf",
+                    "info",
+                    &format!("rbdpool/{name}"),
+                ])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // One `ceph-rbd` pool over the session's `rbdpool`, with
+        // `mode: in-process` so the routed driver calls ours directly instead
+        // of dialling a helper socket this test does not run.
+        let pools = root.join("storage-pools.yaml");
+        std::fs::write(
+            &pools,
+            "mode: in-process\n\
+             pools:\n  \
+             ceph-rbd:\n    \
+             driver: ceph-rbd\n    \
+             cephPool: rbdpool\n    \
+             cephConf: /etc/ceph/ceph.conf\n",
+        )
+        .unwrap();
+        std::env::set_var(delonix_storage::allowlist::PATH_ENV, &pools);
+
+        // Consume the registration `Once` with the production `SystemRun`, then
+        // replace `ceph-rbd` with a driver that runs the tools through sudo.
+        crate::storage::register_pool_drivers();
+        delonix_storage::registry::register(Arc::new(delonix_provider_ceph::RbdDriver::new(
+            Arc::new(SudoRun),
+        )))
+        .unwrap();
+
+        let name = "dlx-nodeapi-live";
+        let req = CreateVolumeRequest {
+            name: name.into(),
+            spec: Some(VolumeSpec {
+                quota_bytes: 64 * (1 << 20),
+                provision: Some(crate::proto::v1::ProvisionRequest {
+                    provider: "ceph-rbd".into(),
+                    extensions: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // Clear anything a prior aborted run left: the record, then the image.
+        let _ = delete_in(root, &delete_req(name));
+        let _ = std::process::Command::new("sudo")
+            .args([
+                "-n",
+                "rbd",
+                "--conf",
+                "/etc/ceph/ceph.conf",
+                "rm",
+                &format!("rbdpool/{name}"),
+            ])
+            .output();
+
+        // --- provision ---
+        let op = create_in(root, &req).unwrap();
+        assert_eq!(
+            op.state,
+            OperationState::Succeeded as i32,
+            "provision did not succeed: {op:?}"
+        );
+
+        // The record names the pool and points at a mapped block device.
+        let rec = VolumeStore::open(root).unwrap().inspect(name).unwrap();
+        assert_eq!(
+            rec.pool.as_deref(),
+            Some("ceph-rbd"),
+            "record keeps its pool"
+        );
+        assert!(
+            rec.mountpoint.starts_with("/dev/rbd"),
+            "the allocation is a mapped RBD device: {}",
+            rec.mountpoint
+        );
+        assert!(
+            image_exists(name),
+            "the RBD image is on the cluster after create"
+        );
+        // And it reads back through the read half.
+        assert!(get(root, name).is_ok(), "the volume reads back");
+
+        // --- release ---
+        let op = delete_in(root, &delete_req(name)).unwrap();
+        assert_eq!(
+            op.state,
+            OperationState::Succeeded as i32,
+            "release did not succeed: {op:?}"
+        );
+        assert_eq!(
+            get(root, name).unwrap_err().code(),
+            tonic::Code::NotFound,
+            "the volume is gone from the store"
+        );
+        assert!(
+            !image_exists(name),
+            "the RBD image was released from the cluster"
+        );
     }
 }

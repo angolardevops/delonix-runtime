@@ -1,0 +1,13 @@
+   Compiling delonix-node-api v5.1.1 (/home/walter/workspaces/NgolaCloud/projects/.worktrees/delonix-runtime/ceph-native-storage/crates/interfaces/delonix-node-api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.83s
+     Running tests/storage_live.rs (/home/walter/workspaces/NgolaCloud/projects/delonix-runtime/target/debug/deps/storage_live-b9a866ffffe8360f)
+
+running 2 tests
+test rados_status_is_served_over_rest ... [REST] GET /v1/storage/ceph/status -> 200 {"fsid":"8ce5d316-a462-411e-8297-9ecb986608f1","health":"HEALTH_OK","mons":1,"osds_in":3,"osds_up":3,"pools":11,"reachable":true}
+ok
+test rgw_buckets_are_served_over_rest ... [REST] GET /v1/storage/objectstore/buckets -> 200 {"buckets":["delonix-bucket"]}
+[REST] GET .../buckets/delonix-bucket -> 200 {"name":"delonix-bucket","objects":"1","owner":"delonix","size_bytes":"4096"}
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+

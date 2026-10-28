@@ -1,0 +1,9 @@
+   Compiling delonix-node-api v5.1.1 (/home/walter/workspaces/NgolaCloud/projects/.worktrees/delonix-runtime/ceph-native-storage/crates/interfaces/delonix-node-api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.51s
+     Running unittests src/lib.rs (target/debug/deps/delonix_node_api-8f02f83dfe01ea74)
+
+running 1 test
+test volume_ops::tests::create_provisions_and_delete_releases_an_rbd_image_on_live_ceph ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 95 filtered out; finished in 0.51s
+
