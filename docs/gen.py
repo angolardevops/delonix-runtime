@@ -3308,6 +3308,10 @@ margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
 th{background:var(--side)}
+dl{margin:1rem 0}
+dt{font-weight:700;margin-top:1.1rem}
+dd{margin:.25rem 0 0;padding-left:1rem;border-left:2px solid var(--line);color:var(--ink)}
+dd+dt{border-top:1px solid var(--line);padding-top:1.1rem}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
 .card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
 .card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
@@ -3359,6 +3363,7 @@ def sidebar(active, depth=0):
         ("Conceitos", "Concepts", [
             ("estrutura.html", "Estrutura de recursos", "Resource structure"),
             ("kinds.html", "Kinds e templates", "Kinds & templates"),
+            ("glossario.html", "Glossário", "Glossary"),
             ("arquitectura.html", "Arquitectura", "Architecture"),
             ("c4.html", "Modelo C4 e system design", "C4 model & system design"),
             ("cri.html", "CRI — kubelet sem containerd", "CRI — kubelet without containerd"),
@@ -3759,17 +3764,50 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Primeiros passos</h2>
-<pre><code>delonix version                  # a identidade do build e o que fazer a seguir
-delonix init                     # olha para esta pasta e começa o projecto certo
+<p>Quatro percursos independentes, do mais simples ao mais completo. Todos os comandos
+abaixo foram verificados contra o binário — confirma qualquer um com <code>--help</code>.
+Novo nos termos? O <a href="glossario.html">glossário</a> define <em>daemonless</em>,
+<em>rootless</em>, <em>holder-netns</em>, <em>Kind</em>, <em>converge/apply</em> e o resto.</p>
 
-# um serviço web na porta 8080, sem root, sem daemon
-delonix container run -d --name web -p 8080:80 nginx
+<h3>1 · Um container</h3>
+<p>Um serviço web na porta 8080, sem root e sem daemon. Com <code>--net host</code> (o
+omisso) o container passa ao seu próprio netns com NAT em espaço de utilizador
+(slirp4netns); <code>-p</code> liga só a <code>127.0.0.1</code> salvo se nomeares o
+endereço.</p>
+<pre><code>delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
 delonix container stats          # CPU/memória/PIDs
 delonix container logs -f web    # logs em contínuo
 delonix container stop web       # a porta fecha sozinha
 delonix container start web      # rearranca com o mesmo estado</code></pre>
+
+<h3>2 · Um projecto completo</h3>
+<p><code>delonix init</code> olha para esta pasta e despacha para o template certo;
+<code>delonix stack init</code> escreve um projecto COMPLETO (Delonixfile + manifesto +
+cluster + README), já preenchido. Depois <code>delonix apply</code> — a grafia canónica de
+<code>stack apply</code> — converge o manifesto por ordem de dependências.</p>
+<pre><code>delonix init                                  # detecta a stack desta pasta
+delonix stack init -t fastapi                 # ou força um template (`-t list` mostra-os)
+delonix apply -f delonix-manifest.yaml        # converge tudo o que o manifesto declara
+delonix stack plan -f delonix-manifest.yaml   # o que mudaria, sem mudar nada</code></pre>
+
+<h3>3 · Um cluster Kubernetes local</h3>
+<p>Modo kind nativo: os nós <code>kindest/node</code> arrancam dentro do próprio engine e
+são iniciados com <code>kubeadm</code> — <strong>sem Docker</strong>. Sem flags, 1
+control-plane pronto a usar.</p>
+<pre><code>delonix cluster create                      # 1 control-plane, nome inventado
+delonix cluster create --name dev --workers 2   # + 2 workers
+delonix cluster health                      # o control-plane responde? nós Ready?
+delonix cluster ls                          # clusters deste host (kind E baseados em VM)</code></pre>
+
+<h3>4 · Ver tudo a correr</h3>
+<p>Um painel htop-style de containers, VMs, redes e volumes. <code>--once</code> imprime um
+retrato de texto e sai (o omisso quando o stdout não é um terminal); <code>--json</code>
+para scripts/Grafana.</p>
+<pre><code>delonix dashboard                 # TUI interactivo
+delonix dashboard --scope container   # focado num tipo de recurso
+delonix dashboard --once          # um retrato de texto e sai</code></pre>
 
 <h2>Referência da CLI</h2>
 {cards}
@@ -3823,17 +3861,49 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Getting started</h2>
-<pre><code>delonix version                  # the build's identity, and what to do next
-delonix init                     # looks at this folder and starts the right project
+<p>Four independent tracks, from the simplest to the most complete. Every command below was
+verified against the binary — confirm any of them with <code>--help</code>. New to the
+terms? The <a href="glossario.html">glossary</a> defines <em>daemonless</em>,
+<em>rootless</em>, <em>holder-netns</em>, <em>Kind</em>, <em>converge/apply</em> and the rest.</p>
 
-# a web service on port 8080, no root, no daemon
-delonix container run -d --name web -p 8080:80 nginx
+<h3>1 · A container</h3>
+<p>A web service on port 8080, no root and no daemon. With <code>--net host</code> (the
+default) the container moves to its own netns with userspace NAT (slirp4netns);
+<code>-p</code> binds to <code>127.0.0.1</code> only unless you name the address.</p>
+<pre><code>delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
 delonix container stats          # CPU/memory/PIDs
 delonix container logs -f web    # follow logs
 delonix container stop web       # the port closes on its own
 delonix container start web      # restarts with the same state</code></pre>
+
+<h3>2 · A complete project</h3>
+<p><code>delonix init</code> looks at this folder and dispatches to the right template;
+<code>delonix stack init</code> writes a COMPLETE project (Delonixfile + manifest + cluster +
+README), already filled in. Then <code>delonix apply</code> — the canonical spelling of
+<code>stack apply</code> — converges the manifest in dependency order.</p>
+<pre><code>delonix init                                  # detects this folder's stack
+delonix stack init -t fastapi                 # or force a template (`-t list` shows them)
+delonix apply -f delonix-manifest.yaml        # converge everything the manifest declares
+delonix stack plan -f delonix-manifest.yaml   # what would change, changing nothing</code></pre>
+
+<h3>3 · A local Kubernetes cluster</h3>
+<p>Native kind mode: the <code>kindest/node</code> nodes start inside the engine itself and
+are bootstrapped with <code>kubeadm</code> — <strong>no Docker</strong>. No flags, 1
+control-plane ready to use.</p>
+<pre><code>delonix cluster create                      # 1 control-plane, invented name
+delonix cluster create --name dev --workers 2   # + 2 workers
+delonix cluster health                      # is the control-plane answering? nodes Ready?
+delonix cluster ls                          # this host's clusters (kind AND VM-based)</code></pre>
+
+<h3>4 · See everything running</h3>
+<p>An htop-style panel of containers, VMs, networks and volumes. <code>--once</code> prints a
+text snapshot and exits (the default when stdout is not a terminal); <code>--json</code> for
+scripts/Grafana.</p>
+<pre><code>delonix dashboard                 # interactive TUI
+delonix dashboard --scope container   # focused on one kind of resource
+delonix dashboard --once          # one text snapshot and exit</code></pre>
 
 <h2>CLI reference</h2>
 {cards}
@@ -6384,6 +6454,216 @@ delonix container rm -f delonix-temp</code></pre>
 """
 
 
+# Glossário (Secção 13) — termos nucleares, agrupados por tema. Cada entrada é
+# (termo, definição PT, definição EN). As definições foram verificadas contra o
+# `--help` do binário (`apply`, `cluster create`, `net`, `api-resources`, ...);
+# os nomes de Kind coincidem com o que `delonix api-resources` lista. Os títulos
+# dos grupos são <h2> (entram na TOC); cada grupo rende um <dl>.
+GLOSSARY = [
+    ("Modelo de execução", "Execution model", [
+        ("daemonless",
+         "Sem processo residente. Cada comando <code>delonix</code> é um processo efémero que fala "
+         "directamente com o kernel (namespaces, cgroups v2, <code>pivot_root</code>), guarda o estado "
+         "em ficheiros e termina. Não há <code>dockerd</code> nem um monitor por container.",
+         "No resident process. Every <code>delonix</code> command is an ephemeral process that talks to "
+         "the kernel directly (namespaces, cgroups v2, <code>pivot_root</code>), keeps its state in files, "
+         "and exits. There is no <code>dockerd</code> and no per-container monitor."),
+        ("rootless",
+         "Corre com o teu UID, sem privilégios de root — o modo por omissão. Assenta em user namespaces e "
+         "em cgroup v2 delegado. Publicar portas abaixo de 1024 (<code>-p 80:80</code>) exige "
+         "<code>--low-ports</code> no instalador, porque o kernel reserva essas portas aos processos "
+         "privilegiados (o mesmo muro do Podman/Docker rootless).",
+         "Runs with your UID, no root privileges — the default mode. It builds on user namespaces and "
+         "delegated cgroup v2. Publishing ports below 1024 (<code>-p 80:80</code>) requires "
+         "<code>--low-ports</code> in the installer, because the kernel reserves those ports for "
+         "privileged processes (the same wall rootless Podman/Docker hit)."),
+        ("holder-netns",
+         "O network namespace PARTILHADO que serve a rede rootless. Em vez de um <code>slirp4netns</code> "
+         "por container (Podman), o delonix mantém UM par holder-netns + slirp4netns partilhado, com DNAT "
+         "<code>nft</code> para o publish de portas — o que permite trocar portas e volumes a quente, sem "
+         "reiniciar o container.",
+         "The SHARED network namespace that serves rootless networking. Instead of one "
+         "<code>slirp4netns</code> per container (Podman), delonix keeps ONE shared holder-netns + "
+         "slirp4netns pair, with <code>nft</code> DNAT for port publishing — which is what lets you swap "
+         "ports and volumes hot, with no container restart."),
+        ("slirp4netns",
+         "NAT em espaço de utilizador que dá conectividade a um netns sem privilégios. É o processo que "
+         "liga o lado do host de um <code>-p</code> em modo <code>--net host</code>.",
+         "Userspace NAT that gives a netns connectivity without privileges. It is the process that binds "
+         "the host side of a <code>-p</code> under <code>--net host</code>."),
+        ("cgroup v2",
+         "A hierarquia UNIFICADA de control groups do kernel Linux (CPU/memória/PIDs/IO). O delonix exige "
+         "cgroup v2 e, em rootless, assenta na delegação via <code>systemd</code> "
+         "(<code>user@&lt;uid&gt;.service</code>). Um limite como <code>-m 2G</code> é <code>memory.max</code>.",
+         "The UNIFIED control-group hierarchy of the Linux kernel (CPU/memory/PIDs/IO). delonix requires "
+         "cgroup v2 and, when rootless, relies on <code>systemd</code> delegation "
+         "(<code>user@&lt;uid&gt;.service</code>). A limit like <code>-m 2G</code> is <code>memory.max</code>."),
+        ("OCI",
+         "Open Container Initiative — os formatos-padrão de imagem e de runtime de container. O delonix "
+         "puxa e constrói imagens OCI e oferece uma CLI runc-compatível em <code>delonix oci-runtime</code> "
+         "(create/start/state/kill/delete sobre um bundle, ADR-0080).",
+         "Open Container Initiative — the standard image and container-runtime formats. delonix pulls and "
+         "builds OCI images and offers a runc-compatible CLI in <code>delonix oci-runtime</code> "
+         "(create/start/state/kill/delete over a bundle, ADR-0080)."),
+    ]),
+    ("Rede", "Networking", [
+        ("netns",
+         "Network namespace — o isolamento de rede do kernel (interfaces, tabelas de routing e firewall "
+         "próprios). Cada container corre no seu; <code>delonix net netns</code> gere a infra do ingress "
+         "rootless (up/status/attach/publish/firewall).",
+         "Network namespace — the kernel's network isolation (its own interfaces, routing tables and "
+         "firewall). Each container runs in one; <code>delonix net netns</code> manages the rootless "
+         "ingress infra (up/status/attach/publish/firewall)."),
+        ("ingress / egress",
+         "<code>delonix net ingress</code> é o firewall INBOUND (regras L4 + publishes DNAT); "
+         "<code>delonix net egress</code> é o firewall OUTBOUND (regras L4 + política de egress por rede).",
+         "<code>delonix net ingress</code> is the INBOUND firewall (L4 rules + DNAT publishes); "
+         "<code>delonix net egress</code> is the OUTBOUND firewall (L4 rules + per-network egress policy)."),
+        ("Gateway",
+         "<code>kind: Gateway</code> — a exposição ao exterior. <code>delonix net tunnel</code> expõe uma "
+         "porta local à internet pública através de um Gateway.",
+         "<code>kind: Gateway</code> — exposure to the outside. <code>delonix net tunnel</code> exposes a "
+         "local port to the public internet through a Gateway."),
+        ("HTTPRoute",
+         "<code>kind: HTTPRoute</code> — o reverse-proxy L7/HTTP embebido (apply/rm via "
+         "<code>delonix net httproute</code>). <code>kind: Ingress</code> é um alias de compatibilidade "
+         "que baixa para HTTPRoute.",
+         "<code>kind: HTTPRoute</code> — the embedded L7/HTTP reverse-proxy (apply/rm via "
+         "<code>delonix net httproute</code>). <code>kind: Ingress</code> is a compatibility alias that "
+         "folds into HTTPRoute."),
+        ("NetworkPolicy",
+         "<code>kind: NetworkPolicy</code> (alias aceite no load: <code>FirewallPolicy</code>) — política "
+         "de rede L4 por container/rede, com <code>direction: egress</code> para a saída. Um "
+         "<code>kind: Dependency</code> é açúcar que baixa para NetworkPolicy.",
+         "<code>kind: NetworkPolicy</code> (alias accepted on load: <code>FirewallPolicy</code>) — L4 "
+         "network policy per container/network, with <code>direction: egress</code> for outbound. A "
+         "<code>kind: Dependency</code> is sugar that folds into NetworkPolicy."),
+    ]),
+    ("Manifesto e recursos", "Manifest and resources", [
+        ("Kind",
+         "O TIPO de um recurso declarativo no manifesto (ex.: <code>Container</code>, <code>Volume</code>, "
+         "<code>Network</code>, <code>VirtualMachine</code>). <code>delonix api-resources</code> lista "
+         "todos (plural, atalho, apiVersion); <code>delonix explain &lt;Kind&gt;</code> dá a referência de "
+         "campos. Não confundir com o cluster «kind» (ver abaixo).",
+         "The TYPE of a declarative resource in the manifest (e.g. <code>Container</code>, "
+         "<code>Volume</code>, <code>Network</code>, <code>VirtualMachine</code>). "
+         "<code>delonix api-resources</code> lists them all (plural, shortname, apiVersion); "
+         "<code>delonix explain &lt;Kind&gt;</code> gives the field reference. Not to be confused with a "
+         "«kind» cluster (see below)."),
+        ("manifesto",
+         "O ficheiro <code>delonix-manifest.yaml</code> que declara os recursos desejados (um ou mais "
+         "Kinds). É a fonte da verdade do estado — o engine converge o host para ele.",
+         "The <code>delonix-manifest.yaml</code> file that declares the desired resources (one or more "
+         "Kinds). It is the source of truth for state — the engine converges the host toward it."),
+        ("Stack",
+         "<code>kind: Stack</code> — o agregado de um manifesto inteiro. <code>delonix stack apply</code> "
+         "aplica todos os Kinds por ordem de dependências (Network → Volume → Image → Vm → Container); os "
+         "recursos ficam marcados com o label <code>delonix.io/stack</code>, por onde "
+         "<code>stack destroy</code> os reconhece.",
+         "<code>kind: Stack</code> — the aggregate of a whole manifest. <code>delonix stack apply</code> "
+         "applies every Kind in dependency order (Network → Volume → Image → Vm → Container); the "
+         "resources are tagged with the <code>delonix.io/stack</code> label, by which "
+         "<code>stack destroy</code> recognizes them."),
+        ("converge / apply",
+         "Aplicar um manifesto é convergir o host para o estado declarado (criar o que falta, reconfigurar "
+         "a quente o que divergiu), de forma idempotente e fail-fast, sem ficheiro de estado — o último "
+         "spec aplicado vive no próprio recurso. <code>delonix apply</code> é a grafia canónica (o verbo "
+         "pertence ao manifesto, não a um grupo); <code>stack apply</code> é o mesmo. <code>delonix "
+         "plan</code> mostra o que um apply mudaria; <code>delonix drift</code> mostra o que a MÁQUINA "
+         "mudou desde o último apply.",
+         "Applying a manifest means converging the host toward the declared state (create what's missing, "
+         "reconfigure hot what drifted), idempotently and fail-fast, with no state file — the last applied "
+         "spec lives on the resource itself. <code>delonix apply</code> is the canonical spelling (the "
+         "verb belongs to the manifest, not one group); <code>stack apply</code> is the same. "
+         "<code>delonix plan</code> shows what an apply would change; <code>delonix drift</code> shows "
+         "what the MACHINE changed since the last apply."),
+        ("Delonixfile",
+         "O ficheiro de build do projecto (análogo a um Dockerfile, com extensões Delonix), escrito por "
+         "<code>delonix init</code>/<code>stack init</code> e lido por <code>delonix build</code>.",
+         "The project's build file (analogous to a Dockerfile, with Delonix extensions), written by "
+         "<code>delonix init</code>/<code>stack init</code> and read by <code>delonix build</code>."),
+        ("Pod / Workload",
+         "<code>kind: Pod</code> são N containers reais a partilhar um netns (<code>delonix pod</code>: "
+         "create/logs/exec/cp/attach/port-forward). <code>kind: Workload</code> é a camada de computação "
+         "unificada sobre containers E VMs, açúcar que baixa para Container/Pod/VirtualMachine "
+         "(<code>delonix workload</code> ls/stop/rm, ADR-0002).",
+         "<code>kind: Pod</code> is N real containers sharing a netns (<code>delonix pod</code>: "
+         "create/logs/exec/cp/attach/port-forward). <code>kind: Workload</code> is the unified compute "
+         "layer over containers AND VMs, sugar that folds into Container/Pod/VirtualMachine "
+         "(<code>delonix workload</code> ls/stop/rm, ADR-0002)."),
+    ]),
+    ("VMs", "VMs", [
+        ("microVM",
+         "Uma máquina virtual leve de 1.ª classe, declarada por <code>kind: VirtualMachine</code> e gerida "
+         "por <code>delonix vm</code> (create/ls/start/stop/console). Arranca em Cloud Hypervisor (ou "
+         "libvirt).",
+         "A first-class lightweight virtual machine, declared by <code>kind: VirtualMachine</code> and "
+         "managed by <code>delonix vm</code> (create/ls/start/stop/console). It boots on Cloud Hypervisor "
+         "(or libvirt)."),
+        ("Cloud Hypervisor",
+         "O VMM (Virtual Machine Monitor) leve em Rust que o delonix usa por omissão para as microVMs — "
+         "caminho nativo, sem libvirt. Ver o guia <a href='cloud.html'>cloud-init, cloud-img e CH</a>.",
+         "The lightweight Rust VMM (Virtual Machine Monitor) delonix uses by default for microVMs — native "
+         "path, no libvirt. See the <a href='cloud.html'>cloud-init, cloud-img &amp; CH</a> guide."),
+    ]),
+    ("Kubernetes", "Kubernetes", [
+        ("CRI",
+         "Container Runtime Interface — a API que o kubelet usa para falar com um runtime. O delonix serve "
+         "a sua própria (<code>delonix serve cri</code>), o que deixa o kubelet correr <strong>sem "
+         "containerd</strong>. Ver o guia <a href='cri.html'>CRI</a>.",
+         "Container Runtime Interface — the API the kubelet uses to talk to a runtime. delonix serves its "
+         "own (<code>delonix serve cri</code>), which lets the kubelet run <strong>without "
+         "containerd</strong>. See the <a href='cri.html'>CRI</a> guide."),
+        ("kind (cluster)",
+         "Um cluster Kubernetes local em modo «kind»: os nós <code>kindest/node</code> arrancam DENTRO do "
+         "próprio engine e são iniciados por <code>kubeadm</code>, <strong>sem Docker</strong>. "
+         "<code>delonix cluster create</code> — sem flags, 1 control-plane pronto a usar.",
+         "A local Kubernetes cluster in «kind» mode: the <code>kindest/node</code> nodes start INSIDE the "
+         "engine itself and are bootstrapped by <code>kubeadm</code>, <strong>no Docker</strong>. "
+         "<code>delonix cluster create</code> — no flags, 1 control-plane ready to use."),
+        ("kubeadm",
+         "A ferramenta oficial de bootstrap de Kubernetes. O delonix usa-a para iniciar tanto os clusters "
+         "kind-mode como os clusters provisionados em VMs (<code>delonix cluster kubeadm</code>, "
+         "<code>kind: KubernetesCluster</code>).",
+         "The official Kubernetes bootstrap tool. delonix uses it to bring up both kind-mode clusters and "
+         "VM-provisioned clusters (<code>delonix cluster kubeadm</code>, "
+         "<code>kind: KubernetesCluster</code>)."),
+    ]),
+]
+
+
+def glossary_page():
+    tagline = bi(
+        "p",
+        "Os termos nucleares do delonix, definidos com rigor e verificados contra o binário "
+        "(<code>delonix api-resources</code>, <code>--help</code>). Começa pelo "
+        "<a href='index.html'>início</a> se ainda não instalaste.",
+        "The core terms of delonix, defined precisely and verified against the binary "
+        "(<code>delonix api-resources</code>, <code>--help</code>). Start at the "
+        "<a href='index.html'>home page</a> if you have not installed yet.",
+        cls="tagline",
+    )
+    body = [bi("h1", "Glossário", "Glossary"), tagline]
+    for pt_title, en_title, terms in GLOSSARY:
+        anchor = "-".join(en_title.lower().replace("/", " ").split())
+        body.append(
+            f"<h2 id='{anchor}'>"
+            f"<span class='lang-pt'>{html.escape(pt_title)}</span>"
+            f"<span class='lang-en'>{html.escape(en_title)}</span></h2>"
+        )
+        items = ["<dl>"]
+        for term, pt_def, en_def in terms:
+            items.append(f"<dt><code>{html.escape(term)}</code></dt>")
+            items.append(
+                "<dd>"
+                f"<span class='lang-pt'>{pt_def}</span>"
+                f"<span class='lang-en'>{en_def}</span></dd>"
+            )
+        items.append("</dl>")
+        body.append("\n".join(items))
+    page("glossario.html", "Glossário", "\n".join(body))
+
+
 def main():
     # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
     # último token do output inteiro deixou de ser a versão.
@@ -6419,6 +6699,7 @@ def main():
     page("index.html", "Delonix Engine", index_html)
     cheatsheet_page()
     kinds_page()
+    glossary_page()
     page("arquitectura.html", "Arquitectura", bi("div", ARCH, ARCH_EN))
     c4_page()
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", bi("div", CLOUD, CLOUD_EN))
