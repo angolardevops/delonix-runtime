@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:5df2927c11b5bdb95b1685c335d2e369105a0e3a9b320e19ee8d44658d4bb917 -->
+<!-- translated-from: build-and-test.md sha256:aca63246c9740801871e24b9b94cc8462d220da49b68db5d649e022e53b31768 -->
 # Clonar, compilar e testar
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md): a toolchain fixada, o `protoc`, e um host que passa nas suas verificações.
@@ -133,7 +133,7 @@ encontra a CLI através de `DELONIX_BIN`, depois de um `delonix` ao seu lado, de
 binários de uma mesma build**; uma mistura da tua build com uma release é recusada, ou corre código
 que não querias testar.
 
-`delonix cluster kubeadm` e `delonix image vm build` procuram o `delonix-cri` pela sua própria ordem
+`delonix cluster kubeadm` e `delonix vm image build` procuram o `delonix-cri` pela sua própria ordem
 (`resolve_cri_bin` em `bins/delonix-runtime-bin/src/cmd/vmimage.rs`): `--cri-bin`, depois ao lado
 do `delonix`, depois um `cargo build --release -p delonix-cri` se o directório actual estiver dentro
 de uma checkout do código-fonte, e só então um download do asset publicado.
