@@ -3857,25 +3857,33 @@ ARCH = """
 quando os dois discordam ou quando uma dependência vai contra a direcção das camadas (uma camada só
 depende das de baixo; um binário compõe UMA interface).</p>
 <div class="arch">
-<div class="row"><div class="box mut" style="flex:3"><b>binários — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin</b>
+<div class="row"><div class="box mut" style="flex:3"><b>binários — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin · delonix-node-api-bin</b>
 a CLI <code>delonix</code> é a única porta: container · image · build · vm · volume · network · stack · cluster · …;
-<code>delonix mcp</code>/<code>serve api</code>/<code>serve cri</code> executam os binários irmãos</div></div>
+<code>delonix mcp</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve cri</code> executam os binários irmãos</div></div>
 <div class="row">
 <div class="box"><b>delonix-cri</b>servidor CRI runtime.v1 — o kubelet fala com o Delonix</div>
 <div class="box"><b>delonix-mgmt</b>API de gestão LOCAL (HTTP+JSON num socket unix), métricas Prometheus</div>
+<div class="box"><b>delonix-node-api</b>contrato de nó <code>delonix.node.v1</code> (gRPC + HTTP/JSON dos mesmos .proto num socket unix) — NodeService + openapi.json</div>
 <div class="box"><b>delonix-mcp</b>servidor Model Context Protocol, local e sem inquilino</div>
 </div>
 <div class="row">
-<div class="box"><b>delonix-proxmox</b>VmBackend e SDN contra a API de um nó Proxmox VE</div>
-<div class="box"><b>delonix-truenas</b>dataset, quota e partilha numa appliance TrueNAS</div>
+<div class="box"><b>delonix-provider-cloud-hypervisor · -libvirt</b>backends VmBackend locais (microVM por processo · libvirt/KVM, ADR-0044) — saíram do delonix-vm, que os regista</div>
+<div class="box"><b>delonix-proxmox</b>VmBackend REMOTO e SDN contra a API de um nó Proxmox VE (ADR-0008)</div>
+<div class="box"><b>delonix-truenas</b>dataset, quota e partilha numa appliance TrueNAS (ADR-0009)</div>
 <div class="box"><b>delonix-opnsense</b>GatewayProvider contra a API REST do OPNsense (ADR-0051)</div>
+<div class="box"><b>delonix-powerdns</b>cliente da API de um servidor PowerDNS (ADR-0064) — limpa os registos de gateway do nó</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-provider-btrfs · -zfs · -lvm</b>drivers de pool de armazenamento (subvolume btrfs · dataset zfs · LV thin lvm, ADR-0067)</div>
+<div class="box"><b>delonix-provider-ceph</b>Ceph nativo pela porta de storage: RADOS · RBD · CephFS · RGW S3 (ADR-0081)</div>
+<div class="box"><b>delonix-storage-helper</b>helper PRIVILEGIADO dos pools — um processo por ligação, SO_PEERCRED + allowUsers (ADR-0067)</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-linux</b>clone() + namespaces, pivot_root, seccomp/caps, cgroups v2 delegados, exec, reconcile</div>
 <div class="box"><b>delonix-sdn</b>SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft,
 DNS interno, overlay WireGuard</div>
 <div class="box"><b>delonix-oci</b>pull OCI (digest verificado), build, export, buildpacks CNB, assinaturas</div>
-<div class="box"><b>delonix-vm</b>microVMs (VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
+<div class="box"><b>delonix-vm</b>raiz de composição das microVMs: semeia o registo de VmBackend e monta o VmEngine; cloud-init</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-volume</b>volumes nomeados, bind mounts, quotas, nfs/cifs/webdav</div>
@@ -3886,6 +3894,10 @@ DNS interno, overlay WireGuard</div>
 <div class="row">
 <div class="box mut"><b>delonix-compute</b>contexto: a especificação única de execução, registos Container/Vm</div>
 <div class="box mut"><b>delonix-stack</b>contexto: tabela de Kinds, reconciliador de 3 vias, revisões</div>
+<div class="box mut"><b>delonix-networking</b>contexto: portas de rede por papel (GatewayProvider, NetworkZoneProvider), registos e posse (ADR-0059)</div>
+<div class="box mut"><b>delonix-storage</b>contexto: porta de driver de pool, registo, allowlist do administrador e posse (ADR-0067)</div>
+</div>
+<div class="row">
 <div class="box mut"><b>delonix-node</b>contexto: eventos, verificações do host, contrato de dispatch</div>
 <div class="box mut"><b>delonix-security-runtime</b>contexto: política e o único ponto de admissão</div>
 </div>
@@ -3895,7 +3907,7 @@ modelo do segredo</div>
 <div class="box mut"><b>delonix-net-rules</b>fundação pura, sem dependências: CIDR, nomes de bridge, IPAM</div>
 </div>
 </div>
-<p>De cima para baixo: binários e interfaces · providers · adaptadores · contextos · fundação.</p>
+<p>De cima para baixo: binários e interfaces · providers · adaptadores · contextos · fundação — os 35 crates em cinco camadas (ADR-0040). O detalhe completo, com as dependências reais, está no <a href="c4.html">modelo C4</a>.</p>
 
 <h2>Daemonless a sério</h2>
 <p>Não há daemon, nem sequer um monitor por container (o conmon do podman). O <code>run</code> faz
@@ -3961,25 +3973,33 @@ ARCH_EN = """
 disagree or when a dependency runs against the direction of the layers (a layer depends only on the
 ones below it; a binary composes ONE interface).</p>
 <div class="arch">
-<div class="row"><div class="box mut" style="flex:3"><b>binaries — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin</b>
+<div class="row"><div class="box mut" style="flex:3"><b>binaries — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin · delonix-node-api-bin</b>
 the <code>delonix</code> CLI is the one door: container · image · build · vm · volume · network · stack · cluster · …;
-<code>delonix mcp</code>/<code>serve api</code>/<code>serve cri</code> run the sibling binaries</div></div>
+<code>delonix mcp</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve cri</code> run the sibling binaries</div></div>
 <div class="row">
 <div class="box"><b>delonix-cri</b>runtime.v1 CRI server — the kubelet talks to Delonix</div>
 <div class="box"><b>delonix-mgmt</b>LOCAL management API (HTTP+JSON over a unix socket), Prometheus metrics</div>
+<div class="box"><b>delonix-node-api</b><code>delonix.node.v1</code> node contract (gRPC + HTTP/JSON of the same .proto over a unix socket) — NodeService + openapi.json</div>
 <div class="box"><b>delonix-mcp</b>Model Context Protocol server, local and tenancy-free</div>
 </div>
 <div class="row">
-<div class="box"><b>delonix-proxmox</b>VmBackend and SDN against one Proxmox VE node's API</div>
-<div class="box"><b>delonix-truenas</b>dataset, quota and share on a TrueNAS appliance</div>
+<div class="box"><b>delonix-provider-cloud-hypervisor · -libvirt</b>local VmBackend backends (per-process microVM · libvirt/KVM, ADR-0044) — split out of delonix-vm, which registers them</div>
+<div class="box"><b>delonix-proxmox</b>REMOTE VmBackend and SDN against one Proxmox VE node's API (ADR-0008)</div>
+<div class="box"><b>delonix-truenas</b>dataset, quota and share on a TrueNAS appliance (ADR-0009)</div>
 <div class="box"><b>delonix-opnsense</b>GatewayProvider against OPNsense's REST API (ADR-0051)</div>
+<div class="box"><b>delonix-powerdns</b>client of one PowerDNS server's API (ADR-0064) — reaps the node's gateway records</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-provider-btrfs · -zfs · -lvm</b>storage pool drivers (btrfs subvolume · zfs dataset · lvm thin LV, ADR-0067)</div>
+<div class="box"><b>delonix-provider-ceph</b>native Ceph over the storage port: RADOS · RBD · CephFS · RGW S3 (ADR-0081)</div>
+<div class="box"><b>delonix-storage-helper</b>the PRIVILEGED pool helper — one process per connection, SO_PEERCRED + allowUsers (ADR-0067)</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-linux</b>clone() + namespaces, pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
 <div class="box"><b>delonix-sdn</b>rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall,
 internal DNS, WireGuard overlay</div>
 <div class="box"><b>delonix-oci</b>OCI pull (digest verified), build, export, CNB buildpacks, signatures</div>
-<div class="box"><b>delonix-vm</b>microVMs (VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
+<div class="box"><b>delonix-vm</b>microVM composition root: seeds the VmBackend registry and assembles the VmEngine; cloud-init</div>
 </div>
 <div class="row">
 <div class="box"><b>delonix-volume</b>named volumes, bind mounts, quotas, nfs/cifs/webdav</div>
@@ -3990,6 +4010,10 @@ internal DNS, WireGuard overlay</div>
 <div class="row">
 <div class="box mut"><b>delonix-compute</b>context: the one run specification, Container/Vm records</div>
 <div class="box mut"><b>delonix-stack</b>context: the Kind table, three-way reconciler, revisions</div>
+<div class="box mut"><b>delonix-networking</b>context: network ports by role (GatewayProvider, NetworkZoneProvider), records and ownership (ADR-0059)</div>
+<div class="box mut"><b>delonix-storage</b>context: the pool-driver port, the registry, the admin allowlist and ownership (ADR-0067)</div>
+</div>
+<div class="row">
 <div class="box mut"><b>delonix-node</b>context: events, host checks, the dispatch contract</div>
 <div class="box mut"><b>delonix-security-runtime</b>context: policy and the single admission point</div>
 </div>
@@ -3999,7 +4023,7 @@ secret model</div>
 <div class="box mut"><b>delonix-net-rules</b>pure foundation, zero dependencies: CIDRs, bridge names, IPAM</div>
 </div>
 </div>
-<p>Top to bottom: binaries and interfaces · providers · adapters · contexts · foundation.</p>
+<p>Top to bottom: binaries and interfaces · providers · adapters · contexts · foundation — the 35 crates in five layers (ADR-0040). The full detail, with the real dependencies, is in the <a href="c4.html">C4 model</a>.</p>
 
 <h2>Genuinely daemonless</h2>
 <p>There's no daemon, not even a per-container monitor (podman's conmon). <code>run</code> does a
@@ -4937,8 +4961,7 @@ a supervisionar tudo; há um holder mínimo por recurso, que morre com o recurso
 <p class="note"><strong>Arnês reproduzível (§7):</strong> este lab corre sozinho,
 com asserção de resultado <em>funcional</em> (HTTP 200 — não um exit-code isolado),
 em <code>docs/labs/lab-1/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-1/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
-(Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-1/lab.sh</code>). Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-2", "Limites de recursos que pegam mesmo", "iniciante", """
 <p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
@@ -4973,8 +4996,7 @@ com asserção de resultado <em>funcional</em> — o <code>memory.max</code> REA
 cgroup do kernel, não a saída do comando — e <strong>falha em voz alta</strong>
 se o limite não pegou (<code>memory.max=max</code>), em vez de passar em silêncio,
 em <code>docs/labs/lab-2/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-2/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
-(Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-2/lab.sh</code>). Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-3", "Duas aplicações que se falam por nome", "intermédio", """
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
@@ -5016,7 +5038,7 @@ nome (<code>getent hosts db</code> → IP) e a porta responde ao par autorizado 
 (o terceiro container ainda a alcançar), distinguindo «bloqueado por política» de
 «serviço em baixo», em vez de passar em silêncio, em <code>docs/labs/lab-3/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
-Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-4", "Do Dockerfile à imagem, sem daemon", "intermédio", """
 <p>Objectivo: construir uma imagem e correr o que construíste.</p>
@@ -5050,7 +5072,7 @@ qualquer <code>Dockerfile</code> sem <code>-f</code> — e <strong>falha em voz
 alta</strong> distinguindo «build falhou» de «healthcheck nunca passou», em vez de
 passar em silêncio, em <code>docs/labs/lab-4/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
-Validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24.</p>"""),
+Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-5", "Uma microVM a sério", "intermédio", """
 <p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
@@ -5087,8 +5109,7 @@ de pé, e prova que <code>vm destroy</code> <strong>não deixa órfãos</strong>
 (<code>describe vm</code> deixa de resolver) — <strong>falha em voz alta</strong>
 distinguindo «VM nunca arrancou» de «sem IP» de «snapshot/restore falhou», em
 <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-5/lab.sh</code>). Validado em <strong>delonix 5.1.1</strong>
-(Linux, libvirt, rootless) a 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-5/lab.sh</code>). Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, libvirt, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-6", "A tua própria imagem de VM, com VMfile", "avançado", """
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
@@ -5131,9 +5152,7 @@ destroy (o overlay era por-VM) — <strong>falha em voz alta</strong> distinguin
 <code>docs/labs/lab-6/</code>: <code>prepare → run → verify → cleanup</code>
 (<code>bash docs/labs/lab-6/lab.sh</code>). Precisa de libguestfs
 (<code>virt-customize</code>) no host; o arnês gera a sua própria chave SSH e
-aponta o <code>SSHKEY</code> do scaffold para ela. Validado em
-<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a
-2026-10-24.</p>"""),
+aponta o <code>SSHKEY</code> do scaffold para ela. Baseline histórica — validado em <strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) a 2026-10-24; não re-medido na linha 0.1.0 actual.</p>"""),
 
     ("lab-7", "Kubernetes sem Docker", "avançado", """
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
@@ -5260,8 +5279,7 @@ you may see no holder at all.)</p>
 <p class="note"><strong>Reproducible harness (§7):</strong> this lab runs on its
 own, asserting a <em>functional</em> result (HTTP 200 — not an isolated exit
 code), under <code>docs/labs/lab-1/</code>: <code>prepare → run → verify →
-cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Validated on
-<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+cleanup</code> (<code>bash docs/labs/lab-1/lab.sh</code>). Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-2": ("Resource limits that actually take", "beginner", """
 <p>Goal: find out whether this host enforces limits — and what to do when it
@@ -5296,8 +5314,7 @@ own, asserting a <em>functional</em> result — the REAL <code>memory.max</code>
 the kernel cgroup, not the command's output — and it <strong>fails loudly</strong>
 if the limit didn't take (<code>memory.max=max</code>) instead of passing
 silently, under <code>docs/labs/lab-2/</code>: <code>prepare → run → verify →
-cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Validated on
-<strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+cleanup</code> (<code>bash docs/labs/lab-2/lab.sh</code>). Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-3": ("Two apps that talk to each other by name", "intermediate", """
 <p>Goal: user network, internal DNS, and isolation — with zero DNS
@@ -5339,7 +5356,7 @@ and it <strong>fails loudly</strong> if <code>db</code> is left open to everyone
 (the third container still reaching it), telling "blocked by policy" apart from
 "service down" instead of passing silently, under <code>docs/labs/lab-3/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-3/lab.sh</code>).
-Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-4": ("From Dockerfile to image, no daemon", "intermediate", """
 <p>Goal: build an image and run what you built.</p>
@@ -5373,7 +5390,7 @@ before any <code>Dockerfile</code> with no <code>-f</code> — and it <strong>fa
 loudly</strong>, telling "build failed" apart from "healthcheck never passed"
 instead of passing silently, under <code>docs/labs/lab-4/</code>:
 <code>prepare → run → verify → cleanup</code> (<code>bash docs/labs/lab-4/lab.sh</code>).
-Validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24.</p>"""),
+Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, cgroup v2, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-5": ("A real microVM", "intermediate", """
 <p>Goal: a full VM with the same CLI as containers.</p>
@@ -5410,8 +5427,7 @@ keeps it up, and it proves <code>vm destroy</code> <strong>leaves no orphans</st
 (<code>describe vm</code> stops resolving) — it <strong>fails loudly</strong>,
 telling "VM never started" apart from "no IP" apart from "snapshot/restore
 failed", under <code>docs/labs/lab-5/</code>: <code>prepare → run → verify → cleanup</code>
-(<code>bash docs/labs/lab-5/lab.sh</code>). Validated on <strong>delonix 5.1.1</strong>
-(Linux, libvirt, rootless) on 2026-10-24.</p>"""),
+(<code>bash docs/labs/lab-5/lab.sh</code>). Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, libvirt, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-6": ("Your own VM image, with a VMfile", "advanced", """
 <p>Goal: build your own qcow2 image, the same way you build a container
@@ -5456,9 +5472,7 @@ started" apart from "orphan", under <code>docs/labs/lab-6/</code>:
 <code>prepare → run → verify → cleanup</code>
 (<code>bash docs/labs/lab-6/lab.sh</code>). Needs libguestfs
 (<code>virt-customize</code>) on the host; the harness generates its own SSH key
-and points the scaffold's <code>SSHKEY</code> at it. Validated on
-<strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on
-2026-10-24.</p>"""),
+and points the scaffold's <code>SSHKEY</code> at it. Historical baseline — validated on <strong>delonix 5.1.1</strong> (Linux, libguestfs + libvirt, rootless) on 2026-10-24; not re-measured on the current 0.1.0 line.</p>"""),
 
     "lab-7": ("Kubernetes with no Docker", "advanced", """
 <p>Goal: a local cluster whose node runtime IS Delonix.</p>
@@ -6384,7 +6398,69 @@ delonix container rm -f delonix-temp</code></pre>
 """
 
 
+def command_map_members():
+    """Lista plana de todos os nomes do COMMAND MAP do `delonix --help`.
+
+    São os MESMOS nomes (já resolvidos a page-keys por
+    `root_command_categories()`) que o índice e o cheatsheet iteram — não uma
+    segunda cópia da taxonomia.
+    """
+    members = []
+    for _category, names in root_command_categories():
+        members.extend(names)
+    return members
+
+
+def contract_gate():
+    """Aborta a geração se binário e `gen.py` divergirem no que documentam.
+
+    Três modos de deriva silenciosa que mais nada apanhava:
+
+      * **Binário à FRENTE do `gen.py`.** O índice e o cheatsheet iteram os
+        membros do COMMAND MAP e só desenham cartão `if g in GROUPS` — um comando
+        NOVO no binário que `GROUPS` ainda não documenta era descartado SEM
+        aviso. O `help_of()` nunca o apanha, porque o `gen.py` jamais pede o
+        `--help` de um comando que não conhece.
+      * **`gen.py` à frente do binário.** Uma página de topo em `GROUPS` cujo
+        comando foi removido/renomeado — ou um binário STALE a que falta `bucket`
+        e companhia. O `help_of()` só abortaria ao gerar essa página; aqui
+        aborta-se primeiro, com as duas listas lado a lado.
+      * **Exemplo embebido em falta.** Um `examples/<grupo>/<kind>.yaml` ausente
+        publica hoje, em silêncio, um bloco `# (exemplo em falta: …)` (fallback
+        em `kinds_page()`). Aqui é erro duro.
+
+    É barato: um só `delonix --help` (já em cache) mais leituras de ficheiro.
+    `scripts/docs_command_gate.py` corre SÓ isto, sem gerar HTML.
+    """
+    members = set(command_map_members())
+    # Uma chave de `GROUPS` cujo `GROUP_PATH` tem um só elemento é um comando de
+    # TOPO (com página própria); as de vários elementos (`ingress` → `net
+    # ingress`) são filhos aninhados e não aparecem no COMMAND MAP de raiz.
+    documented = {k for k in GROUPS if len(group_argv(k)) == 1}
+    problems = []
+    for name in sorted(members - documented):
+        problems.append(
+            f"binário tem `{name}` no COMMAND MAP mas `GROUPS` não lhe dá página "
+            "— seria descartado em silêncio do índice/cheatsheet"
+        )
+    for name in sorted(documented - members):
+        problems.append(
+            f"`GROUPS` documenta `{name}` mas não está no COMMAND MAP do binário "
+            "— página órfã (binário stale ou comando removido?)"
+        )
+    for kind, fname, _intro in KINDS_DOC:
+        if not os.path.isfile(os.path.join(ROOT, "..", "examples", fname)):
+            problems.append(f"exemplo embebido em falta para `{kind}`: examples/{fname}")
+    if problems:
+        raise SystemExit(
+            f"gen.py: contrato binário↔documentação divergente ({BIN}):\n  - "
+            + "\n  - ".join(problems)
+            + "\n  Corrige `GROUPS`/`GROUP_PATH`/`KINDS_DOC` ou reconstrói o binário."
+        )
+
+
 def main():
+    contract_gate()
     # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
     # último token do output inteiro deixou de ser a versão.
     ver = (

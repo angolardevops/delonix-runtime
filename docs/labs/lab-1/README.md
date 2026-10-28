@@ -14,6 +14,8 @@ Terminal Linux e noção de porta TCP. Nada de containers é pressuposto.
 
 ## Versão e ambiente testados
 
+> **Baseline histórica (linha 5.1.x):** os valores abaixo foram medidos na linha antiga e **ainda não foram re-medidos na linha 0.1.0 actual**.
+
 `delonix 5.1.1`, Linux com cgroup v2 e user namespaces sem privilégio, execução
 rootless. Validado a 2026-10-24.
 

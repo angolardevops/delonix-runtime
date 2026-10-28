@@ -17,6 +17,8 @@ O Lab 5 (microVM: ciclo de vida) e noção de imagem de container (um `Dockerfil
 
 ## Versão e ambiente testados
 
+> **Baseline histórica (linha 5.1.x):** os valores abaixo foram medidos na linha antiga e **ainda não foram re-medidos na linha 0.1.0 actual**.
+
 `delonix 5.1.1`, Linux com libguestfs (`virt-customize`) e libvirt, execução
 rootless. Validado a 2026-10-24 (ciclo `init → build → create → Running+IP →
 destroy`, positivo `EXIT=0`; modos de falha «imagem não construiu», «VM não

@@ -17,6 +17,8 @@ obrigatórios.
 
 ## Versão e ambiente testados
 
+> **Baseline histórica (linha 5.1.x):** os valores abaixo foram medidos na linha antiga e **ainda não foram re-medidos na linha 0.1.0 actual**.
+
 `delonix 5.1.1`, Linux com libvirt, execução rootless. Validado a 2026-10-24
 (ciclo `create → Running+IP → snapshot a correr → restore → destroy`, positivo
 `EXIT=0`; modos de falha «VM nunca arrancou», «sem IP» e «snapshot/restore
