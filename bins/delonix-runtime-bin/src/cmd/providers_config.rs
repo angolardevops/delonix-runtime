@@ -801,7 +801,7 @@ pub fn schema() -> serde_json::Value {
     if let Some(o) = v.as_object_mut() {
         o.insert(
             "$id".into(),
-            "https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json".into(),
+            "https://ngolacloud.github.io/delonix/schema/v1/providers.json".into(),
         );
         o.insert(
             "title".into(),

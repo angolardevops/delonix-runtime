@@ -20,7 +20,7 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+option go_package = "github.com/ngolacloud/delonix/gen/go/delonix/node/v1;nodev1";
 
 // Identity and bookkeeping common to every resource the engine manages.
 // A hypermedia link (ADR-0042 D2, Richardson level 3): where a client can go from a

@@ -50,7 +50,7 @@ import dev_docs  # noqa: E402
 ROOT = dev_docs.ROOT
 DEV = dev_docs.DEV_DOCS
 OUT = ROOT / "docs" / "handbook"
-REPO = "https://github.com/angolardevops/delonix-runtime"
+REPO = "https://github.com/ngolacloud/delonix"
 LANGS = dev_docs.LANGS
 TRANSLATED_FROM = re.compile(r"^<!-- translated-from: (?P<file>\S+) sha256:(?P<sha>[0-9a-f]{64}) -->\n")
 

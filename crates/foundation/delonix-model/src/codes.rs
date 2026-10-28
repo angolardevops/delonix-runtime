@@ -367,7 +367,7 @@ pub fn reason(number: u16) -> Option<Reason> {
 
 /// Where the dictionary is published; a problem document's `type` points at
 /// the entry for its code there.
-pub const DICTIONARY_URL: &str = "https://angolardevops.github.io/delonix-runtime/codigos.html";
+pub const DICTIONARY_URL: &str = "https://ngolacloud.github.io/delonix/codigos.html";
 
 /// One failure as an RFC 9457 problem document, with the fields ADR-0059 D5
 /// adds: `code` (the `DX_*` class, as ADR-0042 names it), `dx` (the number),

@@ -4796,7 +4796,7 @@ fn download_cri_bin() -> Result<PathBuf> {
     }
     std::fs::create_dir_all(&cache_dir)?;
     let base_url =
-        format!("https://github.com/angolardevops/delonix-runtime/releases/download/v{version}");
+        format!("https://github.com/ngolacloud/delonix/releases/download/v{version}");
     let tmp = cache_dir.join("delonix-cri.download");
     let variant = if cpu_has_x86_64_v3() { "-v3" } else { "" };
     let mut asset = format!("delonix-cri-x86_64{variant}-linux");
@@ -4922,7 +4922,7 @@ fn download_delonix_bin() -> Result<PathBuf> {
     }
     std::fs::create_dir_all(&cache_dir)?;
     let base_url =
-        format!("https://github.com/angolardevops/delonix-runtime/releases/download/v{version}");
+        format!("https://github.com/ngolacloud/delonix/releases/download/v{version}");
     let tmp = cache_dir.join("delonix.download");
     let variant = if cpu_has_x86_64_v3() { "-v3" } else { "" };
     let mut asset = format!("delonix-x86_64{variant}-linux");
@@ -5961,7 +5961,7 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
                  (Ubuntu 24.04 ships the Feb-2024 build) and a current one has to come \
                  FIRST in PATH — libguestfs looks passt up there. The installer does \
                  exactly that:\n  \
-                 curl -fsSL https://angolardevops.github.io/delonix-runtime/install.sh \
+                 curl -fsSL https://ngolacloud.github.io/delonix/install.sh \
                  | sh -s -- --with-image-build\n  \
                  or by hand: git clone https://passt.top/passt && cd passt && make && \
                  sudo install -m0755 passt /usr/local/bin/passt",

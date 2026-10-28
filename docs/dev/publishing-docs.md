@@ -10,7 +10,7 @@ for any change, which generator to run and which files to commit with it.
 ## Where it is published
 
 The site is served by **GitHub Pages** from the `/docs` directory of `main`, at
-<https://angolardevops.github.io/delonix-runtime/>. The Pages source setting itself lives in the
+<https://ngolacloud.github.io/delonix/>. The Pages source setting itself lives in the
 repository settings, not in the tree; what the tree does contain is `docs/.nojekyll`, which turns
 Jekyll off so every file under `docs/` is served exactly as committed.
 

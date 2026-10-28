@@ -10,7 +10,7 @@
 ## 克隆
 
 ```bash
-git clone https://github.com/angolardevops/delonix-runtime.git
+git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 ```
@@ -247,8 +247,8 @@ sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/d
 要回到一个已发布的二进制程序，再跑一遍安装脚本；它会把安装目录里的二进制程序替换成你指定的那个发布版：
 
 ```bash
-curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --user
-curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
+curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --user
+curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
 ```
 
 你手动生成的补全文件和 man 手册页，这两步都不会删除。最后用 `delonix --version` 确认一下你回到的是哪个 commit。

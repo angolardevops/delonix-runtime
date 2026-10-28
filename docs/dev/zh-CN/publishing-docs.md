@@ -8,7 +8,7 @@
 ## 发布在哪里
 
 这个站点由 **GitHub Pages** 从 `main` 的 `/docs` 目录提供服务，地址是
-<https://angolardevops.github.io/delonix-runtime/>。Pages 的来源设置本身存在于仓库设置里，不在代码树中；代码树里实际存在的是 `docs/.nojekyll`，它关掉了 Jekyll，让 `docs/` 下的每一个文件都原样按提交时的样子被提供。
+<https://ngolacloud.github.io/delonix/>。Pages 的来源设置本身存在于仓库设置里，不在代码树中；代码树里实际存在的是 `docs/.nojekyll`，它关掉了 Jekyll，让 `docs/` 下的每一个文件都原样按提交时的样子被提供。
 
 值得知道的一个后果：因为 Jekyll 被关掉了，`docs/` 下的 Markdown 文件——包括 `docs/dev/` 里的这本手册——**不会**被 Pages 渲染成 HTML；它们是以纯文件形式提供的。手册的渲染视图，是 GitHub 自己在浏览仓库时对 Markdown 的渲染（github.com 上的 `docs/dev/README.md`），它也会渲染 Mermaid 图。手册各页面之间的链接都是相对链接，所以在两个地方都能用。
 

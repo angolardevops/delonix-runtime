@@ -109,7 +109,7 @@ class DryRunAndSafety(unittest.TestCase):
         _git(["config", "user.name", "t"], self.root)
         # a fake origin so validate_remote passes
         _git(["remote", "add", "origin",
-              "https://example.com/angolardevops/delonix-runtime.git"], self.root)
+              "https://example.com/ngolacloud/delonix.git"], self.root)
         (self.root / "f").write_text("x")
         _git(["add", "f"], self.root)
         _git(["commit", "-qm", "init"], self.root)

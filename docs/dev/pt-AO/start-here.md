@@ -55,7 +55,7 @@ corrige-o antes de avançar — todos os passos seguintes dependem dele.
 **1. Clonar, com as tags.**
 
 ```bash
-git clone https://github.com/angolardevops/delonix-runtime.git
+git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin
 git describe --tags --abbrev=0        # prints the newest release, e.g. vX.Y.Z

@@ -628,7 +628,7 @@ published files.
   the secret is missing, the release fails instead of shipping unsigned.
 - **SLSA provenance**: `release.yml` step "Proveniência (SLSA) dos binários" uses
   `actions/attest-build-provenance` on the published `delonix`, `delonix-cri` and `delonix-mcp`
-  binaries. Verify with `gh attestation verify <file> --repo angolardevops/delonix-runtime`.
+  binaries. Verify with `gh attestation verify <file> --repo ngolacloud/delonix`.
 - **Image signatures, cosign-compatible**: `crates/adapters/delonix-oci/src/sign.rs`.
   `sign_image` (behind `delonix image sign`) publishes an ECDSA P-256 simple-signing payload as
   the `.sig` artifact; `verify_signature` (behind `image pull --verify <key>` and `image verify`) checks the signature and

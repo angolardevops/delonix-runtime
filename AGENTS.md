@@ -1,7 +1,7 @@
 # Delonix Runtime — guia do projeto (AGENTS.md)
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
-Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
+Repositório **público** (`ngolacloud/delonix`, Apache-2.0) — ver
 [README.md](README.md) para a arquitectura dos 35 crates.
 
 ## Arranque rápido (ler isto; o resto consulta-se por secção)

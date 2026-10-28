@@ -5,7 +5,7 @@ want to send a first pull request without breaking your host or the engine. Afte
 will know how the handbook is sequenced and which pages to read, in which order, for your role. If
 you only want to
 *use* Delonix, start with the [README](../../README.rst) and the
-[user documentation site](https://angolardevops.github.io/delonix-runtime/) instead.
+[user documentation site](https://ngolacloud.github.io/delonix/) instead.
 
 <!-- dev-docs:begin crate-count -->
 The workspace has **34 crates** and ships **6 binaries** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).

@@ -15,7 +15,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/field_mask.proto";
 
-option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+option go_package = "github.com/ngolacloud/delonix/gen/go/delonix/node/v1;nodev1";
 
 // ---------------------------------------------------------------------------- containers
 

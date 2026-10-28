@@ -604,7 +604,7 @@ proveniência aos ficheiros exactos publicados.
   e faltar o segredo, a release falha em vez de sair sem assinatura.
 - **Proveniência SLSA**: o passo «Proveniência (SLSA) dos binários» do `release.yml` usa
   `actions/attest-build-provenance` sobre os binários publicados `delonix`, `delonix-cri` e
-  `delonix-mcp`. Verifica com `gh attestation verify <file> --repo angolardevops/delonix-runtime`.
+  `delonix-mcp`. Verifica com `gh attestation verify <file> --repo ngolacloud/delonix`.
 - **Assinaturas de imagem, compatíveis com cosign**: `crates/adapters/delonix-oci/src/sign.rs`. O
   `sign_image` (por trás de `delonix image sign`) publica um payload simple-signing ECDSA P-256
   como o artefacto `.sig`; o `verify_signature` (por trás de `image pull --verify <key>` e de
