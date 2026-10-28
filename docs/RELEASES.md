@@ -3785,3 +3785,55 @@ Rust, que corre num nó sem processo residente e sem socket de root.
 
 ---
 
+## v0.1.0 — Delonix: a primeira release da nova identidade
+
+Esta release **abre a linha Delonix**. O produto `delonix-runtime` passou a chamar-se
+**Delonix** e o repositório mudou para `github.com/ngolacloud/delonix`. O número de
+versão foi **re-baseado de propósito** de `5.1.1` para `0.1.0` — uma linha nova, não
+uma regressão (ver [VERSIONING.md](https://github.com/ngolacloud/delonix/blob/main/VERSIONING.md)).
+
+**O motor é o mesmo.** Toda a capacidade herdada da linha `delonix-runtime`
+(v1.0.0 … v5.1.1) continua: containers e microVMs rootless-first e daemonless,
+pods, OCI, SDN rootless, VMs (Cloud Hypervisor/libvirt/Proxmox), `delonix-cri`,
+`cluster kubeadm`, os Kinds declarativos e os providers. **Nada disto é trabalho
+novo da `0.1.0`** — o histórico está no [CHANGELOG.md](https://github.com/ngolacloud/delonix/blob/main/CHANGELOG.md),
+secção «linha `delonix-runtime`». As releases `v1.*`…`v5.1.1` ficam publicadas e
+imutáveis.
+
+### O que esta release muda
+
+- **Identidade:** nome, repositório (`ngolacloud/delonix`), site
+  (`ngolacloud.github.io/delonix`), imagem (`ghcr.io/ngolacloud/delonix`). O binário
+  da CLI continua a chamar-se `delonix`.
+- **Linha de versão:** `scripts/version_gate.py` passou a ser consciente de linha — a
+  linha `delonix-runtime` (majors 1..5) está congelada e a linha Delonix abre em
+  `0.1.0`; a comparação é dentro da linha.
+- **Política de compatibilidade (pré-1.0):** enquanto em `0.x`, um *minor* pode
+  quebrar contratos (anunciado como `BREAKING` no CHANGELOG); *patch* é compatível.
+  A estabilização para SemVer estrito chega com `1.0.0`.
+
+### O que NÃO muda (contratos operacionais)
+
+Uma instalação `5.1.1` mantém tudo ao passar para `0.1.0`: estado em
+`/var/lib/delonix` e `~/.local/share/delonix`, config em `/etc/delonix`, sockets
+`/run/delonix-*.sock`, serviços systemd, variáveis `DELONIX_*` e os grupos de
+schema `*.delonix.io`.
+
+### Actualizar
+
+Ver o [guia de migração](https://github.com/ngolacloud/delonix/blob/main/MIGRATION.md).
+Em resumo: reinstalar pelo `install.sh` (o "latest" do GitHub é por data, resolve
+para `0.1.0`); os cinco binários (`delonix`, `-cri`, `-mcp`, `-mgmt`, `-node-api`)
+têm de ficar todos na mesma versão. Um auto-update por ordem SemVer **não** dispara
+(`0.1.0 < 5.1.1`); é uma transição de linha, anunciada.
+
+### Limitações conhecidas
+
+- A documentação regenerada já usa a identidade nova; as páginas do *handbook*
+  (`docs/handbook/`) regeneram quando `docs/dev/rt4-phase1-impl-map.md` entrar no
+  catálogo de páginas.
+- Imagens GHCR da linha anterior ficam no namespace antigo; a partir desta linha
+  publicam-se em `ghcr.io/ngolacloud/delonix`.
+
+---
+
