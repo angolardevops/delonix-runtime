@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/contributing-workflow.html">EN · English</option><option value="../pt-AO/contributing-workflow.html">PT-AO · Português (Angola)</option><option value="../fr-FR/contributing-workflow.html" selected>FR-FR · Français</option><option value="../zh-CN/contributing-workflow.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Changer le thème de couleur" title="Changer le thème de couleur"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -228,7 +228,7 @@ git log --oneline -- &lt;path you will touch&gt;          # what was already dec
 <p>Lire l'historique de la zone que vous touchez n'est pas une cérémonie : une grande partie de ce code
 est la trace de choses qui ont été essayées, mesurées et modifiées. Ce qui a déjà été décidé ou
 supprimé n'est pas refait par méconnaissance. L'historique détaillé se trouve dans
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (organisé par domaine) et dans <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a>.</p>
+<a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (organisé par domaine) et dans <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a>.</p>
 <h2 id="one-worktree-per-task">Un worktree par tâche<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
 <p>Plusieurs personnes et outils travaillent souvent sur le même clone en même temps. Éditer dans un
 checkout partagé a déjà coûté du vrai travail ici : des modifications absorbées dans le commit de
@@ -262,10 +262,10 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 git worktree list
 </code></pre></div>
 <h2 id="version-alignment">Alignement de version<a class="hanchor" href="#version-alignment" aria-label="#">#</a></h2>
-<p>La <code>version</code> du <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine est porteuse de sens : elle détermine depuis quelle release
+<p>La <code>version</code> du <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine est porteuse de sens : elle détermine depuis quelle release
 <code>delonix-cri</code> est téléchargé, elle est renvoyée comme <code>ServerVersion</code> de l'API Docker, elle est
 enregistrée dans chaque sauvegarde, et le workflow de release la compare au binaire construit.
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (job CI <code>version</code>) n'autorise exactement que deux états :</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (job CI <code>version</code>) n'autorise exactement que deux états :</p>
 <ol>
 <li><strong>Égale au tag le plus récent que contient le commit</strong> — tout le travail ordinaire. Ne modifiez
    pas la version dans une PR de fonctionnalité, et n'utilisez pas de suffixe <code>-dev</code> (il enverrait le
@@ -283,24 +283,24 @@ sont pas le même build.</p>
 <p>Les identifiants, les commentaires et les messages destinés à l'utilisateur sont écrits en
 <strong>anglais</strong>. Le portugais n'atteint l'opérateur qu'à travers le catalogue de traduction :</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> — <code>po::t("…")</code> pour les chaînes fixes, <code>po::tf("… {name} …",
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> — <code>po::t("…")</code> pour les chaînes fixes, <code>po::tf("… {name} …",
   &amp;[("name", value)])</code> pour les chaînes interpolées (espaces réservés nommés, car une traduction peut
   les réordonner). Le texte <code>--help</code> de la CLI est traduit à l'exécution par <code>po::translate_help</code>.</li>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> — les entrées portugaises, embarquées dans le binaire et
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> — les entrées portugaises, embarquées dans le binaire et
   sélectionnées avec <code>--l18n pt</code> ou <code>DELONIX_L18N=pt</code>.</li>
 </ul>
 <p>Une entrée manquante dans le catalogue se replie sur l'anglais ; une chaîne portugaise écrite
-directement dans le code est un bug. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (job CI <code>lang</code>) compte le portugais
+directement dans le code est un bug. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (job CI <code>lang</code>) compte le portugais
 qui subsiste dans les identifiants, les commentaires et les messages par rapport à
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a>. C'est un <strong>ratchet (cliquet)</strong>, pas un plafond : il échoue lorsqu'un
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a>. C'est un <strong>ratchet (cliquet)</strong>, pas un plafond : il échoue lorsqu'un
 décompte augmente (du nouveau portugais est entré) <strong>et</strong> lorsqu'il diminue sans que la ligne de base
 ait été abaissée. Lorsque vous traduisez quelque chose, exécutez
 <code>python3 scripts/lang_ratchet.py --update</code> et commitez la nouvelle ligne de base <strong>dans le même
 commit</strong> que la traduction. Des tests du crate de la CLI vérifient aussi que l'aide des commandes a
 une entrée portugaise — ajoutez-en une lorsque vous ajoutez une commande ou une option.</p>
 <h2 id="architecture-rules-the-gates-enforce">Les règles d'architecture imposées par les gates<a class="hanchor" href="#architecture-rules-the-gates-enforce" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (job CI <code>arch</code>) impose la structure décidée dans
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. La couche de chaque
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (job CI <code>arch</code>) impose la structure décidée dans
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. La couche de chaque
 crate et la direction autorisée sont listées dans <a href="architecture.html">Architecture</a>. Ce que
 cela implique pour une modification :</p>
 <ul>
@@ -328,7 +328,7 @@ cela implique pour une modification :</p>
   liste actuelle est générée :</li>
 </ul>
 <!-- dev-docs:begin ratchets -->
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> maintient <strong>6 cliquets de dette</strong> (référence dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>) :</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> maintient <strong>6 cliquets de dette</strong> (référence dans <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>) :</p>
 <ul>
 <li><code>self_exec_sites</code></li>
 <li><code>library_prints</code></li>
@@ -345,7 +345,7 @@ socket activation n'ont pas pu faire), <strong>rootless-first</strong> (le privi
 annoncé, jamais un défaut silencieux), et <strong>aucun échec silencieux</strong> (une option acceptée puis
 ignorée est pire qu'une option qui n'existe pas — refusez-la plutôt avec une erreur claire).</p>
 <h2 id="when-to-write-an-adr">Quand écrire un ADR<a class="hanchor" href="#when-to-write-an-adr" aria-label="#">#</a></h2>
-<p>Écrivez un Architecture Decision Record dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> <strong>avant</strong> le code lorsqu'une modification
+<p>Écrivez un Architecture Decision Record dans <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> <strong>avant</strong> le code lorsqu'une modification
 déplace une frontière structurelle, par exemple :</p>
 <ul>
 <li>un nouveau backend ou provider (un hyperviseur, un système de stockage), ou un nouveau port ;</li>
@@ -356,7 +356,7 @@ déplace une frontière structurelle, par exemple :</p>
   couches.</li>
 </ul>
 <p>Une fonctionnalité de routine à l'intérieur d'une frontière existante n'en a pas besoin. Le format
-et la liste actuelle se trouvent dans <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> : un fichier par
+et la liste actuelle se trouvent dans <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> : un fichier par
 décision, <code>NNNN-title.md</code>, en anglais. <strong>Les ADR acceptés ne sont jamais réécrits</strong> — un nouvel ADR
 les remplace.</p>
 <h2 id="adding-or-changing-a-cli-command">Ajouter ou modifier une commande de la CLI<a class="hanchor" href="#adding-or-changing-a-cli-command" aria-label="#">#</a></h2>
@@ -387,13 +387,13 @@ les remplace.</p>
 <li>Une modification logique par commit ; dites <strong>pourquoi</strong> dans le message — le diff montre déjà
   quoi.</li>
 <li>Référencez l'issue lorsqu'il y en a une.</li>
-<li>Ouvrez la PR contre <code>main</code> et remplissez <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">le modèle</a> :
+<li>Ouvrez la PR contre <code>main</code> et remplissez <a href="https://github.com/ngolacloud/delonix/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">le modèle</a> :
   ce que vous avez exécuté et, pour le code du runtime, des namespaces, des cgroups ou du réseau, ce
   que vous avez exécuté <strong>en conditions réelles</strong> sur un vrai hôte, avec la commande et sa sortie.</li>
 <li>« Ça compile » et « la commande a renvoyé 0 » ne clôturent pas une modification. Dites ce qui a été
   prouvé et, tout aussi explicitement, ce qui n'a pas été validé et pourquoi.</li>
 <li>Chaque modification est relue par les code owners listés dans
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a>.</li>
+  <a href="https://github.com/ngolacloud/delonix/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a>.</li>
 </ul>
 <h2 id="security-sensitive-changes">Modifications sensibles pour la sécurité<a class="hanchor" href="#security-sensitive-changes" aria-label="#">#</a></h2>
 <p>Signalez-le explicitement dans la PR lorsqu'une modification franchit une frontière de privilège ou
@@ -402,11 +402,11 @@ de namespace : le mappage du user namespace, le holder réseau ou sa socket de 
 une entrée utilisateur ou de manifeste. Celles-ci font l'objet d'une revue supplémentaire.</p>
 <p>Si vous avez trouvé une <strong>vulnérabilité</strong> plutôt qu'un bug — élévation de privilège, évasion de
 namespace, injection de commandes, traversée de chemin — n'ouvrez pas d'issue ni de PR publique.
-Suivez <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a> (GitHub Private Vulnerability Reporting).</p>
+Suivez <a href="https://github.com/ngolacloud/delonix/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a> (GitHub Private Vulnerability Reporting).</p>
 <hr />
 <p><strong>Suivant :</strong> <a href="releases-and-stability.html">Releases et stabilité</a> — ce que fait un tag poussé, et ce que la CLI et le schéma de manifeste promettent de ne pas casser.</p>
 <nav class="pager"><a href="engineering-process.html"><span>← Précédent</span>Engineering process (canonical)</a><a class="next" href="releases-and-stability.html"><span>Suivant →</span>Releases et stabilité</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/contributing-workflow.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/contributing-workflow.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/fr-FR/contributing-workflow.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/contributing-workflow.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>

@@ -9,7 +9,7 @@ ordre, pour votre rôle. Si vous voulez seulement *utiliser* Delonix, commencez 
 [site de documentation utilisateur](https://ngolacloud.github.io/delonix/).
 
 <!-- dev-docs:begin crate-count -->
-Le workspace compte **34 crates** et livre **6 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).
+Le workspace compte **35 crates** et livre **6 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-storage-helper`).
 <!-- dev-docs:end crate-count -->
 
 ## Ce qu’est le moteur — et ce qu’il n’est pas

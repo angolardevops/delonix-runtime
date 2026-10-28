@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/build-and-test.html">EN · English</option><option value="../pt-AO/build-and-test.html">PT-AO · Português (Angola)</option><option value="../fr-FR/build-and-test.html">FR-FR · Français</option><option value="../zh-CN/build-and-test.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -214,7 +214,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <p>本页假设你手上已经是<a href="environment.html">准备你的环境</a>里那台主机：固定的 Rust 工具链和 <code>protoc</code>。读完之后，你就能构建并安装你的这棵树、在本地跑通每一个 CI 门禁，并且在不触碰真实引擎状态的情况下运行 E2E 测试和 chaos 测试装置（harness）。</p>
 <p>这里的一切都从你 checkout 出来的根目录运行——理想情况下是一个 <strong>git worktree</strong>：一个拥有自己分支的独立工作目录，每个任务一个，从 <code>origin/main</code> 创建出来（命令见<a href="start-here.html#2-open-a-worktree-from-originmain">从这里开始，第 2 步</a>；规则见<a href="contributing-workflow.html#one-worktree-per-task">贡献工作流</a>）。</p>
 <h2 id="clone">克隆<a class="hanchor" href="#clone" aria-label="#">#</a></h2>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 </code></pre></div>
@@ -268,7 +268,7 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 <li>如果你同时在多个 worktree 里工作，把它们都指向同一个共享的 <code>CARGO_TARGET_DIR</code> 能省磁盘空间，但两个同时在上面跑的构建会互相等待，还可能让彼此的产物失效。每个 worktree 单独一个 target 目录，第一次会慢一些，之后则是可预测的。</li>
 </ul>
 <h2 id="the-makefile">Makefile<a class="hanchor" href="#the-makefile" aria-label="#">#</a></h2>
-<p>仓库根目录的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> 把本页的命令串成一个生命周期。它不引入自己的构建逻辑：<code>make build</code>
+<p>仓库根目录的 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> 把本页的命令串成一个生命周期。它不引入自己的构建逻辑：<code>make build</code>
 运行的就是上面的 <code>cargo build</code>，只是按这台机器选好了并行数和优先级。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">make bootstrap        # 每台机器一次：固定的 Rust 工具链、C/C++ 编译器、protoc、sccache
 make doctor           # 同样的检查，但不做任何修改（缺少必需项时退出码为 1）
@@ -286,7 +286,7 @@ make help             # 所有目标
 <code>~/.local/bin</code> 时把它加上。<code>~/.bashrc</code> 和 <code>~/.zshrc</code> 中一个带标记的代码块会加载这个文件；
 <code>make uninstall</code> 删除该代码块，文件恢复原样。<code>SHELL_RC=0</code> 只写环境文件，不动你的 shell 文件；
 <code>make install DELONIX_ROOT=&lt;dir&gt;</code> 让开发构建使用自己的 state root，与已安装的发行版分开。
-只要导出了 <code>DELONIX_BIN</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> 检查的就是已安装的
+只要导出了 <code>DELONIX_BIN</code>，<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> 和 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> 检查的就是已安装的
 二进制——针对你的源码树运行它们之前先取消该变量。</p>
 <p><code>make install-system</code> 只复制已经构建好的二进制（绝不在 <code>sudo</code> 下编译），并且在引擎进程仍在运行时
 拒绝执行，原因见选项 C；<code>FORCE=1</code> 可以强制。在 Ubuntu 23.10+ 上，<code>make apparmor</code> 写入选项 B
@@ -329,7 +329,7 @@ make help             # 所有目标
 </tr>
 </tbody>
 </table></div>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 不属于这个生命周期：它安装已发布的版本，并让主机做好运行容器和虚拟机的准备，
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 不属于这个生命周期：它安装已发布的版本，并让主机做好运行容器和虚拟机的准备，
 不需要工具链。</p>
 <h2 id="installing-your-build-locally">在本地安装你的构建<a class="hanchor" href="#installing-your-build-locally" aria-label="#">#</a></h2>
 <p>大多数改动根本不需要一个已安装的构建：直接在你的 worktree 里跑
@@ -337,21 +337,21 @@ make help             # 所有目标
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">./target/debug/delonix --version    # commit: &lt;hash&gt; (+N commits since vX.Y.Z) · built: &lt;date&gt;
 command -v delonix                  # which `delonix` your shell would run instead
 </code></pre></div>
-<p><code>commit:</code> 这一行来自 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a>（<code>DELONIX_GIT_HASH</code>、
+<p><code>commit:</code> 这一行来自 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a>（<code>DELONIX_GIT_HASH</code>、
 <code>DELONIX_GIT_SINCE</code>）。在两次发布之间，每一次构建携带的都是同一个版本号，所以 commit 是把你的构建和已发布版本区分开的唯一办法。</p>
 <h3 id="how-delonix-finds-its-server-binaries"><code>delonix</code> 如何找到它的服务器二进制程序<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
 <p><code>delonix serve cri</code>、<code>delonix serve api</code>、<code>delonix serve node-api</code> 和 <code>delonix mcp</code> 本身并不包含这些服务器：它们会 <code>exec</code> <code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-node-api</code> 和 <code>delonix-mcp</code>
-（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a> 里的 <code>exec_server</code>）。查找顺序是：</p>
+（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a> 里的 <code>exec_server</code>）。查找顺序是：</p>
 <ol>
 <li>与正在运行的这个 <code>delonix</code> <strong>同目录下</strong>的同名文件；</li>
 <li>否则就是 <code>PATH</code> 上的那个同名文件。</li>
 </ol>
 <p><code>delonix</code> 会通过 <code>DELONIX_DISPATCH_VERSION</code> 把自己的版本号传给服务器，一个来自不同发布版本的服务器会拒绝启动。它还会通过 <code>DELONIX_BIN</code> 传入自己的路径，这样服务器就能回调同一个 CLI。一个被直接启动的服务器（比如被某个 unit 启动）会依次通过
 <code>DELONIX_BIN</code>、自己同目录下的一个 <code>delonix</code>、再到 <code>PATH</code>
-（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a> 里的 <code>cli_bin</code>）来找到 CLI。
+（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a> 里的 <code>cli_bin</code>）来找到 CLI。
 <strong>把同一次构建产出的这五个二进制程序放在一起</strong>；混用你的构建和一个发布版会被拒绝，或者会跑一些你本不打算测试的代码。</p>
 <p><code>delonix cluster kubeadm</code> 和 <code>delonix image vm build</code> 用它们自己的顺序去找
-<code>delonix-cri</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a> 里的
+<code>delonix-cri</code>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a> 里的
 <code>resolve_cri_bin</code>）：<code>--cri-bin</code>，然后是 <code>delonix</code> 同目录下，然后——如果当前目录在一个源码 checkout 里面——是一次 <code>cargo build --release -p delonix-cri</code>，只有到最后才会去下载已发布的产物。</p>
 <p>在安装它们之前，先把这五个都构建出来：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
@@ -373,7 +373,7 @@ hash -r                              # forget the path your shell cached
 command -v delonix &amp;&amp; delonix --version
 </code></pre></div>
 <p>如果 <code>/usr/local/bin</code> 里也装了一个发布版，<code>PATH</code> 上排在前面的那个目录说了算。</p>
-<p><strong>AppArmor。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 只在设置了
+<p><strong>AppArmor。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 只在设置了
 <code>kernel.apparmor_restrict_unprivileged_userns=1</code> 的主机上写一份 profile，
 <code>/etc/apparmor.d/delonix</code>，绑定到 <code>&lt;安装目录&gt;/delonix</code>。你拷贝到新路径下的二进制程序不在这份 profile 的覆盖范围内。不要在一台同时也在用已安装发布版的机器上，重新跑一遍安装脚本来"搬动"那份 profile：那个 profile 文件会被重写，已发布的二进制程序会因此失去它。改成用一个不同的名字添加第二份 profile——形状和安装脚本写的一样，所以不会替换掉任何东西：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">printf &#x27;abi &lt;abi/4.0&gt;,\ninclude &lt;tunables/global&gt;\nprofile delonix-dev %s flags=(unconfined) {\n  userns,\n}\n&#x27; \
@@ -393,7 +393,7 @@ delonix man --dir ~/.local/share/man
 <p><strong>只在一台没有任何 Delonix 工作负载在使用的机器上这样做。</strong> 已安装的二进制程序不只是一个命令：</p>
 <ul>
 <li>由 <code>delonix system boot enable</code> 写下的开机 unit 会启动
-  <code>ExecStart=&lt;exe&gt; container start &lt;name&gt;</code>，其中 <code>&lt;exe&gt;</code> 是运行了 <code>enable</code> 的那个二进制程序的路径（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>，unit 前缀
+  <code>ExecStart=&lt;exe&gt; container start &lt;name&gt;</code>，其中 <code>&lt;exe&gt;</code> 是运行了 <code>enable</code> 的那个二进制程序的路径（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>，unit 前缀
   <code>delonix-boot-</code>）；替换掉那个文件，会改变下一次重启之后起来的是什么；</li>
 <li><code>dist/delonix-cri.service</code> 运行的是 <code>/usr/local/bin/delonix-cri</code>，所以在一个 Kubernetes 节点上，kubelet 会在这个 unit 下一次重启时用上你的构建；</li>
 <li>之前已经启动的长生命周期进程（网络 pin 和 control 进程、容器 supervisor）会继续运行它们启动时用的那份代码，所以有一段时间会是两个构建并存地跑。</li>
@@ -404,7 +404,7 @@ ls ~/.config/systemd/user/delonix-boot-* /etc/systemd/system/delonix-* 2&gt;/dev
 pgrep -a delonix
 </code></pre></div>
 <h3 id="preparing-the-host">准备主机<a class="hanchor" href="#preparing-the-host" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 做的是两件互相独立的事。只有第一件是关于二进制程序本身的：</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 做的是两件互相独立的事。只有第一件是关于二进制程序本身的：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -493,8 +493,8 @@ hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev &amp;&amp; sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 </code></pre></div>
 <p>要回到一个已发布的二进制程序，再跑一遍安装脚本；它会把安装目录里的二进制程序替换成你指定的那个发布版：</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --user
-curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --user
+curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
 </code></pre></div>
 <p>你手动生成的补全文件和 man 手册页，这两步都不会删除。最后用 <code>delonix --version</code> 确认一下你回到的是哪个 commit。</p>
 <h2 id="run-the-tests">运行测试<a class="hanchor" href="#run-the-tests" aria-label="#">#</a></h2>
@@ -503,7 +503,7 @@ cargo test -p delonix-sdn                    # one crate
 cargo test -p delonix-stack -- reconcile       # tests whose path contains &quot;reconcile&quot;
 cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_vezes
 </code></pre></div>
-<p>需要特权或者一台真实主机的测试，会自己跳过而不是失败，所以这套测试在笔记本和 CI 上都有意义。少数现场（live）测试标了 <code>#[ignore]</code>，并在它们的 doc comment 里写出了运行它们的命令（比如在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里）；只在你自己拥有的机器上运行这些测试：</p>
+<p>需要特权或者一台真实主机的测试，会自己跳过而不是失败，所以这套测试在笔记本和 CI 上都有意义。少数现场（live）测试标了 <code>#[ignore]</code>，并在它们的 doc comment 里写出了运行它们的命令（比如在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里）；只在你自己拥有的机器上运行这些测试：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo test -p &lt;crate&gt; -- --ignored &lt;test-name&gt;
 </code></pre></div>
 <p>一次绿色的 <code>cargo test</code> 证明的是纯逻辑没问题。它<strong>不能</strong>证明一次对命名空间、cgroup、网络 holder 或虚拟机启动的改动是有效的——那需要一次现场运行（见
@@ -599,7 +599,7 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 </table></div>
 <!-- dev-docs:end ci-gates -->
 
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> 里的每一个任务都能在本地复现。推送之前，先跑跟你改动相关的那些；请求评审之前，把它们全部跑一遍。</p>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> 里的每一个任务都能在本地复现。推送之前，先跑跟你改动相关的那些；请求评审之前，把它们全部跑一遍。</p>
 <p>你可以在还没搞懂背后规则之前就先跑一个门禁；它的失败信息会说明要改什么。这些规则会在课程后面讲到：层、依赖方向和债务棘轮在
 <a href="architecture.html#layers-and-the-allowed-direction">架构</a>里；节点契约在
 <a href="architecture.html#one-set-of-operations-several-interfaces">架构</a>里；LANG-01 和版本对齐在<a href="contributing-workflow.html#language-english-in-the-code-lang-01">贡献工作流</a>里。</p>
@@ -620,7 +620,7 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 <tr>
 <td><code>lang</code></td>
 <td><code>python3 scripts/<wbr>lang_ratchet.<wbr>py</code></td>
-<td>葡萄牙语的标识符、注释或消息<strong>增加了</strong>——或者减少了却没有在同一个 commit 里下调 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>（<code>--list</code> 显示它们，<code>--update</code> 下调基线）</td>
+<td>葡萄牙语的标识符、注释或消息<strong>增加了</strong>——或者减少了却没有在同一个 commit 里下调 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>（<code>--list</code> 显示它们，<code>--update</code> 下调基线）</td>
 </tr>
 <tr>
 <td><code>arch</code></td>
@@ -630,12 +630,12 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 <tr>
 <td><code>arch</code></td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> 里某个生成出来的事实过时了——运行 <code>python3 scripts/<wbr>dev_docs.<wbr>py</code> 并提交</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> 里某个生成出来的事实过时了——运行 <code>python3 scripts/<wbr>dev_docs.<wbr>py</code> 并提交</td>
 </tr>
 <tr>
 <td><code>contract</code></td>
 <td><code>python3 scripts/<wbr>contract_gate.<wbr>py</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 里的节点契约不满足 <code>buf format</code> 的干净度、没通过 <code>buf lint</code>、破坏了与上一个 tag 的兼容性、缺少某个 HTTP 映射，或者 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 不是生成出来的那一份（<code>--update</code> 会重写它）。需要 <code>PATH</code> 上有 <code>protoc</code>、<code>buf</code> v1.73.0 和 <code>protoc-gen-openapi</code> v0.7.1，以及各个 tag</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 里的节点契约不满足 <code>buf format</code> 的干净度、没通过 <code>buf lint</code>、破坏了与上一个 tag 的兼容性、缺少某个 HTTP 映射，或者 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 不是生成出来的那一份（<code>--update</code> 会重写它）。需要 <code>PATH</code> 上有 <code>protoc</code>、<code>buf</code> v1.73.0 和 <code>protoc-gen-openapi</code> v0.7.1，以及各个 tag</td>
 </tr>
 <tr>
 <td><code>version</code></td>
@@ -645,7 +645,7 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 <tr>
 <td><code>cli-surface</code></td>
 <td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; scripts/<wbr>cli-tree.<wbr>sh --gate</code></td>
-<td>新增、移除或重新归类了一个 CLI 叶子命令，却没有在同一个 commit 里更新 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a>（<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>）</td>
+<td>新增、移除或重新归类了一个 CLI 叶子命令，却没有在同一个 commit 里更新 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a>（<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>）</td>
 </tr>
 <tr>
 <td><code>cli-surface</code></td>
@@ -665,12 +665,12 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 <tr>
 <td><code>test</code></td>
 <td><code>mkdir -p /<wbr>tmp/<wbr>t &amp;&amp; TMPDIR=/<wbr>tmp/<wbr>t cargo test --workspace --locked --no-fail-fast &amp;&amp; python3 scripts/<wbr>tmp_roots_gate.<wbr>py --dir /<wbr>tmp/<wbr>t --list</code></td>
-<td>测试在它们的临时目录里留下了不属于 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_baseline.<wbr>json</code></a> 中已知债务的东西——一个新的泄漏、某个已知泄漏变多了，或者某个已知泄漏变少了却没有降低基线（<code>--update</code>）。基线是托管运行器留下的内容，而泄漏可能取决于宿主机（一个在缺少 <code>qemu-img</code> 时提前返回的测试曾经跳过了它的清理）。自从这笔债务还清以来基线就是空的：测试把它的临时目录放在一个在 <code>Drop</code> 时删除它的守卫里（<code>tempfile::TempDir</code>），这样删除在提前 <code>return</code> 和断言失败时也会执行；所以本地运行请用 <code>--list</code> 来对比</td>
+<td>测试在它们的临时目录里留下了不属于 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_baseline.<wbr>json</code></a> 中已知债务的东西——一个新的泄漏、某个已知泄漏变多了，或者某个已知泄漏变少了却没有降低基线（<code>--update</code>）。基线是托管运行器留下的内容，而泄漏可能取决于宿主机（一个在缺少 <code>qemu-img</code> 时提前返回的测试曾经跳过了它的清理）。自从这笔债务还清以来基线就是空的：测试把它的临时目录放在一个在 <code>Drop</code> 时删除它的守卫里（<code>tempfile::TempDir</code>），这样删除在提前 <code>return</code> 和断言失败时也会执行；所以本地运行请用 <code>--list</code> 来对比</td>
 </tr>
 <tr>
 <td><code>deny</code></td>
 <td><code>cargo deny check advisories licenses sources</code></td>
-<td>一条 RUSTSEC 安全公告、一个不被允许的许可证或来源（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>）</td>
+<td>一条 RUSTSEC 安全公告、一个不被允许的许可证或来源（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>）</td>
 </tr>
 <tr>
 <td><code>docs</code></td>
@@ -685,7 +685,7 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 </tbody>
 </table></div>
 <p><code>cli-tree.sh</code> 和 <code>docs_cli_gate.py</code> 是从二进制程序真实的 <code>--help</code> 里读出命令树的；设置
-<code>DELONIX_BIN=/path/to/delonix</code> 来选择用哪个二进制程序。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> 默认用
+<code>DELONIX_BIN=/path/to/delonix</code> 来选择用哪个二进制程序。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> 默认用
 <code>target/release/delonix</code>，还需要 Python 的 <code>markdown</code> 模块。<code>docs</code> 这个任务还会生成 man 手册页（<code>delonix man --dir &lt;dir&gt; --index</code>），并用 <code>groff -mandoc -ww -z</code> 检查它们。</p>
 <p>另外几个独立的工作流，不是每次改动都要求跑：<code>chaos.yml</code> 在一个干净的 runner 上运行 chaos 测试装置（当 runner 屏蔽用户命名空间时会报告 <code>skipped</code>），
 <code>release.yml</code> 发布一个 tag，<code>vm-image.yml</code> / <code>vm-appliances.yml</code> 构建虚拟机镜像。</p>
@@ -697,18 +697,18 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 </code></pre></div>
 <p><strong>两个都要设置，而且每次都要。半吊子的隔离比完全不隔离还糟糕。</strong> 网络套接字和 pid 文件是分开解析的：pid 文件放在<em>状态根目录</em>下，holder 的 control 套接字和 slirp 套接字放在一个<em>运行时目录</em>里（默认是 <code>/tmp/delonix-net-&lt;uid&gt;</code>）。当两个状态根目录最终落到同一个运行时目录上时，各自都会读到自己（不存在）的 pid 文件，断定没有网络基础设施，然后在对方的套接字之上启动或拆掉基础设施。在一台跑着现场工作负载的开发主机上，这最后导致真实的根目录重建了它的网络基础设施，并重启了真实的容器。</p>
 <p>现在，引擎会从一个非默认的 <code>DELONIX_ROOT</code> 为运行时目录派生出一个后缀
-（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> 里的 <code>runtime_dir</code>/<code>root_suffix</code>），这在常见情况下堵上了这个碰撞的漏洞。但还是要两个都导出：这让隔离变得明确，让套接字路径保持简短、在你的掌控之内，而且这也是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> 和
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> 的做法（e2e 会替你补上你没导出的那个变量）。</p>
+（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> 里的 <code>runtime_dir</code>/<code>root_suffix</code>），这在常见情况下堵上了这个碰撞的漏洞。但还是要两个都导出：这让隔离变得明确，让套接字路径保持简短、在你的掌控之内，而且这也是 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> 和
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> 的做法（e2e 会替你补上你没导出的那个变量）。</p>
 <p>让 <code>DELONIX_NET_RUNTIME_DIR</code> 保持简短：一个长度超过约 108 字节的 unix 套接字路径，会以 <code>path must be shorter than SUN_LEN</code> 失败。<code>e2e.sh</code> 会拒绝一个长度超过 80 字节的运行时目录。</p>
 <p>结束之后，在导出同样这两个变量的情况下，拆掉这套隔离出来的网络基础设施：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">./target/debug/delonix net netns down
 </code></pre></div>
-<h2 id="vm-image-recipes-scriptsverify-imagessh">虚拟机镜像配方（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a>）<a class="hanchor" href="#vm-image-recipes-scriptsverify-imagessh" aria-label="#">#</a></h2>
+<h2 id="vm-image-recipes-scriptsverify-imagessh">虚拟机镜像配方（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a>）<a class="hanchor" href="#vm-image-recipes-scriptsverify-imagessh" aria-label="#">#</a></h2>
 <p><code>images/</code> 里的配方（recipe）用两种方式来检查。CLI crate 里的一个单元测试
-（<code>vmspec::every_shipped_recipe_is_valid_and_complete</code>）会在某个配方解析失败、或者指向了一个不存在的文件或 builder 时失败。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> 走得更远：它在一个隔离的 <code>DELONIX_ROOT</code> 里离线构建这四个云镜像发行版，再把构建出来的 qcow2 读回来，对照配方声明的内容做核对；<code>--self-test</code> 证明这些检查在一个没人构建过的镜像上确实能失败。它需要
+（<code>vmspec::every_shipped_recipe_is_valid_and_complete</code>）会在某个配方解析失败、或者指向了一个不存在的文件或 builder 时失败。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> 走得更远：它在一个隔离的 <code>DELONIX_ROOT</code> 里离线构建这四个云镜像发行版，再把构建出来的 qcow2 读回来，对照配方声明的内容做核对；<code>--self-test</code> 证明这些检查在一个没人构建过的镜像上确实能失败。它需要
 <code>libguestfs-tools</code>（见<a href="microvm-setup.html">构建微虚拟机</a>），不属于 CI 门禁的一部分。
 <code>--packages</code>、<code>--profile</code>、<code>--boot</code> 和 <code>--appliance</code> 这几个阶段是存在的，但在 v4.2.0 发布时还没有被运行过。</p>
-<h2 id="end-to-end-battery-scriptse2esh">端到端测试（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>）<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
+<h2 id="end-to-end-battery-scriptse2esh">端到端测试（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>）<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
 <p><code>e2e.sh</code> 让 CLI 对着真实的内核跑：每一个叶子命令的 <code>--help</code>，加上对其中一大部分命令面的真实执行，最后打印一份 PASS/FAIL/SKIP/XFAIL 报告（详细的 JSONL 在
 <code>$OUT/results.jsonl</code> 里，默认 <code>OUT=/tmp/delonix-e2e</code>）。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">./scripts/e2e.sh                          # uses ./target/debug/delonix
@@ -721,7 +721,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <li>它需要网络访问来拉取镜像；前置条件不满足的那些部分，会带着原因被跳过。</li>
 <li>一次绿色的运行，意味着每一个叶子命令的 <code>--help</code> 都被验证过了，并且<em>一部分</em>叶子命令被真的执行了。要知道哪些被执行、哪些没有，读这个脚本的开头部分。</li>
 </ul>
-<h2 id="chaos-harness-scriptschaossh">Chaos 测试装置（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>）<a class="hanchor" href="#chaos-harness-scriptschaossh" aria-label="#">#</a></h2>
+<h2 id="chaos-harness-scriptschaossh">Chaos 测试装置（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>）<a class="hanchor" href="#chaos-harness-scriptschaossh" aria-label="#">#</a></h2>
 <p>这个 chaos 测试装置会故意把一个正在运行的引擎弄坏——杀掉 holder、把磁盘写满、并发的 attach、只做了一半的 apply——然后报告它退化的方式是否和它承诺的一致。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">scripts/chaos.sh                        # every scenario, ./target/debug/delonix
 scripts/chaos.sh holder_kill oom        # selected scenarios
@@ -733,7 +733,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
   <code>/tmp/dlx-chaos</code>），绝不触碰真实引擎的容器、网络或记录。镜像相关的目录
   （<code>images</code>、<code>layers</code>、<code>blobs</code>）是<strong>指向你真实 store 的符号链接</strong>，为的是避免重复下载：实际上这个测试装置只会读它们，但如果某个场景写入了一个镜像，那就会写到真实的 store 里。</li>
 <li>它<strong>拒绝在一台繁忙的机器上运行</strong>（负载超过一个阈值，这个阈值通过
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a> 与 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a> 共用）：在高负载下，场景失败的原因属于那台跑测试的机器，而不属于产品本身。<code>--max-load N</code> 改变这个阈值；
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a> 与 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a> 共用）：在高负载下，场景失败的原因属于那台跑测试的机器，而不属于产品本身。<code>--max-load N</code> 改变这个阈值；
   <code>--force</code> 会照样运行，并把结论标记为不可发布。</li>
 <li>只有在没有任何场景失败时，退出码才是 0。SKIP 会被单独列出来。</li>
 <li>有些场景需要外部资源，没有这些资源就会跳过（比如 <code>truenas_destroy</code> 需要
@@ -744,7 +744,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 <hr />
 <p><strong>下一步：</strong> <a href="project-structure.html">项目结构</a>——这个仓库的地图：每个目录是什么、谁在改动它，以及什么是生成出来的。</p>
 <nav class="pager"><a href="environment.html"><span>← 上一页</span>准备你的环境</a><a class="next" href="project-structure.html"><span>下一页 →</span>项目结构</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/build-and-test.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/build-and-test.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/build-and-test.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/build-and-test.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

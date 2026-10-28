@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/rust-primer.html">EN · English</option><option value="../pt-AO/rust-primer.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/rust-primer.html">FR-FR · Français</option><option value="../zh-CN/rust-primer.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -218,12 +218,12 @@ abrir qualquer crate do workspace e seguir os seus tipos de erro, os seus traits
 <code>unsafe</code> e os seus testes sem parares na língua.</p>
 <p>Os caminhos são relativos à raiz do repositório. Os símbolos são nomeados para os poderes procurar
 com <code>grep</code> — os números de linha ficam de fora de propósito, porque mudam a cada PR.</p>
-<p>A toolchain fixada está no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> (um <code>channel</code> fixo, mais <code>rustfmt</code> e
+<p>A toolchain fixada está no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> (um <code>channel</code> fixo, mais <code>rustfmt</code> e
 <code>clippy</code>). O <code>rustup</code> respeita-o automaticamente, por isso compilas com o mesmo compilador que a CI usa.</p>
 <hr />
 <h2 id="31-the-cargo-workspace">3.1 O workspace do Cargo<a class="hanchor" href="#31-the-cargo-workspace" aria-label="#">#</a></h2>
-<p>O repositório é um único <strong>workspace</strong> do Cargo: um <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> na raiz com
-<code>[workspace] members = [...]</code> e um <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> por crate. Aqui importam três convenções:</p>
+<p>O repositório é um único <strong>workspace</strong> do Cargo: um <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> na raiz com
+<code>[workspace] members = [...]</code> e um <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> por crate. Aqui importam três convenções:</p>
 <ol>
 <li><strong>Cada caminho e cada versão escreve-se uma vez, na raiz.</strong> A raiz tem uma tabela
    <code>[workspace.dependencies]</code> que lista tanto os crates do próprio motor (por <code>path</code>) como todos
@@ -238,13 +238,13 @@ libc = { workspace = true }
 </code></pre></div>
 <p>Um membro pode acrescentar <code>features = [...]</code>, e mais nada. O <code>default-features = false</code> vive na
    raiz porque um membro não consegue desligar defaults que o workspace ligou.
-   O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (função <code>inline_versions</code>) faz falhar o build se um membro escrever
+   O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (função <code>inline_versions</code>) faz falhar o build se um membro escrever
    a sua própria versão.</p>
 <ol start="2">
 <li>
-<p><strong>O directório é a camada.</strong> Os crates vivem em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a> e os binários em <code>bins/</code>
-   (ADR-0040). O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> recusa um crate cujo directório não corresponda à sua
+<p><strong>O directório é a camada.</strong> Os crates vivem em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
+   <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a> e os binários em <code>bins/</code>
+   (ADR-0040). O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> recusa um crate cujo directório não corresponda à sua
    camada declarada, e uma dependência que aponte contra a direcção permitida. As regras de
    camada são ensinadas mais à frente no curso, em
    <a href="architecture.html#layers-and-the-allowed-direction">Arquitectura — Camadas e a direcção permitida</a>.</p>
@@ -267,7 +267,7 @@ os membros consomem como <code>version.workspace = true</code>. A versão não �
 <hr />
 <h2 id="32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 Erros: um só <code>Error</code>, e códigos de saída derivados do seu tipo<a class="hanchor" href="#32-errors-one-error-and-exit-codes-derived-from-its-type" aria-label="#">#</a></h2>
 <p>Quase todas as funções falíveis do motor devolvem <code>delonix_model::Result&lt;T&gt;</code>, um alias sobre o
-enum partilhado definido em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a>. O enum vive no crate de
+enum partilhado definido em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a>. O enum vive no crate de
 fundação puro <code>delonix-model</code>, do qual qualquer outro crate do motor pode depender. Alguns adapters
 definem o seu próprio erro e convertem-no neste (§5.2 de
 <a href="coding-conventions.html">Convenções de código</a>). É construído com
@@ -284,9 +284,9 @@ falta), <code>Timeout</code>, <code>Invalid</code>, <code>Registry</code>, <code
 por aí fora. Os doc comments de cada variante explicam porque é que ela existe; lê-os antes de
 acrescentares uma variante.</p>
 <p>Essas variantes tornam-se <strong>códigos de saída do processo</strong> num só sítio:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>, função <code>for_error</code>. A CLI re-exporta o
-módulo (<code>pub use delonix_model::exitcode;</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>) e o
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> chama <code>std::process::exit(cmd::exitcode::for_error(&amp;e))</code>.</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>, função <code>for_error</code>. A CLI re-exporta o
+módulo (<code>pub use delonix_model::exitcode;</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>) e o
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> chama <code>std::process::exit(cmd::exitcode::for_error(&amp;e))</code>.</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/exitcode.rs
 pub fn for_error(e: &amp;Error) -&gt; i32 {
     match e {
@@ -310,7 +310,7 @@ Rust by Example — <a href="https://doc.rust-lang.org/rust-by-example/error/mul
 <hr />
 <h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 Traits como portas: <code>VmBackend</code> e o registo de backends<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
 <p>O motor fala com os providers através de <strong>traits</strong> («portas»), e um provider é uma implementação
-de uma delas. O exemplo mais claro é o <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>
+de uma delas. O exemplo mais claro é o <code>VmBackend</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>
 (mudou-se para lá a partir do <code>delonix-vm</code>, que o reexporta, para que um crate de provider o possa
 implementar sem depender de um adapter):</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">pub trait VmBackend {
@@ -324,7 +324,7 @@ implementar sem depender de um adapter):</p>
 }
 </code></pre></div>
 <p>Implementações: <code>CloudHypervisorBackend</code> e <code>LibvirtBackend</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, e <code>ProxmoxBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>. Os métodos com <strong>corpo por
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, e <code>ProxmoxBackend</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>. Os métodos com <strong>corpo por
 omissão</strong> no trait (por exemplo <code>auto_selectable</code>) deixam um backend novo herdar um comportamento
 sensato e sobrepor só o que difere.</p>
 <p>Os backends são escolhidos em tempo de execução, por isso são tratados como <strong>trait objects</strong>,
@@ -343,14 +343,14 @@ static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegis
   closure, não o trait <code>VmBackend</code>.</li>
 <li>O <code>OnceLock</code> inicializa a tabela de forma preguiçosa (<code>builtin_backends()</code> semeia os dois backends
   locais), e o <code>RwLock</code> deixa o <code>register_backend</code> acrescentar um terceiro no arranque. O binário
-  fá-lo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>): o crate do
+  fá-lo em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>): o crate do
   provider só constrói o <code>BackendRegistration</code> (<code>delonix_proxmox::registration</code>), e a raiz de
   composição entrega-o ao <code>delonix_vm::register_backend</code>.</li>
 </ul>
-<p>A decisão por trás desta forma é o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. O mesmo padrão
+<p>A decisão por trás desta forma é o <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. O mesmo padrão
 «trait + implementações + um só sítio que escolhe» aparece noutros lados (por exemplo a porta
 <code>VmNetwork</code>, guardada num <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> perto do topo de
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>).</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>).</p>
 <p>Nem toda a porta é um trait object. Os casos de uso de VM recebem as suas portas como <strong>parâmetros
 genéricos</strong>:</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm.rs
@@ -365,10 +365,10 @@ pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
 </code></pre></div>
 <p>A razão é uma regra dos trait objects: um trait com um método genérico não é <em>dyn-compatible</em>
 (object-safe), e o <code>StateRepository&lt;T&gt;</code> tem um (<code>update&lt;F&gt;</code>, em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>). Por isso o engine é genérico, como o
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>). Por isso o engine é genérico, como o
 <code>resolve_run&lt;I, S, D, H&gt;</code> do <code>container run</code>, e cada chamador escolhe os tipos concretos: o
 <code>delonix-vm</code> constrói <code>VmEngine&lt;JsonStore&lt;Vm&gt;, RegistryBackends, QemuImgDisks, CloudLocaldsSeed&gt;</code> no
-<code>engine</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>), e os testes em <code>vm::tests</code> constroem um sobre um
+<code>engine</code> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>), e os testes em <code>vm::tests</code> constroem um sobre um
 store em memória e falsos que registam as chamadas. O preço dos genéricos é uma cópia do código por
 combinação (monomorfização); o ganho é que nenhuma porta tem de ser remodelada para caber em <code>dyn</code>.</p>
 <p><strong>Ler mais:</strong> The Rust Book —
@@ -392,17 +392,17 @@ documentação da std — <a href="https://doc.rust-lang.org/std/sync/struct.Onc
 <tr>
 <td><a href="https://docs.rs/nix"><code>nix</code></a></td>
 <td>Wrappers mais ou menos seguros: <code>clone</code>, <code>setns</code>, <code>unshare</code>, <code>pivot_root</code>, <code>fork</code>, <code>mount</code>, sinais</td>
-<td><code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td><code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/libc"><code>libc</code></a></td>
 <td>Chamadas cruas que o <code>nix</code> não embrulha, ou onde a struct exacta importa</td>
-<td><code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a> (<code>peer_uid</code>); <code>libc::flock</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a></td>
+<td><code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a> (<code>peer_uid</code>); <code>libc::flock</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/rustix"><code>rustix</code></a></td>
 <td>A nova API de mount (<code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>)</td>
-<td><code>fsopen_overlay</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td><code>fsopen_overlay</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -413,7 +413,7 @@ presença do comentário; os revisores impõem a sua veracidade):</p>
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 </code></pre></div>
 <h3 id="where-the-container-is-born">Onde o container nasce<a class="hanchor" href="#where-the-container-is-born" aria-label="#">#</a></h3>
-<p>A <code>fn spawn</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> termina em:</p>
+<p>A <code>fn spawn</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> termina em:</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// SAFETY: single-threaded; the child mounts the container and does `exec`.
 let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i32)) };
 </code></pre></div>
@@ -429,11 +429,11 @@ segurava o lock do alocador nesse instante, a primeira alocação do filho bloqu
 <p>Este repo tem duas regras concretas por causa disto, ambas explicadas em comentários que deves ler:</p>
 <ul>
 <li><strong>O <code>serve docker-api</code> nunca chama <code>spawn</code> dentro do processo.</strong> O doc comment acima do helper de
-  re-exec em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> explica que o servidor é um runtime tokio
+  re-exec em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> explica que o servidor é um runtime tokio
   multi-thread, por isso re-executa o binário (<code>__apirun &lt;spec.json&gt;</code>) para obter um processo novo de
   uma só thread, onde a pré-condição do <code>clone</code> volta a ser verdadeira.</li>
 <li><strong>Depois de um <code>fork</code> cru, só trabalho async-signal-safe.</strong> O <code>reexec_mapped</code> e o
-  <code>reexec_mapped_hold</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> pré-calculam todas as alocações
+  <code>reexec_mapped_hold</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> pré-calculam todas as alocações
   <em>antes</em> do fork. O comentário no <code>reexec_mapped_hold</code> regista também porque usam <code>fork</code> cru em vez de
   <code>std::process::Command</code> + <code>pre_exec</code>: o <code>Command::spawn</code> espera que o filho chegue ao <code>exec</code>, e
   um hook <code>pre_exec</code> que bloqueie à espera do pai faz deadlock.</li>
@@ -443,7 +443,7 @@ segurava o lock do alocador nesse instante, a primeira alocação do filho bloqu
 de uma chamada <code>fsconfig_set_string(&amp;fs, "lowerdir+", lower)</code> por camada. O <code>mount(2)</code> clássico mete
 todas as opções numa única string <code>data</code> do tamanho de uma página, que o kernel trunca em silêncio
 para imagens com muitas camadas. A medição e a decisão estão no
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>. É um bom exemplo do hábito do repo:
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>. É um bom exemplo do hábito do repo:
 o comentário <code>///</code> acima de uma syscall pouco óbvia explica a falha que a motivou.</p>
 <p><strong>Ler mais:</strong> The Rust Book — <a href="https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html">Unsafe Rust</a>;
 o <a href="https://doc.rust-lang.org/nomicon/">Rustonomicon</a> (sobretudo
@@ -467,23 +467,23 @@ pub cloud_init: Option&lt;bool&gt;,
 </code></pre></div>
 <p>Aqui <code>None</code> (todos os registos escritos antes de o campo existir) é lido como «sim»; um simples <code>bool</code>
 teria como default <code>false</code> e mudaria em silêncio o comportamento das imagens antigas. Vais ver o
-mesmo raciocínio em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>: o <code>Mount::propagation</code> é um
+mesmo raciocínio em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>: o <code>Mount::propagation</code> é um
 <code>Option</code> (<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>), e o <code>Mount::optional</code> é um
 simples <code>bool</code> com <code>#[serde(default)]</code>, porque <code>false</code> é o que todos os registos mais antigos
 significavam.</p>
-<p><strong>Manifestos.</strong> O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> lê YAML multi-documento com
+<p><strong>Manifestos.</strong> O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> lê YAML multi-documento com
 <code>serde_yaml::Deserializer::from_str(text)</code> para <code>ManifestDoc</code>, cujo <code>spec</code> fica como um
 <code>serde_yaml::Value</code> cru até o Kind dono o desserializar no seu spec tipado.</p>
 <p><strong>Schema gerado.</strong> Os tipos de spec derivam <code>schemars::JsonSchema</code> (por exemplo <code>PodSpec</code> em
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>), e o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>
-gera a partir deles o JSON Schema publicado (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>).
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>), e o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>
+gera a partir deles o JSON Schema publicado (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>).
 Repara no comentário lá: o schemars respeita <code>#[serde(rename)]</code> mas não <code>#[serde(alias)]</code>.</p>
 <p><strong>Ler mais:</strong> <a href="https://serde.rs/">serde.rs</a> —
 <a href="https://serde.rs/field-attrs.html">atributos de campo</a> (<code>default</code>, <code>skip_serializing_if</code>, <code>alias</code>);
 <a href="https://docs.rs/serde_yaml"><code>serde_yaml</code></a>; <a href="https://docs.rs/schemars"><code>schemars</code></a>.</p>
 <hr />
 <h2 id="36-the-cli-clap-derive-and-translated-output">3.6 A CLI: clap derive e saída traduzida<a class="hanchor" href="#36-the-cli-clap-derive-and-translated-output" aria-label="#">#</a></h2>
-<p>O binário <code>delonix</code> é o <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>. O seu nível de topo é um derive do
+<p>O binário <code>delonix</code> é o <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>. O seu nível de topo é um derive do
 <a href="https://docs.rs/clap"><code>clap</code></a> em <code>src/main.rs</code>: <code>#[derive(Parser)] struct Cli</code>, que contém uma
 flag global <code>--l18n</code> e <code>#[command(subcommand)] cmd: Cmd</code>, onde <code>enum Cmd</code> é um
 <code>#[derive(Subcommand)]</code>. Cada grupo tem o seu próprio módulo e enum em <code>src/cmd/</code> — por exemplo
@@ -510,24 +510,24 @@ std — <a href="https://doc.rust-lang.org/std/macro.include_str.html"><code>inc
 ficheiros, e sai. Não há daemon nem runtime async ambiente. O código async só aparece nas
 <em>interfaces</em> que servem um protocolo:</p>
 <ul>
-<li><strong>Servidor CRI</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>. Os stubs gRPC são gerados em tempo de build:
+<li><strong>Servidor CRI</strong> — <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>. Os stubs gRPC são gerados em tempo de build:
   o <code>build.rs</code> chama <code>tonic_build::configure()...compile_protos(&amp;["proto/api.proto"], &amp;["proto"])</code>.
   Isso precisa do <strong><code>protoc</code></strong> instalado (a CI instala o <code>protobuf-compiler</code>); um <code>protoc</code> em falta é
   a falha mais comum no primeiro build. O <code>serve_blocking</code> em <code>src/lib.rs</code> cria o seu próprio runtime
   <code>tokio::runtime::Builder::new_multi_thread()</code>, e os handlers empurram o trabalho bloqueante do motor
   para fora dos workers async através do helper <code>blocking</code> em <code>src/runtime_svc.rs</code> — senão um
   <code>clone</code> ou uma chamada ao <code>delonix</code> pela shell bloquearia os workers do tokio.</li>
-<li><strong>Reverse proxy L7</strong> — o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> usa
+<li><strong>Reverse proxy L7</strong> — o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> usa
   <a href="https://docs.rs/hyper"><code>hyper</code></a> directamente (<code>hyper::service::service_fn</code>) sobre o seu próprio
   runtime tokio.</li>
-<li><strong>Servidor MCP</strong> — o <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> usa <a href="https://docs.rs/rmcp"><code>rmcp</code></a> sobre
+<li><strong>Servidor MCP</strong> — o <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> usa <a href="https://docs.rs/rmcp"><code>rmcp</code></a> sobre
   stdio (<code>rmcp::transport::io::stdio</code>).</li>
-<li><strong>Telemetria</strong> — o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> exporta spans OpenTelemetry
+<li><strong>Telemetria</strong> — o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> exporta spans OpenTelemetry
   a partir de uma thread dedicada com um cliente HTTP <em>bloqueante</em>, precisamente para que a CLI
   síncrona não precise de um runtime.</li>
 </ul>
-<p>O contrato de nó em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> é uma API protobuf separada com o seu próprio gate
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>, <code>buf</code>); ver <a href="build-and-test.html">Compilar e testar</a>.</p>
+<p>O contrato de nó em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> é uma API protobuf separada com o seu próprio gate
+(<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>, <code>buf</code>); ver <a href="build-and-test.html">Compilar e testar</a>.</p>
 <p><strong>Ler mais:</strong> <a href="https://rust-lang.github.io/async-book/">Asynchronous Programming in Rust</a>;
 <a href="https://tokio.rs/tokio/tutorial">tutorial do Tokio</a>;
 <a href="https://docs.rs/tonic"><code>tonic</code></a> e <a href="https://docs.rs/tonic-build"><code>tonic-build</code></a>;
@@ -560,7 +560,7 @@ daí decorrem:</p>
 <code>Arc&lt;std::sync::RwLock&lt;Arc&lt;Vec&lt;Route&gt;&gt;&gt;&gt;</code> guarda a tabela de rotas trocável a quente do proxy
 (<code>SharedRoutes</code> em <code>cmd/ingress_proxy.rs</code>), e o dashboard partilha a sua amostra lenta através de um
 <code>Arc&lt;Mutex&lt;...&gt;&gt;</code> (<code>cmd/dash.rs</code>).</p>
-<p>Uma ideia relacionada que vais encontrar em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a>: o
+<p>Uma ideia relacionada que vais encontrar em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a>: o
 padrão <strong>typestate</strong>, em que os estados do ciclo de vida são tipos e as transições ilegais não
 compilam (os seus doc tests incluem exemplos <code>compile_fail</code>).</p>
 <p><strong>Ler mais:</strong> The Rust Book —
@@ -574,19 +574,19 @@ std — <a href="https://doc.rust-lang.org/std/sync/struct.Arc.html"><code>Arc</
 <ul>
 <li><strong>Os testes unitários vivem ao lado do código</strong>, num <code>#[cfg(test)] mod tests { ... }</code> no fundo do
   ficheiro. Muitas funções puras existem precisamente para que uma decisão possa ser testada como dados
-  (por exemplo <code>reconcile::plan</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>).</li>
+  (por exemplo <code>reconcile::plan</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>).</li>
 <li><strong>Os testes de integração</strong> vivem em <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/*.rs</code> e usam só a API pública do
-  crate. Exemplo: o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> arranca o servidor CRI
+  crate. Exemplo: o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> arranca o servidor CRI
   num socket Unix e fala com ele através do <em>cliente gRPC gerado</em> (é por isso que o <code>build.rs</code> define
   <code>build_client(true)</code>). Os testes em <code>crates/providers/*/tests/live.rs</code> precisam de um provider real e
   são opt-in.</li>
 <li><strong>Os testes de propriedade</strong> usam <a href="https://docs.rs/proptest"><code>proptest</code></a>: ver
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a> (<code>proptest! { ... }</code>).</li>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a> (<code>proptest! { ... }</code>).</li>
 <li><strong>Os doc tests</strong> também correm — incluindo blocos <code>compile_fail</code> como os do <code>typestate.rs</code>.</li>
-<li><strong>Os benchmarks</strong> usam <a href="https://docs.rs/criterion"><code>criterion</code></a> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>).</li>
+<li><strong>Os benchmarks</strong> usam <a href="https://docs.rs/criterion"><code>criterion</code></a> (<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>).</li>
 <li><strong>Nomes.</strong> Os nomes dos testes descrevem o comportamento que está a ser provado. Muitos testes
   existentes têm nomes em português; os identificadores novos são em inglês (LANG-01, imposto como
-  ratchet pelo <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>).</li>
+  ratchet pelo <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>).</li>
 <li><strong>Os testes não podem tocar no estado real do host.</strong> Obtém um directório temporário e passa-o
   (os stores recebem um caminho de raiz) em vez de chamares código que resolve a raiz de estado real.
   Tudo o que precise de namespaces reais, cgroups ou um holder de rede pertence à validação ao vivo/E2E
@@ -601,7 +601,7 @@ rustdoc — <a href="https://doc.rust-lang.org/rustdoc/write-documentation/docum
 <thead>
 <tr>
 <th>Ferramenta</th>
-<th>Comando da CI (de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>)</th>
+<th>Comando da CI (de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>)</th>
 <th>O que apanha</th>
 </tr>
 </thead>
@@ -623,12 +623,12 @@ rustdoc — <a href="https://doc.rust-lang.org/rustdoc/write-documentation/docum
 </tr>
 <tr>
 <td>cargo-deny</td>
-<td><code>EmbarkStudios/<wbr>cargo-deny-action</code> com <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+<td><code>EmbarkStudios/<wbr>cargo-deny-action</code> com <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
 <td>avisos RUSTSEC, licenças, fontes de crates</td>
 </tr>
 </tbody>
 </table></div>
-<p>O repo tem também gates em Python (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> e outros).
+<p>O repo tem também gates em Python (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> e outros).
 A lista completa e a forma de correr cada um localmente estão em <a href="build-and-test.html">Compilar e testar</a>.</p>
 <p><strong>Ler mais:</strong> <a href="https://doc.rust-lang.org/clippy/">Clippy</a>,
 <a href="https://rust-lang.github.io/rustfmt/">rustfmt</a>,
@@ -636,7 +636,7 @@ A lista completa e a forma de correr cada um localmente estão em <a href="build
 <hr />
 <p><strong>Seguinte:</strong> <a href="environment.html">Preparar o teu ambiente</a> — um host que consegue compilar a árvore e correr os caminhos ao vivo, e as armadilhas do host que parecem bugs do motor.</p>
 <nav class="pager"><a href="cloud-native-primer.html"><span>← Anterior</span>Introdução ao cloud native</a><a class="next" href="environment.html"><span>Seguinte →</span>Preparar o teu ambiente</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/rust-primer.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/rust-primer.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/rust-primer.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/rust-primer.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

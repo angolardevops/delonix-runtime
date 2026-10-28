@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/index.html" selected>EN · English</option><option value="../pt-AO/index.html">PT-AO · Português (Angola)</option><option value="../fr-FR/index.html">FR-FR · Français</option><option value="../zh-CN/index.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -214,10 +214,10 @@ th:first-child,td:first-child{white-space:nowrap}
 want to send a first pull request without breaking your host or the engine. After this page you
 will know how the handbook is sequenced and which pages to read, in which order, for your role. If
 you only want to
-<em>use</em> Delonix, start with the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> and the
-<a href="https://angolardevops.github.io/delonix-runtime/">user documentation site</a> instead.</p>
+<em>use</em> Delonix, start with the <a href="https://github.com/ngolacloud/delonix/blob/main/README.rst" target="_blank" rel="noopener">README</a> and the
+<a href="https://ngolacloud.github.io/delonix/">user documentation site</a> instead.</p>
 <!-- dev-docs:begin crate-count -->
-<p>The workspace has <strong>34 crates</strong> and ships <strong>6 binaries</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, <code>delonix-storage-helper</code>).</p>
+<p>The workspace has <strong>35 crates</strong> and ships <strong>6 binaries</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, <code>delonix-storage-helper</code>).</p>
 <!-- dev-docs:end crate-count -->
 
 <h2 id="what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not<a class="hanchor" href="#what-the-engine-is-and-what-it-is-not" aria-label="#">#</a></h2>
@@ -237,15 +237,15 @@ Cloud Hypervisor, Proxmox VE, OPNsense, the Kubernetes CRI) only through ports, 
 <p>And one boundary that is enforced by a CI gate: <strong>the engine knows no consumer.</strong> It does not know
 who calls it, and it has no notion of tenant, account, plan or billing. A requirement coming from a
 consumer enters as a generic engine capability, or it does not enter. The canonical text is the
-section <em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
+section <em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
 <h2 id="two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative<a class="hanchor" href="#two-halves-generated-facts-and-narrative" aria-label="#">#</a></h2>
 <p>Pages in this handbook mix two kinds of content:</p>
 <ul>
 <li><strong>Facts</strong> — which crates exist, their layer, who depends on whom, the binaries, the pinned
   toolchain, the CI jobs. They live between <code>&lt;!-- dev-docs:begin &lt;key&gt; --&gt;</code> and
   <code>&lt;!-- dev-docs:end &lt;key&gt; --&gt;</code> markers and are <strong>generated</strong> by <code>python3 scripts/dev_docs.py</code>
-  from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Never edit them by hand — CI runs <code>dev_docs.py --check</code> and fails.
+  from <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Never edit them by hand — CI runs <code>dev_docs.py --check</code> and fails.
   If a fact is wrong, fix the source or the generator.</li>
 <li><strong>Narrative</strong> — why things are the way they are, how flows work, how to contribute. It is
   written by hand and reviewed after each release. See <a href="publishing-docs.html">Publishing the docs</a>.</li>
@@ -456,13 +456,13 @@ and read its pages in the order given; keep the <a href="glossary.html">Glossary
 </tr>
 </tbody>
 </table></div>
-<p>Other references you will be pointed to: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
-(private vulnerability reports) and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
+<p>Other references you will be pointed to: <a href="https://github.com/ngolacloud/delonix/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/ngolacloud/delonix/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
+(private vulnerability reports) and <a href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
 <hr />
 <p><strong>Next:</strong> <a href="start-here.html">Start here</a> — check your setup in thirty minutes and walk through a first contribution end to end.</p>
 <nav class="pager"><span></span><a class="next" href="start-here.html"><span>Next →</span>Start here</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/README.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/README.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/README.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">On this page</p><div class="toc">
 <ul>

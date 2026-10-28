@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/environment-variables.html">EN · English</option><option value="../pt-AO/environment-variables.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/environment-variables.html">FR-FR · Français</option><option value="../zh-CN/environment-variables.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -230,15 +230,15 @@ antes de definires uma.</p>
 automaticamente. Algumas são definidas pelo próprio motor nos processos que arranca; essas estão em
 <a href="#set-by-the-engine-itself-internal">Definidas pelo próprio motor</a> e não as deves definir.</p>
 <p><strong>Esta tabela é verificada pela CI nos dois sentidos.</strong> <code>python3 scripts/dev_docs.py --check</code>
-(função <code>env_var_problems</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) extrai todos os nomes <code>DELONIX_*</code> dos literais
-de string Rust em <code>crates/</code> e <code>bins/</code> (incluindo <code>build.rs</code> e <code>env!()</code>) e do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>,
+(função <code>env_var_problems</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) extrai todos os nomes <code>DELONIX_*</code> dos literais
+de string Rust em <code>crates/</code> e <code>bins/</code> (incluindo <code>build.rs</code> e <code>env!()</code>) e do <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>,
 e falha quando falta aqui um nome ou quando esta página lista um nome que o código já não contém.
 Uma linha só conta quando começa por <code>| `DELONIX_NAME`</code>. A extracção é textual, por isso apanha
 também alguns nomes que <strong>não</strong> são variáveis de ambiente (uma constante Rust, fixtures de teste,
 uma chave escrita numa imagem de VM); esses estão listados em secções próprias para que a
 verificação continue exacta.</p>
 <p>As variáveis usadas apenas por scripts fora desse âmbito — por exemplo <code>DELONIX_CHAOS_DIR</code> e a
-família <code>DELONIX_CHAOS_TRUENAS_*</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> — estão documentadas no cabeçalho de cada
+família <code>DELONIX_CHAOS_TRUENAS_*</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> — estão documentadas no cabeçalho de cada
 script e no <a href="build-and-test.html">Clonar, compilar e testar</a>, não aqui.</p>
 <h3 id="precedencia">Precedência<a class="hanchor" href="#precedencia" aria-label="#">#</a></h3>
 <p>Onde o código tem uma regra de precedência, ela é normalmente <strong>flag &gt; ambiente &gt; omissão</strong>; a tabela mostra cada caso tal como o código o resolve, incluindo os que têm um nível a mais ou nenhuma flag:</p>
@@ -254,58 +254,58 @@ script e no <a href="build-and-test.html">Clonar, compilar e testar</a>, não aq
 <tr>
 <td>Socket do CRI, tecto de capabilities e modo</td>
 <td><code>--addr</code> / <code>--cap-ceiling</code> / <code>--cap-ceiling-mode</code> &gt; <code>DELONIX_CRI_ADDR</code> / <code>DELONIX_CRI_CAP_CEILING</code> / <code>DELONIX_CRI_CAP_CEILING_MODE</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-cri.<wbr>sock</code> / sem tecto / <code>reject</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a></td>
 </tr>
 <tr>
 <td>Socket da API de gestão</td>
 <td><code>--addr</code> &gt; <code>DELONIX_API_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-mgmt.<wbr>sock</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
 </tr>
 <tr>
 <td>Socket da API de nó</td>
 <td><code>--addr</code> &gt; <code>DELONIX_NODE_API_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
 </tr>
 <tr>
 <td>Socket da API Docker</td>
 <td><code>--addr</code> &gt; <code>DELONIX_DOCKER_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-docker.<wbr>sock</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
 </tr>
 <tr>
 <td>Língua da saída</td>
 <td><code>--l18n</code> &gt; <code>DELONIX_L18N</code> &gt; inglês</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>po.<wbr>rs:peek_lang</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>po.<wbr>rs:peek_lang</code></a></td>
 </tr>
 <tr>
 <td>Tecla de escape da consola de VM</td>
 <td><code>--escape</code> &gt; <code>DELONIX_CONSOLE_ESCAPE</code> &gt; <code>^]</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs:resolve_escape</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs:resolve_escape</code></a></td>
 </tr>
 <tr>
 <td>Backend de VM</td>
 <td><code>--backend</code> (ou o <code>HYPERVISOR</code> da imagem) &gt; <code>DELONIX_VM_BACKEND</code> &gt; o <code>defaultProvider</code> do ficheiro de providers (ADR-0054; o <code>vm default-backend --set</code> escreve-o) &gt; o legado <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; auto-detecção. Um ficheiro de providers que não se consegue ler faz a escolha falhar em vez de cair para o seguinte</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
 <td>Endereço de bind das portas publicadas</td>
 <td>o endereço em <code>-p &lt;ip&gt;:&lt;host&gt;:&lt;container&gt;</code> &gt; <code>DELONIX_PUBLISH_ADDR</code> &gt; <code>127.0.0.1</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs:publish_bind_addr</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs:publish_bind_addr</code></a></td>
 </tr>
 <tr>
 <td>Feed de CVE para <code>image scan --update</code></td>
 <td><code>--feed</code> &gt; <code>DELONIX_ADVISORY_FEED</code> &gt; erro</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:cmd_scan_update</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:cmd_scan_update</code></a></td>
 </tr>
 <tr>
 <td>Filtro de logs</td>
 <td><code>DELONIX_LOG</code> &gt; <code>RUST_LOG</code> &gt; <code>info</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
 </tr>
 </tbody>
 </table></div>
 <p><code>delonix serve cri</code> e <code>delonix serve api</code> passam as suas flags ao binário de servidor que executam
 com <code>exec</code> <strong>das duas formas</strong>, como flags e como a variável correspondente
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs:run</code></a>), para que um servidor de uma release anterior que
+(<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs:run</code></a>), para que um servidor de uma release anterior que
 só lê as variáveis receba mesmo assim o valor.</p>
 <h3 id="isolar-uma-corrida-de-desenvolvimento">Isolar uma corrida de desenvolvimento<a class="hanchor" href="#isolar-uma-corrida-de-desenvolvimento" aria-label="#">#</a></h3>
 <p>Antes de correres qualquer coisa além de <code>--help</code> numa máquina que também corre workloads Delonix,
@@ -316,7 +316,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 ./target/debug/delonix system info                # &quot;state root&quot; must show your scratch path
 </code></pre></div>
 <p><strong>Porquê as duas.</strong> A infra-estrutura de rede guarda os seus pidfiles em <code>DELONIX_ROOT</code>, mas os seus
-sockets unix num directório de runtime separado (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs:runtime_dir</code></a>),
+sockets unix num directório de runtime separado (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs:runtime_dir</code></a>),
 porque o caminho de um socket está limitado a cerca de 108 bytes e o <code>DELONIX_ROOT</code> pode ser
 arbitrariamente profundo. Definir só uma das duas pode deixar dois state roots a partilhar o mesmo
 conjunto de sockets. A história completa, e como desmontar a infra isolada, está em
@@ -335,154 +335,154 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <tbody>
 <tr>
 <td><code>DELONIX_PERF_CONF</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
 <td>Caminho da configuração (flags <code>CPU=</code>/<code>THP=</code>) que o helper lê.</td>
 <td>Um caminho de ficheiro. Por definir: <code>/<wbr>etc/<wbr>delonix/<wbr>performance.<wbr>conf</code>.</td>
 <td>Só para testar o helper contra um sysfs falso; o <code>install.sh</code> escreve o verdadeiro.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PERF_CPU</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
 <td>Raiz da árvore sysfs do CPU que o helper lê e escreve (governor, EPP).</td>
 <td>Um caminho de directório. Por definir: <code>/sys/devices/system/cpu</code>.</td>
 <td>Aponta-a para uma árvore falsa para testar <code>apply</code>/<code>revert</code> sem tocar no host.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PERF_STATE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
 <td>Directório onde o helper guarda os valores do arranque que repõe no <code>revert</code>.</td>
 <td>Um caminho de directório. Por definir: <code>/<wbr>var/<wbr>lib/<wbr>delonix-performance</code>.</td>
 <td>Substituição só para testes, como as outras.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PERF_THP</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (o <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code> gerado)</td>
 <td>O ficheiro <code>enabled</code> das hugepages transparentes que o helper lê e escreve.</td>
 <td>Um caminho de ficheiro. Por definir: <code>/<wbr>sys/<wbr>kernel/<wbr>mm/<wbr>transparent_hugepage/<wbr>enabled</code>.</td>
 <td>Substituição só para testes, como as outras.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ROOT</code></td>
-<td>todos os stores e binários: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>util.<wbr>rs:state_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/image.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>image.<wbr>rs:ImageStore::<wbr>default_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs:Store::<wbr>default_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:base_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td>todos os stores e binários: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>util.<wbr>rs:state_root</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/image.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>image.<wbr>rs:ImageStore::<wbr>default_root</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs:Store::<wbr>default_root</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:base_root</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 <td>O state root do motor: registos de containers, imagens, redes, IPAM, volumes, VMs, segredos.</td>
 <td>Um caminho de directório. Sem valor: <code>$XDG_DATA_HOME/delonix</code> (ou <code>~/.local/share/delonix</code>) quando não é root, <code>/var/lib/delonix</code> como root. <strong><code>delonix-cri</code> e <code>delonix-mgmt</code> usam <code>/var/lib/delonix</code> por omissão em qualquer caso</strong>, e é por isso que <code>delonix serve …</code> passa explicitamente o root da CLI (<code>cmd/<wbr>serve.<wbr>rs:exec_server</code>).</td>
 <td>A variável a definir quando testas. O motor também a <strong>define</strong> em cada filho que arranca (passagens de re-exec, o holder de rede, servidores, chamadas de ciclo de vida do CRI) para que os caminhos concordem entre user namespaces.</td>
 </tr>
 <tr>
 <td><code>DELONIX_NET_RUNTIME_DIR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:runtime_dir</code></a> (<code>RUNTIME_DIR_ENV</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:runtime_dir</code></a> (<code>RUNTIME_DIR_ENV</code>)</td>
 <td>Directório dos sockets unix da infra-estrutura de rede (<code>control.sock</code>, <code>slirp.sock</code>).</td>
 <td>Um caminho de directório; mantém-no curto (caminhos de socket acima de ~108 bytes falham com <code>SUN_LEN</code>). Sem valor: <code>/<wbr>tmp/<wbr>delonix-net-&lt;uid&gt;</code> mais um sufixo derivado de um <code>DELONIX_ROOT</code> que não seja o de omissão.</td>
 <td>Define-a junto com <code>DELONIX_ROOT</code> quando isolas. O motor também a passa ao holder e às passagens de re-exec de <code>--net &lt;custom&gt;</code> (<code>infra::runtime_dir_env</code>), porque dentro do user namespace do holder o uid é 0 e o valor de omissão seria outro.</td>
 </tr>
 <tr>
 <td><code>DELONIX_L18N</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>po.<wbr>rs:peek_lang</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>po.<wbr>rs:peek_lang</code></a></td>
 <td>Língua da saída e do <code>--help</code> da CLI.</td>
 <td><code>en</code> (omissão) ou <code>pt</code>.</td>
 <td><code>--l18n</code> ganha. As <em>classes</em> de erro (códigos de saída) não dependem da língua, as mensagens sim — não faças grep a mensagens em scripts.</td>
 </tr>
 <tr>
 <td><code>DELONIX_LOG</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
 <td>Filtro de logs para <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> e <code>delonix-mcp</code>.</td>
 <td>Uma expressão de filtro do <code>tracing</code> (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Recorre a <code>RUST_LOG</code> e depois a <code>info</code>.</td>
 <td>Os logs vão para o stderr; o stdout fica reservado à saída dos comandos.</td>
 </tr>
 <tr>
 <td><code>DELONIX_LOG_FORMAT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
 <td>Formato das linhas de log.</td>
 <td><code>json</code> para linhas JSON; qualquer outra coisa (ou sem valor) é texto simples.</td>
 <td>Útil quando um servidor corre sob systemd e o seu journal é enviado para outro sítio.</td>
 </tr>
 <tr>
 <td><code>DELONIX_VERBOSE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/output.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>output.<wbr>rs</code></a> (<code>Progress</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/output.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>output.<wbr>rs</code></a> (<code>Progress</code>)</td>
 <td>Mostra a saída de cada passo em vez de a condensar numa linha de progresso.</td>
 <td>Definida e diferente de <code>0</code> → verboso.</td>
 <td>O mesmo efeito que <code>--verbose</code> onde um comando o tem.</td>
 </tr>
 <tr>
 <td><code>DELONIX_HOSTS_FILE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>hosts_file.<wbr>rs:hosts_path</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>hosts_file.<wbr>rs:hosts_path</code></a></td>
 <td>O ficheiro de hosts onde <code>hosts: [host]</code> num <code>HTTPRoute</code> e o <code>delonix hosts sync</code> escrevem o seu bloco gerido.</td>
 <td>Um caminho de ficheiro; omissão <code>/etc/hosts</code>.</td>
 <td>Aponta-o para um ficheiro de rascunho numa corrida isolada, para o <code>/etc/hosts</code> verdadeiro nunca ser tocado (escrevê-lo precisa de root). Como o bloco funciona: <a href="service-names-and-hosts.html">Como os nomes chegam ao <code>/etc/hosts</code></a>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_CONSOLE_ESCAPE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs:resolve_escape</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs:resolve_escape</code></a></td>
 <td>A tecla que desliga do <code>delonix vm console</code>.</td>
 <td>Uma tecla de controlo como <code>^X</code> ou <code>X</code>. Omissão <code>^]</code>. Um valor inválido é um erro, não um recurso a outro valor.</td>
 <td>Para layouts de teclado onde <code>^]</code> não se consegue escrever (por exemplo o português). <code>-e/--escape</code> ganha.</td>
 </tr>
 <tr>
 <td><code>DELONIX_CRI_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a>; passada adiante por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:run</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a>; passada adiante por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:run</code></a></td>
 <td>Socket onde o servidor CRI escuta.</td>
 <td><code>unix://&lt;path&gt;</code>. Omissão <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-cri.<wbr>sock</code>.</td>
 <td><code>--addr</code> ganha. O <code>--container-runtime-endpoint</code> do kubelet tem de coincidir.</td>
 </tr>
 <tr>
 <td><code>DELONIX_CRI_CAP_CEILING</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a> (<code>cap_ceiling::<wbr>CEILING_ENV</code>, interpretada por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>cap_ceiling.<wbr>rs:CapCeiling::<wbr>parse</code></a>); passada adiante por <code>cmd/serve.rs:run</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a> (<code>cap_ceiling::<wbr>CEILING_ENV</code>, interpretada por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>cap_ceiling.<wbr>rs:CapCeiling::<wbr>parse</code></a>); passada adiante por <code>cmd/serve.rs:run</code></td>
 <td>Limite máximo, ao nível do nó, das capabilities de qualquer container criado através do CRI, <code>privileged: true</code> incluído.</td>
 <td>Vazia/sem valor ou <code>all</code> → sem tecto (comportamento inalterado). <code>none</code> → nenhuma capability. <code>default</code> → o conjunto de omissão do motor. <code>default,NET_ADMIN,…</code> → o de omissão mais as nomeadas. Uma lista de nomes (prefixo <code>CAP_</code> opcional, sem distinção de maiúsculas; separados por vírgulas, espaços ou <code>;</code>) → exactamente essas. <code>all</code> em qualquer ponto da lista ganha. Um nome desconhecido, ou um valor só com separadores, <strong>impede o servidor de arrancar</strong>.</td>
 <td><code>--cap-ceiling</code> ganha. Limita só capabilities: um pod privilegiado continua a ter seccomp sem confinamento e um <code>/sys</code> com escrita. O tecto em vigor é visível no <code>crictl info</code> (<code>capabilityCeiling</code>).</td>
 </tr>
 <tr>
 <td><code>DELONIX_CRI_CAP_CEILING_MODE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>cap_ceiling.<wbr>rs:CeilingMode::<wbr>parse</code></a> (<code>MODE_ENV</code>); passada adiante por <code>cmd/serve.rs:run</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>cap_ceiling.<wbr>rs:CeilingMode::<wbr>parse</code></a> (<code>MODE_ENV</code>); passada adiante por <code>cmd/serve.rs:run</code></td>
 <td>O que acontece quando um pod pede explicitamente mais do que o tecto.</td>
 <td><code>reject</code> (omissão; também <code>enforce</code> ou vazio) → o <code>CreateContainer</code> falha a nomear as capabilities recusadas. <code>clamp</code> (ou <code>trim</code>) → reduzido ao tecto com um aviso. Uma palavra desconhecida <strong>impede o servidor de arrancar</strong>.</td>
 <td><code>--cap-ceiling-mode</code> ganha. Nos dois modos, o conjunto de omissão implícito do motor é reduzido ao tecto sem erro.</td>
 </tr>
 <tr>
 <td><code>DELONIX_CRI_FROM_SOURCE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs:locate_cri_bin</code></a> (<code>CRI_FROM_SOURCE_ENV</code>, lida por <code>cri_from_source_requested</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs:locate_cri_bin</code></a> (<code>CRI_FROM_SOURCE_ENV</code>, lida por <code>cri_from_source_requested</code>)</td>
 <td>Opt-in para compilar o <code>delonix-cri</code> a partir do checkout do código-fonte à volta do cwd quando o <code>cluster apply</code> / <code>cluster kubeadm</code> precisam de um binário para instalar nos nós.</td>
 <td>Só <code>1</code> ou <code>true</code> (depois de aparar) o liga; por definir, vazio, <code>0</code> ou qualquer outra coisa é desligado.</td>
 <td>Desligado por omissão para o runtime instalado num cluster nunca depender do directório de onde o comando correu. Sem ele a ordem é <code>--cri-bin</code>, o <code>delonix-cri</code> ao lado do <code>delonix</code>, e depois o asset de release da versão em execução, verificado contra o seu <code>SHA256SUMS</code>. A origem, o caminho e o sha256 são sempre impressos.</td>
 </tr>
 <tr>
 <td><code>DELONIX_SERVER_FROM_PATH</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:exec_server</code></a> (<code>FROM_PATH_ENV</code>, decidido pelo <code>choose</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:exec_server</code></a> (<code>FROM_PATH_ENV</code>, decidido pelo <code>choose</code>)</td>
 <td>Opt-in para servir com um binário irmão encontrado no <code>PATH</code> quando nenhum está ao lado do <code>delonix</code> em execução (ADR-0075 D2).</td>
 <td>Só <code>1</code> liga; não definida, vazia, <code>0</code> ou outra coisa fica desligada.</td>
-<td>Desligada por omissão: um irmão que não está ao lado do executável é de outra instalação, porque o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> põe todos os binários num único <code>BIN_DIR</code>. Medido a 2026-10-08 — um <code>delonix-cri</code> de 2026-09-07 no <code>PATH</code> serviu um <code>delonix</code> de 2026-10-08 e três verificações da bateria chumbaram como se o motor estivesse errado; a recusa de versão que devia tê-lo apanhado corre no CHAMADO (<code>delonix_node::<wbr>dispatch::<wbr>check_version</code>), que um servidor tão antigo não carrega. Com o opt-in ligado, o caminho resolvido é nomeado no stderr. O <code>beside</code> ganha sempre, logo isto nunca pode degradar uma instalação boa.</td>
+<td>Desligada por omissão: um irmão que não está ao lado do executável é de outra instalação, porque o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> põe todos os binários num único <code>BIN_DIR</code>. Medido a 2026-10-08 — um <code>delonix-cri</code> de 2026-09-07 no <code>PATH</code> serviu um <code>delonix</code> de 2026-10-08 e três verificações da bateria chumbaram como se o motor estivesse errado; a recusa de versão que devia tê-lo apanhado corre no CHAMADO (<code>delonix_node::<wbr>dispatch::<wbr>check_version</code>), que um servidor tão antigo não carrega. Com o opt-in ligado, o caminho resolvido é nomeado no stderr. O <code>beside</code> ganha sempre, logo isto nunca pode degradar uma instalação boa.</td>
 </tr>
 <tr>
 <td><code>DELONIX_API_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
 <td>Socket da API de gestão local (<code>delonix serve api</code>).</td>
 <td><code>unix://&lt;path&gt;</code>. Omissão <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-mgmt.<wbr>sock</code>.</td>
 <td><code>--addr</code> ganha. A API é só local (o uid que chama).</td>
 </tr>
 <tr>
 <td><code>DELONIX_NODE_API_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
 <td>Socket da API de nó (<code>delonix serve node-api</code>, o contrato <code>delonix.node.v1</code> em gRPC e HTTP/JSON).</td>
 <td><code>unix://&lt;path&gt;</code>. Omissão <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code>.</td>
 <td><code>--addr</code> ganha. Só local (o uid que chama).</td>
 </tr>
 <tr>
 <td><code>DELONIX_NODE_API_IDLE_TIMEOUT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
 <td>Quanto tempo a API de nó espera sem ligação aberta e sem operação sua a correr antes de sair (ADR-0040 P5).</td>
 <td>Uma duração (<code>300s</code>, <code>2m</code>); <code>0</code> nunca sai. Omissão <code>300s</code> quando activada por socket, senão nunca.</td>
 <td><code>--idle-timeout</code> ganha. O <code>--install-units</code> escreve <code>120s</code> se não for dado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_DOCKER_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
 <td>Socket da fatia da Docker Engine API (<code>delonix serve docker-api</code>).</td>
 <td><code>unix://&lt;path&gt;</code> (o prefixo <code>unix://</code> é opcional). Omissão <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-docker.<wbr>sock</code>.</td>
 <td><code>--addr</code> ganha.</td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_BACKEND</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 <td>Backend de VM para toda a sessão quando um comando não nomeia nenhum.</td>
 <td>Um nome de backend (<code>libvirt</code>, <code>cloud-hypervisor</code>, ou um backend remoto registado como <code>proxmox</code>). Um valor em branco é ignorado.</td>
 <td>Abaixo de <code>--backend</code> e do <code>HYPERVISOR</code> da imagem, acima da omissão da máquina definida com <code>delonix vm default-backend --set</code>. Tal como uma escolha explícita, sobrepõe-se à heurística de capacidade e pode falhar tarde, no arranque, se o backend não conseguir correr a VM.</td>
@@ -496,42 +496,42 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 </tr>
 <tr>
 <td><code>DELONIX_STORAGE_HELPER_SOCKET</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/helper.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>helper.<wbr>rs:socket_path</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-storage/src/helper.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>helper.<wbr>rs:socket_path</code></a></td>
 <td>O socket do helper privilegiado de armazenamento a que o MOTOR liga (ADR-0067 D3), em vez de <code>/<wbr>run/<wbr>delonix-storage-helper.<wbr>sock</code>.</td>
 <td>Um caminho.</td>
 <td>Lida só pelo motor; o helper nunca a lê. Quando o caminho não existe, um pool cujo driver precisa de privilégio é recusado com DX-6206.</td>
 </tr>
 <tr>
 <td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
 <td>Caminho da allowlist de pools de armazenamento do administrador (ADR-0067 D3), em vez de <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
 <td>Um caminho.</td>
 <td>O ficheiro é recusado quando o grupo ou todos lhe podem escrever, ou quando não pertence nem ao root nem ao utilizador que corre o motor. Um ficheiro que não existe quer dizer que nenhum pool foi declarado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (o aviso de rootless sem delegação e <code>warn_if_unprotected_memory</code>), <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (o aviso de rootless sem delegação e <code>warn_if_unprotected_memory</code>), <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
 <td>Silencia os avisos sobre a falta de delegação de cgroup e sobre um container sem tecto de memória em lado nenhum.</td>
 <td>Definida (qualquer valor) → silêncio.</td>
 <td>O motor <strong>define-a</strong> ele próprio (<code>cmd/<wbr>util.<wbr>rs:silence_cgroup_warning</code>, <code>cmd/kindmode.rs</code>) para que os filhos de re-exec não repitam um aviso que o pai já imprimiu. Defini-la à mão esconde uma condição real: os limites não são aplicados.</td>
 </tr>
 <tr>
 <td><code>DELONIX_POLICY_LINT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/policy.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>policy.<wbr>rs:show_lints</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/policy.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>policy.<wbr>rs:show_lints</code></a></td>
 <td>Silencia os avisos de política de runtime emitidos uma vez por comando (<code>warning: runtime policy [.<wbr>.<wbr>.<wbr>]</code>).</td>
 <td><code>0</code> → silêncio; qualquer outra coisa ou sem valor → mostrados.</td>
 <td>Para quem leu o aviso e decidiu de outra forma.</td>
 </tr>
 <tr>
 <td><code>DELONIX_NO_AUTO_RECOVER</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/netns.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>netns.<wbr>rs:reconcile_after_respawn</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/netns.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>netns.<wbr>rs:reconcile_after_respawn</code></a></td>
 <td>Depois de o holder de rede ser reconstruído, reporta os containers encalhados e o comando para os reiniciar, em vez de os reiniciar automaticamente.</td>
 <td>Definida (qualquer valor) → só reporta.</td>
 <td>Para hosts onde queres escolher quando uma base de dados reinicia.</td>
 </tr>
 <tr>
 <td><code>DELONIX_NO_AUTO_DELEGATE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a> (verificação prévia de cgroup do <code>cluster create</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a> (verificação prévia de cgroup do <code>cluster create</code>)</td>
 <td>Desliga o re-exec automático do <code>cluster create</code> sob <code>systemd-run --user --scope -p Delegate=yes</code> quando o controlador <code>cpu</code> não está delegado.</td>
 <td>Definida (qualquer valor) → imprime o erro em vez de re-executar.</td>
 <td>Para scripts e CI que preferem o erro simples.</td>
@@ -541,7 +541,7 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <h2 id="escapatorias-de-rede-e-de-seguranca">Escapatórias de rede e de segurança<a class="hanchor" href="#escapatorias-de-rede-e-de-seguranca" aria-label="#">#</a></h2>
 <p><strong>Todas as variáveis desta secção baixam uma fronteira.</strong> Cada uma regista um <code>SECURITY WARNING</code> (ou
 um aviso) quando produz efeito. Existem para depuração e para opções de saída explícitas e
-informadas; nenhuma pertence a uma configuração de produção. Lê a secção do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> indicada
+informadas; nenhuma pertence a uma configuração de produção. Lê a secção do <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> indicada
 antes de usares uma delas.</p>
 <div class="tablewrap"><table>
 <thead>
@@ -556,80 +556,80 @@ antes de usares uma delas.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_FORWARD_POLICY</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (construtor do ruleset de ingress)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (construtor do ruleset de ingress)</td>
 <td>Reverte a chain <code>forward</code> da netns do holder de negação por omissão (<code>policy drop</code>) para permissão por omissão.</td>
 <td><code>accept</code> → permissão por omissão; qualquer outra coisa → negação por omissão.</td>
-<td><strong>Baixa o isolamento entre redes.</strong> Registada como aviso de segurança. Ver <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
+<td><strong>Baixa o isolamento entre redes.</strong> Registada como aviso de segurança. Ver <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_LINK_LOCAL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (chain <code>fwguard</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (chain <code>fwguard</code>)</td>
 <td>Remove o drop incondicional de <code>169.254.0.0/16</code> (metadados de cloud) e <code>127.0.0.0/8</code> (loopback do host) para o tráfego dos containers.</td>
 <td><code>1</code> → permitido; qualquer outra coisa → descartado.</td>
-<td><strong>Expõe as credenciais de metadados da instância num host de cloud.</strong> Aviso de segurança. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em> (RF-NET-02).</td>
+<td><strong>Expõe as credenciais de metadados da instância num host de cloud.</strong> Aviso de segurança. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em> (RF-NET-02).</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_HOLDER_INGRESS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (chain <code>dlxinput</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (chain <code>dlxinput</code>)</td>
 <td>Deixa os containers alcançar os serviços que o próprio holder expõe (o proxy L7, o DNS interno) para além da allowlist.</td>
 <td><code>1</code> → permitido; qualquer outra coisa → ligações novas descartadas.</td>
-<td><strong>Através do proxy, um container alcança qualquer backend registado, em qualquer namespace, passando por cima da política de ingress desse backend.</strong> Aviso de segurança. Fundamentação em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/discovery/46_GAPS_ENCONTRADOS.md" target="_blank" rel="noopener"><code>docs/<wbr>discovery/<wbr>46_GAPS_ENCONTRADOS.<wbr>md</code></a> §4.2.</td>
+<td><strong>Através do proxy, um container alcança qualquer backend registado, em qualquer namespace, passando por cima da política de ingress desse backend.</strong> Aviso de segurança. Fundamentação em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/discovery/46_GAPS_ENCONTRADOS.md" target="_blank" rel="noopener"><code>docs/<wbr>discovery/<wbr>46_GAPS_ENCONTRADOS.<wbr>md</code></a> §4.2.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ENABLE_IPV6</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:ipv6_sdn_enabled</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:ipv6_sdn_enabled</code></a></td>
 <td>Volta a dar aos containers endereços IPv6 na SDN.</td>
 <td><code>1</code> → ligado; qualquer outra coisa → IPv6 desligado no container e forwarding recusado.</td>
-<td><strong>Nenhuma regra de firewall, isolamento de namespace ou <code>Dependency</code> se aplica ao IPv6</strong> — todas as políticas são só IPv4. Aviso de segurança. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
+<td><strong>Nenhuma regra de firewall, isolamento de namespace ou <code>Dependency</code> se aplica ao IPv6</strong> — todas as políticas são só IPv4. Aviso de segurança. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
 <td>Corre um workload numa namespace com nome mesmo quando o kernel não filtra o tráfego dentro de uma bridge (<code>br_netfilter</code> não carregado, ou <code>bridge-nf-call-iptables=0</code>), com um aviso. Sem ela o pedido é recusado (DX-6305, saída 69), porque o isolamento seria instalado e não imporia nada. Só <code>1</code> a abre.</td>
 <td><code>1</code> → corre com um aviso; qualquer outro valor (ou ausente) → recusado.</td>
-<td>As regras de isolamento são instaladas e não impõem nada. Ver o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+<td>As regras de isolamento são instaladas e não impõem nada. Ver o <a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-provider-cloud-hypervisor/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-provider-cloud-hypervisor/<wbr>src/<wbr>lib.<wbr>rs:vmm_leaf</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-provider-cloud-hypervisor/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-provider-cloud-hypervisor/<wbr>src/<wbr>lib.<wbr>rs:vmm_leaf</code></a></td>
 <td>Corre um container com <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> mesmo quando esta sessão não tem delegação de cgroup, e com <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> mesmo quando falta ao cgroup do container o controlador <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), em vez de recusar (saída 69). Também arranca uma VM do Cloud Hypervisor cujo VMM não pode ser posto numa folha de cgroup com os tectos de CPU e memória da VM, em vez de a recusar (DX-6515, saída 69).</td>
 <td>Definida (qualquer valor) → corre, sem limites, com um aviso.</td>
 <td>O kernel nunca vê os limites. Ver <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">delegação de cgroup</a>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_INSECURE_BESTEFFORT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:insecure_besteffort</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:insecure_besteffort</code></a></td>
 <td>Salta a verificação fail-closed do confinamento (seccomp, capabilities, <code>no_new_privs</code>) que corre antes do <code>execve</code> no init de um container e no <code>exec</code>.</td>
 <td>Definida (qualquer valor) → a verificação é saltada.</td>
 <td><strong>Um container pode arrancar com um confinamento que, em silêncio, não foi aplicado.</strong> Lida pelo motor antes de o ambiente do container ser aplicado, por isso um container não a consegue definir para si próprio.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PUBLISH_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs:publish_bind_addr</code></a>; sugerida por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a> (<code>vm reach</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs:publish_bind_addr</code></a>; sugerida por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a> (<code>vm reach</code>)</td>
 <td>Endereço do host a que as portas publicadas fazem bind quando o <code>-p</code> não nomeia nenhum.</td>
 <td>Um endereço IPv4; um valor que não seja IPv4 é ignorado. Omissão <code>127.0.0.1</code>.</td>
-<td><code>0.0.0.0</code> expõe as portas publicadas em todas as interfaces. O <code>vm reach</code> sugere o gateway do libvirt para que as VMs consigam alcançar um container sem o expor à LAN. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Revisão do flow <code>-p</code> ↔ <code>ingress</code>/<code>egress</code> (2026-07-27)»</em>.</td>
+<td><code>0.0.0.0</code> expõe as portas publicadas em todas as interfaces. O <code>vm reach</code> sugere o gateway do libvirt para que as VMs consigam alcançar um container sem o expor à LAN. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Revisão do flow <code>-p</code> ↔ <code>ingress</code>/<code>egress</code> (2026-07-27)»</em>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_SUBNET_BASE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs:default_base</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs:default_base</code></a></td>
 <td>Força o segundo octeto da rede de omissão (<code>10.&lt;base&gt;.0.0/16</code>).</td>
 <td>Um inteiro 0–255 (sem mais verificação de intervalo). Sem valor: o valor persistido em <code>&lt;root&gt;/<wbr>net/<wbr>default-base</code>, senão um octeto livre detectado no host.</td>
 <td>Só para uma colisão que a detecção não viu. Mudá-la depois de existirem containers muda os endereços da rede de omissão.</td>
 </tr>
 <tr>
 <td><code>DELONIX_CNI</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>cni.<wbr>rs:enabled_conf</code></a>, consumida por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>runtime_svc/<wbr>lifecycle.<wbr>rs</code></a> (<code>RunPodSandbox</code>) e <code>runtime_svc.rs</code> (<code>UpdateRuntimeConfig</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>cni.<wbr>rs:enabled_conf</code></a>, consumida por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>runtime_svc/<wbr>lifecycle.<wbr>rs</code></a> (<code>RunPodSandbox</code>) e <code>runtime_svc.rs</code> (<code>UpdateRuntimeConfig</code>)</td>
 <td><strong>Só no CRI rootless:</strong> liga à rede os sandboxes de pod através da cadeia de plugins CNI (<code>/etc/cni/net.d</code>, plugins do <code>CNI_PATH</code>), corrida dentro do holder de rede, em vez da SDN nativa.</td>
 <td><code>1</code> → ligado, e só se existir uma configuração; qualquer outra coisa → SDN nativa.</td>
 <td>Não tem efeito quando o CRI corre como root: em root usa-se sempre a configuração CNI do nó.</td>
 </tr>
 <tr>
 <td><code>DELONIX_TRACE_UNPUBLISH</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:trace_unpublish</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:trace_unpublish</code></a></td>
 <td>Regista cada despublicação de porta com a função, a porta, o pid, o pid do pai, o executável e um backtrace.</td>
 <td><code>1</code> ou <code>stderr</code> → stderr; qualquer outro valor → acrescentado a esse ficheiro.</td>
-<td>Uma ferramenta de diagnóstico, custo zero quando não definida. Mantida para a investigação em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«RESOLVIDO — as portas publicadas morriam sozinhas»</em>.</td>
+<td>Uma ferramenta de diagnóstico, custo zero quando não definida. Mantida para a investigação em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«RESOLVIDO — as portas publicadas morriam sozinhas»</em>.</td>
 </tr>
 </tbody>
 </table></div>
@@ -647,28 +647,28 @@ antes de usares uma delas.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_INSECURE_REGISTRIES</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>registry.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>registry.<wbr>rs</code></a></td>
 <td>Registos contactados por HTTP simples em vez de HTTPS.</td>
 <td>Entradas <code>host</code> ou <code>host:port</code> separadas por vírgulas (sem distinção de maiúsculas). Sem valor → HTTPS em todo o lado excepto nos registos de loopback, que já usam HTTP.</td>
 <td><strong>O tráfego e as credenciais para esses hosts viajam sem TLS.</strong> Uma opção explícita por host, nunca um intervalo. Quando uma ligação HTTPS a um registo falha, o erro sugere esta variável já com o host preenchido.</td>
 </tr>
 <tr>
 <td><code>DELONIX_SCAN_ON_PULL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:admission_scan_on_pull</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:admission_scan_on_pull</code></a></td>
 <td>Política de admissão de CVE aplicada depois de cada pull de imagem.</td>
 <td>Sem valor/vazia → desligada. <code>warn</code> → faz o scan e reporta. <code>low</code>/<code>medium</code>/<code>high</code>/<code>critical</code> → remove a imagem e recusa quando é encontrada uma vulnerabilidade de pelo menos essa severidade. Um valor desconhecido recusa o pull.</td>
 <td>Um gate fail-closed: um erro de escrita não o desliga. Uma imagem sem SBOM é admitida com um aviso.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ADVISORIES</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:load_advisories</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:load_advisories</code></a></td>
 <td>Caminho de um ficheiro de base de dados de advisories usado pelo <code>image scan</code>.</td>
 <td>Um caminho de ficheiro.</td>
 <td>Usada só quando não existe uma base de dados sincronizada em <code>&lt;root&gt;/<wbr>advisories.<wbr>json</code>; a sincronizada ganha. Sem nenhuma das duas, usa-se o marcador embutido e o scan di-lo.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ADVISORY_FEED</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:cmd_scan_update</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/scan.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>scan.<wbr>rs:cmd_scan_update</code></a></td>
 <td>Origem para <code>delonix image scan --update</code>.</td>
 <td>Um URL ou ficheiro (formato OSV ou nativo).</td>
 <td><code>--feed</code> ganha. Sem nenhum dos dois, o <code>--update</code> falha com um erro que nomeia ambos.</td>
@@ -677,7 +677,7 @@ antes de usares uma delas.</p>
 </table></div>
 <h2 id="afinacao-de-recursos-do-cloud-hypervisor-e-das-vms">Afinação de recursos do Cloud Hypervisor e das VMs<a class="hanchor" href="#afinacao-de-recursos-do-cloud-hypervisor-e-das-vms" aria-label="#">#</a></h2>
 <p>Os tectos do libvirt abaixo são escritos no XML de domínio gerado
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs:libvirt_domain_xml</code></a>); não mudam um domínio que já exista
+(<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs:libvirt_domain_xml</code></a>); não mudam um domínio que já exista
 até ele voltar a arrancar.</p>
 <div class="tablewrap"><table>
 <thead>
@@ -692,49 +692,49 @@ até ele voltar a arrancar.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_HYPERVISOR_FW</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:default_ch_firmware</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:default_ch_firmware</code></a></td>
 <td>Firmware que o Cloud Hypervisor arranca quando não é dado <code>--firmware</code>.</td>
 <td>Um caminho de ficheiro, usado só se existir. Caso contrário, o primeiro que exista de <code>DEFAULT_CH_FIRMWARES</code> (o EDK2 <code>CLOUDHV.fd</code> antes do <code>hypervisor-fw</code>).</td>
 <td>Ver o <a href="microvm-setup.html">Construir microVMs</a> para saber porque é que o build do EDK2 vem primeiro.</td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (o veredicto é o <code>admission_verdict</code>; o <code>MemAvailable</code> vem do <code>delonix_node::<wbr>mem_available_mib</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (o veredicto é o <code>admission_verdict</code>; o <code>MemAvailable</code> vem do <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Memória mantida livre para o host ao admitir uma VM: uma VM é recusada se a sua memória mais esta reserva exceder o <code>MemAvailable</code>.</td>
 <td>MiB; omissão <code>2048</code>; um valor que não se consegue interpretar recorre a 2048.</td>
 <td>Baixá-la arrisca que o host mate processos por OOM.</td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_MEM_HARD_LIMIT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:mem_hard_limit_kib</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:mem_hard_limit_kib</code></a></td>
 <td>Se os domínios libvirt recebem um <code>&lt;memtune&gt;&lt;hard_limit&gt;</code> sobre o processo QEMU inteiro.</td>
 <td><code>off</code> → sem limite rígido; qualquer outra coisa → ligado.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_MEM_OVERHEAD_PCT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:mem_hard_limit_kib</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:mem_hard_limit_kib</code></a></td>
 <td>Margem acima da memória do convidado permitida pelo limite rígido.</td>
 <td>Percentagem, intervalo aceite 5–200; omissão <code>25</code>; pelo menos 1 GiB de margem. Fora do intervalo → 25.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_CPU_QUOTA_CORES</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:cpu_quota_micros</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:cpu_quota_micros</code></a></td>
 <td>Tecto de CPU (<code>&lt;cputune&gt;&lt;quota&gt;</code>) para um domínio libvirt, em cores.</td>
 <td>Sem valor → vCPUs + 1 (o core extra é para as threads de emulador e de IO do QEMU). Um número positivo → esse número de cores. <code>off</code> → sem tecto.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_IO_MAX_BPS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_iotune_xml</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_iotune_xml</code></a></td>
 <td>Tecto de débito do disco raiz (<code>&lt;iotune&gt;&lt;total_bytes_sec&gt;</code>).</td>
 <td>Bytes/s, inteiro positivo. Sem valor ou 0 → sem tecto (opt-in).</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_VM_IO_MAX_IOPS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_iotune_xml</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_iotune_xml</code></a></td>
 <td>Tecto de IOPS do disco raiz (<code>&lt;iotune&gt;&lt;total_iops_sec&gt;</code>).</td>
 <td>Inteiro positivo. Sem valor ou 0 → sem tecto (opt-in).</td>
 <td></td>
@@ -743,7 +743,7 @@ até ele voltar a arrancar.</p>
 </table></div>
 <h3 id="orcamento-de-recursos-dos-containers">Orçamento de recursos dos containers<a class="hanchor" href="#orcamento-de-recursos-dos-containers" aria-label="#">#</a></h3>
 <p>Estas afinam as omissões e o tecto agregado que o motor aplica aos containers
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>).</p>
+(<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>).</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -757,28 +757,28 @@ até ele voltar a arrancar.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_RESERVE_PCT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:host_reserve_pct</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:host_reserve_pct</code></a></td>
 <td>Fracção do host (memória e CPU) que o slice de cgroup do motor pode usar no total.</td>
 <td>Percentagem, intervalo aceite 10–95; omissão <code>85</code>. Fora do intervalo → 85.</td>
 <td>É também a base das omissões por workload abaixo.</td>
 </tr>
 <tr>
 <td><code>DELONIX_DEFAULT_PCT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:default_workload_pct</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:default_workload_pct</code></a></td>
 <td>Fracção do orçamento do motor que um workload pode tomar quando não declara limites.</td>
 <td>Percentagem, intervalo aceite 1–100; omissão <code>25</code>. Fora do intervalo → 25.</td>
 <td>A omissão de memória é de pelo menos 64 MiB; a omissão de CPU fica limitada entre 0,25 e 1,0 cores.</td>
 </tr>
 <tr>
 <td><code>DELONIX_SWAP_MAX</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:swap_max_value</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:swap_max_value</code></a></td>
 <td><code>memory.swap.max</code> do cgroup de um container.</td>
 <td>Um valor de cgroup; omissão <code>0</code> (sem swap). <code>max</code> repõe o swap ilimitado.</td>
 <td>O swap transforma um limite de memória num limite flexível.</td>
 </tr>
 <tr>
 <td><code>DELONIX_IO_MAX_BPS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:host_io_max_bps</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:host_io_max_bps</code></a></td>
 <td>Tecto agregado de leitura/escrita em disco (<code>io.max</code>) do slice do motor.</td>
 <td>Bytes/s; omissão <code>500000000</code> (500 MB/s). <code>0</code> desliga-o. Um valor que não se consegue interpretar → omissão.</td>
 <td>Um tecto de segurança contra um container saturar o disco, não QoS fino. Só se aplica onde o controlador <code>io</code> estiver disponível.</td>
@@ -787,10 +787,10 @@ até ele voltar a arrancar.</p>
 </table></div>
 <h2 id="providers">Providers<a class="hanchor" href="#providers" aria-label="#">#</a></h2>
 <h3 id="proxmox-ve">Proxmox VE<a class="hanchor" href="#proxmox-ve" aria-label="#">#</a></h3>
-<p>Lidas uma vez no arranque da CLI por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_proxmox</code></a>.
+<p>Lidas uma vez no arranque da CLI por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_proxmox</code></a>.
 Nada é contactado até um comando de VM seleccionar o backend <code>proxmox</code>. Valores em branco contam
 como não definidos. Uma configuração errada imprime um aviso e deixa o backend por registar; não
-impede os outros comandos. Contexto: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/adr/0008-proxmox-vm-backend.md</code></a>.</p>
+impede os outros comandos. Contexto: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/adr/0008-proxmox-vm-backend.md</code></a>.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -804,7 +804,7 @@ impede os outros comandos. Contexto: <a class="src" href="https://github.com/ang
 <tbody>
 <tr>
 <td><code>DELONIX_PROXMOX_URL</code></td>
-<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code>; nomeada no erro de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>KNOWN_UNREGISTERED</code>)</td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code>; nomeada no erro de <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>KNOWN_UNREGISTERED</code>)</td>
 <td>Endpoint da API do nó. Defini-la é o que activa o backend.</td>
 <td><code>https:/<wbr>/<wbr>&lt;host&gt;:8006</code>.</td>
 <td>Exige <code>DELONIX_PROXMOX_NODE</code> e uma credencial.</td>
@@ -916,7 +916,7 @@ impede os outros comandos. Contexto: <a class="src" href="https://github.com/ang
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TRACE_ROUTES</code></td>
-<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code> (lida uma vez, entregue ao cliente como <code>ClientOptions::<wbr>trace_routes</code>; a constante <code>TRACE_ROUTES_ENV</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> nomeia-a) e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:backend</code></a> (a suite ao vivo, cuja corrida está commitada como <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/proxmox/trace-9.2.2.routes" target="_blank" rel="noopener"><code>docs/<wbr>proxmox/<wbr>trace-9.<wbr>2.<wbr>2.<wbr>routes</code></a>)</td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code> (lida uma vez, entregue ao cliente como <code>ClientOptions::<wbr>trace_routes</code>; a constante <code>TRACE_ROUTES_ENV</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> nomeia-a) e <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:backend</code></a> (a suite ao vivo, cuja corrida está commitada como <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/proxmox/trace-9.2.2.routes" target="_blank" rel="noopener"><code>docs/<wbr>proxmox/<wbr>trace-9.<wbr>2.<wbr>2.<wbr>routes</code></a>)</td>
 <td>Acrescenta <code>METHOD /path</code> de cada pedido a este ficheiro — o numerador da matriz de cobertura (ADR-0049).</td>
 <td>Caminho para um ficheiro; vazio = desligado.</td>
 <td>Alimenta-o ao <code>scripts/<wbr>proxmox_api_inventory.<wbr>py --trace</code> para marcar rotas <code>supported+tested</code>.</td>
@@ -1013,28 +1013,28 @@ definições de teste — ver <a href="#test-only">Só para testes</a>.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_OTLP_ENDPOINT</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:build_otlp_layer</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:build_otlp_layer</code></a></td>
 <td>Exporta spans de tracing por OTLP/HTTP (protobuf).</td>
 <td>Um URL base como <code>http://localhost:4318</code>; <code>/v1/traces</code> é acrescentado se faltar. Sem valor ou em branco → sem exportador.</td>
 <td>Uma falha a construir o exportador avisa e continua só com logs. O nome do serviço é <code>OTEL_SERVICE_NAME</code> ou o nome do executável.</td>
 </tr>
 <tr>
 <td><code>DELONIX_METRICS_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>lib.<wbr>rs</code></a> (arranque do servidor CRI)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>lib.<wbr>rs</code></a> (arranque do servidor CRI)</td>
 <td>Activa um listener HTTP Prometheus <code>/metrics</code> no <code>delonix-cri</code>.</td>
 <td><code>host:port</code>, por exemplo <code>127.0.0.1:9100</code>. Sem valor → sem listener.</td>
 <td>Um listener TCP: faz bind ao loopback, a menos que as métricas devam ser alcançáveis pela rede.</td>
 </tr>
 <tr>
 <td><code>DELONIX_WALK_THREADS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume/<wbr>src/<wbr>lib.<wbr>rs:walk_threads</code></a> (a varredura de disco por trás do <code>system df</code>, do uso de volumes e da quota rootless)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume/<wbr>src/<wbr>lib.<wbr>rs:walk_threads</code></a> (a varredura de disco por trás do <code>system df</code>, do uso de volumes e da quota rootless)</td>
 <td>Define quantos workers a varredura paralela de directórios usa.</td>
 <td>Um inteiro positivo; <code>1</code> → a varredura sequencial. Não definida → o número de CPUs, com tecto.</td>
 <td>As varreduras paralela e sequencial dão o MESMO total (testado com hardlinks vistos por workers diferentes); a variável existe para o provar num host dado, e como escapatória se um sistema de ficheiros se comportar mal sob <code>readdir</code> concorrente.</td>
 </tr>
 <tr>
 <td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, chamada no arranque pelos processos que ficam de pé (o pin e o control da rede, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, a fatia da API Docker, o proxy de ingress L7)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, chamada no arranque pelos processos que ficam de pé (o pin e o control da rede, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, a fatia da API Docker, o proxy de ingress L7)</td>
 <td>O tecto do próprio glibc para as arenas do malloc. Sem ela, esses processos põem o tecto em 2 eles mesmos, porque a omissão do glibc reserva um heap de 64 MiB por thread em contenção.</td>
 <td>Um inteiro positivo; lido pelo glibc, não pelo motor.</td>
 <td>Se a definires, o motor não lhe toca: o valor do operador ganha.</td>
@@ -1057,49 +1057,49 @@ normal comportar-se como uma passagem interna.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_BIN</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs:cli_bin</code></a> (usada por <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs:cli_bin</code></a> (usada por <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
 <td>O executável <code>delonix</code> que um servidor volta a chamar para operações de ciclo de vida.</td>
 <td>Um caminho. Sem valor: o <code>delonix</code> ao lado do executável do servidor, depois o <code>delonix</code> no <code>PATH</code>.</td>
-<td>Definida por <code>delonix serve …</code> / <code>delonix mcp</code> (<code>cmd/<wbr>serve.<wbr>rs:exec_server</code>) com a CLI em execução. Defini-la à mão só é legítimo quando arrancas um binário de servidor directamente e queres que ele chame uma CLI específica. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a> também lêem uma variável com este nome para escolher o binário que inspeccionam (ver <a href="build-and-test.html">Clonar, compilar e testar</a>).</td>
+<td>Definida por <code>delonix serve …</code> / <code>delonix mcp</code> (<code>cmd/<wbr>serve.<wbr>rs:exec_server</code>) com a CLI em execução. Defini-la à mão só é legítimo quando arrancas um binário de servidor directamente e queres que ele chame uma CLI específica. <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> e <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a> também lêem uma variável com este nome para escolher o binário que inspeccionam (ver <a href="build-and-test.html">Clonar, compilar e testar</a>).</td>
 </tr>
 <tr>
 <td><code>DELONIX_DISPATCH_VERSION</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs:check_version</code></a> (no <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs:check_version</code></a> (no <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
 <td>A versão que o servidor tem de ser; um servidor de outra release recusa-se a arrancar.</td>
 <td>Definida por <code>cmd/<wbr>serve.<wbr>rs:exec_server</code> com a versão da CLI.</td>
 <td>Um servidor arrancado directamente (por exemplo por uma unit do systemd) não tem expectativa nenhuma e não é verificado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_REEXEC_ID</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs</code></a> (<code>cmd_run</code>, <code>reexec_env</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs</code></a> (<code>cmd_run</code>, <code>reexec_env</code>)</td>
 <td>Marca a segunda passagem de <code>container run/<wbr>start --net &lt;custom&gt;</code> ou <code>--pod</code>, re-executada dentro dos namespaces do holder, e leva o id do container.</td>
 <td>Definida por <code>cmd/<wbr>container.<wbr>rs:reexec_env</code>.</td>
 <td>A sua presença salta verificações que a primeira passagem já fez (posse da porta).</td>
 </tr>
 <tr>
 <td><code>DELONIX_REEXEC_IP</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs</code></a></td>
 <td>O endereço SDN que a primeira passagem atribuiu, para a segunda passagem o registar.</td>
 <td>Definida por <code>cmd/<wbr>container.<wbr>rs:reexec_env</code>.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PIN_SYNC</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>pin_userns.<wbr>rs</code></a> (<code>SYNC_ENV</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>pin_userns.<wbr>rs</code></a> (<code>SYNC_ENV</code>)</td>
 <td>Descritores de ficheiro dos pipes de handshake entre o chamador e o pin de rede enquanto os mapas do user namespace são escritos.</td>
 <td><code>&lt;read-fd&gt;,&lt;write-fd&gt;</code>.</td>
 <td>Só definida quando o pin tem de criar namespaces novos; um pin que adopta nunca a recebe.</td>
 </tr>
 <tr>
 <td><code>DELONIX_DELEGATE_ATTEMPTED</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs:reexec_under_delegated_scope</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs:reexec_under_delegated_scope</code></a></td>
 <td>Protege o único re-exec automático do <code>cluster create</code> sob um scope delegado, para que um host a quem ainda falte <code>cpu</code> mostre o erro real em vez de entrar em ciclo.</td>
 <td>Definida a <code>1</code> no processo re-executado.</td>
 <td>Para desligar o re-exec, usa <code>DELONIX_NO_AUTO_DELEGATE</code>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_INTERNAL</code></td>
-<td>definida nos filhos por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (<code>start_control</code> e os outros spawns do holder), <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:launch_vmm</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>runtime_svc/<wbr>lifecycle.<wbr>rs</code></a>, <code>spdy.rs</code>, <code>streaming.rs</code></td>
+<td>definida nos filhos por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (<code>start_control</code> e os outros spawns do holder), <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:launch_vmm</code></a>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>runtime_svc/<wbr>lifecycle.<wbr>rs</code></a>, <code>spdy.rs</code>, <code>streaming.rs</code></td>
 <td>Marca uma invocação máquina-a-máquina.</td>
 <td>Definida a <code>1</code>.</td>
 <td><strong>Nenhum leitor no código actual</strong>: o comentário em <code>runtime_svc/<wbr>lifecycle.<wbr>rs:delonix</code> diz que ela "bypasses the grouped-commands barrier", mas já nada lê a variável. Continua a ser escrita, e aparece no environ dos processos de rede (ver os testes de <code>infra.<wbr>rs:env_names_this_root</code>).</td>
@@ -1122,42 +1122,42 @@ variável quando o programa corre.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_GIT_HASH</code></td>
-<td>escrita por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>build.<wbr>rs</code></a>; lida com <code>env!</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a></td>
+<td>escrita por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>build.<wbr>rs</code></a>; lida com <code>env!</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a></td>
 <td>Hash curto do commit mostrado por <code>delonix --version</code>.</td>
 <td><code>git rev-parse --short=9 HEAD</code>, ou <code>unknown</code> sem git.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_GIT_SINCE</code></td>
-<td>escrita por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>build.<wbr>rs</code></a>; lida em <code>src/main.rs</code></td>
+<td>escrita por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>build.<wbr>rs</code></a>; lida em <code>src/main.rs</code></td>
 <td>Distância à tag mais recente, mostrada como <code>(+N commits since vX.<wbr>Y.<wbr>Z)</code>.</td>
 <td><code>&lt;count&gt;|&lt;tag&gt;</code>, vazia numa tag ou sem git.</td>
 <td>É assim que distingues duas builds com a mesma versão.</td>
 </tr>
 <tr>
 <td><code>DELONIX_BUILD_DATE</code></td>
-<td>escrita por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>build.<wbr>rs</code></a>; lida em <code>src/main.rs</code> e <code>src/cmd/man.rs</code></td>
+<td>escrita por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>build.<wbr>rs</code></a>; lida em <code>src/main.rs</code> e <code>src/cmd/man.rs</code></td>
 <td>Data de build no <code>--version</code> e nas man pages geradas.</td>
 <td><code>date -u +%Y-%m-%d</code>, ou <code>unknown</code>.</td>
 <td>As man pages usam-na em vez do relógio para que duas corridas do gerador sobre a mesma build produzam a mesma saída.</td>
 </tr>
 <tr>
 <td><code>DELONIX_GIT_COMMIT</code></td>
-<td>lida com <code>option_env!</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs</code></a> (resposta de <code>/version</code>, <code>GitCommit</code>)</td>
+<td>lida com <code>option_env!</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs</code></a> (resposta de <code>/version</code>, <code>GitCommit</code>)</td>
 <td>Commit reportado pela fatia da API Docker.</td>
 <td>Tirada do ambiente de build se estiver definida; caso contrário <code>unknown</code>.</td>
 <td><strong>Nada no repositório a define</strong> (nem o <code>build.rs</code>, nem os workflows), por isso os binários publicados reportam <code>unknown</code>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_BPF_OBJECT</code></td>
-<td>escrita por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>build.<wbr>rs</code></a>; lida com <code>env!</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/bpf.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>bpf.<wbr>rs</code></a></td>
+<td>escrita por <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>build.<wbr>rs</code></a>; lida com <code>env!</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/bpf.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>bpf.<wbr>rs</code></a></td>
 <td>Caminho do objecto eBPF compilado de contabilização de fluxos, embutido no binário.</td>
 <td>Definida só quando o <code>clang</code> e os headers da libbpf estão presentes em tempo de build (junto com <code>cfg(bpf_object)</code>).</td>
 <td>Opcional: sem ela o runtime degrada para contadores do nftables.</td>
 </tr>
 <tr>
 <td><code>DELONIX_ASSET</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (secção do binário)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (secção do binário)</td>
 <td>Variável de shell que guarda o nome do ficheiro do asset da release escolhido para este CPU (<code>delonix</code> ou a sua variante <code>-v3</code>).</td>
 <td>Atribuída pelo script a partir do passo de download.</td>
 <td>Não é lida do teu ambiente; defini-la antes de correres o instalador não tem efeito.</td>
@@ -1180,232 +1180,232 @@ variável quando o programa corre.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_URL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Nó Proxmox contra o qual correr os testes ao vivo do backend.</td>
 <td><code>https:/<wbr>/<wbr>&lt;host&gt;:8006</code>.</td>
 <td>Activa os testes. Criam e destroem uma VM; corre-os só contra um nó que seja teu.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_NODE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Nome do nó.</td>
 <td>Omissão <code>pve</code>.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_USER</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Conta para autenticação por password.</td>
 <td>Por exemplo <code>root@pam</code>. Obrigatória.</td>
 <td>A verificação TLS está desligada nestes testes.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_PASS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>A sua password.</td>
 <td>Obrigatória.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN_FILE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>Um ficheiro com um token de API na forma <code>user@realm!nome=segredo</code>, numa linha.</td>
 <td>Opcional; lido antes de <code>DELONIX_PROXMOX_TEST_TOKEN_ID</code> e da conta.</td>
 <td>O segredo fica num ficheiro 0600, fora do ambiente e do histórico da shell.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN_ID</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>O id de um token de API em vez da conta (<code>user@realm!nome</code>).</td>
 <td>Opcional; com <code>DELONIX_PROXMOX_TEST_TOKEN</code> é usado antes da conta.</td>
 <td>Revogável no nó; uma corrida de lab pode criá-lo sem a password de ninguém.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>O seu segredo.</td>
 <td>Opcional, com o id.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_STORAGE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Storage para o disco da VM de teste.</td>
 <td>Omissão <code>local-lvm</code>.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_BACKUP_STORAGE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Storage onde o arquivo de backup aterra — o nó pode não aceitar conteúdo de backup no storage do disco (uma pool thin-LVM não pode).</td>
 <td>Omissão: igual a <code>DELONIX_PROXMOX_TEST_STORAGE</code>.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_MOVE_STORAGE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Um SEGUNDO storage para onde o <code>move_disk</code> move o disco de arranque da VM de teste — o nó recusa um move para o mesmo storage com o mesmo formato, por isso tem de ser mesmo uma pool diferente.</td>
 <td>Omissão <code>local</code> (tem de ter <code>content=images</code> activado).</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_MOVE_NODE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>O nó do mesmo cluster para onde os casos ao vivo do <code>vm move</code> movem uma VM (ADR-0053). Precisa de um cluster de laboratório com dois nós — nunca produção.</td>
 <td>Por definir: os dois casos de move saltam.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_IMAGE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Um qcow2 do store do motor a partir do qual o caso ao vivo do ADR-0057 arranca uma VM, enviando-o para o nó. O storage de importação do nó tem de ter <code>import</code>.</td>
 <td>Por definir: o caso salta.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_OCI_ARCHIVE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Um arquivo de imagem com media types OCI, escrito pelo motor (<code>write_oci_media_archive</code>), a partir do qual o caso ao vivo do ADR-0058 cria um container de sistema. O storage para onde é enviado tem de ter <code>vztmpl</code>.</td>
 <td>Por definir: o caso salta.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Um storage partilhado por todos os nós do cluster (NFS, Ceph RBD), onde os casos de move põem o disco da VM — um disco em storage local é recusado, não é copiado.</td>
 <td>Por definir: os dois casos de move saltam.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_CALLBACK_ADDR</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
 <td>O endereço em que o NÓ alcança este host: o teste arranca um servidor HTTP stub e dá ao nó <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> como o URL de um controlador IPAM e de um controlador DNS, porque o nó verifica os dois chamando-lhes.</td>
 <td>Um IP que o nó consegue rotear (<code>192.168.122.1</code> para um nó de laboratório libvirt-NAT).</td>
 <td>Sem ela, a metade do controlador desse teste é saltada; o resto continua a correr.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_DNS_CONTROLLER</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
 <td>O id de um controlador PowerDNS que o administrador do cluster registou (<code>/cluster/sdn/dns</code>) — o caso ao vivo do ADR-0064 dá-o à zona e nunca cria nenhum.</td>
 <td>Um id de controlador (<code>pdnslab</code> no lab).</td>
 <td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_DNS_ZONE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
 <td>O domínio em que o caso ao vivo regista o seu guest, sem o ponto final; ele e o <code>10.in-addr.arpa.</code> têm de existir no servidor DNS.</td>
 <td>Um domínio, p. ex. <code>f5c.lab</code>.</td>
 <td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_DNS_URL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
 <td>A base da API do servidor DNS (<code>http:/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>), alcançada a partir deste host para o TESTE ler os registos; o motor nunca a chama.</td>
 <td>Um URL http(s).</td>
 <td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_DNS_KEY_FILE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
 <td>Um ficheiro com a chave da API do servidor DNS, para as leituras e a limpeza do próprio teste.</td>
 <td>O caminho de um ficheiro com a chave.</td>
 <td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_POWERDNS_TEST_URL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
 <td>A API de um servidor PowerDNS (<code>http(s):/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>) onde o caso ao vivo do <code>delonix-powerdns</code> remove registos (ADR-0064 D6).</td>
 <td>Um URL http(s).</td>
 <td>Activa o caso, com as duas de baixo. Escreve um rrset seu e remove-o em qualquer saída.</td>
 </tr>
 <tr>
 <td><code>DELONIX_POWERDNS_TEST_KEY_FILE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
 <td>Um ficheiro com a chave de API desse servidor.</td>
 <td>Um caminho.</td>
 <td>Nunca é impressa.</td>
 </tr>
 <tr>
 <td><code>DELONIX_POWERDNS_TEST_ZONE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
 <td>Uma zona que o servidor já serve, onde o caso escreve o seu rrset.</td>
 <td>Um domínio, ex. <code>f5c.lab</code>.</td>
 <td>Sem as três, o caso é saltado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>A bridge do nó onde o container de sistema do teste de firewall é ligado: a firewall precisa de um <code>net0</code> onde pôr <code>firewall=1</code>.</td>
 <td>Uma bridge que exista no nó.</td>
 <td><code>vmbr0</code>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_AGENT_VMID</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:o_ip_vem_do_agente_de_um_convidado_a_serio</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:o_ip_vem_do_agente_de_um_convidado_a_serio</code></a></td>
 <td>Uma VM existente, com o QEMU guest agent a correr, cujo IP o teste lê.</td>
 <td>Um id de VM.</td>
 <td>Saltado quando não definida, mesmo com o URL definido.</td>
 </tr>
 <tr>
 <td><code>DELONIX_TRUENAS_TEST_URL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Appliance TrueNAS contra o qual correr os testes ao vivo do provisionador.</td>
 <td><code>https://&lt;host&gt;</code>.</td>
 <td>Activa os testes. Criam e destroem <code>&lt;pool&gt;/<wbr>dlxlive-&lt;pid&gt;</code>.</td>
 </tr>
 <tr>
 <td><code>DELONIX_TRUENAS_TEST_POOL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Pool para o dataset de teste.</td>
 <td>Omissão <code>tank</code>.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_TRUENAS_TEST_KEY</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Chave de API.</td>
 <td></td>
 <td>Usada em vez de utilizador e password quando definida.</td>
 </tr>
 <tr>
 <td><code>DELONIX_TRUENAS_TEST_USER</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Conta para autenticação por password.</td>
 <td>Obrigatória sem chave.</td>
 <td>A verificação TLS está desligada nestes testes.</td>
 </tr>
 <tr>
 <td><code>DELONIX_TRUENAS_TEST_PASS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-truenas/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>A sua password.</td>
 <td>Obrigatória sem chave.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_OPNSENSE_TEST_URL</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Appliance OPNsense contra o qual correr os testes ao vivo do cliente.</td>
 <td><code>https://&lt;host&gt;</code>.</td>
 <td>Activa os testes. Criam e removem um alias e uma regra, e depois confirmam que o appliance fica limpo.</td>
 </tr>
 <tr>
 <td><code>DELONIX_OPNSENSE_TEST_KEY</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Chave de API.</td>
 <td>Obrigatória.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>DELONIX_OPNSENSE_TEST_SECRET</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Segredo de API.</td>
 <td>Obrigatório.</td>
 <td>A verificação TLS está desligada nestes testes.</td>
 </tr>
 <tr>
 <td><code>DELONIX_UPDATE_FIXTURES</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/tests/advisor_fixtures.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>advisor_fixtures.<wbr>rs:goldens_match_the_rules_as_they_are_today</code></a></td>
-<td>Reescreve as fixtures golden do advisor em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux/tests/fixtures/advisor" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>fixtures/<wbr>advisor/<wbr></code></a> em vez de comparar com elas.</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/tests/advisor_fixtures.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>advisor_fixtures.<wbr>rs:goldens_match_the_rules_as_they_are_today</code></a></td>
+<td>Reescreve as fixtures golden do advisor em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-linux/tests/fixtures/advisor" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>fixtures/<wbr>advisor/<wbr></code></a> em vez de comparar com elas.</td>
 <td>Definida (qualquer valor) → reescreve.</td>
 <td>Regenera-as no <strong>mesmo commit</strong> que a mudança de regra.</td>
 </tr>
@@ -1428,24 +1428,24 @@ DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 </code></pre></div>
 <h2 id="nomes-que-parecem-variaveis-mas-nao-sao">Nomes que parecem variáveis mas não são<a class="hanchor" href="#nomes-que-parecem-variaveis-mas-nao-sao" aria-label="#">#</a></h2>
 <p>Alguns nomes <code>DELONIX_*</code> aparecem no código sem serem lidos do ambiente de nenhum processo. Estão
-excluídos da verificação acima por <code>NOT_ENV</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>, cada um com a sua razão, e
+excluídos da verificação acima por <code>NOT_ENV</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>, cada um com a sua razão, e
 nunca precisas de os definir:</p>
 <ul>
-<li><code>DELONIX_CRI_SOCKET</code> — uma constante Rust em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/cluster.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/cluster.rs</code></a>,
+<li><code>DELONIX_CRI_SOCKET</code> — uma constante Rust em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/cluster.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/cluster.rs</code></a>,
   passada a <code>kubeadm … --cri-socket=</code>. O socket onde o servidor CRI escuta é <code>DELONIX_CRI_ADDR</code>.</li>
-<li><code>DELONIX_ROOTX</code>, <code>DELONIX_ROOT_BACKUP</code> — fixtures de teste em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>,
+<li><code>DELONIX_ROOTX</code>, <code>DELONIX_ROOT_BACKUP</code> — fixtures de teste em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>,
   que provam que a leitura do environ de um processo compara nomes inteiros, não prefixos.</li>
 <li><code>DELONIX_IMAGE</code>, <code>DELONIX_DISTRO</code>, <code>DELONIX_RELEASE</code>, <code>DELONIX_BUILT_BY</code>, <code>DELONIX_BASE_IMAGE</code>,
   <code>DELONIX_BASE_SHA256</code>, <code>DELONIX_K8S_VERSION</code>, <code>DELONIX_OFFLINE</code>, <code>DELONIX_NODE_EXPORTER</code>,
   <code>DELONIX_EXTRA_PACKAGES</code> — chaves do ficheiro de proveniência <code>/etc/delonix-image-release</code> que o
   <code>image vm build</code> escreve <strong>dentro</strong> de uma imagem de VM construída
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>). Lê-as no convidado com
+  (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>). Lê-as no convidado com
   <code>cat /etc/delonix-image-release</code>; nenhum processo as lê.</li>
 </ul>
 <hr />
 <p><strong>Seguinte:</strong> <a href="glossary.html">Glossário</a> — os termos que encontras neste repositório, com o seu significado no Delonix e onde cada um é explicado.</p>
 <nav class="pager"><a href="plano-conformidade-oci-cri.html"><span>← Anterior</span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</a><a class="next" href="glossary.html"><span>Seguinte →</span>Glossário</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/environment-variables.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/environment-variables.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/environment-variables.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/environment-variables.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>

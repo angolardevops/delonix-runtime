@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/environment.html">EN · English</option><option value="../pt-AO/environment.html">PT-AO · Português (Angola)</option><option value="../fr-FR/environment.html">FR-FR · Français</option><option value="../zh-CN/environment.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -222,7 +222,7 @@ issue 之前，先读一读 <a href="#known-host-traps">已知的宿主机陷阱
 <h2 id="toolchain">工具链<a class="hanchor" href="#toolchain" aria-label="#">#</a></h2>
 <!-- dev-docs:begin toolchain -->
 <ul>
-<li><strong>Rust 工具链：</strong> <code>1.96.0</code>（固定在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 中；首次调用 <code>cargo</code> 时由 <code>rustup</code> 安装）</li>
+<li><strong>Rust 工具链：</strong> <code>1.96.0</code>（固定在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 中；首次调用 <code>cargo</code> 时由 <code>rustup</code> 安装）</li>
 <li><strong>组件：</strong> <code>rustfmt</code>, <code>clippy</code></li>
 </ul>
 <!-- dev-docs:end toolchain -->
@@ -230,8 +230,8 @@ issue 之前，先读一读 <a href="#known-host-traps">已知的宿主机陷阱
 <p>安装 <a href="https://rustup.rs/"><code>rustup</code></a>，让它去读取那个固定版本的 channel；不要用 <code>stable</code>
 去覆盖它。CI 用的是完全同一份文件（每个 job 里都会跑 <code>rustup show</code>）。</p>
 <h3 id="protoc-required-to-build"><code>protoc</code>（构建必需）<a class="hanchor" href="#protoc-required-to-build" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> 编译 Kubernetes CRI 的 protobuf，
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api/build.rs</code></a> 编译 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 里的节点契约，两者都用
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> 编译 Kubernetes CRI 的 protobuf，
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-node-api/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api/build.rs</code></a> 编译 <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 里的节点契约，两者都用
 <code>tonic-build</code>/<code>prost</code>，这需要 <code>PATH</code> 上有 Protocol Buffers 编译器。<code>delonix</code> 这个二进制程序依赖
 <code>delonix-cri</code>，所以<strong>如果没有它，一次普通的 <code>cargo build --workspace</code> 就会失败</strong>：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash"># Debian / Ubuntu
@@ -258,17 +258,17 @@ sudo dnf install protobuf-compiler
 </tr>
 <tr>
 <td><code>buf</code> v1.73.0 和 <code>protoc-gen-openapi</code> v0.7.1（需要 Go 工具链来安装它们）</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a> 里的 <code>contract</code> job</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a> 里的 <code>contract</code> job</td>
 </tr>
 <tr>
 <td><code>cargo-deny</code></td>
 <td>供应链检查</td>
-<td><code>deny</code> job，配置在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+<td><code>deny</code> job，配置在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
 </tr>
 <tr>
 <td>Python 的 <code>markdown</code> 模块</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>（渲染 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>）</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>（渲染 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>）</td>
 <td><code>docs</code> job</td>
 </tr>
 <tr>
@@ -280,7 +280,7 @@ sudo dnf install protobuf-compiler
 </table></div>
 <p>各自怎么跑，见 <a href="build-and-test.html">克隆、构建与测试</a>。</p>
 <h2 id="kernel-requirements">内核要求<a class="hanchor" href="#kernel-requirements" aria-label="#">#</a></h2>
-<p>这些是引擎所依赖的内核特性。安装脚本（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>）和
+<p>这些是引擎所依赖的内核特性。安装脚本（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>）和
 <code>delonix system doctor</code> 会替你检查其中大部分。</p>
 <div class="tablewrap"><table>
 <thead>
@@ -308,7 +308,7 @@ sudo dnf install protobuf-compiler
 </tr>
 <tr>
 <td>带新 mount API 和 <code>lowerdir+</code> 的 <strong>overlayfs</strong>（Linux <strong>6.5</strong> 或更新）</td>
-<td>容器的根文件系统是用 <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code> 构建出来的 overlay 挂载，每一层调用一次 <code>lowerdir+</code> —— 见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
+<td>容器的根文件系统是用 <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code> 构建出来的 overlay 挂载，每一层调用一次 <code>lowerdir+</code> —— 见 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
 <td><code>uname -r</code></td>
 </tr>
 <tr>
@@ -328,7 +328,7 @@ sudo dnf install protobuf-compiler
 <p>在较老的 Debian 内核上，无特权 user 命名空间是被
 <code>kernel.unprivileged_userns_clone=0</code> 关掉的；安装脚本会把它设成 <code>1</code>。</p>
 <h2 id="host-packages">宿主机软件包<a class="hanchor" href="#host-packages" aria-label="#">#</a></h2>
-<p>唯一的真相来源是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>，它同时也是官方安装
+<p>唯一的真相来源是 <a href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>，它同时也是官方安装
 脚本（作为发布资产发布出去）。它通过 <code>/etc/os-release</code> 检测包管理器，支持 <strong>apt</strong>（Debian、
 Ubuntu 及其衍生版）、<strong>dnf</strong>（Fedora、RHEL、CentOS Stream、Rocky、AlmaLinux）、<strong>zypper</strong>
 （openSUSE、SLES）和 <strong>pacman</strong>（Arch 及其衍生版）。安装脚本会为 <strong>x86_64</strong> 和 <strong>aarch64</strong>
@@ -440,13 +440,13 @@ v4.2.0 起才有（v4.1.0 的发布里一个都没有）。
 <ul>
 <li><code>-m</code>/<code>--memory</code>、<code>-c</code>/<code>--cpus</code> 和 <code>--cpu-weight</code>：<code>container run</code> 会在创建任何东西之前就
   <strong>拒绝</strong>执行，报出一个点名修法的错误，退出码是 <strong>69</strong>（<code>Error::Unavailable</code>，
-  <code>EX_UNAVAILABLE</code> 这一类 —— 见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> 里的
+  <code>EX_UNAVAILABLE</code> 这一类 —— 见 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> 里的
   <code>preflight_resource_limits</code>）。<code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> 会带着告警照样把容器
   跑起来，只是不加限制。</li>
 <li><code>--cpuset</code>、<code>--io-weight</code> 以及
   <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/<code>--device-write-iops</code> 这一
   族，会<strong>按控制器</strong>检查（<code>preflight_controller_limits</code>，它询问
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> 里的 <code>leaf_controllers</code>）：容器的 cgroup 里没有
+  <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> 里的 <code>leaf_controllers</code>）：容器的 cgroup 里没有
   <code>cpuset</code>/<code>io</code> 控制器时，<code>container run</code> 会以退出码 <strong>69</strong> 拒绝，逃生口同样是
   <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code>。2026-09-27 实测：在此之前，
   <code>--device-write-bps 5mb</code> 以 1.6 GB/s 写入并退出 0。</li>
@@ -490,7 +490,7 @@ v4.2.0 起才有（v4.1.0 的发布里一个都没有）。
 <p><strong>下一篇：</strong><a href="build-and-test.html">克隆、构建与测试</a> —— 构建、安装并测试你的代码树，以及
 把每一个 CI 门禁都当作本地命令来跑。</p>
 <nav class="pager"><a href="rust-primer.html"><span>← 上一页</span>本代码库的 Rust 入门</a><a class="next" href="build-and-test.html"><span>下一页 →</span>克隆、构建与测试</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/environment.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/environment.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/environment.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/environment.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

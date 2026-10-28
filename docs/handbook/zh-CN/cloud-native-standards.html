@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/cloud-native-standards.html">EN · English</option><option value="../pt-AO/cloud-native-standards.html">PT-AO · Português (Angola)</option><option value="../fr-FR/cloud-native-standards.html">FR-FR · Français</option><option value="../zh-CN/cloud-native-standards.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -288,32 +288,32 @@ th:first-child,td:first-child{white-space:nowrap}
 <ol>
 <li><strong>它为 OCI 运行时生产 bundle。</strong> <code>delonix image export &lt;image&gt; &lt;dir&gt;</code> 会写出
    <code>&lt;dir&gt;/rootfs</code> 和 <code>&lt;dir&gt;/config.json</code>，好让 <code>runc run -b &lt;dir&gt;</code> 能运行这个镜像。
-   - <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a>：<code>cmd_export</code> 通过
-     <code>ImageStore::export_rootfs</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a>）解包根
+   - <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a>：<code>cmd_export</code> 通过
+     <code>ImageStore::export_rootfs</code>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a>）解包根
      文件系统，并用 <code>build_runtime_spec</code> 构建 config。
    - <code>build_runtime_spec</code> 是从 <code>oci_spec::runtime</code> 的类型（<code>oci-spec</code> crate，钉在根目录的
-     <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里）构建 config 的，而不是手写 JSON。它的文档注释列出了早先那份手写 bundle
+     <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里）构建 config 的，而不是手写 JSON。它的文档注释列出了早先那份手写 bundle
      缺了什么（标准挂载点、生效的 capability、被屏蔽/只读的路径）。</li>
-<li><strong>它原生实现了同样的机制。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的
+<li><strong>它原生实现了同样的机制。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的
    <code>fn spawn</code> 和 <code>container_init</code> 做的正是一个 OCI 运行时会从一份 <code>config.json</code> 里做的事：
    命名空间、<code>pivot_root</code>、capability、seccomp、被屏蔽的路径。它们所消费的执行规格不是
-   <code>config.json</code>，而是 <code>RunOpts</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run_opts.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run_opts.rs</code></a>）,
+   <code>config.json</code>，而是 <code>RunOpts</code>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/run_opts.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run_opts.rs</code></a>）,
    由每一个前端（CLI、Kind、compose、Docker API、CRI）生产出来。</li>
 </ol>
 <p><strong>合规状态／缺口。</strong></p>
 <ul>
 <li>没有针对 Delonix 跑过 runtime-spec 的合规套件。也没法跑：不存在一个消费 bundle 的入口
   点可以拿来跑它。</li>
-<li><strong>没有实现 OCI 钩子。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>（提议中）记录了
+<li><strong>没有实现 OCI 钩子。</strong> <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>（提议中）记录了
   原因：没有具体的消费者，而且运行一个由容器 spec 点名的宿主机二进制文件，属于本项目已经
   拿一次 spike 挡在前面的那类安全问题。<code>delonix-linux</code> 里那个进程内的 <code>StartedHook</code> 闭包
   看起来相似，但它不是 OCI 那套协议。</li>
 <li>导出的 bundle 是最小化的（默认命令、环境变量和工作目录都取自镜像）。把它当作一种交接
   格式来对待，而不是对一个容器完整配置的转译。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a> 里的 <code>cmd_export</code> 和
-<code>build_runtime_spec</code> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a> 里的
-<code>export_rootfs</code> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>spawn</code>。</p>
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/image.rs</code></a> 里的 <code>cmd_export</code> 和
+<code>build_runtime_spec</code> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a> 里的
+<code>export_rootfs</code> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>spawn</code>。</p>
 <hr />
 <h2 id="132-oci-image-specification">13.2 OCI 镜像规范<a class="hanchor" href="#132-oci-image-specification" aria-label="#">#</a></h2>
 <p><strong>这个标准是什么。</strong> <a href="https://github.com/opencontainers/image-spec">OCI 镜像规范</a>
@@ -328,13 +328,13 @@ th:first-child,td:first-child{white-space:nowrap}
   应用各层，包括 whiteout（白化标记）。</li>
 <li>在不经过镜像仓库交换镜像时，能读写 image layout。</li>
 </ul>
-<p><strong>Delonix 是怎么实现它的。</strong> 全部在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a> 里：</p>
+<p><strong>Delonix 是怎么实现它的。</strong> 全部在 <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a> 里：</p>
 <ul>
 <li><strong>按内容寻址的存储</strong>：<code>src/cas.rs</code>（<code>Cas</code>），<code>ImageStore</code> 在 <code>src/image.rs</code> 里。</li>
 <li><strong>层作为 overlay 的下层（lower）</strong>：<code>ImageStore::prepare_overlay</code>（<code>src/overlay.rs</code>）
   在容器自己的 <code>merged/</code> 旁边写出一份 <code>overlay-lowers</code> 文件，容器自己的 init 会挂载它。
-  层在容器之间是共享的，而不是被复制的（参见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里关于容器共享层的记录，以及关于
-  挂载 API 的 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>）。</li>
+  层在容器之间是共享的，而不是被复制的（参见 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里关于容器共享层的记录，以及关于
+  挂载 API 的 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>）。</li>
 <li><strong>按魔数识别层的媒体类型</strong>：<code>src/registry.rs</code> 里紧挨着 <code>DOCKER_MANIFEST_MEDIA_TYPE</code> 的
   那个辅助函数会检测 gzip、zstd 或纯 tar。</li>
 <li><strong>写出 image layout</strong>：<code>write_oci_archive</code>（<code>src/save.rs</code>），由 <code>delonix image save</code>
@@ -368,7 +368,7 @@ th:first-child,td:first-child{white-space:nowrap}
   摘要。</li>
 <li>推送 blob（带存在性检查），然后再推送 manifest。</li>
 </ul>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>：</p>
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>：</p>
 <ul>
 <li><code>parse_reference</code> 拆解 <code>registry/repo:tag@digest</code>（包括 <code>tag@digest</code> 这种组合形式）。</li>
 <li><code>pull_from_registry_with_creds</code> / <code>pull_from_registry_with_creds_full</code> 拉取一个多层
@@ -391,7 +391,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <p><strong>合规状态／缺口。</strong></p>
 <ul>
 <li>没有为这个客户端跑过 distribution-spec 的合规测试。</li>
-<li><code>list_remote_tags</code> 只读取 <code>tags/list</code> 的第一页（没有 <code>Link</code> 分页）。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里的
+<li><code>list_remote_tags</code> 只读取 <code>tags/list</code> 的第一页（没有 <code>Link</code> 分页）。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里的
   记录说，对于一个虚拟机镜像那寥寥几个标签来说这无关紧要；但对于一个很大的仓库来说，这
   就会成为问题。</li>
 <li>引擎没有实现镜像仓库的<em>服务端</em>那一侧，除了上面提到的那个一次性本地镜像仓库。</li>
@@ -415,7 +415,7 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
 <li>把它的 cgroup 驱动告诉 kubelet（<code>RuntimeConfig</code>），遵守资源限制，为驱逐（eviction）
   报告统计信息，并以 CRI 日志格式写日志。</li>
 </ul>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>，二进制文件
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>，二进制文件
 <code>delonix-cri</code>（也就是 <code>delonix serve cri</code>）：</p>
 <ul>
 <li><strong>契约</strong>：<code>proto/api.proto</code> 声明了 <code>package runtime.v1</code>，带
@@ -430,10 +430,10 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
   <code>Cgroupfs</code>。它的文档注释记录了逼出这个答案的那次测量（2026-09-15，k8s
   1.36.4）：什么也不回答会让 kubelet 默认走 <code>systemd</code>，systemd 会从空的 pod slice 里
   丢掉 <code>cpuset</code>，然后 kubelet 就会陷入循环杀 pod。</li>
-<li><strong>kubelet 的资源模型</strong>：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>。
+<li><strong>kubelet 的资源模型</strong>：<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>。
   kubelet 的 <code>cgroup_parent</code> 由 <code>KubeCgroupParent::parse</code>
-  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>）校验，并在
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> 里被消费；<code>delonix-linux</code> 有
+  （<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>）校验，并在
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> 里被消费；<code>delonix-linux</code> 有
   <code>transient_scope_argv</code>，用来把一个容器放进 pod slice 之下的一个 systemd scope。</li>
 <li><strong>Capability 天花板</strong>：<code>CapCeiling</code>（<code>src/cap_ceiling.rs</code>），由
   <code>DELONIX_CRI_CAP_CEILING</code> 和 <code>DELONIX_CRI_CAP_CEILING_MODE</code> 配置，在 <code>crictl info</code>
@@ -446,17 +446,17 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
 </ul>
 <p><strong>合规状态／缺口。</strong></p>
 <ul>
-<li><strong>用上游的 <code>critest</code> 测量过</strong>（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>）：
+<li><strong>用上游的 <code>critest</code> 测量过</strong>（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>）：
   cri-tools <code>critest</code> <strong>v1.36.0</strong>，引擎 <code>delonix-cri</code> <strong>v0.63.1</strong>，rootless，
   <strong>2026-08-25</strong>：在跑过的 103 项规格里（套件总共 122 项），<strong>79 通过、24 失败、19
   跳过</strong>。那份文档里按领域列出的失败：AppArmor 按容器级别的 profile、挂载传播
   （propagation）、安全上下文（security context）的部分内容、镜像管理器（按摘要拉取、
   <code>Uid</code>/<code>Username</code>）、流式端口转发、OOM，以及少数几条单独的规格。这个数字比
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里记录的好几处 CRI 修复要旧；此后没有重新测量过。用 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里记录的好几处 CRI 修复要旧；此后没有重新测量过。用 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>
   可以复现。</li>
-<li><strong>在 2026-09-11 用 <code>crictl</code> 手动操练过</strong>（据 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>）：version、info、images,
+<li><strong>在 2026-09-11 用 <code>crictl</code> 手动操练过</strong>（据 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>）：version、info、images,
   以及 <code>runp → create → start → exec</code> 这个循环。</li>
-<li><strong>针对一个真实的 kubelet 验证过</strong>（k8s 1.36.4，2026-09-15，据 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 和
+<li><strong>针对一个真实的 kubelet 验证过</strong>（k8s 1.36.4，2026-09-15，据 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 和
   <code>engine_cgroup_driver</code> 的文档注释）：单节点控制平面稳定，CoreDNS 在 root 模式的
   CNI 下运行。</li>
 <li><strong>未实现的 RPC</strong>（它们返回 <code>UNIMPLEMENTED</code>）：<code>UpdateContainerResources</code>、
@@ -487,10 +487,10 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
 <p><strong>Delonix 是怎么实现它的。</strong> 存在两个网络提供方，CNI 是其中之一：</p>
 <ul>
 <li><strong>原生 SDN</strong>（容器的默认方案）：rootless 的 holder netns、bridge、IPAM、nftables
-  防火墙——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a>（参见
+  防火墙——<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a>（参见
   <a href="cloud-native-primer.html#45-container-networking">云原生入门 4.5</a> 和
   <a href="architecture.html#rootless-network-infrastructure">架构</a>）。</li>
-<li><strong>CNI 协议层</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>，纯函数且可测试。
+<li><strong>CNI 协议层</strong>：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>，纯函数且可测试。
   <code>list_conf_files</code>、<code>parse_config</code>、<code>load_default</code>、<code>resolve_plugin</code>、<code>add</code>（把
   <code>prevResult</code> 串联起来）、<code>del</code>、<code>plugin_dirs</code>（来自 <code>CNI_PATH</code>）、<code>readiness</code>
   （既要配置能解析，<strong>又要</strong>每一个二进制文件——包括 <code>ipam.type</code>——都在
@@ -498,7 +498,7 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
 <li><strong>CNI 用在哪里</strong>：</li>
 <li><strong>CRI，root 模式</strong>：pod 网络永远是节点的 CNI 链，在宿主机上，与 containerd
     一样。<code>run_pod_sandbox</code>
-    （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>）创建
+    （<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>）创建
     <code>/run/netns/cri-&lt;id&gt;</code> 并调用 <code>delonix_sdn::cni::attach_named_netns</code>。
     <code>NetworkReady</code> 来自 <code>root_cni_readiness</code>（<code>src/runtime_svc.rs</code>），与沙箱据以
     行事的是同一个事实。</li>
@@ -512,15 +512,15 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
 <li><code>cni.rs</code> 里的文档记录了对配置版本 0.4.0 和 1.0.0 的支持。<code>CHECK</code> 作为
   <code>Command_</code> 的一个变体存在，但<strong>从未被调用</strong>；<code>GC</code> 和 <code>STATUS</code> 没有实现。</li>
 <li><code>runtimeConfig</code> 不会传给插件，所以在一个 root 模式的 CNI 沙箱上，通过 <code>portmap</code>
-  插件实现的 <code>hostPort</code> 是不工作的（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-09-15 的记录）。</li>
+  插件实现的 <code>hostPort</code> 是不工作的（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-09-15 的记录）。</li>
 <li>在一个 kubeadm 节点上用一条真实的 bridge/host-local 链测量过（2026-09-15，k8s
-  1.36.4，据 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>）：节点 <code>Ready</code>，CoreDNS 在服务，Service DNS 从另一个
+  1.36.4，据 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>）：节点 <code>Ready</code>，CoreDNS 在服务，Service DNS 从另一个
   pod 解析成功。没有测量过的：多于一个节点，以及 rootless 的 CNI 路径在被重构为
   共享 <code>ADD</code> 主体之后的情况。</li>
 <li>没有针对运行时这一侧跑过任何 CNI 插件的合规测试工具。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>（模块注释、<code>add</code>、
-<code>readiness</code>）→ <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a> 里的
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>（模块注释、<code>add</code>、
+<code>readiness</code>）→ <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a> 里的
 <code>run_pod_sandbox</code> → <code>src/runtime_svc.rs</code> 里的 <code>root_cni_readiness</code>。</p>
 <hr />
 <h2 id="136-container-storage-interface-csi">13.6 容器存储接口（CSI）<a class="hanchor" href="#136-container-storage-interface-csi" aria-label="#">#</a></h2>
@@ -534,22 +534,22 @@ Controller 插件。</p>
 <p><strong>Delonix 是怎么实现它的。</strong> <strong>它没有实现 CSI。</strong> 存储由引擎自己的 <code>kind: Volume</code> 来
 服务：</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a>：命名卷（<code>&lt;root&gt;/volumes/&lt;name&gt;/_data</code>）
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a>：命名卷（<code>&lt;root&gt;/volumes/&lt;name&gt;/_data</code>）
   和绑定挂载（bind mount），两者都是 <code>MS_BIND</code>，用的是 Docker <code>-v</code> 语法。
   <code>HostVolumes</code> 实现了 compute 上下文（context）的 <code>StorageProvider</code> 端口
-  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>）。</li>
+  （<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>）。</li>
 <li>网络存储（NFS、CIFS/SMB、WebDAV）以卷的形式挂载，以及一个针对 NAS API 的存储
-  配置器（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>，crate
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>）。</li>
+  配置器（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>，crate
+  <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>）。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 未实现，出于决策：
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>（提议中）。一个 CSI Node 插件是一个
+<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>（提议中）。一个 CSI Node 插件是一个
 常驻服务，而引擎按设计是无守护进程（daemonless）的。这份 ADR 只有在一个具体需求明确点名
 CSI 这个协议、<strong>并且</strong>守护进程这个问题本身已经有一份被接受的 ADR 时，才会重新开启。它还
 记录了一条不需要在这里写任何代码的现实路径（针对同一台服务器的一个外部 NFS 配置器）。</p>
-<p><strong>从哪里开始读。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 里的 <code>StorageProvider</code>。</p>
+<p><strong>从哪里开始读。</strong> <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 里的 <code>StorageProvider</code>。</p>
 <hr />
 <h2 id="137-container-device-interface-cdi">13.7 容器设备接口（CDI）<a class="hanchor" href="#137-container-device-interface-cdi" aria-label="#">#</a></h2>
 <p><strong>这个标准是什么。</strong> <a href="https://github.com/cncf-tags/container-device-interface">容器设备接口</a>
@@ -561,11 +561,11 @@ CSI 这个协议、<strong>并且</strong>守护进程这个问题本身已经�
 <p><strong>Delonix 是怎么实现它的。</strong> 作为一个由厂商工具（<code>nvidia-ctk cdi generate</code>）生成的
 spec 的<strong>消费者</strong>，而绝不是一个驱动发现工具：</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>：<code>is_cdi_qualified</code>、
+<li><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>：<code>is_cdi_qualified</code>、
   <code>ensure_cdi_available</code>、<code>resolve_cdi_device</code>、<code>expand_gpu_devices</code>；spec 目录
   先 <code>/etc/cdi</code> 后 <code>/var/run/cdi</code>。</li>
 <li><code>HostDevices</code> 实现了 <code>DeviceResolver</code> 端口
-  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>），把编辑内容变成与 <code>-v</code> 和
+  （<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>），把编辑内容变成与 <code>-v</code> 和
   <code>--device</code> 所产生的同样的挂载点、设备列表和环境变量。容器自己的 init 会在
   <code>pivot_root</code> 之前应用它们；不会有第二个进程按 PID 进入容器。</li>
 <li>CLI 接口：<code>container run --gpus nvidia|all</code> 和
@@ -576,16 +576,16 @@ spec 的<strong>消费者</strong>，而绝不是一个驱动发现工具：</p>
 <ul>
 <li><strong>钩子没有被执行。</strong> 一个尽力而为（best-effort）的 <code>ldconfig -r &lt;rootfs&gt;</code> 取代了
   通常的 <code>createContainer</code> 钩子，一个声明了钩子的 spec 会产生一条可见的警告。这是
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a> 唯一点名的代价。</li>
+  <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a> 唯一点名的代价。</li>
 <li>模块注释里记录了一次针对 <code>nvidia-ctk</code> 1.20.0（<code>cdiVersion</code> 0.7.0）的 spec 所做的
   测量：顶层的 <code>containerEdits</code> 携带了大多数设备节点和全部挂载点，所以只读取按设备
-  的编辑会破坏 CUDA。这条注释没有写日期，这次也没有为本页重新测量。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>
+  的编辑会破坏 CUDA。这条注释没有写日期，这次也没有为本页重新测量。<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>
   把两个目录之间的确切优先级、以及 <code>ldconfig -r</code> 是否够用，都列为"需要在一台真实的
   GPU 宿主机上确认"。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>（模块注释、
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>（模块注释、
 <code>resolve_cdi_device</code>、<code>HostDevices</code>）→
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 里的 <code>DeviceResolver</code>。</p>
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 里的 <code>DeviceResolver</code>。</p>
 <hr />
 <h2 id="138-the-workload-api-own-kinds-and-the-node-contract">13.8 工作负载 API：自有 Kind 与节点契约<a class="hanchor" href="#138-the-workload-api-own-kinds-and-the-node-contract" aria-label="#">#</a></h2>
 <p><strong>这个标准是什么。</strong> 这里刻意没有外部标准。引擎在自己的 API 分组（<code>core</code>、<code>compute</code>、
@@ -596,30 +596,30 @@ API 兼容。</p>
 <p><strong>一个实现必须做到什么</strong>（引擎自己定的规则）：</p>
 <ul>
 <li>发布从代码生成出来的清单 schema，而不是手写的
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。</li>
+  （<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。</li>
 <li>用三方差异比对来规划（plan）、应用（apply）并检测漂移（drift），绝不悄悄忽略任何一个
   字段。</li>
 <li>在同一个本地套接字上，用 gRPC 和 HTTP/JSON 同时服务同一份节点契约，OpenAPI 文档从
   protobuf 生成
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，
-  提议中；<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0041-node-local-contract-for-the-control-plane-agent.md" target="_blank" rel="noopener">ADR-0041</a>）。</li>
+  （<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，
+  提议中；<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0041-node-local-contract-for-the-control-plane-agent.md" target="_blank" rel="noopener">ADR-0041</a>）。</li>
 </ul>
 <p><strong>Delonix 是怎么实现它的。</strong></p>
 <ul>
-<li>Kind 表：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>（每个 Kind 的
+<li>Kind 表：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>（每个 Kind 的
   <code>api_version</code>、领域、收敛（convergence）、拆除（teardown））。协调器：
   <code>src/reconcile.rs</code>。</li>
-<li>发布的 schema：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>。</li>
-<li>节点契约：<code>proto/delonix/node/v1/*.proto</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 是生成出来的,
-  由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 检查。它由 <code>delonix serve node-api</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>）
+<li>发布的 schema：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>。</li>
+<li>节点契约：<code>proto/delonix/node/v1/*.proto</code>，<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 是生成出来的,
+  由 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 检查。它由 <code>delonix serve node-api</code>（<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>）
   部分地提供服务：<code>NodeService.ListProviders</code> 以 gRPC 和 <code>GET /v1/providers</code> 的形式提供；其余 RPC
   都回答 <code>UNIMPLEMENTED</code>。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 由 CI 把关（schema 测试、<code>contract_gate.py</code>），而不是靠一个外部
 套件。参见<a href="architecture.html">架构</a>和<a href="system-design-interview.html">系统设计</a>。</p>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> →
-<code>src/reconcile.rs</code> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>。</p>
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> →
+<code>src/reconcile.rs</code> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>。</p>
 <hr />
 <h2 id="139-docker-engine-api-subset-a-de-facto-interface">13.9 Docker 引擎 API 子集——一个事实接口<a class="hanchor" href="#139-docker-engine-api-subset-a-de-facto-interface" aria-label="#">#</a></h2>
 <p><strong>这个标准是什么。</strong> <a href="https://docs.docker.com/reference/api/engine/">Docker 引擎 API</a>
@@ -628,7 +628,7 @@ API 兼容。</p>
 的互操作面。</p>
 <p><strong>一个实现必须做到什么。</strong> 回答 <code>/_ping</code> 和版本协商，然后回答某个具体工具会调用的那些
 路由，用 Docker 的 JSON 形状和状态码。</p>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>，由
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>，由
 <code>delonix serve docker-api [--addr unix://&lt;socket&gt;]</code> 提供服务：</p>
 <ul>
 <li><code>API_VERSION</code> 是 <code>"1.43"</code>，<code>MIN_API_VERSION</code> 是 <code>"1.24"</code>；版本前缀会被去掉，所以
@@ -648,7 +648,7 @@ API 兼容。</p>
   那张表，而不要相信这份清单；那张表才是契约。</li>
 <li>Docker 的网络模型（<code>NetworkingConfig</code>）没有被转译。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> 里的
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> 里的
 <code>API_MATRIX</code> 和 <code>API_UNIMPLEMENTED</code> → 同一个文件里的分发 <code>match</code> →
 <code>tests/compat/docker_api_smoke.py</code>。</p>
 <hr />
@@ -658,7 +658,7 @@ API 兼容。</p>
 项目维护的一份开放规范，<strong>不是一个 CNCF 或 OCI 标准</strong>。</p>
 <p><strong>一个实现必须做到什么。</strong> 解析这个模型，按 <code>depends_on</code>（及其条件）给各个 service
 排序，创建网络和卷，并且不能悄悄改变一份文件的含义。</p>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/compose.rs</code></a>
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/compose.rs</code></a>
 （<code>delonix compose up|down|ps|logs|config</code>）：一个把内容转译成 <code>RunOpts</code> 以及引擎
 自己的 <code>Image</code>/<code>Network</code>/<code>Volume</code> 文档的转译器，成员关系是从标签（label）里推导出来的。</p>
 <p><strong>合规状态／缺口。</strong></p>
@@ -677,7 +677,7 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
 一个 collector（采集器）。</p>
 <p><strong>一个实现必须做到什么。</strong> 发出带资源属性（至少要有 <code>service.name</code>）的 span,
 通过 OTLP（gRPC 或 HTTP）导出它们，并在进程退出之前把它们刷出去。</p>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>：</p>
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>：</p>
 <ul>
 <li>通过 <code>tracing</code> 输出结构化日志（<code>DELONIX_LOG</code>、<code>DELONIX_LOG_FORMAT=json</code>）。</li>
 <li><strong>在设置了 <code>DELONIX_OTLP_ENDPOINT</code> 时，通过 OTLP/HTTP protobuf 输出 trace</strong>
@@ -694,7 +694,7 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
 <li>短生命周期的 CLI 在退出时不会刷新，所以一次快速的调用可能会丢失它的 span。可靠的
   路径是长期运行的 <code>delonix-cri</code>。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> 里的模块
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> 里的模块
 注释、<code>init</code> 和 <code>build_otlp_layer</code>。</p>
 <hr />
 <h2 id="1312-prometheus-exposition-format">13.12 Prometheus 曝露格式<a class="hanchor" href="#1312-prometheus-exposition-format" aria-label="#">#</a></h2>
@@ -705,22 +705,22 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
 速度要快到能在抓取超时之内完成。</p>
 <p><strong>Delonix 是怎么实现它的。</strong></p>
 <ul>
-<li>一份共享的注册表：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a>（<code>encode</code>,
+<li>一份共享的注册表：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a>（<code>encode</code>,
   以及 <code>set_containers</code>、<code>set_vms</code>、<code>set_memory</code>、<code>set_network</code>、<code>set_storage</code>
   这些设值函数），建立在 <code>prometheus-client</code> crate 之上。</li>
 <li><code>delonix-cri</code>：一个由 <code>DELONIX_METRICS_ADDR</code> 启用的可选 <code>/metrics</code> 监听器
   （<code>src/lib.rs</code>，<code>metrics_handler</code>），与 gRPC 套接字是分开的。</li>
 <li><code>delonix-mgmt</code>：在它的本地套接字上提供 <code>/metrics</code>
-  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a>，<code>metrics</code>）。便宜的字段每次抓取
+  （<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a>，<code>metrics</code>）。便宜的字段每次抓取
   都重新计算；昂贵的字段（磁盘遍历）在后台刷新，这样抓取本身就能保持快速。</li>
 <li>两个处理函数服务的都是
   <code>application/openmetrics-text; version=1.0.0; charset=utf-8</code>。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 没有记录跑过任何一次 <code>promtool check metrics</code>。那些昂贵的
-仪表值（gauge）最多可能滞后一个刷新周期；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里的记录解释了为什么要这样
+仪表值（gauge）最多可能滞后一个刷新周期；<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里的记录解释了为什么要这样
 权衡。</p>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a> 里的 <code>metrics_handler</code> → <code>delonix-mgmt</code>
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a> 里的 <code>metrics_handler</code> → <code>delonix-mgmt</code>
 里的 <code>metrics</code> 和 <code>src/dashstats.rs</code>。</p>
 <hr />
 <h2 id="1313-supply-chain-sbom-spdx-signatures-slsa-provenance">13.13 供应链：SBOM（SPDX）、签名、SLSA 来源证明<a class="hanchor" href="#1313-supply-chain-sbom-spdx-signatures-slsa-provenance" aria-label="#">#</a></h2>
@@ -736,23 +736,23 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
 篡改后校验会失败；把来源证明与实际发布出去的那些文件绑定在一起。</p>
 <p><strong>Delonix 是怎么实现它的。</strong></p>
 <ul>
-<li><strong>发布二进制文件的 SBOM</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> 从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a> 写出 SPDX 2.3 格式。
+<li><strong>发布二进制文件的 SBOM</strong>：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> 从 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a> 写出 SPDX 2.3 格式。
   <code>release.yml</code> 里 "SBOM (SPDX 2.3, do Cargo.lock)" 这一步写出
   <code>delonix-sbom.spdx.json</code>，并把它加进 <code>SHA256SUMS</code>，所以这份 SBOM 也被签名覆盖了。</li>
 <li><strong>发布签名</strong>：<code>release.yml</code> 用 minisign 给 <code>SHA256SUMS</code> 签名，并用内置在
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 里的公钥（<code>MINISIGN_PUBKEY</code>）去验证它。如果密钥已经配置好了
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 里的公钥（<code>MINISIGN_PUBKEY</code>）去验证它。如果密钥已经配置好了
   但是那份 secret 却缺失，发布会失败，而不是发一份未签名的出去。</li>
 <li><strong>SLSA 来源证明</strong>：<code>release.yml</code> 里 "Proveniência (SLSA) dos binários" 这一步,
   对已发布的 <code>delonix</code>、<code>delonix-cri</code> 和 <code>delonix-mcp</code> 二进制文件使用
   <code>actions/attest-build-provenance</code>。用
-  <code>gh attestation verify &lt;file&gt; --repo angolardevops/delonix-runtime</code> 来验证。</li>
-<li><strong>与 cosign 兼容的镜像签名</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a>。
+  <code>gh attestation verify &lt;file&gt; --repo ngolacloud/delonix</code> 来验证。</li>
+<li><strong>与 cosign 兼容的镜像签名</strong>：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a>。
   <code>sign_image</code>（在 <code>delonix image sign</code> 背后）发布一份 ECDSA P-256 的
   simple-signing 载荷作为 <code>.sig</code> artifact；<code>verify_signature</code>（在
   <code>image pull --verify &lt;key&gt;</code> 和 <code>image verify</code> 背后）会检查签名，并检查载荷里
   点名的是不是那个镜像的摘要。虚拟机镜像用的是同一套机制
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a>）。</li>
-<li><strong>镜像扫描</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>。<code>extract_sbom</code> 直接从
+  （<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a>）。</li>
+<li><strong>镜像扫描</strong>：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>。<code>extract_sbom</code> 直接从
   CAS 里的层读取 <code>apk</code>/<code>dpkg</code> 的数据库（以及 Python 的依赖清单），不需要运行这个
   镜像；<code>advisories_from_osv</code> 摄入 OSV 的信息流。</li>
 </ul>
@@ -766,9 +766,9 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
   没有任何 Rust 代码会写出 SPDX。</li>
 <li>本仓库里没有记录跑过任何一次 SPDX 校验器或 <code>slsa-verifier</code>。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a> 里 SBOM、
-minisign 和来源证明那几步 → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a> →
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>。</p>
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a> → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a> 里 SBOM、
+minisign 和来源证明那几步 → <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/sign.rs</code></a> →
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>。</p>
 <hr />
 <h2 id="1314-virtual-machines-kvm-virtio-uefi-cloud-init-nocloud">13.14 虚拟机：KVM、virtio、UEFI、cloud-init NoCloud<a class="hanchor" href="#1314-virtual-machines-kvm-virtio-uefi-cloud-init-nocloud" aria-label="#">#</a></h2>
 <p><strong>这些标准是什么。</strong></p>
@@ -784,17 +784,17 @@ minisign 和来源证明那几步 → <a class="src" href="https://github.com/an
 </ul>
 <p><strong>一个实现必须做到什么。</strong> 给客户机（guest）virtio 设备和它能启动的固件，交给它一份
 NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm</code></a>：</p>
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm</code></a>：</p>
 <ul>
 <li><strong>端口背后的各个后端</strong>：<code>src/lib.rs</code> 里的 <code>trait VmBackend</code> 和
   <code>register_backend</code>。Cloud Hypervisor（基于 <code>/dev/kvm</code> 的 Rust VMM）和
   libvirt/QEMU 是本地的；Proxmox VE 是一个远程的 provider
-  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>）。参见<a href="microvm-setup.html">构建微虚拟机</a>。</li>
+  （<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>）。参见<a href="microvm-setup.html">构建微虚拟机</a>。</li>
 <li><strong>virtio</strong>：<code>libvirt_domain_xml</code> 把主磁盘渲染成 <code>bus='virtio'</code>（<code>vda</code>）、网卡
   渲染成 <code>&lt;model type='virtio'/&gt;</code>、共享卷渲染成 virtio-9p。</li>
 <li><strong>Cloud Hypervisor 的 UEFI 固件</strong>：<code>DEFAULT_CH_FIRMWARES</code> 优先选用 EDK2 的
   <code>CLOUDHV.fd</code>，而不是 <code>hypervisor-fw</code>。它的文档注释记录了为什么：用
-  <code>hypervisor-fw</code> 时本项目的镜像启动不起来；用 EDK2 就可以（据 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，
+  <code>hypervisor-fw</code> 时本项目的镜像启动不起来；用 EDK2 就可以（据 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，
   2026-08-12 测量）。libvirt 用的是一个 <code>pflash</code> 的 <code>&lt;loader&gt;</code>。</li>
 <li><strong>cloud-init NoCloud</strong>：<code>src/cloudinit.rs</code>。<code>build_user_data</code>、
   <code>build_network_config</code>（在主网卡上启用 DHCP，<strong>按 MAC 地址匹配</strong>，来自
@@ -807,11 +807,11 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
 <li>Cloud Hypervisor 不支持 virtio-9p；在一台 CH 虚拟机上，<code>spec.volumes</code> 会被拒绝
   （virtio-fs 需要 <code>virtiofsd</code> 守护进程，而这个还没有接进来）。</li>
 <li><code>delonix-vm-base:fedora-42</code> 在 Cloud Hypervisor 的 EDK2 下启动不起来，包括厂商
-  原始的那份镜像也一样（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-08-12）；直接内核启动是可行的。</li>
-<li>实时迁移是一个 NO-GO（不予采纳）：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>。</li>
-<li>已发布的虚拟机镜像只有 amd64：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>。</li>
+  原始的那份镜像也一样（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-08-12）；直接内核启动是可行的。</li>
+<li>实时迁移是一个 NO-GO（不予采纳）：<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>。</li>
+<li>已发布的虚拟机镜像只有 amd64：<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>。</li>
 </ul>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的
 <code>trait VmBackend</code> 和 <code>create_with</code> → <code>src/cloudinit.rs</code> →
 <code>libvirt_domain_xml</code> → <code>DEFAULT_CH_FIRMWARES</code>。</p>
 <hr />
@@ -825,7 +825,7 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
 之下，rootless 下放在 <code>user@&lt;uid&gt;.service/dlx-containers</code> 之下）在
 <a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">云原生入门 4.2</a> 里讲；
 那棵树本身和委派规则则在<a href="linux-foundations.html#cgroups-v2">Linux 基础</a>里讲。就这份
-契约本身而言，在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的要点是：</p>
+契约本身而言，在 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的要点是：</p>
 <ul>
 <li><code>cgroup_limits_apply</code> 回答"限制会在这里生效吗？"这个问题，而不需要真的启动一个
   容器。在 rootless 下，它探测的是进程<em>当前</em>所在的 cgroup
@@ -835,9 +835,9 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
   已委派 scope 的 <code>StartTransientUnit</code> 调用（ADR-0038）。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 一个普通的 SSH 会话 scope 是没有被委派的；补救办法是
-<code>systemd-run --user --scope -p Delegate=yes</code>（据 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-08-04
+<code>systemd-run --user --scope -p Delegate=yes</code>（据 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-08-04
 测量）。没有委派时，<code>container run</code> 会以退出码 69 拒绝 <code>-m</code>/<code>--cpus</code>/
-<code>--cpu-weight</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> 里的
+<code>--cpu-weight</code>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> 里的
 <code>preflight_resource_limits</code>；<code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> 会让它不受限地
 运行，并附带一条警告）。那次探测只覆盖了 <code>memory</code>/<code>cpu</code>/<code>pids</code> 这个基础组合；
 <code>--cpuset</code>、<code>--io-weight</code> 以及 <code>--device-*-bps</code>/<code>--device-*-iops</code> 这些标志位
@@ -846,8 +846,8 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
 <code>cpu memory pids</code>，<code>Delegate=yes</code> 的 scope 也拿不到更多。补救办法是由 root 给
 <code>user@.service</code> 加一个 drop-in（<code>Delegate=cpu cpuset io memory pids</code>）。参见
 <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">准备你的环境</a>
-和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>。</p>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的
+和 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>。</p>
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的
 <code>cgroup_limits_apply</code> → <code>user_service_base</code> → <code>try_delegated_base</code> →
 <code>transient_scope_argv</code>。</p>
 <hr />
@@ -858,18 +858,18 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 是因为它是引擎的接口之一。</p>
 <p><strong>一个实现必须做到什么。</strong> 在某种传输方式（stdio 或 HTTP）上提供 JSON-RPC 服务、
 声明服务器能力，并用 JSON Schema 描述工具的输入。</p>
-<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>（二进制文件
+<p><strong>Delonix 是怎么实现它的。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>（二进制文件
 <code>delonix-mcp</code>，也就是 <code>delonix mcp serve</code>），建立在 <code>rmcp</code> crate 之上：</p>
 <ul>
 <li><strong>只有 stdio</strong>：作为 AI 客户端的一个前台子进程，stdin 关闭时它就退出。它不是一个
-  守护进程（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</li>
+  守护进程（<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</li>
 <li>工具的输入是有类型的、经过 schema 校验的；输出是 JSON 文本。工具带有一个风险等级
   （<code>src/risk.rs</code>），调用会被审计（<code>src/audit.rs</code>）。</li>
 <li>唯一的主体（principal）是本地 uid，与 <code>delonix-mgmt</code> 用的是同一条边界。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 出于决策，没有 HTTP 传输方式，也没有结构化的工具输出（详见
 模块注释）。没有跑过任何 MCP 合规测试工具。</p>
-<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a> 里的模块注释 →
+<p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a> 里的模块注释 →
 <code>src/risk.rs</code> → <code>src/audit.rs</code>。</p>
 <hr />
 <h2 id="1317-summary-table">13.17 汇总表<a class="hanchor" href="#1317-summary-table" aria-label="#">#</a></h2>
@@ -890,7 +890,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>OCI Runtime Spec</td>
 <td><code>delonix-linux</code>（原生机制）；通过 <code>build_runtime_spec</code> 实现的 <code>image export</code> bundle</td>
 <td>部分实现——能生产 bundle，但不是一个消费 bundle 的运行时；没有钩子</td>
-<td>13.1，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a></td>
+<td>13.1，<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a></td>
 </tr>
 <tr>
 <td>OCI Image Spec</td>
@@ -908,7 +908,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>CRI（<code>runtime.v1</code>）</td>
 <td><code>delonix-cri</code></td>
 <td>部分实现——critest v1.36.0：79/103 通过，引擎 v0.63.1，2026-08-25；kubelet 1.36.4 已于 2026-09-15 验证</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">cri-conformance.md</a>，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">cri-conformance.md</a>，<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
 </tr>
 <tr>
 <td>CNI</td>
@@ -920,7 +920,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>CSI</td>
 <td>无（<code>kind: Volume</code>、<code>delonix-volume</code>、<code>delonix-truenas</code>）</td>
 <td>未实现——需要一个守护进程</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a></td>
 </tr>
 <tr>
 <td>CDI</td>
@@ -930,9 +930,9 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 </tr>
 <tr>
 <td>引擎自有 Kind 与节点契约</td>
-<td><code>delonix-stack</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a></td>
+<td><code>delonix-stack</code>，<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a></td>
 <td>已实现（自有 API）——由 CI 把关</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
 </tr>
 <tr>
 <td>Docker 引擎 API（事实标准）</td>
@@ -960,7 +960,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 </tr>
 <tr>
 <td>SPDX SBOM</td>
-<td><code>release.yml</code> 里的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a></td>
+<td><code>release.yml</code> 里的 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a></td>
 <td>部分实现——只覆盖二进制文件的 Rust 依赖树；镜像扫描器不产出 SPDX</td>
 <td>13.13</td>
 </tr>
@@ -968,7 +968,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>签名（与 cosign 兼容，minisign）</td>
 <td><code>delonix-oci::sign</code>；<code>release.yml</code> 里的 minisign</td>
 <td>部分实现——只有基于密钥的方式；没有无密钥签名，没有透明日志</td>
-<td>13.13，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a></td>
+<td>13.13，<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a></td>
 </tr>
 <tr>
 <td>SLSA 来源证明</td>
@@ -980,7 +980,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>KVM / virtio / UEFI</td>
 <td><code>delonix-vm</code>（Cloud Hypervisor、libvirt）</td>
 <td>已实现——Cloud Hypervisor 上没有 virtio-9p；没有实时迁移</td>
-<td>13.14，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a></td>
+<td>13.14，<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a></td>
 </tr>
 <tr>
 <td>cloud-init NoCloud</td>
@@ -992,23 +992,23 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>cgroup v2 + systemd 委派（Linux）</td>
 <td><code>delonix-linux</code></td>
 <td>已实现——限制生效需要一个已委派的 scope</td>
-<td>13.15，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a></td>
+<td>13.15，<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a></td>
 </tr>
 <tr>
 <td>MCP（不是 CNCF 标准）</td>
 <td><code>delonix-mcp</code></td>
 <td>部分实现——只有 stdio</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a></td>
 </tr>
 </tbody>
 </table></div>
 <p>当你改动这些组件里的某一个时，在同一个 pull request 里更新它对应的表格行和它所在的那一节。
 如果你重新跑了一次合规测试套件，请把数字、日期和版本号一起换掉，并且先更新对应的源文档
-（关于 CRI 的是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>）。</p>
+（关于 CRI 的是 <a href="https://github.com/ngolacloud/delonix/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>）。</p>
 <hr />
 <p><strong>下一篇：</strong> <a href="environment-variables.html">环境变量（<code>DELONIX_*</code>）</a>——代码读取的每一个 <code>DELONIX_*</code> 变量、它的默认值，以及哪些会降低边界。</p>
 <nav class="pager"><a href="publishing-docs.html"><span>← 上一页</span>发布文档</a><a class="next" href="plano-conformidade-oci-cri.html"><span>下一页 →</span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/cloud-native-standards.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/cloud-native-standards.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/cloud-native-standards.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/cloud-native-standards.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>

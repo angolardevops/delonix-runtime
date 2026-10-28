@@ -688,6 +688,7 @@ flowchart TB
     delonix_opnsense["delonix-opnsense"]
     delonix_powerdns["delonix-powerdns"]
     delonix_provider_btrfs["delonix-provider-btrfs"]
+    delonix_provider_ceph["delonix-provider-ceph"]
     delonix_provider_cloud_hypervisor["delonix-provider-cloud-hypervisor"]
     delonix_provider_libvirt["delonix-provider-libvirt"]
     delonix_provider_lvm["delonix-provider-lvm"]
@@ -758,10 +759,13 @@ flowchart TB
   delonix_node_api --> delonix_linux
   delonix_node_api --> delonix_model
   delonix_node_api --> delonix_node
+  delonix_node_api --> delonix_oci
   delonix_node_api --> delonix_opnsense
+  delonix_node_api --> delonix_provider_ceph
   delonix_node_api --> delonix_proxmox
   delonix_node_api --> delonix_sdn
   delonix_node_api --> delonix_state
+  delonix_node_api --> delonix_storage
   delonix_node_api --> delonix_vm
   delonix_node_api --> delonix_volume
   delonix_node_api_bin --> delonix_model
@@ -777,6 +781,7 @@ flowchart TB
   delonix_opnsense --> delonix_networking
   delonix_powerdns --> delonix_model
   delonix_provider_btrfs --> delonix_storage
+  delonix_provider_ceph --> delonix_storage
   delonix_provider_cloud_hypervisor --> delonix_compute
   delonix_provider_cloud_hypervisor --> delonix_model
   delonix_provider_cloud_hypervisor --> delonix_node
@@ -799,6 +804,7 @@ flowchart TB
   delonix_runtime_bin --> delonix_opnsense
   delonix_runtime_bin --> delonix_powerdns
   delonix_runtime_bin --> delonix_provider_btrfs
+  delonix_runtime_bin --> delonix_provider_ceph
   delonix_runtime_bin --> delonix_provider_lvm
   delonix_runtime_bin --> delonix_provider_zfs
   delonix_runtime_bin --> delonix_proxmox
@@ -829,6 +835,7 @@ flowchart TB
   delonix_storage --> delonix_model
   delonix_storage_helper --> delonix_model
   delonix_storage_helper --> delonix_provider_btrfs
+  delonix_storage_helper --> delonix_provider_ceph
   delonix_storage_helper --> delonix_provider_lvm
   delonix_storage_helper --> delonix_provider_zfs
   delonix_storage_helper --> delonix_storage
@@ -862,6 +869,7 @@ flowchart TB
   class delonix_opnsense external
   class delonix_powerdns external
   class delonix_provider_btrfs external
+  class delonix_provider_ceph external
   class delonix_provider_cloud_hypervisor external
   class delonix_provider_libvirt external
   class delonix_provider_lvm external

@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/start-here.html" selected>EN · English</option><option value="../pt-AO/start-here.html">PT-AO · Português (Angola)</option><option value="../fr-FR/start-here.html">FR-FR · Français</option><option value="../zh-CN/start-here.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -240,7 +240,7 @@ for where this places the engine in a cloud, and <a href="architecture.html#engi
 for how the boundary is enforced; for now, those four sentences are enough.</p>
 <h3 id="what-you-need-10-minutes">What you need (10 minutes)<a class="hanchor" href="#what-you-need-10-minutes" aria-label="#">#</a></h3>
 <p>A Linux host with cgroup v2 and unprivileged user namespaces, the pinned Rust toolchain from
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>, and <code>protoc</code> on your <code>PATH</code>. The full list, and the host traps that look like
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>, and <code>protoc</code> on your <code>PATH</code>. The full list, and the host traps that look like
 engine bugs, are in <a href="environment.html">Preparing your environment</a>. Read at least its
 <a href="environment.html#known-host-traps">Known host traps</a> section before step 5 below. If "user
 namespace" or "cgroup delegation" are new words, the hands-on explanation is
@@ -250,7 +250,7 @@ first time a limit does not apply.</p>
 <p>Run these from the root of your checkout. If one of them does not give the shape shown, stop and
 fix it before going further — every later step depends on it.</p>
 <p><strong>1. Clone, with the tags.</strong></p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 git fetch --tags origin
 git describe --tags --abbrev=0        # prints the newest release, e.g. vX.Y.Z
@@ -265,7 +265,7 @@ message about <code>protoc</code>, install it (<a href="environment.html#protoc-
 <p><strong>3. Run the tests of a small, pure crate.</strong></p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">cargo test -p delonix-net-rules
 </code></pre></div>
-<p><code>delonix-net-rules</code> has no dependencies at all (see its <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), so this only proves that
+<p><code>delonix-net-rules</code> has no dependencies at all (see its <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), so this only proves that
 your toolchain compiles and runs tests — nothing about the host. Expected: a line of the form
 <code>test result: ok. N passed; 0 failed</code>.</p>
 <p><strong>4. Run the binary you just built.</strong></p>
@@ -327,12 +327,12 @@ the same two variables exported: <code>./target/debug/delonix net netns down</co
   the issue before starting, so two people do not do the same work.</li>
 <li>For anything non-trivial — a new command, a new manifest Kind, a change to namespace or cgroup
   setup, a new backend — open an issue first and agree on the approach
-  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>, <a href="contributing-workflow.html">Contribution workflow</a>).</li>
+  (<a href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>, <a href="contributing-workflow.html">Contribution workflow</a>).</li>
 <li>Check open pull requests so you do not duplicate work already in flight.</li>
 </ul>
 <p>Good first areas, because they are pure code with unit tests and no host privileges: a parser or
 validator in the CLI crate, an error message that does not say what to do, a missing Portuguese
-entry in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, or a page of this handbook that is wrong.</p>
+entry in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, or a page of this handbook that is wrong.</p>
 <h3 id="2-open-a-worktree-from-originmain">2. Open a worktree from <code>origin/main</code><a class="hanchor" href="#2-open-a-worktree-from-originmain" aria-label="#">#</a></h3>
 <p>One task, one worktree, one branch — never edit a shared checkout, never put the worktree in <code>/tmp</code>
 (<a href="contributing-workflow.html#one-worktree-per-task">One worktree per task</a>):</p>
@@ -376,7 +376,7 @@ gate if you touched <code>proto/</code>, the docs generator if help text changed
 <a href="build-and-test.html#the-gates-ci-runs">The gates CI runs</a> says which.</p>
 <h3 id="6-write-the-pull-request">6. Write the pull request<a class="hanchor" href="#6-write-the-pull-request" aria-label="#">#</a></h3>
 <p>Open it against <code>main</code> and fill in every section of
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener"><code>.github/PULL_REQUEST_TEMPLATE.md</code></a>. The template has four
+<a href="https://github.com/ngolacloud/delonix/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener"><code>.github/PULL_REQUEST_TEMPLATE.md</code></a>. The template has four
 parts, and reviewers read all of them:</p>
 <ul>
 <li><strong>What does this change do, and why?</strong> — the <em>why</em>; the diff already shows the <em>what</em>.</li>
@@ -392,7 +392,7 @@ parts, and reviewers read all of them:</p>
 <p>Say what was proved <strong>and</strong> what was not validated, and why
 (<a href="contributing-workflow.html#commits-and-pull-requests">Commits and pull requests</a>).</p>
 <h3 id="7-what-reviewers-check">7. What reviewers check<a class="hanchor" href="#7-what-reviewers-check" aria-label="#">#</a></h3>
-<p>The code owners in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> review every change. The review
+<p>The code owners in <a href="https://github.com/ngolacloud/delonix/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> review every change. The review
 checklist is in <a href="coding-conventions.html">Coding conventions</a>; the cloud-native standards a
 change is measured against are in <a href="cloud-native-standards.html">Cloud native standards</a>. Read
 both before you open the PR, not after the first round of comments.</p>
@@ -431,63 +431,63 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <tbody>
 <tr>
 <td><strong>New CLI flag or subcommand</strong></td>
-<td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> (one module per group); strings through <code>cmd/po.rs</code> with Portuguese in <code>data/pt.po</code>; manual text in <code>cmd/manual_entries.rs</code>; leaf list in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>). Pure validation of a run belongs in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>preflight.<wbr>rs</code></a></td>
+<td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> (one module per group); strings through <code>cmd/po.rs</code> with Portuguese in <code>data/pt.po</code>; manual text in <code>cmd/manual_entries.rs</code>; leaf list in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>). Pure validation of a run belongs in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>preflight.<wbr>rs</code></a></td>
 <td><a href="contributing-workflow.html#adding-or-changing-a-cli-command">Adding or changing a CLI command</a>, <a href="rust-primer.html#36-the-cli-clap-derive-and-translated-output">The CLI</a></td>
-<td>LANG-01 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>); CLI surface gate (<code>scripts/<wbr>cli-tree.<wbr>sh --gate</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a>); wire every entry point (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
+<td>LANG-01 (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>); CLI surface gate (<code>scripts/<wbr>cli-tree.<wbr>sh --gate</code>, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a>); wire every entry point (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
 </tr>
 <tr>
 <td><strong>New Kind, or a field on one</strong></td>
-<td>The Kind's facts: <code>FACTS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>kinds.<wbr>rs</code></a>. Its spec type and apply: <code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;kind&gt;.<wbr>rs</code>. Live-updatable fields: <code>hot_fields</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>reconcile.<wbr>rs</code></a>. The schema: <code>TYPED_KINDS</code> in <code>cmd/schema.rs</code>, and the published <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code></a> (<code>delonix manifest schema</code>)</td>
+<td>The Kind's facts: <code>FACTS</code> in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>kinds.<wbr>rs</code></a>. Its spec type and apply: <code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;kind&gt;.<wbr>rs</code>. Live-updatable fields: <code>hot_fields</code> in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>reconcile.<wbr>rs</code></a>. The schema: <code>TYPED_KINDS</code> in <code>cmd/schema.rs</code>, and the published <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code></a> (<code>delonix manifest schema</code>)</td>
 <td><a href="cloud-native-primer.html#48-declarative-reconciliation">Declarative reconciliation</a>, <a href="crates.html#delonix-stack"><code>delonix-stack</code></a></td>
-<td>Open an issue first (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>); the schema is generated from the code (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>); tests in <code>kinds.rs</code> and <code>schema.rs</code> fail when a table is left out</td>
+<td>Open an issue first (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>); the schema is generated from the code (<a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>); tests in <code>kinds.rs</code> and <code>schema.rs</code> fail when a table is left out</td>
 </tr>
 <tr>
 <td><strong>Network behaviour</strong></td>
-<td>Pure rules with no I/O: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-net-rules/<wbr>src/<wbr>lib.<wbr>rs</code></a>. Dataplane (holder, control socket, nftables, IPAM, CNI): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr></code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). The network step of <code>container run</code>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>network.<wbr>rs</code></a>. CLI: <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
+<td>Pure rules with no I/O: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-net-rules/<wbr>src/<wbr>lib.<wbr>rs</code></a>. Dataplane (holder, control socket, nftables, IPAM, CNI): <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr></code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). The network step of <code>container run</code>: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>network.<wbr>rs</code></a>. CLI: <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
 <td><a href="cloud-native-primer.html#45-container-networking">Container networking</a>, <a href="crates.html#delonix-sdn"><code>delonix-sdn</code></a></td>
-<td>Rootless-first and no silent failure (<a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Architecture rules</a>); flag the privilege boundary in the PR (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>)</td>
+<td>Rootless-first and no silent failure (<a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Architecture rules</a>); flag the privilege boundary in the PR (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>)</td>
 </tr>
 <tr>
 <td><strong>Images, registry, build</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr></code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>); CLI in <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr></code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>); CLI in <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
 <td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a>, <a href="crates.html#delonix-oci"><code>delonix-oci</code></a></td>
-<td>Downloads are verified by digest (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>, supply-chain scope)</td>
+<td>Downloads are verified by digest (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>, supply-chain scope)</td>
 </tr>
 <tr>
 <td><strong>Persisted state: a record field, a store, file locking, secrets at rest</strong></td>
-<td>Record types (<code>Container</code>, <code>Vm</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code></a>; plain-data parts (<code>Status</code>, <code>ContainerFw</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs</code></a>. How they are stored and locked (<code>Store</code>, <code>JsonStore</code>, <code>write_atomic*</code>, <code>SecretStore</code>, <code>CredVault</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr></code></a> (<code>store.rs</code>, <code>secret.rs</code>, <code>cred_vault.rs</code>)</td>
+<td>Record types (<code>Container</code>, <code>Vm</code>): <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code></a>; plain-data parts (<code>Status</code>, <code>ContainerFw</code>): <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs</code></a>. How they are stored and locked (<code>Store</code>, <code>JsonStore</code>, <code>write_atomic*</code>, <code>SecretStore</code>, <code>CredVault</code>): <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-state/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr></code></a> (<code>store.rs</code>, <code>secret.rs</code>, <code>cred_vault.rs</code>)</td>
 <td><a href="crates.html#delonix-state"><code>delonix-state</code></a>, <a href="architecture.html#state-on-disk">State on disk</a>, <a href="rust-primer.html#38-concurrency-and-shared-state">Concurrency</a></td>
 <td>New record fields take <code>#[serde(default)]</code>; read-modify-write goes through <code>update</code> (<a href="coding-conventions.html#8-state-and-concurrency">State and concurrency</a>)</td>
 </tr>
 <tr>
 <td><strong>VM behaviour on this node</strong></td>
-<td>What an operation decides: the use cases in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a> (<code>VmEngine</code>). How it is done here: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (the backends and their registry), <code>local_ports.rs</code>, <code>cloudinit.rs</code>; the <code>VmBackend</code> trait itself in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a>; CLI in <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
+<td>What an operation decides: the use cases in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a> (<code>VmEngine</code>). How it is done here: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (the backends and their registry), <code>local_ports.rs</code>, <code>cloudinit.rs</code>; the <code>VmBackend</code> trait itself in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a>; CLI in <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
 <td><a href="microvm-setup.html">Building microVMs</a>, <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits as ports</a></td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (backends are registrable)</td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (backends are registrable)</td>
 </tr>
 <tr>
 <td><strong>A new VM backend or storage provider behind a remote API</strong></td>
-<td>A new crate under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, implementing a port; registered at the composition root (<code>cmd/vmbackends.rs</code>, <code>cmd/gatewayproviders.rs</code>), configured from the providers file (<code>cmd/providers_config.rs</code>), and answering the capability catalog with a report listed both in <code>cmd/provider.rs</code> and in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/providers.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>providers.<wbr>rs</code></a> (a test keeps the two equal)</td>
+<td>A new crate under <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, implementing a port; registered at the composition root (<code>cmd/vmbackends.rs</code>, <code>cmd/gatewayproviders.rs</code>), configured from the providers file (<code>cmd/providers_config.rs</code>), and answering the capability catalog with a report listed both in <code>cmd/provider.rs</code> and in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-node-api/src/providers.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>providers.<wbr>rs</code></a> (a test keeps the two equal)</td>
 <td><a href="crates.html#providers">Providers</a>, <a href="architecture.html#layers-and-the-allowed-direction">Layers</a></td>
-<td>ADR first (<a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a>); <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
+<td>ADR first (<a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a>); <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
 </tr>
 <tr>
 <td><strong>CRI (what the kubelet talks to)</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri/src" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr></code></a> (<code>runtime_svc.rs</code>, <code>runtime_svc/<wbr>lifecycle.<wbr>rs</code>, <code>streaming.rs</code>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/interfaces/delonix-cri/src" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr></code></a> (<code>runtime_svc.rs</code>, <code>runtime_svc/<wbr>lifecycle.<wbr>rs</code>, <code>streaming.rs</code>)</td>
 <td><a href="cloud-native-primer.html#46-kubernetes-cri-kubelet-kubeadm-and-kind">Kubernetes</a>, <a href="crates.html#delonix-cri"><code>delonix-cri</code></a></td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
 </tr>
 <tr>
 <td><strong>A new crate</strong></td>
-<td>An entry in <code>LAYERS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, a directory under <code>crates/&lt;layer&gt;/</code>, and its path in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> <code>[workspace.<wbr>dependencies]</code> — all in the same commit</td>
+<td>An entry in <code>LAYERS</code> in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, a directory under <code>crates/&lt;layer&gt;/</code>, and its path in the root <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> <code>[workspace.<wbr>dependencies]</code> — all in the same commit</td>
 <td><a href="architecture.html#layers-and-the-allowed-direction">Layers</a></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (directory = layer, versions only in the root)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (directory = layer, versions only in the root)</td>
 </tr>
 <tr>
 <td><strong>A decision that moves a boundary</strong></td>
 <td><code>docs/adr/NNNN-title.md</code>, before the code</td>
 <td><a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a></td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>; accepted ADRs are superseded, never rewritten</td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>; accepted ADRs are superseded, never rewritten</td>
 </tr>
 </tbody>
 </table></div>
@@ -505,27 +505,27 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <tbody>
 <tr>
 <td><strong>The engine knows no consumer.</strong> No product, platform, control plane, console or agent that uses the engine is named in <code>crates/</code>, <code>bins/</code>, <code>proto/</code> or the manifests, comments included; no tenant, account, plan or billing.</td>
-<td><em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. The named consumers are enforced by <code>CONSUMER_NAMES</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (a fixed list of names, matched by regular expression); the ban on tenant, account, plan and billing concepts is not matched by any gate and is checked in review</td>
+<td><em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. The named consumers are enforced by <code>CONSUMER_NAMES</code> in <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (a fixed list of names, matched by regular expression); the ban on tenant, account, plan and billing concepts is not matched by any gate and is checked in review</td>
 </tr>
 <tr>
 <td><strong>Daemonless.</strong> No resident process by default; a new one needs an ADR with evidence of what systemd could not do.</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (same section); <a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Architecture rules</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (same section); <a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Architecture rules</a></td>
 </tr>
 <tr>
 <td><strong>Rootless-first.</strong> The normal path runs unprivileged; privilege is an explicit, announced opt-in. A new privilege boundary needs a GO/NO-GO spike and an ADR.</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; <a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; <a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a></td>
 </tr>
 <tr>
 <td><strong>Dependencies point inward, the directory is the layer, versions live only in the root.</strong></td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>; <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
 </tr>
 <tr>
 <td><strong>LANG-01: code is English.</strong> Identifiers, comments and messages in English; Portuguese only through <code>pt.po</code>.</td>
-<td><a href="contributing-workflow.html#language-english-in-the-code-lang-01">Language</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
+<td><a href="contributing-workflow.html#language-english-in-the-code-lang-01">Language</a>; <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
 </tr>
 <tr>
-<td><strong>Version alignment.</strong> Do not change <code>version</code> in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> in a feature PR; your branch must contain the newest tag.</td>
-<td><a href="contributing-workflow.html#version-alignment">Version alignment</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
+<td><strong>Version alignment.</strong> Do not change <code>version</code> in the root <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> in a feature PR; your branch must contain the newest tag.</td>
+<td><a href="contributing-workflow.html#version-alignment">Version alignment</a>; <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
 </tr>
 <tr>
 <td><strong>One worktree per task</strong>, outside <code>/tmp</code>, stage files by name, remove worktree and branch at the end.</td>
@@ -537,7 +537,7 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 </tr>
 <tr>
 <td><strong>Security-sensitive changes are called out</strong>, and vulnerabilities are reported privately, never in a public issue or PR.</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>; <a href="contributing-workflow.html#security-sensitive-changes">Security-sensitive changes</a></td>
+<td><a href="https://github.com/ngolacloud/delonix/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>; <a href="contributing-workflow.html#security-sensitive-changes">Security-sensitive changes</a></td>
 </tr>
 </tbody>
 </table></div>
@@ -546,9 +546,9 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <ol>
 <li><strong>This handbook.</strong> The <a href="index.html">README</a> has the page list; the <a href="glossary.html">glossary</a>
    explains the vocabulary.</li>
-<li><strong><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></strong>, organised by area. It is long and partly historical (and
+<li><strong><a href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></strong>, organised by area. It is long and partly historical (and
    partly in Portuguese): use it to learn <em>where</em> to look, then confirm in the code.</li>
-<li><strong>The ADR index</strong>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> — the decision behind a structure,
+<li><strong>The ADR index</strong>, <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> — the decision behind a structure,
    and what was rejected.</li>
 <li><strong>The history of the file</strong>: <code>git log --oneline -- &lt;path&gt;</code> and <code>git log -p -S '&lt;symbol&gt;'</code>. Commit
    messages here explain why.</li>
@@ -556,9 +556,9 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <p>If you are still stuck, <strong>ask</strong> on GitHub:</p>
 <ul>
 <li>Comment on the issue you are working on, or open a new one with
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/feature_request.md" target="_blank" rel="noopener">the feature request template</a> (for questions
-  about an approach) or <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/bug_report.md" target="_blank" rel="noopener">the bug report template</a>.</li>
-<li>A security problem goes through <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener">private vulnerability reporting</a>, not an issue.</li>
+  <a href="https://github.com/ngolacloud/delonix/blob/main/.github/ISSUE_TEMPLATE/feature_request.md" target="_blank" rel="noopener">the feature request template</a> (for questions
+  about an approach) or <a href="https://github.com/ngolacloud/delonix/blob/main/.github/ISSUE_TEMPLATE/bug_report.md" target="_blank" rel="noopener">the bug report template</a>.</li>
+<li>A security problem goes through <a href="https://github.com/ngolacloud/delonix/blob/main/SECURITY.md" target="_blank" rel="noopener">private vulnerability reporting</a>, not an issue.</li>
 </ul>
 <p>The bug report template asks for:</p>
 <ul>
@@ -576,7 +576,7 @@ round trip:</p>
 <li>the <strong>whole</strong> <code>--version</code> output of the binary you ran, including the <code>commit:</code> line (between
   releases every build reports the same version number, and only the commit tells them apart);</li>
 <li>whether <code>DELONIX_ROOT</code>/<code>DELONIX_NET_RUNTIME_DIR</code> were set, and what you already read and tried
-  (the page, the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> section, the ADR).</li>
+  (the page, the <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> section, the ADR).</li>
 </ul>
 <h2 id="progress-checklist">Progress checklist<a class="hanchor" href="#progress-checklist" aria-label="#">#</a></h2>
 <ul>
@@ -598,7 +598,7 @@ round trip:</p>
 <hr />
 <p><strong>Next:</strong> <a href="iaas-and-cloud-native.html">IaaS and cloud native — where the engine fits</a> — the mental model of an IaaS, which of its layers this engine is, and how cloud native principles show up in its files.</p>
 <nav class="pager"><a href="index.html"><span>← Previous</span>Delonix Runtime — Contributor Handbook</a><a class="next" href="iaas-and-cloud-native.html"><span>Next →</span>IaaS and cloud native — where the engine fits</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/start-here.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/start-here.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/start-here.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/start-here.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">On this page</p><div class="toc">
 <ul>

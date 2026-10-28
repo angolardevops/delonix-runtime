@@ -202,7 +202,7 @@ th:first-child,td:first-child{white-space:nowrap}
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language"><option value="../en/environment.html">EN · English</option><option value="../pt-AO/environment.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/environment.html">FR-FR · Français</option><option value="../zh-CN/environment.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+    <a class="iconbtn ghbtn" href="https://github.com/ngolacloud/delonix" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
@@ -222,7 +222,7 @@ secção <a href="#known-host-traps">Armadilhas conhecidas do host</a> antes de 
 <h2 id="toolchain">Toolchain<a class="hanchor" href="#toolchain" aria-label="#">#</a></h2>
 <!-- dev-docs:begin toolchain -->
 <ul>
-<li><strong>Toolchain de Rust:</strong> <code>1.96.0</code> (fixada no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>; o <code>rustup</code> instala-a na primeira chamada ao <code>cargo</code>)</li>
+<li><strong>Toolchain de Rust:</strong> <code>1.96.0</code> (fixada no <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>; o <code>rustup</code> instala-a na primeira chamada ao <code>cargo</code>)</li>
 <li><strong>Componentes:</strong> <code>rustfmt</code>, <code>clippy</code></li>
 </ul>
 <!-- dev-docs:end toolchain -->
@@ -230,8 +230,8 @@ secção <a href="#known-host-traps">Armadilhas conhecidas do host</a> antes de 
 <p>Instala o <a href="https://rustup.rs/"><code>rustup</code></a> e deixa-o apanhar o canal fixado; não o substituas por
 <code>stable</code>. A CI usa exactamente o mesmo ficheiro (<code>rustup show</code> em todos os jobs).</p>
 <h3 id="protoc-required-to-build"><code>protoc</code> (necessário para compilar)<a class="hanchor" href="#protoc-required-to-build" aria-label="#">#</a></h3>
-<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compila o protobuf do CRI do Kubernetes, e o
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api/build.rs</code></a> o contrato de nó em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a>, ambos com
+<p>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compila o protobuf do CRI do Kubernetes, e o
+<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/crates/interfaces/delonix-node-api/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api/build.rs</code></a> o contrato de nó em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a>, ambos com
 <code>tonic-build</code>/<code>prost</code>, que precisa do compilador de Protocol Buffers no <code>PATH</code>. O binário <code>delonix</code>
 depende do <code>delonix-cri</code>, por isso <strong>um simples <code>cargo build --workspace</code> falha sem ele</strong>:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash"># Debian / Ubuntu
@@ -258,17 +258,17 @@ sudo dnf install protobuf-compiler
 </tr>
 <tr>
 <td><code>buf</code> v1.73.0 e <code>protoc-gen-openapi</code> v0.7.1 (toolchain de Go para os instalar)</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
-<td>job <code>contract</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a></td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
+<td>job <code>contract</code> em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a></td>
 </tr>
 <tr>
 <td><code>cargo-deny</code></td>
 <td>a verificação da cadeia de fornecimento</td>
-<td>job <code>deny</code>, configuração em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+<td>job <code>deny</code>, configuração em <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
 </tr>
 <tr>
 <td>Módulo Python <code>markdown</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> (renderiza o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>)</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> (renderiza o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>)</td>
 <td>job <code>docs</code></td>
 </tr>
 <tr>
@@ -280,7 +280,7 @@ sudo dnf install protobuf-compiler
 </table></div>
 <p>Ver <a href="build-and-test.html">Clonar, compilar e testar</a> para saber como cada uma é corrida.</p>
 <h2 id="kernel-requirements">Requisitos de kernel<a class="hanchor" href="#kernel-requirements" aria-label="#">#</a></h2>
-<p>Estas são as funcionalidades do kernel de que o motor depende. O instalador (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>) e o
+<p>Estas são as funcionalidades do kernel de que o motor depende. O instalador (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>) e o
 <code>delonix system doctor</code> verificam a maior parte delas por ti.</p>
 <div class="tablewrap"><table>
 <thead>
@@ -308,7 +308,7 @@ sudo dnf install protobuf-compiler
 </tr>
 <tr>
 <td><strong>overlayfs</strong> com a nova API de mount e <code>lowerdir+</code> (Linux <strong>6.5</strong> ou mais recente)</td>
-<td>os sistemas de ficheiros raiz dos containers são mounts overlay construídos com <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>, uma chamada <code>lowerdir+</code> por camada — ver <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
+<td>os sistemas de ficheiros raiz dos containers são mounts overlay construídos com <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>, uma chamada <code>lowerdir+</code> por camada — ver <a href="https://github.com/ngolacloud/delonix/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
 <td><code>uname -r</code></td>
 </tr>
 <tr>
@@ -328,7 +328,7 @@ de container é montado, não no arranque (o ADR-0037 regista isto como uma esco
 <p>Em kernels Debian mais antigos os user namespaces sem privilégio estão desligados por
 <code>kernel.unprivileged_userns_clone=0</code>; o instalador põe-no a <code>1</code>.</p>
 <h2 id="host-packages">Pacotes do host<a class="hanchor" href="#host-packages" aria-label="#">#</a></h2>
-<p>A fonte de verdade é o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, que é também o
+<p>A fonte de verdade é o <a href="https://github.com/ngolacloud/delonix/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, que é também o
 instalador oficial (é publicado como asset de release). Detecta o gestor de pacotes através de
 <code>/etc/os-release</code> e suporta <strong>apt</strong> (Debian, Ubuntu e derivados), <strong>dnf</strong> (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) e <strong>pacman</strong> (Arch e
@@ -445,11 +445,11 @@ correr sem limite; há duas sondas, conforme a flag:</p>
 <li><code>-m</code>/<code>--memory</code>, <code>-c</code>/<code>--cpus</code> e <code>--cpu-weight</code>: o <code>container run</code> <strong>recusa</strong> antes de criar
   seja o que for, com um erro que diz como corrigir, e sai com <strong>69</strong> (<code>Error::Unavailable</code>, a
   classe <code>EX_UNAVAILABLE</code> — <code>preflight_resource_limits</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> corre o
+  <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> corre o
   container na mesma, sem limites, com um aviso.</li>
 <li><code>--cpuset</code>, <code>--io-weight</code> e a família <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/
   <code>--device-write-iops</code> são verificados <strong>por controlador</strong> (<code>preflight_controller_limits</code>, que
-  pergunta ao <code>leaf_controllers</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>): sem o controlador <code>cpuset</code>/<code>io</code>
+  pergunta ao <code>leaf_controllers</code> em <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>): sem o controlador <code>cpuset</code>/<code>io</code>
   no cgroup do container, o <code>container run</code> recusa com saída <strong>69</strong>, com a mesma válvula
   <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code>. Medido a 2026-09-27: antes disto, <code>--device-write-bps 5mb</code>
   escrevia a 1,6 GB/s e saía 0.</li>
@@ -492,7 +492,7 @@ número de versão.</p>
 <hr />
 <p><strong>Seguinte:</strong> <a href="build-and-test.html">Clonar, compilar e testar</a> — compilar, instalar e testar a tua árvore, e cada gate de CI como comando local.</p>
 <nav class="pager"><a href="rust-primer.html"><span>← Anterior</span>Introdução ao Rust para esta base de código</a><a class="next" href="build-and-test.html"><span>Seguinte →</span>Clonar, compilar e testar</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/environment.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/environment.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/environment.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/environment.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
