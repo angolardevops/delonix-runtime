@@ -23,16 +23,17 @@
 //! a ceiling so a client cannot hold a worker forever.
 //!
 //! Fields the node API does not serve on this path yet — pods, secret delivery,
-//! a continuous health check, a pinned network address, a second network — are
-//! REFUSED (`UNIMPLEMENTED`), never silently dropped: a container that came up
-//! missing what it was created with is the degradation this engine refuses
-//! elsewhere (see [`crate::network_ops::create_with`]). Volume/bind `mounts`,
-//! published `ports` AND a single custom `network` ARE served: mounts become the
-//! `-v` strings `resolve_mounts` reads; ports become the `-p` strings the record
-//! carries (`c.ports`) so the re-exec'd `delonix start` publishes them through
-//! the container's own slirp; a custom network becomes `c.network`, which
-//! `start_container` attaches the container to — the same rootless paths
-//! `delonix run -p`/`--net` take.
+//! a continuous health check, a pinned network address — are REFUSED
+//! (`UNIMPLEMENTED`), never silently dropped: a container that came up missing
+//! what it was created with is the degradation this engine refuses elsewhere
+//! (see [`crate::network_ops::create_with`]). Volume/bind `mounts`, published
+//! `ports` AND custom `networks` (one primary + extras to multi-home) ARE
+//! served: mounts become the `-v` strings `resolve_mounts` reads; ports become
+//! the `-p` strings the record carries (`c.ports`) so the re-exec'd `delonix
+//! start` publishes them through the container's own slirp; the first network
+//! becomes `c.network` and the rest `c.extra_networks`, which `start_container`
+//! attaches — the same rootless paths `delonix run -p`/`--net` (+ `network
+//! connect`) take.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -136,35 +137,37 @@ pub fn spec_to_run_opts(
         argv => Some(argv.to_vec()),
     };
 
-    // The container's PRIMARY network. Empty `spec.networks` = the rootless
-    // default (`host`: shares the host netns, slirp per published port). ONE
-    // attachment names a custom network, joined at start (`start_container`
-    // reads `c.network`, which `create_work` sets). A pinned address, or a
-    // SECOND network, is a `network connect` after start — refused here, not
-    // dropped.
-    let (net, net_aliases) = match spec.networks.as_slice() {
-        [] => ("host".to_string(), Vec::new()),
-        [a] => {
-            if a.network.is_empty() {
-                return Err(Status::invalid_argument(
-                    "CreateContainer: spec.networks[0].network is required",
-                ));
-            }
-            if !a.ipv4_address.is_empty() {
-                return Err(not_served_yet(
-                    "spec.networks[0].ipv4_address (a pinned address)",
-                    "`delonix run --ip` (not on the node API)",
-                ));
-            }
-            (a.network.clone(), a.aliases.clone())
+    // The container's networks. Empty `spec.networks` = the rootless default
+    // (`host`: shares the host netns, slirp per published port). The FIRST
+    // attachment is the primary (`c.network`, eth0); any further ones are extra
+    // networks the container is multi-homed onto (`c.extra_networks`, eth1…),
+    // both set in `create_work` from `req.spec.networks` and attached by the
+    // re-exec'd `delonix start`. A pinned address is still a follow-up, refused
+    // here (never dropped). Validate EVERY attachment before an operation exists.
+    for (i, a) in spec.networks.iter().enumerate() {
+        if a.network.is_empty() {
+            return Err(Status::invalid_argument(format!(
+                "CreateContainer: spec.networks[{i}].network is required"
+            )));
         }
-        _ => {
+        if !a.ipv4_address.is_empty() {
             return Err(not_served_yet(
-                "spec.networks with more than one network",
-                "`delonix network connect` after start",
-            ))
+                "spec.networks[].ipv4_address (a pinned address)",
+                "`delonix run --ip` (not on the node API)",
+            ));
         }
+    }
+    let (net, net_aliases) = match spec.networks.first() {
+        None => ("host".to_string(), Vec::new()),
+        Some(a) => (a.network.clone(), a.aliases.clone()),
     };
+    // Extra networks need a real primary netns: a host/none container has none
+    // to multi-home, so additional attachments there are refused, not dropped.
+    if spec.networks.len() > 1 && delonix_compute::preflight::custom_net_name(&net).is_none() {
+        return Err(Status::invalid_argument(
+            "CreateContainer: additional networks require the first to be a custom network, not host/none",
+        ));
+    }
 
     let mut o = delonix_compute::RunOpts {
         image: spec.image.clone(),
@@ -446,6 +449,23 @@ fn create_work(
     // set `c.net_mode`, the intent; this is the resolved network the re-exec'd
     // `delonix start` attaches to (`start_container` reads `c.network`).
     c.network = delonix_compute::preflight::custom_net_name(&o.net);
+    // Multi-homing: the networks AFTER the primary become `extra_networks`
+    // (eth1, eth2, …), IP left empty for IPAM to allocate at start — the same
+    // shape `network connect` writes, which `start_container` attaches. Guarded
+    // above: these only exist when the primary is a real custom network.
+    if let Some(spec) = &req.spec {
+        c.extra_networks = spec
+            .networks
+            .iter()
+            .skip(1)
+            .enumerate()
+            .map(|(i, a)| delonix_compute::ExtraNet {
+                network: a.network.clone(),
+                ip: String::new(),
+                idx: (i + 1) as u32,
+            })
+            .collect();
+    }
     // `build_record` carries the labels; annotations are the request's, kept on
     // the record so a reader sees what it was created with.
     for (k, v) in &req.annotations {
@@ -747,26 +767,13 @@ mod tests {
         use crate::proto::v1::{HealthCheck, NetworkAttachment, SecretRef};
         type Mutate = Box<dyn Fn(&mut ContainerSpec)>;
         let cases: Vec<Mutate> = vec![
-            // A pinned address and a second network are `network connect` after
-            // start, not a create — still refused.
+            // A pinned address is a follow-up (`--ip`), not a create — still refused.
             Box::new(|s| {
                 s.networks = vec![NetworkAttachment {
                     network: "backend".into(),
                     ipv4_address: "10.0.0.5".into(),
                     ..Default::default()
                 }]
-            }),
-            Box::new(|s| {
-                s.networks = vec![
-                    NetworkAttachment {
-                        network: "a".into(),
-                        ..Default::default()
-                    },
-                    NetworkAttachment {
-                        network: "b".into(),
-                        ..Default::default()
-                    },
-                ]
             }),
             Box::new(|s| s.pod = "p1".into()),
             Box::new(|s| s.secrets = vec![SecretRef::default()]),
@@ -853,6 +860,31 @@ mod tests {
             delonix_compute::preflight::custom_net_name(&plain.net),
             None
         );
+    }
+
+    #[test]
+    fn additional_networks_need_a_custom_primary_and_are_validated() {
+        use crate::proto::v1::NetworkAttachment;
+        let attach = |n: &str| NetworkAttachment {
+            network: n.into(),
+            ..Default::default()
+        };
+        // host + an extra is refused: nothing to multi-home.
+        let mut s = spec("alpine");
+        s.networks = vec![attach("host"), attach("backend")];
+        assert_eq!(
+            spec_to_run_opts(&req("a", s.clone()), &s)
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+        // Two custom networks: the first is the primary (`net`), the rest are
+        // extras — accepted (built into `c.extra_networks` in create_work).
+        let mut ok = spec("alpine");
+        ok.networks = vec![attach("frontend"), attach("backend")];
+        let o = spec_to_run_opts(&req("web", ok.clone()), &ok).unwrap();
+        assert_eq!(o.net, "frontend");
     }
 
     #[test]
