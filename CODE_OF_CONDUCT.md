@@ -51,7 +51,7 @@ officially representing the community in public spaces.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the
 maintainers by opening a
-[private security advisory](https://github.com/angolardevops/delonix-runtime/security/advisories/new)
+[private security advisory](https://github.com/ngolacloud/delonix/security/advisories/new)
 (the same private-reporting channel used for security issues also reaches maintainers directly and
 confidentially) or by contacting a maintainer directly via GitHub. All complaints will be reviewed
 and investigated promptly and fairly.

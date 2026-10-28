@@ -96,11 +96,11 @@ def main() -> int:
         "SPDXID": "SPDXRef-Package-delonix",
         "name": args.name,
         "versionInfo": version,
-        "downloadLocation": "https://github.com/angolardevops/delonix-runtime",
+        "downloadLocation": "https://github.com/ngolacloud/delonix",
         "licenseConcluded": "Apache-2.0",
         "licenseDeclared": "Apache-2.0",
         "filesAnalyzed": False,
-        "supplier": "Organization: angolardevops",
+        "supplier": "Organization: ngolacloud",
     }]
     relationships = [{
         "spdxElementId": "SPDXRef-DOCUMENT",
@@ -142,9 +142,9 @@ def main() -> int:
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": f"{args.name}-{version}",
-        "documentNamespace": f"https://github.com/angolardevops/delonix-runtime/sbom/{version}/{digest[:16]}",
+        "documentNamespace": f"https://github.com/ngolacloud/delonix/sbom/{version}/{digest[:16]}",
         "creationInfo": {
-            "creators": ["Tool: delonix-scripts-sbom", "Organization: angolardevops"],
+            "creators": ["Tool: delonix-scripts-sbom", "Organization: ngolacloud"],
             # NO generation timestamp, deliberately: the same `Cargo.lock` has
             # to give the same file, byte for byte. A real `created` would make
             # every run produce a different SBOM for the same software, and there

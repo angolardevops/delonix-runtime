@@ -8,7 +8,7 @@
 # acknowledged, so a stop at any moment loses nothing (ADR-0041 D5).
 [Unit]
 Description=Delonix node API (delonix.node.v1), started on demand
-Documentation=https://github.com/angolardevops/delonix-runtime
+Documentation=https://github.com/ngolacloud/delonix
 Requires=delonix-node-api.socket
 After=delonix-node-api.socket
 

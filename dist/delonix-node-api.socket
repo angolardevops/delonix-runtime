@@ -8,7 +8,7 @@
 # service exits waits in this socket's queue, so none is lost.
 [Unit]
 Description=Delonix node API socket (delonix.node.v1)
-Documentation=https://github.com/angolardevops/delonix-runtime
+Documentation=https://github.com/ngolacloud/delonix
 
 [Socket]
 ListenStream=@LISTEN@

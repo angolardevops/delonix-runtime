@@ -4,7 +4,7 @@ Thanks for considering a contribution. This is a systems project (namespaces, cg
 raw `clone()`/`unshare()`) — small mistakes here can have real security or stability consequences,
 so we lean on tests, live validation, and careful review more than most projects.
 
-**Contributor handbook:** <https://angolardevops.github.io/delonix-runtime/handbook/> (English,
+**Contributor handbook:** <https://ngolacloud.github.io/delonix/handbook/> (English,
 Português de Angola, Français; source in [docs/dev/README.md](docs/dev/README.md)) — host requirements, building,
 every CI gate as a local command, the architecture, the crates, and the contribution workflow. This
 file is the short version.
@@ -24,7 +24,7 @@ file is the short version.
 ## Development setup
 
 ```bash
-git clone https://github.com/angolardevops/delonix-runtime.git
+git clone https://github.com/ngolacloud/delonix.git
 cd delonix-runtime
 cargo build --workspace
 cargo test --workspace
@@ -109,7 +109,7 @@ into the next release's notes.
 
 ## Reporting bugs
 
-Use [GitHub Issues](https://github.com/angolardevops/delonix-runtime/issues). Include:
+Use [GitHub Issues](https://github.com/ngolacloud/delonix/issues). Include:
 - `delonix --version`
 - The exact command you ran and what you expected vs. what happened
 - Whether you're running rootless or as root, and your distro/kernel version

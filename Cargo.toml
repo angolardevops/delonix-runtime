@@ -42,7 +42,7 @@ members = [
 version = "5.1.1"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/angolardevops/delonix-runtime"
+repository = "https://github.com/ngolacloud/delonix"
 
 [workspace.dependencies]
 # The engine's own crates, by path. ADR-0040 P0: the path of every crate is written

@@ -3,13 +3,13 @@ Delonix Engine
 ==============
 
 .. image:: https://img.shields.io/github/v/release/angolardevops/delonix-runtime?label=release
-   :target: https://github.com/angolardevops/delonix-runtime/releases/latest
+   :target: https://github.com/ngolacloud/delonix/releases/latest
    :alt: Latest release
 .. image:: https://img.shields.io/github/actions/workflow/status/angolardevops/delonix-runtime/ci.yml?branch=main&label=CI
-   :target: https://github.com/angolardevops/delonix-runtime/actions/workflows/ci.yml
+   :target: https://github.com/ngolacloud/delonix/actions/workflows/ci.yml
    :alt: CI status
 .. image:: https://img.shields.io/github/license/angolardevops/delonix-runtime
-   :target: https://github.com/angolardevops/delonix-runtime/blob/main/LICENSE
+   :target: https://github.com/ngolacloud/delonix/blob/main/LICENSE
    :alt: License
 
 A **daemonless, rootless-first, kernel-native** container and microVM **engine**,
@@ -25,10 +25,10 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Docs: https://angolardevops.github.io/delonix-runtime/
-:Contributor handbook: https://angolardevops.github.io/delonix-runtime/handbook/ (English, Português de Angola, Français)
+:Docs: https://ngolacloud.github.io/delonix/
+:Contributor handbook: https://ngolacloud.github.io/delonix/handbook/ (English, Português de Angola, Français)
 :Rust tutorial: https://angolardevops.github.io/delonix-rust-tutorial/ (Português de Angola — Rust, containers, OCI/CRI and a from-scratch rootless runtime)
-:Repo: https://github.com/angolardevops/delonix-runtime
+:Repo: https://github.com/ngolacloud/delonix
 
 Why it's different
 ==================
@@ -298,7 +298,7 @@ Fedora/RHEL, openSUSE and Arch families (uses ``sudo`` for packages):
 
 .. code-block:: bash
 
-   curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
+   curl -fsSL https://github.com/ngolacloud/delonix/releases/latest/download/install.sh | bash
 
 The installer detects your hardware (CPU features, RAM, disk, GPU) and picks
 the best binary for it — on x86-64, an ``x86-64-v3`` (AVX2) build on modern
@@ -385,7 +385,7 @@ download you are verifying):
 
 .. code-block:: bash
 
-   BASE=https://github.com/angolardevops/delonix-runtime/releases/latest/download
+   BASE=https://github.com/ngolacloud/delonix/releases/latest/download
    ARCH=x86_64      # or aarch64
    cd "$(mktemp -d)"
    for f in SHA256SUMS SHA256SUMS.minisig \
@@ -423,7 +423,7 @@ The CLI is grouped semantically; every group has ``--help`` and most accept a
 per-Kind manifest via ``apply -f``. Every list command also takes ``-o json``
 for stable, language-independent output (ADR-0005). Full, always-current
 reference (embeds the real ``--help``) at
-https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
+https://ngolacloud.github.io/delonix/cheatsheet.html.
 
 Since v2.0.0 the surface has two halves that mean the same thing. The
 **imperative** groups below are the ones you type by hand (``container ps``,
@@ -733,8 +733,8 @@ command, no residing process:
      - The ``delonix`` CLI — the one door; it runs the servers as sibling binaries.
 
 See the `architecture page
-<https://angolardevops.github.io/delonix-runtime/arquitectura.html>`_ and the
-`C4 model <https://angolardevops.github.io/delonix-runtime/c4.html>`_ for the
+<https://ngolacloud.github.io/delonix/arquitectura.html>`_ and the
+`C4 model <https://ngolacloud.github.io/delonix/c4.html>`_ for the
 full picture.
 
 Appendix — features by release
@@ -750,7 +750,7 @@ Community
 =========
 
 `CONTRIBUTING.md <CONTRIBUTING.md>`_ for how to send a change (and the
-`contributor handbook <https://angolardevops.github.io/delonix-runtime/handbook/>`_
+`contributor handbook <https://ngolacloud.github.io/delonix/handbook/>`_
 for everything behind it — environment, build, architecture, crates, conventions),
 the `Rust tutorial <https://angolardevops.github.io/delonix-rust-tutorial/>`_ (Português de Angola)
 if you are new to Rust or to how containers work underneath,

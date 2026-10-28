@@ -14,7 +14,7 @@
 # the mount visible is to be measured on a node before it is added.
 [Unit]
 Description=Delonix storage pool helper (one request)
-Documentation=https://github.com/angolardevops/delonix-runtime
+Documentation=https://github.com/ngolacloud/delonix
 Requires=delonix-storage-helper.socket
 
 [Service]

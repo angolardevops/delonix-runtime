@@ -145,7 +145,7 @@ SHELL_RC      ?= 1
 TAG        ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 IMAGE_REPO ?= delonix/runtime
 IMAGE      := $(IMAGE_REPO):$(TAG)
-GHCR_IMAGE ?= ghcr.io/angolardevops/delonix-runtime
+GHCR_IMAGE ?= ghcr.io/ngolacloud/delonix
 
 .PHONY: help info repro-check bootstrap doctor build build-debug binaries check fmt fmt-check lint test deny \
 	gates ci gitflow install install-system uninstall uninstall-system apparmor clean \

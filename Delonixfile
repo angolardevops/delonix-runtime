@@ -29,9 +29,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # --- final: CLI magra --------------------------------------------------------
 FROM debian:bookworm-slim
 ARG DELONIX_VERSION=dev
-LABEL org.opencontainers.image.title="delonix-runtime" \
+LABEL org.opencontainers.image.title="delonix" \
       org.opencontainers.image.version="${DELONIX_VERSION}" \
-      org.opencontainers.image.source="https://github.com/angolardevops/delonix-runtime" \
+      org.opencontainers.image.source="https://github.com/ngolacloud/delonix" \
       org.opencontainers.image.licenses="Apache-2.0" \
       delonix/runtime.version="${DELONIX_VERSION}"
 

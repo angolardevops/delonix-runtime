@@ -10,7 +10,7 @@ too, by not disclosing them publicly before a fix is available.
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-Use **[GitHub Private Vulnerability Reporting](https://github.com/angolardevops/delonix-runtime/security/advisories/new)**
+Use **[GitHub Private Vulnerability Reporting](https://github.com/ngolacloud/delonix/security/advisories/new)**
 (enabled on this repository) — go to the **Security** tab → **Report a vulnerability**. This opens
 a private draft advisory visible only to you and the maintainers, with no public trace until it's
 resolved and you both agree to disclose.
