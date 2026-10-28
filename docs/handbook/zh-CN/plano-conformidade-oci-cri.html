@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman · Delonix — 贡献者手册</title>
+<title>OCI + CRI 合规计划——让 Delonix 与 Docker/Podman 对齐 · Delonix — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,100 +206,95 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="engineering-process.html"><span class="n">18</span><span>Engineering process (canonical)</span></a><a href="contributing-workflow.html"><span class="n">19</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">20</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">21</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">22</span><span>云原生标准，逐层展开</span></a><a class="on" aria-current="page" href="plano-conformidade-oci-cri.html"><span class="n">23</span><span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</span></a><a href="environment-variables.html"><span class="n">24</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">25</span><span>术语表</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="engineering-process.html"><span class="n">18</span><span>工程流程（权威）</span></a><a href="contributing-workflow.html"><span class="n">19</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">20</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">21</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">22</span><span>云原生标准，逐层展开</span></a><a class="on" aria-current="page" href="plano-conformidade-oci-cri.html"><span class="n">23</span><span>OCI + CRI 合规计划——让 Delonix 与 Docker/Podman 对齐</span></a><a href="environment-variables.html"><span class="n">24</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">25</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">参考</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="plano-de-conformidade-oci-cri-alinhar-o-delonix-com-dockerpodman">Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</h1>
+<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/plano-conformidade-oci-cri.html">阅读英文页面</a></span></div><h1 id="plano-de-conformidade-oci-cri-alinhar-o-delonix-com-dockerpodman">OCI + CRI 合规计划——让 Delonix 与 Docker/Podman 对齐</h1>
 <blockquote>
-<p><strong>Objetivo.</strong> Fazer o Delonix passar os <strong>mesmos contratos de interoperabilidade</strong> que o
-containerd/CRI-O (CRI) e qualquer runtime OCI (image/distribution/runtime) passam, para ser
-drop-in para o kubelet e para registries — e, num track separado e com ressalva, cobrir a
-Docker Engine API que ferramentas de terceiros chamam via <code>DOCKER_HOST</code>.</p>
-<p><strong>Princípio de medição.</strong> Cada fase fecha contra uma <strong>suite upstream com um número</strong>, não
-"parece feito". Nunca divergência silenciosa (recusa explícita + razão). Teste que falha sem a
-correção e passa com ela, como o resto do projeto. Onde um teste não se aplica ao modelo
-(daemonless, rootless), nomeia-se <strong>N/A</strong> com a razão — não se inflaciona a percentagem.</p>
-<p><strong>Âmbito e a ressalva do <code>paridade-docker-podman.md §5</code>.</strong> OCI (image/distribution/runtime) e
-CRI são contratos de interop onde conformidade total vale a pena — fazem do Delonix um
-substituto real. A Docker Engine API (Track D) é conveniência de ecossistema; o próprio projeto
-desaconselha perseguir paridade total com a Docker CLI, por isso o Track D cobre só o que
-ferramentas automáticas chamam, não <code>docker run</code> interactivo.</p>
+<p><strong>目标。</strong> 让 Delonix 通过与 containerd/CRI-O（CRI）以及任何 OCI 运行时
+（image/distribution/runtime）所通过的<strong>相同的互操作契约</strong>，从而成为 kubelet 和 registry 的
+drop-in 替代——并且，在一个单独且带保留的 track 中，覆盖第三方工具经由 <code>DOCKER_HOST</code> 调用的
+Docker Engine API。</p>
+<p><strong>度量原则。</strong> 每个阶段都对着一个<strong>带数字的上游 suite</strong> 收尾，而不是"看起来做好了"。绝不静默
+偏离（显式拒绝 + 原因）。如同项目其余部分一样：一个在没有修复时失败、有修复时通过的测试。
+凡是一个测试不适用于本模型（daemonless、rootless）的地方，就带原因标注 <strong>N/A</strong>——不虚增百分比。</p>
+<p><strong>范围，以及 <code>paridade-docker-podman.md §5</code> 的保留。</strong> OCI（image/distribution/runtime）和
+CRI 是值得追求完全合规的互操作契约——它们使 Delonix 成为真正的替代品。Docker Engine API
+（Track D）是生态系统的便利；项目本身不建议追求与 Docker CLI 的完全对等，所以 Track D 只覆盖
+自动化工具所调用的内容，而非交互式的 <code>docker run</code>。</p>
 </blockquote>
-<h2 id="baseline-medido-binario-ee615f3b-2026-10-24">Baseline medido (binário <code>ee615f3b</code>, 2026-10-24)<a class="hanchor" href="#baseline-medido-binario-ee615f3b-2026-10-24" aria-label="#">#</a></h2>
+<h2 id="baseline-medido-binario-ee615f3b-2026-10-24">已测量基线（二进制 <code>ee615f3b</code>，2026-10-24）<a class="hanchor" href="#baseline-medido-binario-ee615f3b-2026-10-24" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Contrato</th>
-<th>Estado</th>
-<th>Fonte</th>
+<th>契约</th>
+<th>状态</th>
+<th>来源</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>CRI — critest v1.36.0</td>
-<td><strong>RE-MEDIDO 2026-10-24 na v5.1.1 (<code>main @ ab4751ac</code>): 84/104 (<code>84 Passed | 20 Failed \| 18 Skipped</code>)</strong> — supera o 79/103 de v0.63 (2026-08). Linha que hoje embarca como 0.1.0</td>
-<td><code>reports/<wbr>cri-conformance-2026-10-24/<wbr>00-audit-report.<wbr>md</code> · <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a></td>
+<td><strong>79/103 来自 v0.63（2026-08）——需在 v5.1.1 重新测量</strong>（所有者正在 C2/C3 上运行 critest）</td>
+<td><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a></td>
 </tr>
 <tr>
 <td>OCI Image</td>
-<td><strong>interop provada na v5.1.1</strong>: delonix→docker <strong>e</strong> delonix→podman + docker→delonix, por digest (IMG-1 corrigido 2026-10-24)</td>
+<td><strong>在 v5.1.1 已证明互操作</strong>：delonix→docker <strong>和</strong> delonix→podman + docker→delonix，按 digest（IMG-1 已于 2026-10-24 修复）</td>
 <td><code>reports/<wbr>conformance/<wbr>A1-oci-image-distribution.<wbr>md</code></td>
 </tr>
 <tr>
 <td>OCI Distribution</td>
-<td>push/pull cross-engine OK na v5.1.1; suite <code>distribution-spec</code> é server-side → <strong>N/A</strong> (Delonix é cliente)</td>
+<td>在 v5.1.1 跨引擎 push/pull OK；<code>distribution-spec</code> suite 是服务端 → <strong>N/A</strong>（Delonix 是客户端）</td>
 <td>A1</td>
 </tr>
 <tr>
 <td>OCI Runtime — bundle</td>
-<td><strong>v5.1.1</strong>: ociVersion 1.3.0 ✅, seccomp ✅, <code>runc run</code> rootless rc=0 ✅ (RT-1/2/3) — <code>oci-runtime-tool validate</code> OK</td>
-<td>B1/B2 reports</td>
+<td><strong>v5.1.1</strong>：ociVersion 1.3.0 ✅、seccomp ✅、<code>runc run</code> rootless rc=0 ✅（RT-1/2/3）—— <code>oci-runtime-tool validate</code> OK</td>
+<td>B1/B2 报告</td>
 </tr>
 <tr>
 <td>OCI Runtime — CLI runc</td>
-<td><strong>não existe</strong> (o único gap de runtime real) — RT-4 / ADR-0080</td>
+<td><strong>不存在</strong>（唯一真正的 runtime 缺口）—— RT-4 / ADR-0080</td>
 <td>B1</td>
 </tr>
 <tr>
 <td>Docker Engine API</td>
-<td><strong>15/26</strong> rotas (medido ao vivo na v5.1.1)</td>
+<td><strong>15/26</strong> 路由（在 v5.1.1 实测）</td>
 <td><code>delonix serve docker-api --matrix</code></td>
 </tr>
 </tbody>
 </table></div>
 <blockquote>
-<p><strong>Aviso de proveniência (importante).</strong> A primeira versão deste plano herdou a matriz de gaps do
-relatório <strong>v3.1.0</strong> (<code>fa8c6297</code>). Estamos na <strong>v5.1.1</strong>: re-medir contra o código actual mostrou
-que vários "gaps" estão <strong>stale</strong> — a mount-propagation já funciona (B2), o <code>.tmp</code> de layer já é
-limpo em-processo (G-035), e o <code>tag@digest</code> é formato válido, não bug (G-033). <strong>Este plano é
-conduzido por medições na v5.1.1, não pela matriz v3.1.0.</strong> Um "gap" só entra se REPRODUZIR na v5.1.1.</p>
+<p><strong>来源提示（重要）。</strong> 本计划的第一版沿用了 <strong>v3.1.0</strong> 报告（<code>fa8c6297</code>）的缺口矩阵。我们现在
+处于 <strong>v5.1.1</strong>：对当前代码重新测量表明，若干"缺口"已经<strong>过时（stale）</strong>——mount-propagation
+已经可用（B2），层的 <code>.tmp</code> 已在进程内清理（G-035），而 <code>tag@digest</code> 是有效格式，不是 bug
+（G-033）。<strong>本计划由 v5.1.1 上的测量驱动，而非 v3.1.0 矩阵。</strong> 一个"缺口"只有在 v5.1.1 上能
+<strong>复现</strong>时才会入列。</p>
 </blockquote>
-<p><strong>As 20 falhas do CRI (medição de 2026-10-24), por área:</strong> AppArmor 6 · Mount Propagation 3 ·
-Security Context 3 (HostPID, PodPID, SeccompProfilePath) · Rede 2 · Streaming 2 (portforward) ·
-Image Manager 2 (ambas já corrigidas, #18/#19) · RO-mount 1 · Image Identifier Consistency 1.
-(A repartição antiga — 24 falhas de v0.63, AppArmor 9 — fica no histórico de <code>cri-conformance.md</code>.)</p>
-<h2 id="decisoes-do-dono-2026-10-24">Decisões do dono (2026-10-24)<a class="hanchor" href="#decisoes-do-dono-2026-10-24" aria-label="#">#</a></h2>
+<p><strong>CRI 的 24 项失败，按领域划分：</strong> AppArmor 9 · Security Context 4 · Mount Propagation 3 ·
+Image Manager 2 · Streaming 2 · Multiple Containers 1 · Networking 1 · RO-mount 1 · OOM 1。</p>
+<h2 id="decisoes-do-dono-2026-10-24">所有者的决定（2026-10-24）<a class="hanchor" href="#decisoes-do-dono-2026-10-24" aria-label="#">#</a></h2>
 <ol>
-<li><strong>Prioridade: CRI primeiro</strong> (kubelet drop-in — o diferenciador container+VM+k8s).</li>
-<li><strong><code>NoNewPrivs=false</code>:</strong> honrar o pedido do CRI (passa a conformidade) <strong>mantendo NNP sempre-ligado
-   por omissão no caminho CLI/normal</strong>. A garantia por omissão não muda; só o CRI a pode relaxar.</li>
-<li><strong>OOM post-mortem:</strong> <strong>investir no supervisor</strong> — o supervisor por-container (que já existe para
-   <code>--restart</code>/<code>wait</code>) lê o cgroup ANTES do teardown e regista <code>OOMKilled</code>/137. Não é N/A.</li>
+<li><strong>优先级：CRI 优先</strong>（kubelet drop-in——container+VM+k8s 的差异化点）。</li>
+<li><strong><code>NoNewPrivs=false</code>：</strong> 兑现 CRI 的请求（使之合规），<strong>同时在 CLI/正常路径上保持 NNP 默认
+   常开</strong>。默认保证不变；只有 CRI 可以放宽它。</li>
+<li><strong>OOM post-mortem：</strong> <strong>投资于 supervisor</strong> —— 按容器的 supervisor（它为 <code>--restart</code>/<code>wait</code>
+   已经存在）在拆除（teardown）之前读取 cgroup 并记录 <code>OOMKilled</code>/137。它不是 N/A。</li>
 </ol>
 <hr />
-<h2 id="track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful">Track C — CRI (PRIORITÁRIO) · gate: re-medir na v5.1.1, depois → ~100/103 em rootful<a class="hanchor" href="#track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful" aria-label="#">#</a></h2>
-<p><strong>Passo zero: re-medir o critest na v5.1.1 — FEITO (2026-10-24): 84/104</strong> (<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>;
-relatório em <code>reports/cri-conformance-2026-10-24/</code>). O 79/103 era de v0.63 (2026-08); a repartição
-de falhas abaixo foi actualizada para a corrida de 2026-10-24. Os fixes #18/#19 do <code>ImageService</code>
-(C2, worktree <code>cri-image-repodigests-and-user</code>) já entraram; falta portforward (C3,
-<code>cri-portforward-conformance</code>). As fases abaixo mantêm-se como mapa das ÁREAS.</p>
-<p>Cada fase = uma área de falha do critest, com a spec que falha nomeada.</p>
+<h2 id="track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful">Track C — CRI（优先）· gate：在 v5.1.1 重新测量，然后 → rootful 下 ~100/103<a class="hanchor" href="#track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful" aria-label="#">#</a></h2>
+<p><strong>第零步：在 v5.1.1 重新测量 critest</strong>（<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a>）。那 79/103 来自 v0.63（2026-08），
+下面的失败分布是那次运行的——可能已不相符。所有者正在跑这个（worktree
+<code>cri-image-repodigests-and-user</code> = C2、<code>cri-portforward-conformance</code> = C3）。下面各阶段作为<strong>领域</strong>
+的地图保留，但那些数字（<code>+4</code> 等）只有在重新测量之后才有效。</p>
+<p>每个阶段 = critest 的一个失败领域，并点名失败的 spec。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Fase</th>
-<th>Área (nº specs)</th>
-<th>O que fazer</th>
+<th>阶段</th>
+<th>领域（spec 数）</th>
+<th>要做什么</th>
 <th>Gate</th>
 </tr>
 </thead>
@@ -307,157 +302,156 @@ de falhas abaixo foi actualizada para a corrida de 2026-10-24. Os fixes #18/#19 
 <tr>
 <td><strong>C1</strong></td>
 <td>Security Context (4)</td>
-<td><code>PodPID</code> namespace; <code>RunAsUserName</code>; <code>SeccompProfilePath</code> por caminho (liga ao seccomp-custom que já erra em vez de ignorar); <strong><code>NoNewPrivs=false</code></strong> (decisão 2 — relaxável só pelo CRI)</td>
+<td><code>PodPID</code> 命名空间；<code>RunAsUserName</code>；按路径的 <code>SeccompProfilePath</code>（接到已经报错而非忽略的 seccomp-custom）；<strong><code>NoNewPrivs=false</code></strong>（决定 2——只能由 CRI 放宽）</td>
 <td>+4</td>
 </tr>
 <tr>
 <td><strong>C2</strong></td>
 <td>Image Manager (2)</td>
-<td>pull por digest via CRI; <code>Uid</code>/<code>Username</code> no <code>ImageStatus</code></td>
+<td>经 CRI 按 digest 拉取；<code>ImageStatus</code> 中的 <code>Uid</code>/<code>Username</code></td>
 <td>+2</td>
 </tr>
 <tr>
 <td><strong>C3</strong></td>
 <td>Streaming (2)</td>
-<td>servidor de streaming CRI: <code>PortForward</code> + base de <code>Exec</code>/<code>Attach</code> com hijack (<strong>partilhado com D3</strong>)</td>
+<td>CRI streaming 服务器：<code>PortForward</code> + 带 hijack 的 <code>Exec</code>/<code>Attach</code> 基础（<strong>与 D3 共享</strong>）</td>
 <td>+2</td>
 </tr>
 <tr>
 <td><strong>C4</strong></td>
 <td>Networking (1) + Mount Propagation (3)</td>
-<td>port mapping só com porta de container; <code>rshared</code>/<code>rslave</code> (<strong>vem do Track B2</strong>)</td>
+<td>仅带容器端口的 port mapping；<code>rshared</code>/<code>rslave</code>（<strong>来自 Track B2</strong>）</td>
 <td>+4</td>
 </tr>
 <tr>
 <td><strong>C5</strong></td>
 <td>RO-mount (1) + Multiple Containers (1)</td>
-<td>mounts read-only não-recursivos; caso multi-container</td>
+<td>非递归的只读挂载；多容器用例</td>
 <td>+2</td>
 </tr>
 <tr>
 <td><strong>C6</strong></td>
 <td>OOM (1)</td>
-<td>supervisor capta OOM antes do teardown do cgroup (decisão 3)</td>
+<td>supervisor 在 cgroup 拆除之前捕获 OOM（决定 3）</td>
 <td>+1</td>
 </tr>
 <tr>
 <td><strong>C7</strong></td>
 <td>AppArmor (9)</td>
-<td>traduzir o perfil por-container do CRI; correr a suite <strong>rootful</strong> (carregar perfis exige privilégio — N/A em rootless, nomeado); provar os que não são de ambiente</td>
-<td>+0 a +9 conforme rootful/rootless</td>
+<td>转译 CRI 的按容器 profile；在 <strong>rootful</strong> 下运行该 suite（加载 profile 需要特权——rootless 下 N/A，已点名）；证明那些非环境相关的</td>
+<td>按 rootful/rootless 为 +0 到 +9</td>
 </tr>
 </tbody>
 </table></div>
 <blockquote>
-<p><strong>N/A honestos a nomear no relatório final:</strong> as specs de AppArmor que exigem carregar um perfil
-(privilégio que o rootless não tem) ficam N/A em rootless e provam-se em rootful. Nenhuma outra.</p>
+<p><strong>要在最终报告中诚实点名的 N/A：</strong> 那些要求加载 profile（rootless 不具备的特权）的 AppArmor
+spec，在 rootless 下为 N/A，并在 rootful 下证明。其他任何都不算。</p>
 </blockquote>
-<p><strong>Pré-requisito do Track B:</strong> C4 depende de B2 (mount propagation). Fazer B2 no arranque do Track C.</p>
+<p><strong>Track B 的前置条件：</strong> C4 依赖 B2（mount propagation）。在 Track C 启动时就做 B2。</p>
 <hr />
-<h2 id="track-b-oci-runtime-spec-habilita-o-cri">Track B — OCI Runtime Spec (habilita o CRI)<a class="hanchor" href="#track-b-oci-runtime-spec-habilita-o-cri" aria-label="#">#</a></h2>
+<h2 id="track-b-oci-runtime-spec-habilita-o-cri">Track B — OCI Runtime Spec（为 CRI 赋能）<a class="hanchor" href="#track-b-oci-runtime-spec-habilita-o-cri" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Fase</th>
-<th>O que fazer</th>
+<th>阶段</th>
+<th>要做什么</th>
 <th>Gate</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>B1</strong></td>
-<td>Correr <code>opencontainers/<wbr>runtime-tools</code> validation contra (a) o bundle de <code>image export</code> + runc/crun e (b) o init próprio do Delonix (config.json → namespaces/caps/seccomp/mounts/hooks/rlimits). Script reproduzível.</td>
-<td>baseline publicado</td>
+<td>运行 <code>opencontainers/<wbr>runtime-tools</code> validation，对着 (a) <code>image export</code> 的 bundle + runc/crun 以及 (b) Delonix 自己的 init（config.json → namespaces/caps/seccomp/mounts/hooks/rlimits）。可复现脚本。</td>
+<td>已发布基线</td>
 </tr>
 <tr>
 <td><strong>B2</strong></td>
-<td>Mount propagation <code>rshared</code>/<code>rslave</code> (<strong>fecha 3 do CRI — C4</strong>)</td>
+<td>Mount propagation <code>rshared</code>/<code>rslave</code>（<strong>关闭 CRI 的 3 项——C4</strong>）</td>
 <td>runtime-tools + critest</td>
 </tr>
 <tr>
 <td><strong>B3</strong></td>
-<td>Readonly recursivo + masked/readonly paths (decisão G-009)</td>
+<td>递归 readonly + masked/readonly paths（决定 G-009）</td>
 <td>runtime-tools</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="track-a-oci-image-distribution-fundacao-de-interop-de-imagens">Track A — OCI Image + Distribution (fundação de interop de imagens)<a class="hanchor" href="#track-a-oci-image-distribution-fundacao-de-interop-de-imagens" aria-label="#">#</a></h2>
-<p><strong>Re-baseline na v5.1.1 (2026-10-24): esta track está em grande parte FEITA — o resto é opcional.</strong>
-A interop OCI de imagem foi <strong>provada ao vivo</strong> nos três motores (IMG-1 corrigido: <code>push</code> publica
-manifesto OCI, puxável por docker E podman). Os "gaps" G-033/035/039 do relatório v3.1.0 <strong>saíram</strong>
-após re-medição:</p>
+<h2 id="track-a-oci-image-distribution-fundacao-de-interop-de-imagens">Track A — OCI Image + Distribution（镜像互操作的基础）<a class="hanchor" href="#track-a-oci-image-distribution-fundacao-de-interop-de-imagens" aria-label="#">#</a></h2>
+<p><strong>在 v5.1.1 重新定基线（2026-10-24）：此 track 大部分已完成——其余是可选的。</strong>
+OCI 镜像互操作已在三个引擎上<strong>实际证明</strong>（IMG-1 已修复：<code>push</code> 发布 OCI 清单，可被 docker 与
+podman 拉取）。v3.1.0 报告的"缺口" G-033/035/039 在重新测量后<strong>出局</strong>：</p>
 <ul>
-<li><strong>G-033</strong> (tag+digest) — <strong>NÃO é bug</strong>: <code>repo:tag@digest</code> é formato OCI/Docker válido e comum (o
-  kind usa-o); recusar partiria o kind. Se um dia se quiser detectar um <em>conflito</em> real (a tag
-  resolve para outro digest), é uma decisão de representação local — fora do âmbito até ser pedido.</li>
-<li><strong>G-035</strong> (<code>.tmp</code> de layer) — <strong>já limpo em-processo</strong> (<code>overlay.rs:492-508</code>). Resíduo mínimo: só
-  um <code>.tmp</code> órfão de um processo MORTO a meio, que o <code>prune</code> não varre — melhoria pequena, agrupável
-  numa futura passagem do <code>prune</code>, não um gap de conformidade.</li>
-<li><strong>G-039</strong> (archive docker-save LEGADO <code>&lt;hash&gt;/layer.tar</code>) — real mas <strong>só afecta archives
-  pré-OCI</strong>; o <code>docker save</code> moderno produz o layout <code>blobs/sha256/</code> que o <code>load</code> já aceita. Baixa
-  prioridade; a correcção (mapa path→digest) tem subtileza nos layers.</li>
+<li><strong>G-033</strong>（tag+digest）—— <strong>不是 bug</strong>：<code>repo:tag@digest</code> 是有效且常见的 OCI/Docker 格式（kind
+  会用它）；拒绝它会破坏 kind。若有朝一日想检测一个真正的<em>冲突</em>（tag 解析到另一个 digest），
+  那是本地表示的决定——在被要求之前不在范围内。</li>
+<li><strong>G-035</strong>（层的 <code>.tmp</code>）—— <strong>已在进程内清理</strong>（<code>overlay.rs:492-508</code>）。残留极少：只有一个来自
+  中途<strong>死亡</strong>进程的孤儿 <code>.tmp</code>，<code>prune</code> 不会清扫它——这是小改进，可归并进未来一次 <code>prune</code>
+  的扫荡，不是合规缺口。</li>
+<li><strong>G-039</strong>（<strong>遗留的</strong> docker-save 归档 <code>&lt;hash&gt;/layer.tar</code>）—— 真实但<strong>只影响 pre-OCI 归档</strong>；
+  现代 <code>docker save</code> 产生 <code>load</code> 已接受的 <code>blobs/sha256/</code> 布局。低优先级；其修复（path→digest
+  映射）在层上有微妙之处。</li>
 </ul>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Opcional</th>
-<th>O que fica</th>
+<th>可选</th>
+<th>剩下的</th>
 <th>Gate</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>A-sbom/scan/sign</td>
-<td><code>image sbom</code>/<code>scan</code>/<code>verify</code>/<code>sign</code> — medir a cobertura real na v5.1.1 (não medido nesta campanha)</td>
-<td>baseline publicado</td>
+<td><code>image sbom</code>/<code>scan</code>/<code>verify</code>/<code>sign</code> —— 在 v5.1.1 测量真实覆盖（本轮未测量）</td>
+<td>已发布基线</td>
 </tr>
 <tr>
 <td>A-manifest-list</td>
-<td>multi-arch no <code>push</code> (hoje 1 arch por invocação)</td>
-<td>round-trip multi-arch</td>
+<td><code>push</code> 的 multi-arch（今天每次调用 1 arch）</td>
+<td>multi-arch round-trip</td>
 </tr>
 </tbody>
 </table></div>
 <blockquote>
-<p><code>oci-image-tool</code> (image-spec) <strong>não compila</strong> (breakage <code>Sirupsen/logrus</code>) e a <code>distribution-spec</code>
-é server-side — por isso a prova de imagem na v5.1.1 é a <strong>interop entre motores</strong>, não uma suite.</p>
+<p><code>oci-image-tool</code>（image-spec）<strong>无法编译</strong>（<code>Sirupsen/logrus</code> 损坏），且 <code>distribution-spec</code>
+是服务端——所以 v5.1.1 上的镜像证明是<strong>引擎间的互操作</strong>，而非一个 suite。</p>
 </blockquote>
-<h2 id="track-d-docker-engine-api-ecossistema-ressalva-5">Track D — Docker Engine API (ecossistema; ressalva §5)<a class="hanchor" href="#track-d-docker-engine-api-ecossistema-ressalva-5" aria-label="#">#</a></h2>
+<h2 id="track-d-docker-engine-api-ecossistema-ressalva-5">Track D — Docker Engine API（生态系统；§5 保留）<a class="hanchor" href="#track-d-docker-engine-api-ecossistema-ressalva-5" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Fase</th>
-<th>Rota(s)</th>
-<th>Porquê</th>
+<th>阶段</th>
+<th>路由</th>
+<th>为什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>D1</strong></td>
-<td><code>GET /<wbr>containers/<wbr>{id}/<wbr>logs</code> (framing stdout/stderr)</td>
-<td>desbloqueia <code>wait_for_logs</code> do testcontainers — maior valor isolado</td>
+<td><code>GET /<wbr>containers/<wbr>{id}/<wbr>logs</code>（stdout/stderr framing）</td>
+<td>为 testcontainers 的 <code>wait_for_logs</code> 解锁——最大的孤立价值</td>
 </tr>
 <tr>
 <td><strong>D2</strong></td>
-<td><code>/events</code>, <code>/build</code>, <code>/networks</code>, <code>/volumes</code>, <code>GET …/stats</code></td>
-<td>superfície que compose/kind/ferramentas tocam</td>
+<td><code>/events</code>、<code>/build</code>、<code>/networks</code>、<code>/volumes</code>、<code>GET …/stats</code></td>
+<td>compose/kind/工具会触及的表面</td>
 </tr>
 <tr>
 <td><strong>D3</strong></td>
-<td><code>POST …/exec</code> + <code>…/attach</code> (hijack HTTP)</td>
-<td><strong>partilha o servidor de streaming do C3</strong></td>
+<td><code>POST …/exec</code> + <code>…/attach</code>（HTTP hijack）</td>
+<td><strong>与 C3 共享 streaming 服务器</strong></td>
 </tr>
 </tbody>
 </table></div>
 <blockquote>
-<p>Fora de âmbito deliberado: <code>docker run</code> interactivo contra o servidor (comportamento interno do
-CLI Go), e paridade de <code>--format</code>/CLI que o <code>§5</code> desaconselha.</p>
+<p>刻意不在范围内：对服务器的交互式 <code>docker run</code>（Go CLI 的内部行为），以及 <code>§5</code> 不建议的
+<code>--format</code>/CLI 对等。</p>
 </blockquote>
 <hr />
-<h2 id="sequencia-e-dependencias">Sequência e dependências<a class="hanchor" href="#sequencia-e-dependencias" aria-label="#">#</a></h2>
-<p><strong>Estado na v5.1.1:</strong> Track A (imagem) <strong>provada</strong> (IMG-1); Track B RT-1/2/3 + B2 <strong>feitos</strong> — só falta
-<strong>RT-4</strong> (CLI runc, ADR-0080, GO-gated). O trabalho real restante é RT-4, o Track C (a re-medir) e o
-Track D.</p>
+<h2 id="sequencia-e-dependencias">顺序与依赖<a class="hanchor" href="#sequencia-e-dependencias" aria-label="#">#</a></h2>
+<p><strong>v5.1.1 上的状态：</strong> Track A（镜像）<strong>已证明</strong>（IMG-1）；Track B RT-1/2/3 + B2 <strong>已完成</strong>——只差
+<strong>RT-4</strong>（CLI runc，ADR-0080，受 GO 门控）。剩下的真实工作是 RT-4、Track C（待重新测量）和
+Track D。</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">[v5.1.1 feito]  A (interop) ✅   B2 mount-prop ✅   RT-1/2/3 bundle ✅
 [real restante]
    RT-4 (ADR-0080, GO) ─► runtime-tools validation suite contra o Delonix
@@ -465,41 +459,41 @@ Track D.</p>
                                           └─(C3 streaming)─► D3 ─► D1 ─► D2
 </code></pre></div>
 <ol>
-<li><strong>Track C</strong>: re-medir o critest na v5.1.1 (C0), depois fechar por área — o retorno estratégico
-   (em curso pelo dono: C2/C3).</li>
-<li><strong>RT-4</strong> (quando o dono der GO): desbloqueia medir o runtime pela suite upstream.</li>
-<li><strong>Track D</strong> por último, com a ressalva; D3 cai de borla com o C3 (mesmo servidor de streaming).</li>
-<li><strong>Track A</strong>: só o opcional (sbom/scan/sign, manifest-list) — a interop já está provada.</li>
+<li><strong>Track C</strong>：在 v5.1.1 重新测量 critest（C0），然后按领域收尾——战略回报（由所有者进行中：
+   C2/C3）。</li>
+<li><strong>RT-4</strong>（当所有者给出 GO 时）：解锁用上游 suite 来测量 runtime。</li>
+<li><strong>Track D</strong> 放到最后，带着保留；D3 随 C3 顺带完成（同一个 streaming 服务器）。</li>
+<li><strong>Track A</strong>：只剩可选项（sbom/scan/sign、manifest-list）——互操作已经证明。</li>
 </ol>
-<h2 id="como-medir-reproduzivel-por-fase">Como medir (reproduzível, por fase)<a class="hanchor" href="#como-medir-reproduzivel-por-fase" aria-label="#">#</a></h2>
+<h2 id="como-medir-reproduzivel-por-fase">如何测量（可复现，按阶段）<a class="hanchor" href="#como-medir-reproduzivel-por-fase" aria-label="#">#</a></h2>
 <ul>
-<li>CRI: <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a> → <code>Ran N of 122 ... X Passed | Y Failed</code>. Publicar o diff de X a cada fase.</li>
-<li>OCI runtime: <code>runtime-tools</code> validation (instalar em A1/B1); publicar pass/fail por secção do spec.</li>
-<li>OCI image/distribution: suites upstream <code>image-spec</code>/<code>distribution-spec</code>; publicar baseline e deltas.</li>
-<li>Docker API: <code>delonix serve docker-api --matrix</code> (rotas servidas/recusadas) + <code>tests/compat/docker_api_smoke.py</code> e um run de testcontainers.</li>
-<li>Cada fase traz um teste que falha sem a correção (o método do projeto).</li>
+<li>CRI：<a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/critest.sh" target="_blank" rel="noopener"><code>scripts/critest.sh</code></a> → <code>Ran N of 122 ... X Passed | Y Failed</code>。每个阶段发布 X 的 diff。</li>
+<li>OCI runtime：<code>runtime-tools</code> validation（在 A1/B1 安装）；按 spec 的各节发布 pass/fail。</li>
+<li>OCI image/distribution：上游 suite <code>image-spec</code>/<code>distribution-spec</code>；发布基线和增量。</li>
+<li>Docker API：<code>delonix serve docker-api --matrix</code>（已服务/已拒绝的路由）+ <code>tests/compat/docker_api_smoke.py</code> 以及一次 testcontainers 运行。</li>
+<li>每个阶段都带来一个在没有修复时失败的测试（项目的方法）。</li>
 </ul>
-<h2 id="riscos-tensoes-conhecidas">Riscos / tensões conhecidas<a class="hanchor" href="#riscos-tensoes-conhecidas" aria-label="#">#</a></h2>
+<h2 id="riscos-tensoes-conhecidas">已知风险 / 张力<a class="hanchor" href="#riscos-tensoes-conhecidas" aria-label="#">#</a></h2>
 <ul>
-<li><strong>NNP vs CRI</strong> (decisão 2): o caminho que relaxa NNP só pode ser alcançável pelo CRI, nunca pela CLI.</li>
-<li><strong>AppArmor rootless</strong> (C7): parte das 9 specs é limite de privilégio, não lacuna — medir rootful para separar.</li>
-<li><strong>OOM daemonless</strong> (C6): o supervisor tem de ler o cgroup na janela entre a morte e o teardown; corrida real.</li>
-<li><strong>Disco do host a 96%</strong>: as suites OCI/CRI puxam imagens e escrevem artefactos — libertar espaço antes de A1/B1.</li>
+<li><strong>NNP vs CRI</strong>（决定 2）：放宽 NNP 的那条路径只能经由 CRI 到达，绝不经由 CLI。</li>
+<li><strong>AppArmor rootless</strong>（C7）：9 项 spec 中有一部分是特权限制，而非缺口——用 rootful 测量以作区分。</li>
+<li><strong>OOM daemonless</strong>（C6）：supervisor 必须在死亡与拆除之间的窗口内读取 cgroup；真实的竞态。</li>
+<li><strong>宿主机磁盘 96%</strong>：OCI/CRI suite 会拉取镜像并写入制品——在 A1/B1 之前释放空间。</li>
 </ul>
 <nav class="pager"><a href="cloud-native-standards.html"><span>← 上一页</span>云原生标准，逐层展开</a><a class="next" href="environment-variables.html"><span>下一页 →</span>环境变量（DELONIX_*）</a></nav>
-<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/plano-conformidade-oci-cri.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/plano-conformidade-oci-cri.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/plano-conformidade-oci-cri.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/plano-conformidade-oci-cri.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#baseline-medido-binario-ee615f3b-2026-10-24">Baseline medido (binário ee615f3b, 2026-10-24)</a></li>
-<li><a href="#decisoes-do-dono-2026-10-24">Decisões do dono (2026-10-24)</a></li>
-<li><a href="#track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful">Track C — CRI (PRIORITÁRIO) · gate: re-medir na v5.1.1, depois → ~100/103 em rootful</a></li>
-<li><a href="#track-b-oci-runtime-spec-habilita-o-cri">Track B — OCI Runtime Spec (habilita o CRI)</a></li>
-<li><a href="#track-a-oci-image-distribution-fundacao-de-interop-de-imagens">Track A — OCI Image + Distribution (fundação de interop de imagens)</a></li>
-<li><a href="#track-d-docker-engine-api-ecossistema-ressalva-5">Track D — Docker Engine API (ecossistema; ressalva §5)</a></li>
-<li><a href="#sequencia-e-dependencias">Sequência e dependências</a></li>
-<li><a href="#como-medir-reproduzivel-por-fase">Como medir (reproduzível, por fase)</a></li>
-<li><a href="#riscos-tensoes-conhecidas">Riscos / tensões conhecidas</a></li>
+<li><a href="#baseline-medido-binario-ee615f3b-2026-10-24">已测量基线（二进制 ee615f3b，2026-10-24）</a></li>
+<li><a href="#decisoes-do-dono-2026-10-24">所有者的决定（2026-10-24）</a></li>
+<li><a href="#track-c-cri-prioritario-gate-re-medir-na-v511-depois-100103-em-rootful">Track C — CRI（优先）· gate：在 v5.1.1 重新测量，然后 → rootful 下 ~100/103</a></li>
+<li><a href="#track-b-oci-runtime-spec-habilita-o-cri">Track B — OCI Runtime Spec（为 CRI 赋能）</a></li>
+<li><a href="#track-a-oci-image-distribution-fundacao-de-interop-de-imagens">Track A — OCI Image + Distribution（镜像互操作的基础）</a></li>
+<li><a href="#track-d-docker-engine-api-ecossistema-ressalva-5">Track D — Docker Engine API（生态系统；§5 保留）</a></li>
+<li><a href="#sequencia-e-dependencias">顺序与依赖</a></li>
+<li><a href="#como-medir-reproduzivel-por-fase">如何测量（可复现，按阶段）</a></li>
+<li><a href="#riscos-tensoes-conhecidas">已知风险 / 张力</a></li>
 </ul>
 </div>
 </aside>

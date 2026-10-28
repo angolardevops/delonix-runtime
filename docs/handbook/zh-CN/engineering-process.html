@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Engineering process (canonical) · Delonix — 贡献者手册</title>
+<title>工程流程（权威） · Delonix — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,111 +206,101 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a class="on" aria-current="page" href="engineering-process.html"><span class="n">18</span><span>Engineering process (canonical)</span></a><a href="contributing-workflow.html"><span class="n">19</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">20</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">21</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">22</span><span>云原生标准，逐层展开</span></a><a href="plano-conformidade-oci-cri.html"><span class="n">23</span><span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</span></a><a href="environment-variables.html"><span class="n">24</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">25</span><span>术语表</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a class="on" aria-current="page" href="engineering-process.html"><span class="n">18</span><span>工程流程（权威）</span></a><a href="contributing-workflow.html"><span class="n">19</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">20</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">21</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">22</span><span>云原生标准，逐层展开</span></a><a href="plano-conformidade-oci-cri.html"><span class="n">23</span><span>OCI + CRI 合规计划——让 Delonix 与 Docker/Podman 对齐</span></a><a href="environment-variables.html"><span class="n">24</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">25</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">贡献</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="engineering-process-canonical">Engineering process (canonical)</h1>
-<p>This page is the <strong>single source of truth</strong> for how work flows through this repository: which
-branch a change starts from, how it is built in isolation, how it is validated, how it lands, and
-how its traces are cleaned up. AGENTS.md, <a href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>, the
-<a href="contributing-workflow.html">contribution workflow</a> and the session skills all defer here for the
-branch model and lifecycle — they do not restate it. When they disagree with this page, this page
-wins; fix the other place rather than forking the rule.</p>
+<h1 id="engineering-process-canonical">工程流程（权威）</h1>
+<p>本页是工作如何在本仓库中流转的<strong>唯一真实来源（single source of truth）</strong>：一次变更从哪个分支开始、
+如何隔离构建、如何验证、如何落地，以及如何清理它留下的痕迹。AGENTS.md、<a href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>、
+<a href="contributing-workflow.html">贡献流程</a>以及各会话技能（session skill）在分支模型和生命周期方面都以本页为准——
+它们不会重述这些内容。当它们与本页不一致时，以本页为准；去修正另一处，而不是分叉出一条规则。</p>
 <blockquote>
-<p><strong>This is a Delonix decision, not a claim about other projects.</strong> The branch model below is
-GitFlow-shaped by the owner's decision (2026-10-23). Docker/Moby and Podman are PR-first,
-trunk-based projects; we borrow their <em>contribution</em> and <em>review</em> discipline (tests before merge,
-live validation of kernel-facing changes, DCO-style focused commits, CODEOWNERS review) — not
-their branch topology. Do not assert they use this flow.</p>
+<p><strong>这是 Delonix 的决定，而非对其他项目的断言。</strong> 下面的分支模型是依据所有者的决定（2026-10-23）而采用
+GitFlow 形态。Docker/Moby 和 Podman 是 PR 优先、基于主干（trunk-based）的项目；我们借鉴它们的<em>贡献</em>和
+<em>评审</em>纪律（合并前测试、对面向内核的变更做实际（live）验证、DCO 风格的聚焦提交、CODEOWNERS 评审）——
+而非它们的分支拓扑。不要断言它们使用本流程。</p>
 </blockquote>
-<h2 id="the-two-long-lived-branches">The two long-lived branches<a class="hanchor" href="#the-two-long-lived-branches" aria-label="#">#</a></h2>
+<h2 id="the-two-long-lived-branches">两条长期存在的分支<a class="hanchor" href="#the-two-long-lived-branches" aria-label="#">#</a></h2>
 <ul>
-<li><strong><code>main</code></strong> is the released line. It only ever moves forward by a release or a hotfix. Its <code>HEAD</code>
-  is what a user who installs from source gets.</li>
-<li><strong><code>develop</code></strong> is the integration line. Everyday work is cut from it and lands back on it. A
-  release promotes <code>develop</code> into <code>main</code>.</li>
+<li><strong><code>main</code></strong> 是已发布线。它只会因一次发布或一次热修复（hotfix）而向前移动。它的 <code>HEAD</code>
+  就是从源码安装的用户所得到的内容。</li>
+<li><strong><code>develop</code></strong> 是集成线。日常工作从它切出，并回落到它上面。一次发布会把 <code>develop</code> 提升进 <code>main</code>。</li>
 </ul>
-<p>Both are fetched fresh before use; never branch from a stale local ref, and never from another
-task's branch for convenience.</p>
-<h2 id="branch-policy-mandatory">Branch policy (mandatory)<a class="hanchor" href="#branch-policy-mandatory" aria-label="#">#</a></h2>
-<p>Classify by the <strong>nature of the problem</strong>, not by the prefix someone suggested. The prefix follows
-the classification; it does not drive it.</p>
+<p>两者在使用前都会重新 fetch；绝不要从陈旧的本地引用切分支，也绝不要为了方便而从另一个任务的分支切出。</p>
+<h2 id="branch-policy-mandatory">分支策略（强制）<a class="hanchor" href="#branch-policy-mandatory" aria-label="#">#</a></h2>
+<p>按<strong>问题的性质</strong>分类，而不是按某人建议的前缀分类。前缀跟随分类而定；它不驱动分类。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Kind of work</th>
-<th>Branch prefix</th>
-<th>Starts from (fresh remote)</th>
-<th>Normal destination</th>
+<th>工作类型</th>
+<th>分支前缀</th>
+<th>起始于（最新远端）</th>
+<th>正常目的地</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Feature</td>
+<td>功能（Feature）</td>
 <td><code>feat/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Chore / maintenance</td>
+<td>杂务 / 维护</td>
 <td><code>chore/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Refactor</td>
+<td>重构</td>
 <td><code>refactor/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Performance</td>
+<td>性能</td>
 <td><code>perf/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Documentation</td>
+<td>文档</td>
 <td><code>docs/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Test / CI / build</td>
+<td>测试 / CI / 构建</td>
 <td><code>test/</code> <code>ci/</code> <code>build/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td><strong>Bug fix / hotfix</strong></td>
+<td><strong>缺陷修复 / 热修复</strong></td>
 <td><code>fix/</code> <code>bug/</code> <code>hotfix/</code></td>
 <td><strong><code>origin/main</code></strong></td>
-<td><strong><code>develop</code> and, when it affects the released line, <code>main</code></strong></td>
+<td><strong><code>develop</code>，并且当它影响已发布线时还有 <code>main</code></strong></td>
 </tr>
 </tbody>
 </table></div>
-<p>Names are short and descriptive, with the task identifier when one exists:
-<code>feat/DX-1234-http-route-timeouts</code>, <code>fix/compose-secret-lazy-read</code>.</p>
-<h3 id="the-fixbughotfix-rule-and-its-one-real-trap">The fix/bug/hotfix rule, and its one real trap<a class="hanchor" href="#the-fixbughotfix-rule-and-its-one-real-trap" aria-label="#">#</a></h3>
-<p>A fix branches from <code>main</code> because a fix is, by default, a correction to what is published. The
-same correction must also reach <code>develop</code> so the next release does not regress it.</p>
-<p>The trap, which this policy forbids: <strong>a defect that exists only on <code>develop</code></strong>. Do not branch it
-from <code>main</code> (it will not reproduce there), and do not merge <code>develop</code> into <code>main</code> to make it
-reproduce. A develop-only defect is corrected on a branch cut from <code>develop</code> and lands only on
-<code>develop</code> — record that condition explicitly when you classify it. If this policy ever blocks a
-coherent fix, surface the concrete conflict to the owner for a decision; do not silently bend the
-rule.</p>
-<h3 id="carrying-a-fix-to-both-destinations">Carrying a fix to both destinations<a class="hanchor" href="#carrying-a-fix-to-both-destinations" aria-label="#">#</a></h3>
-<p>When a fix targets the released line, it lands on <code>main</code> through the release gates and the same
-change reaches <code>develop</code>. <strong>Never merge <code>develop</code> into <code>main</code></strong> to carry an isolated fix across.
-Choose merge, back-merge or <code>cherry-pick</code> per the linear-history convention below, record the
-commit equivalence, and apply the change once — not twice. Authorisation to integrate into
-<code>develop</code> does <strong>not</strong> authorise cutting a release, a tag, or publishing artefacts; those follow the
-release process.</p>
-<h2 id="one-worktree-per-task">One worktree per task<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
-<p>Several sessions write to this clone at once (measured: <code>main</code>'s <code>HEAD</code> moved four times during one
-session, eight live worktrees, two regenerating the same file minutes apart). So every task gets its
-own worktree and branch, and nothing is edited directly in the <code>main</code> or <code>develop</code> checkout.</p>
+<p>名称要简短且具描述性，若存在任务标识符则带上它：
+<code>feat/DX-1234-http-route-timeouts</code>、<code>fix/compose-secret-lazy-read</code>。</p>
+<h3 id="the-fixbughotfix-rule-and-its-one-real-trap">fix/bug/hotfix 规则，及其唯一真正的陷阱<a class="hanchor" href="#the-fixbughotfix-rule-and-its-one-real-trap" aria-label="#">#</a></h3>
+<p>修复从 <code>main</code> 切出，因为修复在默认情况下是对已发布内容的纠正。同一个纠正还必须到达 <code>develop</code>，
+以免下一次发布使它回归（regress）。</p>
+<p>本策略所禁止的那个陷阱：<strong>只存在于 <code>develop</code> 上的缺陷</strong>。不要从 <code>main</code> 切出它（它在那里无法复现），
+也不要把 <code>develop</code> 合并进 <code>main</code> 来让它复现。一个仅存在于 develop 的缺陷，应在一条从 <code>develop</code>
+切出的分支上纠正，并且只落到 <code>develop</code> 上——在分类时明确记录这一条件。如果本策略曾阻碍一个
+连贯的修复，请把具体冲突上报给所有者以作决定；不要悄悄地弯曲规则。</p>
+<h3 id="carrying-a-fix-to-both-destinations">把一个修复带到两个目的地<a class="hanchor" href="#carrying-a-fix-to-both-destinations" aria-label="#">#</a></h3>
+<p>当一个修复以已发布线为目标时，它通过发布门禁落到 <code>main</code>，同一变更也到达 <code>develop</code>。
+<strong>绝不要把 <code>develop</code> 合并进 <code>main</code></strong> 来把一个孤立的修复横移过去。按下面的线性历史约定选择
+merge、back-merge 或 <code>cherry-pick</code>，记录提交的等价关系，并把变更应用一次——而非两次。
+获得集成进 <code>develop</code> 的授权<strong>并不</strong>授权切出一次发布、一个标签或发布制品；那些要遵循发布流程。</p>
+<h2 id="one-worktree-per-task">每个任务一个 worktree<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
+<p>多个会话会同时写入这个克隆（实测：某次会话期间 <code>main</code> 的 <code>HEAD</code> 移动了四次，八个活跃的 worktree，
+两个在相隔几分钟内重新生成同一个文件）。因此每个任务都有自己的 worktree 和分支，并且不在 <code>main</code>
+或 <code>develop</code> 的检出中直接编辑任何东西。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git fetch origin --prune
 # base is origin/develop for feat/chore/..., origin/main for fix/bug/hotfix
 git worktree add -b &lt;prefix&gt;/&lt;task&gt; \
@@ -319,118 +309,103 @@ cd &lt;workspace&gt;/.worktrees/delonix-runtime/&lt;task&gt;
 export CARGO_TARGET_DIR=&lt;repo&gt;/target   # reuse the build cache safely
 </code></pre></div>
 <ul>
-<li><strong>Never in <code>/tmp</code></strong> — it is cleared on boot and this host reboots; a reboot mid-task takes the
-  uncommitted work. Use the persistent <code>.worktrees/</code> beside the repositories (gitignored by the
-  workspace harness). Commit and push the branch <strong>early and at every step with value</strong>.</li>
-<li><strong>Isolate state, not just code.</strong> A worktree isolates the files; it does <strong>not</strong> isolate the one
-  shared Delonix engine on this host, nor ports, volumes or test fixtures. Do not share state files,
-  ports, volumes or test resources between parallel tasks. Build caches may be shared only when the
-  tool guarantees it is safe; never run a binary from another worktree without checking its
-  identity (<code>target/release/delonix --version</code> + commit distance).</li>
-<li><strong>Stage by name</strong> (<code>git add &lt;file&gt;</code>, never <code>-A</code>/<code>-u</code>/<code>.</code>), recognise every <code>git status --short</code>
-  entry as yours, and <strong>never <code>git checkout -- &lt;path&gt;</code></strong> in a shared tree — it destroys another
-  session's uncommitted work without a stash.</li>
-<li><strong>Rebase, do not merge</strong> on a rejected push (<code>git pull --rebase</code>): history is linear, no merge
-  commits.</li>
-<li><strong>WIP cap: at most 3 open worktrees/sessions at once.</strong> Opening a fourth forces closing or parking
-  one, with a written handoff.</li>
+<li><strong>绝不在 <code>/tmp</code> 中</strong> —— 它在开机时被清空，而本宿主机会重启；任务进行中的一次重启会带走未提交的工作。
+  使用仓库旁边持久的 <code>.worktrees/</code>（由工作区 harness 做 gitignore）。<strong>尽早并在每个有价值的步骤</strong>
+  提交并推送分支。</li>
+<li><strong>隔离的是状态，不只是代码。</strong> worktree 隔离的是文件；它<strong>不</strong>隔离本宿主机上那个唯一共享的 Delonix
+  引擎，也不隔离端口、卷或测试 fixture。不要在并行任务之间共享状态文件、端口、卷或测试资源。
+  仅当工具保证安全时，构建缓存才可以共享；绝不要在不核对身份（<code>target/release/delonix --version</code> +
+  提交距离）的情况下运行来自另一个 worktree 的二进制。</li>
+<li><strong>按名称暂存</strong>（<code>git add &lt;file&gt;</code>，绝不用 <code>-A</code>/<code>-u</code>/<code>.</code>），把每一条 <code>git status --short</code>
+  条目都认作你自己的，并且在共享树中<strong>绝不使用 <code>git checkout -- &lt;path&gt;</code></strong> —— 它会在不经 stash
+  的情况下销毁另一个会话未提交的工作。</li>
+<li>推送被拒时要 <strong>rebase，不要 merge</strong>（<code>git pull --rebase</code>）：历史是线性的，没有合并提交。</li>
+<li><strong>在制品上限（WIP cap）：同时最多 3 个开放的 worktree/会话。</strong> 开启第四个会强制关闭或搁置
+  （park）一个，并附带书面交接。</li>
 </ul>
-<h2 id="the-lifecycle-of-a-prompt">The lifecycle of a prompt<a class="hanchor" href="#the-lifecycle-of-a-prompt" aria-label="#">#</a></h2>
-<p>Every new request runs this loop. A small task may be a single sprint — do not manufacture
-ceremony; but do not confuse "implementation ready" with "done" either.</p>
+<h2 id="the-lifecycle-of-a-prompt">一个 prompt 的生命周期<a class="hanchor" href="#the-lifecycle-of-a-prompt" aria-label="#">#</a></h2>
+<p>每个新请求都运行这个循环。小任务可能就是一个 sprint——不要制造仪式感；但也不要把"实现就绪"
+与"完成"混为一谈。</p>
 <ol>
-<li>Recover the instructions, decisions and checkpoint (the session contract, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> for the
-   area, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> for the decisions).</li>
-<li>Define objective, scope and acceptance criteria.</li>
-<li>Classify the work and pick the base branch from the table above.</li>
-<li>Identify the specialists needed (see "Delegation").</li>
-<li>Build the dependency graph; sequence dependent fronts, parallelise independent ones.</li>
-<li>Organise execution in short sprints sized to the work.</li>
-<li>Create the worktree(s).</li>
-<li>Implement, review, validate.</li>
-<li>Integrate the finished work into <code>develop</code>.</li>
-<li>Clean up the resources and update the checkpoint.</li>
+<li>恢复指令、决策与检查点（会话契约、该领域的 <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>、<a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> 中的决策）。</li>
+<li>定义目标、范围与验收标准。</li>
+<li>对工作分类，并从上表选择基分支。</li>
+<li>识别所需的专家（见"委派"）。</li>
+<li>构建依赖图；对有依赖的工作前线排序，对独立的并行化。</li>
+<li>以与工作量相称的短 sprint 组织执行。</li>
+<li>创建 worktree。</li>
+<li>实现、评审、验证。</li>
+<li>把完成的工作集成进 <code>develop</code>。</li>
+<li>清理资源并更新检查点。</li>
 </ol>
-<h3 id="each-sprints-contract">Each sprint's contract<a class="hanchor" href="#each-sprints-contract" aria-label="#">#</a></h3>
-<p>A sprint delivers a <strong>concrete, usable change</strong> — no stubs or fictional paths presented as complete,
-and never a state that leaves <code>develop</code> functionally broken. It names: the functional result; the
-tasks and their dependencies; the responsible specialists; acceptance criteria; risks; the tests;
-the evidence collected; and the integration condition.</p>
-<h2 id="delegation-to-specialist-agents">Delegation to specialist agents<a class="hanchor" href="#delegation-to-specialist-agents" aria-label="#">#</a></h2>
-<p>When the environment offers specialist agents, pick them by the problem (Rust/systems, OCI
-lifecycle, CRI/CNI/Kubernetes, networking/isolation, virtualization/providers, cloud images,
-CLI/DX, security, functional testing, CI/release). For each, state: objective, specialty, scope,
-branch and worktree, the files/contracts it owns, dependencies, acceptance criteria, validation
-commands, and delivery format. Independent fronts run in parallel; dependent fronts run in sequence
-from an already-integrated contract. <strong>Two agents never edit the same worktree at once.</strong> If the
-environment offers no agents, say so and run the responsibilities sequentially — do not simulate
-delegation that did not happen.</p>
-<p>The principal agent owns the architecture, the common contracts and the integration. When one front
-depends on another: stabilise and validate the first, integrate it into <code>develop</code>, cut the next
-front from the updated <code>develop</code>, and re-validate the consumed contract. Do not start parallel
-implementations on incompatible assumptions about a schema, trait or API. Control build/test
-concurrency to avoid saturating CPU, RAM and I/O.</p>
-<h2 id="quality-before-integration">Quality before integration<a class="hanchor" href="#quality-before-integration" aria-label="#">#</a></h2>
-<p>Before a task is considered validated:</p>
+<h3 id="each-sprints-contract">每个 sprint 的契约<a class="hanchor" href="#each-sprints-contract" aria-label="#">#</a></h3>
+<p>一个 sprint 交付一个<strong>具体、可用的变更</strong> —— 没有被当作已完成来呈现的桩（stub）或虚构路径，
+也绝不留下一个使 <code>develop</code> 在功能上损坏的状态。它要点名：功能结果；任务及其依赖；负责的专家；
+验收标准；风险；测试；所收集的证据；以及集成条件。</p>
+<h2 id="delegation-to-specialist-agents">委派给专家 agent<a class="hanchor" href="#delegation-to-specialist-agents" aria-label="#">#</a></h2>
+<p>当环境提供专家 agent 时，按问题挑选它们（Rust/系统、OCI 生命周期、CRI/CNI/Kubernetes、
+网络/隔离、虚拟化/provider、云镜像、CLI/DX、安全、功能测试、CI/发布）。对每一个，说明：目标、专长、
+范围、分支与 worktree、它拥有的文件/契约、依赖、验收标准、验证命令，以及交付格式。独立的前线
+并行运行；有依赖的前线从一个已集成的契约出发按序运行。<strong>两个 agent 绝不同时编辑同一个 worktree。</strong>
+如果环境不提供 agent，就说明这一点并按序运行各项职责——不要模拟一次并未发生的委派。</p>
+<p>主 agent 拥有架构、公共契约与集成。当一条前线依赖另一条时：稳定并验证第一条，把它集成进 <code>develop</code>，
+从更新后的 <code>develop</code> 切出下一条前线，并重新验证所消费的契约。不要在关于某个 schema、trait 或 API
+的不兼容假设上启动并行实现。控制构建/测试的并发度，以免耗尽 CPU、RAM 和 I/O。</p>
+<h2 id="quality-before-integration">集成前的质量<a class="hanchor" href="#quality-before-integration" aria-label="#">#</a></h2>
+<p>在一个任务被视为已验证之前：</p>
 <ul>
-<li>Confirm the requirements and the relevant sources; review the diff.</li>
-<li>Run the gates the repository requires — <code>make ci</code> (or the subset the change touches, with the
-  <code>rc=0</code> quoted). Zero clippy warnings is enforced, not advisory.</li>
-<li>Run tests proportional to the risk; a change that depends on the kernel, a provider or a protocol
-  is validated <strong>live</strong>, and the PR says what was tested (command, expected vs. actual).</li>
-<li>Update the documentation and contracts the change affects
-  (<code>scripts/dev_docs.py --check</code>, <code>scripts/dev_docs_site.py --check</code>).</li>
-<li>Confirm there are no secrets or accidental artefacts; check migration and compatibility where they
-  apply.</li>
-<li>For relevant changes, a <strong>reviewer agent different from the implementer</strong> hunts for defects,
-  regressions, test gaps and contract violations — approving the author's description is not review.</li>
+<li>确认需求和相关来源；评审 diff。</li>
+<li>运行仓库要求的门禁—— <code>make ci</code>（或变更所触及的子集，并引用 <code>rc=0</code>）。强制零 clippy 警告，
+  而非仅作建议。</li>
+<li>运行与风险相称的测试；一个依赖内核、provider 或协议的变更要做<strong>实际（live）</strong>验证，
+  并且 PR 要说明测试了什么（命令、预期 vs. 实际）。</li>
+<li>更新变更所影响的文档和契约
+  （<code>scripts/dev_docs.py --check</code>、<code>scripts/dev_docs_site.py --check</code>）。</li>
+<li>确认没有密钥或意外制品；在适用处检查迁移与兼容性。</li>
+<li>对相关的变更，由一个<strong>不同于实现者的评审 agent</strong> 去搜寻缺陷、回归、测试缺口和契约违背——
+  认可作者的描述不算评审。</li>
 </ul>
-<p>Do not change assertions, reduce isolation or ignore failures to get a green. Do not declare
-integration validated when the material tests are missing.</p>
-<h2 id="integration-into-develop-mandatory">Integration into <code>develop</code> (mandatory)<a class="hanchor" href="#integration-into-develop-mandatory" aria-label="#">#</a></h2>
-<p>Finished, validated work is integrated into <code>develop</code> in the <strong>same work sequence</strong>, when
-permissions and gates allow. Integration is by <strong>pull request, squash-merged, with the CI suite
-green</strong> — matching the linear history and Conventional Commits already in use. Before integrating:</p>
+<p>不要为了拿到绿色而更改断言、降低隔离或忽略失败。在关键测试缺失时，不要宣称集成已验证。</p>
+<h2 id="integration-into-develop-mandatory">集成进 <code>develop</code>（强制）<a class="hanchor" href="#integration-into-develop-mandatory" aria-label="#">#</a></h2>
+<p>已完成、已验证的工作要在<strong>同一工作序列中</strong>集成进 <code>develop</code>，当权限和门禁允许时。集成采用
+<strong>pull request、squash 合并、CI 套件为绿色</strong>的方式——与已在使用的线性历史和 Conventional Commits
+相匹配。集成前：</p>
 <ol>
-<li><code>git fetch origin --prune</code> and check whether <code>develop</code> moved.</li>
-<li>Resolve conflicts on the work branch (<code>git pull --rebase origin develop</code>).</li>
-<li>Re-run the affected tests.</li>
-<li>Confirm the exact candidate to integrate.</li>
-<li>Obtain the required review.</li>
-<li>Open/complete the PR against <code>develop</code>; let CI finish before merging.</li>
+<li><code>git fetch origin --prune</code> 并检查 <code>develop</code> 是否移动过。</li>
+<li>在工作分支上解决冲突（<code>git pull --rebase origin develop</code>）。</li>
+<li>重新运行受影响的测试。</li>
+<li>确认要集成的确切候选。</li>
+<li>取得所需的评审。</li>
+<li>对 <code>develop</code> 开启/完成 PR；在合并前让 CI 跑完。</li>
 </ol>
-<p>Respect PRs, checks and protections. Never bypass a control with a direct push or a force-push. If a
-protection blocks integration, leave the PR and the evidence ready and explain the exact blocker —
-do not mark the work integrated.</p>
-<p>CI runs the gate suite on push to <code>main</code> and <code>develop</code> and on pull requests targeting either (see
-<a href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>). A pushed branch with no PR does not,
-by itself, prove "CI green".</p>
-<h2 id="cleanup-after-integration">Cleanup after integration<a class="hanchor" href="#cleanup-after-integration" aria-label="#">#</a></h2>
-<p>After integration is <strong>confirmed</strong> — not assumed — verify: the destination branch locally and
-remotely; that the change is effectively included; the required checks; no local changes left; no
-un-preserved commits; and no agent/process still using the worktree. Then:</p>
+<p>尊重 PR、检查和保护。绝不要用直接 push 或 force-push 绕过某个控制。如果某个保护阻碍集成，
+把 PR 和证据准备好并解释确切的阻碍者——不要把工作标记为已集成。</p>
+<p>CI 在推送到 <code>main</code> 和 <code>develop</code> 时、以及在以两者之一为目标的 pull request 上运行门禁套件（见
+<a href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>）。一个没有 PR 的已推送分支，
+本身并不证明"CI 绿色"。</p>
+<h2 id="cleanup-after-integration">集成后的清理<a class="hanchor" href="#cleanup-after-integration" aria-label="#">#</a></h2>
+<p>在集成被<strong>确认</strong>——而非假定——之后，核实：本地和远端的目的地分支；变更确实被包含；所需的检查；
+没有遗留的本地改动；没有未保留的提交；以及没有 agent/进程仍在使用该 worktree。然后：</p>
 <ol>
-<li><code>git worktree remove &lt;path&gt;</code> (never <code>--force</code> to hide pending changes).</li>
-<li><code>git branch -d &lt;branch&gt;</code> (never <code>-D</code>).</li>
-<li>Delete the remote branch if it belongs to the task and is no longer needed.</li>
-<li><code>git worktree prune</code> for stale references.</li>
-<li>Update the task record / checkpoint.</li>
+<li><code>git worktree remove &lt;path&gt;</code>（绝不用 <code>--force</code> 来掩盖待处理的改动）。</li>
+<li><code>git branch -d &lt;branch&gt;</code>（绝不用 <code>-D</code>）。</li>
+<li>如果远端分支属于该任务且不再需要，则删除它。</li>
+<li>对陈旧引用执行 <code>git worktree prune</code>。</li>
+<li>更新任务记录 / 检查点。</li>
 </ol>
-<p>A squash or cherry-pick means <strong>commit identity changes</strong> — prove inclusion by the PR, the diff and
-<code>git cherry develop &lt;branch&gt;</code>, not by ancestry alone. Never remove someone else's branch or
-worktree. A blocked resource stays identified with its reason and next step — no abandoned branches
-without state.</p>
-<h2 id="definition-of-done-and-the-states-on-the-way">Definition of done, and the states on the way<a class="hanchor" href="#definition-of-done-and-the-states-on-the-way" aria-label="#">#</a></h2>
-<p>A task is <strong>CONCLUÍDA / DONE</strong> only when: acceptance criteria met; review finished; the required
-tests pass; documentation and contracts updated; integration into <code>develop</code> confirmed; any
-additional integration into <code>main</code> resolved when it is in the authorised scope; the temporary
-worktree and branch removed safely; and the checkpoint updated.</p>
-<p>Use the explicit intermediate states in the session contract:</p>
+<p>squash 或 cherry-pick 意味着<strong>提交身份发生变化</strong>——用 PR、diff 和 <code>git cherry develop &lt;branch&gt;</code>
+来证明包含关系，而不是仅凭血缘。绝不要移除别人的分支或 worktree。一个被阻塞的资源要保持被标识，
+连同其原因和下一步——没有不带状态的被遗弃分支。</p>
+<h2 id="definition-of-done-and-the-states-on-the-way">完成的定义，及途中的各个状态<a class="hanchor" href="#definition-of-done-and-the-states-on-the-way" aria-label="#">#</a></h2>
+<p>一个任务只有在满足以下条件时才算 <strong>CONCLUÍDA / DONE</strong>：验收标准达成；评审完成；所需测试通过；
+文档与契约已更新；集成进 <code>develop</code> 已确认；当额外集成进 <code>main</code> 处于被授权范围内时也已解决；
+临时 worktree 和分支已安全移除；以及检查点已更新。</p>
+<p>在会话契约中使用明确的中间状态：</p>
 <p><code>EM IMPLEMENTAÇÃO</code> → <code>EM REVISÃO</code> → <code>BLOQUEADO NA VALIDAÇÃO</code> →
-<code>VALIDADO, A AGUARDAR INTEGRAÇÃO</code> → <code>INTEGRADO, LIMPEZA PENDENTE</code> → <code>CONCLUÍDO</code>.</p>
-<h2 id="the-harness-that-enforces-this">The harness that enforces this<a class="hanchor" href="#the-harness-that-enforces-this" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/gitflow.py" target="_blank" rel="noopener"><code>scripts/gitflow.py</code></a> turns this page into runnable controls. It validates the repo and remote before
-any mutation, supports <code>--dry-run</code>, is idempotent, preserves data, and propagates exit codes.</p>
+<code>VALIDADO, A AGUARDAR INTEGRAÇÃO</code> → <code>INTEGRADO, LIMPEZA PENDENTE</code> → <code>CONCLUÍDO</code>。</p>
+<h2 id="the-harness-that-enforces-this">强制执行此流程的 harness<a class="hanchor" href="#the-harness-that-enforces-this" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/gitflow.py" target="_blank" rel="noopener"><code>scripts/gitflow.py</code></a> 把本页变成可运行的控制。它在任何变更之前验证仓库和远端，支持 <code>--dry-run</code>，
+是幂等的，保全数据，并传播退出码。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">python3 scripts/gitflow.py classify &quot;fix a crash in compose config&quot;   # -&gt; prefix + base
 python3 scripts/gitflow.py start  &lt;prefix&gt;/&lt;task&gt;  [--dry-run]          # fetch, base, worktree, contract
 python3 scripts/gitflow.py preflight                                    # remote, base freshness, stale worktree refs, WIP cap
@@ -439,31 +414,30 @@ python3 scripts/gitflow.py integrate  [--dry-run]                       # rebase
 python3 scripts/gitflow.py done                                         # prove inclusion, checks, clean tree
 python3 scripts/gitflow.py cleanup  [--dry-run]                         # remove worktree + branches safely
 </code></pre></div>
-<p><code>make gitflow ARGS="&lt;subcommand&gt; ..."</code> is the same thing through the Makefile. Local hooks assist the
-person at the keyboard; the CI checks and (when the owner enables them) the branch protections are
-what hold the important rules. Instruction files are not a substitute for an executable control.</p>
+<p><code>make gitflow ARGS="&lt;subcommand&gt; ..."</code> 是通过 Makefile 做的同一件事。本地钩子（hook）辅助键盘前的那个人；
+真正守住重要规则的，是 CI 检查以及（当所有者启用时）分支保护。指令文件不能替代一个可执行的控制。</p>
 <nav class="pager"><a href="adding-a-kind.html"><span>← 上一页</span>新增一个 Kind</a><a class="next" href="contributing-workflow.html"><span>下一页 →</span>贡献流程</a></nav>
-<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/engineering-process.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/engineering-process.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/zh-CN/engineering-process.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/engineering-process.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#the-two-long-lived-branches">The two long-lived branches</a></li>
-<li><a href="#branch-policy-mandatory">Branch policy (mandatory)</a><ul>
-<li><a href="#the-fixbughotfix-rule-and-its-one-real-trap">The fix/bug/hotfix rule, and its one real trap</a></li>
-<li><a href="#carrying-a-fix-to-both-destinations">Carrying a fix to both destinations</a></li>
+<li><a href="#the-two-long-lived-branches">两条长期存在的分支</a></li>
+<li><a href="#branch-policy-mandatory">分支策略（强制）</a><ul>
+<li><a href="#the-fixbughotfix-rule-and-its-one-real-trap">fix/bug/hotfix 规则，及其唯一真正的陷阱</a></li>
+<li><a href="#carrying-a-fix-to-both-destinations">把一个修复带到两个目的地</a></li>
 </ul>
 </li>
-<li><a href="#one-worktree-per-task">One worktree per task</a></li>
-<li><a href="#the-lifecycle-of-a-prompt">The lifecycle of a prompt</a><ul>
-<li><a href="#each-sprints-contract">Each sprint's contract</a></li>
+<li><a href="#one-worktree-per-task">每个任务一个 worktree</a></li>
+<li><a href="#the-lifecycle-of-a-prompt">一个 prompt 的生命周期</a><ul>
+<li><a href="#each-sprints-contract">每个 sprint 的契约</a></li>
 </ul>
 </li>
-<li><a href="#delegation-to-specialist-agents">Delegation to specialist agents</a></li>
-<li><a href="#quality-before-integration">Quality before integration</a></li>
-<li><a href="#integration-into-develop-mandatory">Integration into develop (mandatory)</a></li>
-<li><a href="#cleanup-after-integration">Cleanup after integration</a></li>
-<li><a href="#definition-of-done-and-the-states-on-the-way">Definition of done, and the states on the way</a></li>
-<li><a href="#the-harness-that-enforces-this">The harness that enforces this</a></li>
+<li><a href="#delegation-to-specialist-agents">委派给专家 agent</a></li>
+<li><a href="#quality-before-integration">集成前的质量</a></li>
+<li><a href="#integration-into-develop-mandatory">集成进 develop（强制）</a></li>
+<li><a href="#cleanup-after-integration">集成后的清理</a></li>
+<li><a href="#definition-of-done-and-the-states-on-the-way">完成的定义，及途中的各个状态</a></li>
+<li><a href="#the-harness-that-enforces-this">强制执行此流程的 harness</a></li>
 </ul>
 </div>
 </aside>

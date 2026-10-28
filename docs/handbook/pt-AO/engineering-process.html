@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Engineering process (canonical) · Delonix — Manual do contribuidor</title>
+<title>Processo de engenharia (canónico) · Delonix — Manual do contribuidor</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,111 +206,113 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a class="on" aria-current="page" href="engineering-process.html"><span class="n">18</span><span>Engineering process (canonical)</span></a><a href="contributing-workflow.html"><span class="n">19</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">20</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">21</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">22</span><span>Padrões cloud native, camada a camada</span></a><a href="plano-conformidade-oci-cri.html"><span class="n">23</span><span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</span></a><a href="environment-variables.html"><span class="n">24</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">25</span><span>Glossário</span></a></div></nav>
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a class="on" aria-current="page" href="engineering-process.html"><span class="n">18</span><span>Processo de engenharia (canónico)</span></a><a href="contributing-workflow.html"><span class="n">19</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">20</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">21</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">22</span><span>Padrões cloud native, camada a camada</span></a><a href="plano-conformidade-oci-cri.html"><span class="n">23</span><span>Plano de conformidade OCI + CRI — alinhar o Delonix com Docker/Podman</span></a><a href="environment-variables.html"><span class="n">24</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">25</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Contribuir</p>
-<div class="notice" role="note">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="engineering-process-canonical">Engineering process (canonical)</h1>
-<p>This page is the <strong>single source of truth</strong> for how work flows through this repository: which
-branch a change starts from, how it is built in isolation, how it is validated, how it lands, and
-how its traces are cleaned up. AGENTS.md, <a href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>, the
-<a href="contributing-workflow.html">contribution workflow</a> and the session skills all defer here for the
-branch model and lifecycle — they do not restate it. When they disagree with this page, this page
-wins; fix the other place rather than forking the rule.</p>
+<h1 id="engineering-process-canonical">Processo de engenharia (canónico)</h1>
+<p>Esta página é a <strong>única fonte de verdade</strong> sobre como o trabalho flui por este repositório: de que
+ramo uma mudança parte, como é construída em isolamento, como é validada, como aterra, e como os
+seus rastos são limpos. O AGENTS.md, o <a href="https://github.com/ngolacloud/delonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>, o
+<a href="contributing-workflow.html">fluxo de contribuição</a> e as skills de sessão deferem todos para aqui no
+que toca ao modelo de ramos e ao ciclo de vida — não o repetem. Quando discordarem desta página,
+esta página vence; corrige o outro sítio em vez de bifurcar a regra.</p>
 <blockquote>
-<p><strong>This is a Delonix decision, not a claim about other projects.</strong> The branch model below is
-GitFlow-shaped by the owner's decision (2026-10-23). Docker/Moby and Podman are PR-first,
-trunk-based projects; we borrow their <em>contribution</em> and <em>review</em> discipline (tests before merge,
-live validation of kernel-facing changes, DCO-style focused commits, CODEOWNERS review) — not
-their branch topology. Do not assert they use this flow.</p>
+<p><strong>Isto é uma decisão da Delonix, não uma afirmação sobre outros projectos.</strong> O modelo de ramos
+abaixo tem forma de GitFlow por decisão do dono (2026-10-23). O Docker/Moby e o Podman são
+projectos PR-first, trunk-based; tomamos emprestada a sua disciplina de <em>contribuição</em> e de
+<em>revisão</em> (testes antes do merge, validação ao vivo de mudanças que tocam o kernel, commits
+focados ao estilo DCO, revisão por CODEOWNERS) — não a sua topologia de ramos. Não afirmes que
+eles usam este fluxo.</p>
 </blockquote>
-<h2 id="the-two-long-lived-branches">The two long-lived branches<a class="hanchor" href="#the-two-long-lived-branches" aria-label="#">#</a></h2>
+<h2 id="the-two-long-lived-branches">Os dois ramos de vida longa<a class="hanchor" href="#the-two-long-lived-branches" aria-label="#">#</a></h2>
 <ul>
-<li><strong><code>main</code></strong> is the released line. It only ever moves forward by a release or a hotfix. Its <code>HEAD</code>
-  is what a user who installs from source gets.</li>
-<li><strong><code>develop</code></strong> is the integration line. Everyday work is cut from it and lands back on it. A
-  release promotes <code>develop</code> into <code>main</code>.</li>
+<li><strong><code>main</code></strong> é a linha publicada. Só avança por uma release ou por um hotfix. O seu <code>HEAD</code> é o que
+  um utilizador que instala a partir do código-fonte obtém.</li>
+<li><strong><code>develop</code></strong> é a linha de integração. O trabalho do dia-a-dia parte dela e aterra de volta nela.
+  Uma release promove <code>develop</code> para <code>main</code>.</li>
 </ul>
-<p>Both are fetched fresh before use; never branch from a stale local ref, and never from another
-task's branch for convenience.</p>
-<h2 id="branch-policy-mandatory">Branch policy (mandatory)<a class="hanchor" href="#branch-policy-mandatory" aria-label="#">#</a></h2>
-<p>Classify by the <strong>nature of the problem</strong>, not by the prefix someone suggested. The prefix follows
-the classification; it does not drive it.</p>
+<p>Ambos são obtidos de fresco antes de usar; nunca ramifiques a partir de uma ref local obsoleta, e
+nunca a partir do ramo de outra tarefa por conveniência.</p>
+<h2 id="branch-policy-mandatory">Política de ramos (obrigatória)<a class="hanchor" href="#branch-policy-mandatory" aria-label="#">#</a></h2>
+<p>Classifica pela <strong>natureza do problema</strong>, não pelo prefixo que alguém sugeriu. O prefixo segue a
+classificação; não a conduz.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Kind of work</th>
-<th>Branch prefix</th>
-<th>Starts from (fresh remote)</th>
-<th>Normal destination</th>
+<th>Tipo de trabalho</th>
+<th>Prefixo de ramo</th>
+<th>Parte de (remoto fresco)</th>
+<th>Destino normal</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Feature</td>
+<td>Funcionalidade</td>
 <td><code>feat/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Chore / maintenance</td>
+<td>Manutenção / chore</td>
 <td><code>chore/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Refactor</td>
+<td>Refactorização</td>
 <td><code>refactor/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Performance</td>
+<td>Desempenho</td>
 <td><code>perf/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Documentation</td>
+<td>Documentação</td>
 <td><code>docs/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td>Test / CI / build</td>
+<td>Teste / CI / build</td>
 <td><code>test/</code> <code>ci/</code> <code>build/</code></td>
 <td><code>origin/develop</code></td>
 <td><code>develop</code></td>
 </tr>
 <tr>
-<td><strong>Bug fix / hotfix</strong></td>
+<td><strong>Correcção / hotfix</strong></td>
 <td><code>fix/</code> <code>bug/</code> <code>hotfix/</code></td>
 <td><strong><code>origin/main</code></strong></td>
-<td><strong><code>develop</code> and, when it affects the released line, <code>main</code></strong></td>
+<td><strong><code>develop</code> e, quando afecta a linha publicada, <code>main</code></strong></td>
 </tr>
 </tbody>
 </table></div>
-<p>Names are short and descriptive, with the task identifier when one exists:
+<p>Os nomes são curtos e descritivos, com o identificador da tarefa quando existir:
 <code>feat/DX-1234-http-route-timeouts</code>, <code>fix/compose-secret-lazy-read</code>.</p>
-<h3 id="the-fixbughotfix-rule-and-its-one-real-trap">The fix/bug/hotfix rule, and its one real trap<a class="hanchor" href="#the-fixbughotfix-rule-and-its-one-real-trap" aria-label="#">#</a></h3>
-<p>A fix branches from <code>main</code> because a fix is, by default, a correction to what is published. The
-same correction must also reach <code>develop</code> so the next release does not regress it.</p>
-<p>The trap, which this policy forbids: <strong>a defect that exists only on <code>develop</code></strong>. Do not branch it
-from <code>main</code> (it will not reproduce there), and do not merge <code>develop</code> into <code>main</code> to make it
-reproduce. A develop-only defect is corrected on a branch cut from <code>develop</code> and lands only on
-<code>develop</code> — record that condition explicitly when you classify it. If this policy ever blocks a
-coherent fix, surface the concrete conflict to the owner for a decision; do not silently bend the
-rule.</p>
-<h3 id="carrying-a-fix-to-both-destinations">Carrying a fix to both destinations<a class="hanchor" href="#carrying-a-fix-to-both-destinations" aria-label="#">#</a></h3>
-<p>When a fix targets the released line, it lands on <code>main</code> through the release gates and the same
-change reaches <code>develop</code>. <strong>Never merge <code>develop</code> into <code>main</code></strong> to carry an isolated fix across.
-Choose merge, back-merge or <code>cherry-pick</code> per the linear-history convention below, record the
-commit equivalence, and apply the change once — not twice. Authorisation to integrate into
-<code>develop</code> does <strong>not</strong> authorise cutting a release, a tag, or publishing artefacts; those follow the
-release process.</p>
-<h2 id="one-worktree-per-task">One worktree per task<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
-<p>Several sessions write to this clone at once (measured: <code>main</code>'s <code>HEAD</code> moved four times during one
-session, eight live worktrees, two regenerating the same file minutes apart). So every task gets its
-own worktree and branch, and nothing is edited directly in the <code>main</code> or <code>develop</code> checkout.</p>
+<h3 id="the-fixbughotfix-rule-and-its-one-real-trap">A regra do fix/bug/hotfix, e a sua única armadilha real<a class="hanchor" href="#the-fixbughotfix-rule-and-its-one-real-trap" aria-label="#">#</a></h3>
+<p>Um fix ramifica de <code>main</code> porque um fix é, por omissão, uma correcção ao que está publicado. A
+mesma correcção também tem de chegar a <code>develop</code> para que a próxima release não regrida.</p>
+<p>A armadilha, que esta política proíbe: <strong>um defeito que existe apenas em <code>develop</code></strong>. Não o
+ramifiques de <code>main</code> (não reproduz lá), e não faças merge de <code>develop</code> para <code>main</code> para o fazer
+reproduzir. Um defeito só-de-develop corrige-se num ramo cortado de <code>develop</code> e aterra apenas em
+<code>develop</code> — regista essa condição explicitamente quando o classificas. Se esta política alguma vez
+bloquear uma correcção coerente, expõe o conflito concreto ao dono para uma decisão; não dobres a
+regra em silêncio.</p>
+<h3 id="carrying-a-fix-to-both-destinations">Levar um fix aos dois destinos<a class="hanchor" href="#carrying-a-fix-to-both-destinations" aria-label="#">#</a></h3>
+<p>Quando um fix visa a linha publicada, aterra em <code>main</code> através dos gates de release e a mesma
+mudança chega a <code>develop</code>. <strong>Nunca faças merge de <code>develop</code> para <code>main</code></strong> para levar um fix isolado
+de um lado ao outro. Escolhe merge, back-merge ou <code>cherry-pick</code> conforme a convenção de histórico
+linear abaixo, regista a equivalência de commits, e aplica a mudança uma vez — não duas. A
+autorização para integrar em <code>develop</code> <strong>não</strong> autoriza cortar uma release, uma tag, ou publicar
+artefactos; esses seguem o processo de release.</p>
+<h2 id="one-worktree-per-task">Um worktree por tarefa<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
+<p>Várias sessões escrevem neste clone ao mesmo tempo (medido: o <code>HEAD</code> de <code>main</code> mexeu quatro vezes
+durante uma sessão, oito worktrees vivos, dois a regenerar o mesmo ficheiro com minutos de
+diferença). Por isso cada tarefa tem o seu próprio worktree e ramo, e nada é editado directamente
+na checkout de <code>main</code> ou de <code>develop</code>.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">git fetch origin --prune
 # base is origin/develop for feat/chore/..., origin/main for fix/bug/hotfix
 git worktree add -b &lt;prefix&gt;/&lt;task&gt; \
@@ -319,118 +321,123 @@ cd &lt;workspace&gt;/.worktrees/delonix-runtime/&lt;task&gt;
 export CARGO_TARGET_DIR=&lt;repo&gt;/target   # reuse the build cache safely
 </code></pre></div>
 <ul>
-<li><strong>Never in <code>/tmp</code></strong> — it is cleared on boot and this host reboots; a reboot mid-task takes the
-  uncommitted work. Use the persistent <code>.worktrees/</code> beside the repositories (gitignored by the
-  workspace harness). Commit and push the branch <strong>early and at every step with value</strong>.</li>
-<li><strong>Isolate state, not just code.</strong> A worktree isolates the files; it does <strong>not</strong> isolate the one
-  shared Delonix engine on this host, nor ports, volumes or test fixtures. Do not share state files,
-  ports, volumes or test resources between parallel tasks. Build caches may be shared only when the
-  tool guarantees it is safe; never run a binary from another worktree without checking its
-  identity (<code>target/release/delonix --version</code> + commit distance).</li>
-<li><strong>Stage by name</strong> (<code>git add &lt;file&gt;</code>, never <code>-A</code>/<code>-u</code>/<code>.</code>), recognise every <code>git status --short</code>
-  entry as yours, and <strong>never <code>git checkout -- &lt;path&gt;</code></strong> in a shared tree — it destroys another
-  session's uncommitted work without a stash.</li>
-<li><strong>Rebase, do not merge</strong> on a rejected push (<code>git pull --rebase</code>): history is linear, no merge
-  commits.</li>
-<li><strong>WIP cap: at most 3 open worktrees/sessions at once.</strong> Opening a fourth forces closing or parking
-  one, with a written handoff.</li>
+<li><strong>Nunca em <code>/tmp</code></strong> — é limpo no arranque e este host reinicia; um reinício a meio da tarefa leva
+  o trabalho por commitar. Usa o persistente <code>.worktrees/</code> ao lado dos repositórios (ignorado pelo
+  git através do harness do workspace). Faz commit e push do ramo <strong>cedo e a cada passo com valor</strong>.</li>
+<li><strong>Isola o estado, não só o código.</strong> Um worktree isola os ficheiros; <strong>não</strong> isola o único motor
+  Delonix partilhado neste host, nem portas, volumes ou fixtures de teste. Não partilhes ficheiros
+  de estado, portas, volumes ou recursos de teste entre tarefas paralelas. As caches de build só
+  podem ser partilhadas quando a ferramenta garante que é seguro; nunca corras um binário de outro
+  worktree sem verificar a sua identidade (<code>target/release/delonix --version</code> + distância de
+  commits).</li>
+<li><strong>Faz stage pelo nome</strong> (<code>git add &lt;file&gt;</code>, nunca <code>-A</code>/<code>-u</code>/<code>.</code>), reconhece cada entrada de
+  <code>git status --short</code> como tua, e <strong>nunca <code>git checkout -- &lt;path&gt;</code></strong> numa árvore partilhada — isso
+  destrói o trabalho por commitar de outra sessão sem um stash.</li>
+<li><strong>Faz rebase, não merge</strong> num push rejeitado (<code>git pull --rebase</code>): o histórico é linear, sem
+  commits de merge.</li>
+<li><strong>Limite de WIP: no máximo 3 worktrees/sessões abertos ao mesmo tempo.</strong> Abrir um quarto obriga a
+  fechar ou estacionar um, com um handoff escrito.</li>
 </ul>
-<h2 id="the-lifecycle-of-a-prompt">The lifecycle of a prompt<a class="hanchor" href="#the-lifecycle-of-a-prompt" aria-label="#">#</a></h2>
-<p>Every new request runs this loop. A small task may be a single sprint — do not manufacture
-ceremony; but do not confuse "implementation ready" with "done" either.</p>
+<h2 id="the-lifecycle-of-a-prompt">O ciclo de vida de um pedido<a class="hanchor" href="#the-lifecycle-of-a-prompt" aria-label="#">#</a></h2>
+<p>Cada novo pedido corre este laço. Uma tarefa pequena pode ser um único sprint — não fabriques
+cerimónia; mas também não confundas "implementação pronta" com "feito".</p>
 <ol>
-<li>Recover the instructions, decisions and checkpoint (the session contract, <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> for the
-   area, <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> for the decisions).</li>
-<li>Define objective, scope and acceptance criteria.</li>
-<li>Classify the work and pick the base branch from the table above.</li>
-<li>Identify the specialists needed (see "Delegation").</li>
-<li>Build the dependency graph; sequence dependent fronts, parallelise independent ones.</li>
-<li>Organise execution in short sprints sized to the work.</li>
-<li>Create the worktree(s).</li>
-<li>Implement, review, validate.</li>
-<li>Integrate the finished work into <code>develop</code>.</li>
-<li>Clean up the resources and update the checkpoint.</li>
+<li>Recupera as instruções, decisões e checkpoint (o contrato de sessão, o <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> da área, o
+   <a class="src" href="https://github.com/ngolacloud/delonix/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> para as decisões).</li>
+<li>Define objectivo, escopo e critérios de aceitação.</li>
+<li>Classifica o trabalho e escolhe o ramo base a partir da tabela acima.</li>
+<li>Identifica os especialistas necessários (ver "Delegação").</li>
+<li>Constrói o grafo de dependências; sequencia as frentes dependentes, paraleliza as independentes.</li>
+<li>Organiza a execução em sprints curtos dimensionados ao trabalho.</li>
+<li>Cria o(s) worktree(s).</li>
+<li>Implementa, revê, valida.</li>
+<li>Integra o trabalho concluído em <code>develop</code>.</li>
+<li>Limpa os recursos e actualiza o checkpoint.</li>
 </ol>
-<h3 id="each-sprints-contract">Each sprint's contract<a class="hanchor" href="#each-sprints-contract" aria-label="#">#</a></h3>
-<p>A sprint delivers a <strong>concrete, usable change</strong> — no stubs or fictional paths presented as complete,
-and never a state that leaves <code>develop</code> functionally broken. It names: the functional result; the
-tasks and their dependencies; the responsible specialists; acceptance criteria; risks; the tests;
-the evidence collected; and the integration condition.</p>
-<h2 id="delegation-to-specialist-agents">Delegation to specialist agents<a class="hanchor" href="#delegation-to-specialist-agents" aria-label="#">#</a></h2>
-<p>When the environment offers specialist agents, pick them by the problem (Rust/systems, OCI
-lifecycle, CRI/CNI/Kubernetes, networking/isolation, virtualization/providers, cloud images,
-CLI/DX, security, functional testing, CI/release). For each, state: objective, specialty, scope,
-branch and worktree, the files/contracts it owns, dependencies, acceptance criteria, validation
-commands, and delivery format. Independent fronts run in parallel; dependent fronts run in sequence
-from an already-integrated contract. <strong>Two agents never edit the same worktree at once.</strong> If the
-environment offers no agents, say so and run the responsibilities sequentially — do not simulate
-delegation that did not happen.</p>
-<p>The principal agent owns the architecture, the common contracts and the integration. When one front
-depends on another: stabilise and validate the first, integrate it into <code>develop</code>, cut the next
-front from the updated <code>develop</code>, and re-validate the consumed contract. Do not start parallel
-implementations on incompatible assumptions about a schema, trait or API. Control build/test
-concurrency to avoid saturating CPU, RAM and I/O.</p>
-<h2 id="quality-before-integration">Quality before integration<a class="hanchor" href="#quality-before-integration" aria-label="#">#</a></h2>
-<p>Before a task is considered validated:</p>
+<h3 id="each-sprints-contract">O contrato de cada sprint<a class="hanchor" href="#each-sprints-contract" aria-label="#">#</a></h3>
+<p>Um sprint entrega uma <strong>mudança concreta e utilizável</strong> — sem stubs ou caminhos fictícios
+apresentados como completos, e nunca um estado que deixe <code>develop</code> funcionalmente partido. Nomeia:
+o resultado funcional; as tarefas e as suas dependências; os especialistas responsáveis; os
+critérios de aceitação; os riscos; os testes; as evidências recolhidas; e a condição de integração.</p>
+<h2 id="delegation-to-specialist-agents">Delegação a agentes especialistas<a class="hanchor" href="#delegation-to-specialist-agents" aria-label="#">#</a></h2>
+<p>Quando o ambiente oferece agentes especialistas, escolhe-os pelo problema (Rust/sistemas, ciclo de
+vida OCI, CRI/CNI/Kubernetes, rede/isolamento, virtualização/providers, imagens cloud, CLI/DX,
+segurança, teste funcional, CI/release). Para cada um, declara: objectivo, especialidade, escopo,
+ramo e worktree, os ficheiros/contratos que detém, dependências, critérios de aceitação, comandos
+de validação, e formato de entrega. As frentes independentes correm em paralelo; as dependentes
+correm em sequência a partir de um contrato já integrado. <strong>Dois agentes nunca editam o mesmo
+worktree ao mesmo tempo.</strong> Se o ambiente não oferecer agentes, di-lo e corre as responsabilidades
+sequencialmente — não simules uma delegação que não aconteceu.</p>
+<p>O agente principal detém a arquitectura, os contratos comuns e a integração. Quando uma frente
+depende de outra: estabiliza e valida a primeira, integra-a em <code>develop</code>, corta a frente seguinte a
+partir do <code>develop</code> actualizado, e revalida o contrato consumido. Não arranques implementações
+paralelas sobre pressupostos incompatíveis acerca de um schema, trait ou API. Controla a
+concorrência de build/teste para evitar saturar CPU, RAM e I/O.</p>
+<h2 id="quality-before-integration">Qualidade antes da integração<a class="hanchor" href="#quality-before-integration" aria-label="#">#</a></h2>
+<p>Antes de uma tarefa ser considerada validada:</p>
 <ul>
-<li>Confirm the requirements and the relevant sources; review the diff.</li>
-<li>Run the gates the repository requires — <code>make ci</code> (or the subset the change touches, with the
-  <code>rc=0</code> quoted). Zero clippy warnings is enforced, not advisory.</li>
-<li>Run tests proportional to the risk; a change that depends on the kernel, a provider or a protocol
-  is validated <strong>live</strong>, and the PR says what was tested (command, expected vs. actual).</li>
-<li>Update the documentation and contracts the change affects
+<li>Confirma os requisitos e as fontes relevantes; revê o diff.</li>
+<li>Corre os gates que o repositório exige — <code>make ci</code> (ou o subconjunto que a mudança toca, com o
+  <code>rc=0</code> citado). Zero avisos do clippy é imposto, não meramente aconselhado.</li>
+<li>Corre testes proporcionais ao risco; uma mudança que depende do kernel, de um provider ou de um
+  protocolo é validada <strong>ao vivo</strong>, e o PR diz o que foi testado (comando, esperado vs. real).</li>
+<li>Actualiza a documentação e os contratos que a mudança afecta
   (<code>scripts/dev_docs.py --check</code>, <code>scripts/dev_docs_site.py --check</code>).</li>
-<li>Confirm there are no secrets or accidental artefacts; check migration and compatibility where they
-  apply.</li>
-<li>For relevant changes, a <strong>reviewer agent different from the implementer</strong> hunts for defects,
-  regressions, test gaps and contract violations — approving the author's description is not review.</li>
+<li>Confirma que não há segredos nem artefactos acidentais; verifica a migração e a compatibilidade
+  onde se aplicam.</li>
+<li>Para mudanças relevantes, um <strong>agente revisor diferente do implementador</strong> caça defeitos,
+  regressões, lacunas de teste e violações de contrato — aprovar a descrição do autor não é revisão.</li>
 </ul>
-<p>Do not change assertions, reduce isolation or ignore failures to get a green. Do not declare
-integration validated when the material tests are missing.</p>
-<h2 id="integration-into-develop-mandatory">Integration into <code>develop</code> (mandatory)<a class="hanchor" href="#integration-into-develop-mandatory" aria-label="#">#</a></h2>
-<p>Finished, validated work is integrated into <code>develop</code> in the <strong>same work sequence</strong>, when
-permissions and gates allow. Integration is by <strong>pull request, squash-merged, with the CI suite
-green</strong> — matching the linear history and Conventional Commits already in use. Before integrating:</p>
+<p>Não alteres asserções, não reduzas o isolamento nem ignores falhas para obter um verde. Não
+declares a integração validada quando os testes materiais estão em falta.</p>
+<h2 id="integration-into-develop-mandatory">Integração em <code>develop</code> (obrigatória)<a class="hanchor" href="#integration-into-develop-mandatory" aria-label="#">#</a></h2>
+<p>O trabalho concluído e validado é integrado em <code>develop</code> na <strong>mesma sequência de trabalho</strong>, quando
+as permissões e os gates o permitirem. A integração é por <strong>pull request, squash-merged, com a
+suíte de CI verde</strong> — a condizer com o histórico linear e os Conventional Commits já em uso. Antes
+de integrar:</p>
 <ol>
-<li><code>git fetch origin --prune</code> and check whether <code>develop</code> moved.</li>
-<li>Resolve conflicts on the work branch (<code>git pull --rebase origin develop</code>).</li>
-<li>Re-run the affected tests.</li>
-<li>Confirm the exact candidate to integrate.</li>
-<li>Obtain the required review.</li>
-<li>Open/complete the PR against <code>develop</code>; let CI finish before merging.</li>
+<li><code>git fetch origin --prune</code> e verifica se <code>develop</code> mexeu.</li>
+<li>Resolve os conflitos no ramo de trabalho (<code>git pull --rebase origin develop</code>).</li>
+<li>Volta a correr os testes afectados.</li>
+<li>Confirma o candidato exacto a integrar.</li>
+<li>Obtém a revisão exigida.</li>
+<li>Abre/completa o PR contra <code>develop</code>; deixa o CI terminar antes do merge.</li>
 </ol>
-<p>Respect PRs, checks and protections. Never bypass a control with a direct push or a force-push. If a
-protection blocks integration, leave the PR and the evidence ready and explain the exact blocker —
-do not mark the work integrated.</p>
-<p>CI runs the gate suite on push to <code>main</code> and <code>develop</code> and on pull requests targeting either (see
-<a href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>). A pushed branch with no PR does not,
-by itself, prove "CI green".</p>
-<h2 id="cleanup-after-integration">Cleanup after integration<a class="hanchor" href="#cleanup-after-integration" aria-label="#">#</a></h2>
-<p>After integration is <strong>confirmed</strong> — not assumed — verify: the destination branch locally and
-remotely; that the change is effectively included; the required checks; no local changes left; no
-un-preserved commits; and no agent/process still using the worktree. Then:</p>
+<p>Respeita os PRs, os checks e as protecções. Nunca contornes um controlo com um push directo ou um
+force-push. Se uma protecção bloquear a integração, deixa o PR e a evidência prontos e explica o
+bloqueador exacto — não marques o trabalho como integrado.</p>
+<p>O CI corre a suíte de gates no push para <code>main</code> e <code>develop</code> e nos pull requests que visam qualquer
+um (ver <a href="https://github.com/ngolacloud/delonix/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>). Um ramo empurrado sem PR
+não prova, por si só, "CI verde".</p>
+<h2 id="cleanup-after-integration">Limpeza após a integração<a class="hanchor" href="#cleanup-after-integration" aria-label="#">#</a></h2>
+<p>Depois de a integração ser <strong>confirmada</strong> — não assumida — verifica: o ramo de destino local e
+remotamente; que a mudança está efectivamente incluída; os checks exigidos; que não ficaram
+mudanças locais; que não há commits não preservados; e que nenhum agente/processo continua a usar o
+worktree. Depois:</p>
 <ol>
-<li><code>git worktree remove &lt;path&gt;</code> (never <code>--force</code> to hide pending changes).</li>
-<li><code>git branch -d &lt;branch&gt;</code> (never <code>-D</code>).</li>
-<li>Delete the remote branch if it belongs to the task and is no longer needed.</li>
-<li><code>git worktree prune</code> for stale references.</li>
-<li>Update the task record / checkpoint.</li>
+<li><code>git worktree remove &lt;path&gt;</code> (nunca <code>--force</code> para esconder mudanças pendentes).</li>
+<li><code>git branch -d &lt;branch&gt;</code> (nunca <code>-D</code>).</li>
+<li>Apaga o ramo remoto se pertence à tarefa e já não é necessário.</li>
+<li><code>git worktree prune</code> para referências obsoletas.</li>
+<li>Actualiza o registo da tarefa / checkpoint.</li>
 </ol>
-<p>A squash or cherry-pick means <strong>commit identity changes</strong> — prove inclusion by the PR, the diff and
-<code>git cherry develop &lt;branch&gt;</code>, not by ancestry alone. Never remove someone else's branch or
-worktree. A blocked resource stays identified with its reason and next step — no abandoned branches
-without state.</p>
-<h2 id="definition-of-done-and-the-states-on-the-way">Definition of done, and the states on the way<a class="hanchor" href="#definition-of-done-and-the-states-on-the-way" aria-label="#">#</a></h2>
-<p>A task is <strong>CONCLUÍDA / DONE</strong> only when: acceptance criteria met; review finished; the required
-tests pass; documentation and contracts updated; integration into <code>develop</code> confirmed; any
-additional integration into <code>main</code> resolved when it is in the authorised scope; the temporary
-worktree and branch removed safely; and the checkpoint updated.</p>
-<p>Use the explicit intermediate states in the session contract:</p>
+<p>Um squash ou cherry-pick significa que <strong>a identidade do commit muda</strong> — prova a inclusão pelo PR,
+pelo diff e por <code>git cherry develop &lt;branch&gt;</code>, não só pela ascendência. Nunca removas o ramo ou
+worktree de outra pessoa. Um recurso bloqueado fica identificado com a sua razão e o próximo passo —
+sem ramos abandonados sem estado.</p>
+<h2 id="definition-of-done-and-the-states-on-the-way">Definição de pronto, e os estados pelo caminho<a class="hanchor" href="#definition-of-done-and-the-states-on-the-way" aria-label="#">#</a></h2>
+<p>Uma tarefa está <strong>CONCLUÍDA / DONE</strong> só quando: os critérios de aceitação estão cumpridos; a revisão
+está terminada; os testes exigidos passam; a documentação e os contratos estão actualizados; a
+integração em <code>develop</code> está confirmada; qualquer integração adicional em <code>main</code> está resolvida
+quando está no escopo autorizado; o worktree e o ramo temporários estão removidos em segurança; e o
+checkpoint está actualizado.</p>
+<p>Usa os estados intermédios explícitos no contrato de sessão:</p>
 <p><code>EM IMPLEMENTAÇÃO</code> → <code>EM REVISÃO</code> → <code>BLOQUEADO NA VALIDAÇÃO</code> →
 <code>VALIDADO, A AGUARDAR INTEGRAÇÃO</code> → <code>INTEGRADO, LIMPEZA PENDENTE</code> → <code>CONCLUÍDO</code>.</p>
-<h2 id="the-harness-that-enforces-this">The harness that enforces this<a class="hanchor" href="#the-harness-that-enforces-this" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/gitflow.py" target="_blank" rel="noopener"><code>scripts/gitflow.py</code></a> turns this page into runnable controls. It validates the repo and remote before
-any mutation, supports <code>--dry-run</code>, is idempotent, preserves data, and propagates exit codes.</p>
+<h2 id="the-harness-that-enforces-this">O harness que impõe isto<a class="hanchor" href="#the-harness-that-enforces-this" aria-label="#">#</a></h2>
+<p>O <a class="src" href="https://github.com/ngolacloud/delonix/blob/main/scripts/gitflow.py" target="_blank" rel="noopener"><code>scripts/gitflow.py</code></a> transforma esta página em controlos executáveis. Valida o repositório e o
+remoto antes de qualquer mutação, suporta <code>--dry-run</code>, é idempotente, preserva dados, e propaga os
+códigos de saída.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">python3 scripts/gitflow.py classify &quot;fix a crash in compose config&quot;   # -&gt; prefix + base
 python3 scripts/gitflow.py start  &lt;prefix&gt;/&lt;task&gt;  [--dry-run]          # fetch, base, worktree, contract
 python3 scripts/gitflow.py preflight                                    # remote, base freshness, stale worktree refs, WIP cap
@@ -439,31 +446,31 @@ python3 scripts/gitflow.py integrate  [--dry-run]                       # rebase
 python3 scripts/gitflow.py done                                         # prove inclusion, checks, clean tree
 python3 scripts/gitflow.py cleanup  [--dry-run]                         # remove worktree + branches safely
 </code></pre></div>
-<p><code>make gitflow ARGS="&lt;subcommand&gt; ..."</code> is the same thing through the Makefile. Local hooks assist the
-person at the keyboard; the CI checks and (when the owner enables them) the branch protections are
-what hold the important rules. Instruction files are not a substitute for an executable control.</p>
+<p><code>make gitflow ARGS="&lt;subcommand&gt; ..."</code> é a mesma coisa através do Makefile. Os hooks locais ajudam
+a pessoa ao teclado; os checks de CI e (quando o dono as activa) as protecções de ramo são o que
+sustenta as regras importantes. Os ficheiros de instruções não substituem um controlo executável.</p>
 <nav class="pager"><a href="adding-a-kind.html"><span>← Anterior</span>Acrescentar um Kind</a><a class="next" href="contributing-workflow.html"><span>Seguinte →</span>Fluxo de contribuição</a></nav>
-<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/engineering-process.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/engineering-process.md</code></footer>
+<footer class="foot"><a href="https://github.com/ngolacloud/delonix/blob/main/docs/dev/pt-AO/engineering-process.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/engineering-process.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
-<li><a href="#the-two-long-lived-branches">The two long-lived branches</a></li>
-<li><a href="#branch-policy-mandatory">Branch policy (mandatory)</a><ul>
-<li><a href="#the-fixbughotfix-rule-and-its-one-real-trap">The fix/bug/hotfix rule, and its one real trap</a></li>
-<li><a href="#carrying-a-fix-to-both-destinations">Carrying a fix to both destinations</a></li>
+<li><a href="#the-two-long-lived-branches">Os dois ramos de vida longa</a></li>
+<li><a href="#branch-policy-mandatory">Política de ramos (obrigatória)</a><ul>
+<li><a href="#the-fixbughotfix-rule-and-its-one-real-trap">A regra do fix/bug/hotfix, e a sua única armadilha real</a></li>
+<li><a href="#carrying-a-fix-to-both-destinations">Levar um fix aos dois destinos</a></li>
 </ul>
 </li>
-<li><a href="#one-worktree-per-task">One worktree per task</a></li>
-<li><a href="#the-lifecycle-of-a-prompt">The lifecycle of a prompt</a><ul>
-<li><a href="#each-sprints-contract">Each sprint's contract</a></li>
+<li><a href="#one-worktree-per-task">Um worktree por tarefa</a></li>
+<li><a href="#the-lifecycle-of-a-prompt">O ciclo de vida de um pedido</a><ul>
+<li><a href="#each-sprints-contract">O contrato de cada sprint</a></li>
 </ul>
 </li>
-<li><a href="#delegation-to-specialist-agents">Delegation to specialist agents</a></li>
-<li><a href="#quality-before-integration">Quality before integration</a></li>
-<li><a href="#integration-into-develop-mandatory">Integration into develop (mandatory)</a></li>
-<li><a href="#cleanup-after-integration">Cleanup after integration</a></li>
-<li><a href="#definition-of-done-and-the-states-on-the-way">Definition of done, and the states on the way</a></li>
-<li><a href="#the-harness-that-enforces-this">The harness that enforces this</a></li>
+<li><a href="#delegation-to-specialist-agents">Delegação a agentes especialistas</a></li>
+<li><a href="#quality-before-integration">Qualidade antes da integração</a></li>
+<li><a href="#integration-into-develop-mandatory">Integração em develop (obrigatória)</a></li>
+<li><a href="#cleanup-after-integration">Limpeza após a integração</a></li>
+<li><a href="#definition-of-done-and-the-states-on-the-way">Definição de pronto, e os estados pelo caminho</a></li>
+<li><a href="#the-harness-that-enforces-this">O harness que impõe isto</a></li>
 </ul>
 </div>
 </aside>
