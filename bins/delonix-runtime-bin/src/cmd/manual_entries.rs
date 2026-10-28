@@ -2517,6 +2517,57 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["gitops suspend", "gitops reconcile"],
     },
     Entry {
+        path: "oci-runtime",
+        group: "Workloads",
+        examples: &[
+            ("create a container from an OCI bundle, then start it", "delonix oci-runtime create web -b ./bundle"),
+            ("its OCI state, the way runc reports it", "delonix oci-runtime state web"),
+        ],
+        see_also: &["oci-runtime create", "oci-runtime start", "oci-runtime state", "oci-runtime delete", "container"],
+    },
+    Entry {
+        path: "oci-runtime create",
+        group: "Lifecycle",
+        examples: &[
+            ("stage a container from a bundle without running it", "delonix oci-runtime create web -b ./bundle"),
+        ],
+        see_also: &["oci-runtime start", "oci-runtime state", "oci-runtime delete"],
+    },
+    Entry {
+        path: "oci-runtime start",
+        group: "Lifecycle",
+        examples: &[
+            ("run a container that was already created", "delonix oci-runtime start web"),
+        ],
+        see_also: &["oci-runtime create", "oci-runtime state", "oci-runtime kill"],
+    },
+    Entry {
+        path: "oci-runtime state",
+        group: "Inspect",
+        examples: &[
+            ("print the OCI runtime-spec state JSON", "delonix oci-runtime state web"),
+        ],
+        see_also: &["oci-runtime create", "oci-runtime start"],
+    },
+    Entry {
+        path: "oci-runtime kill",
+        group: "Lifecycle",
+        examples: &[
+            ("send SIGTERM (the default)", "delonix oci-runtime kill web"),
+            ("send a specific signal", "delonix oci-runtime kill web SIGKILL"),
+        ],
+        see_also: &["oci-runtime delete", "oci-runtime state"],
+    },
+    Entry {
+        path: "oci-runtime delete",
+        group: "Lifecycle",
+        examples: &[
+            ("tear down a stopped container's state", "delonix oci-runtime delete web"),
+            ("kill it first, then delete", "delonix oci-runtime delete web --force"),
+        ],
+        see_also: &["oci-runtime kill", "oci-runtime create"],
+    },
+    Entry {
         path: "backup",
         group: "Engine",
         examples: &[

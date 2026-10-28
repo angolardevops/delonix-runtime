@@ -6970,20 +6970,30 @@ workers:
         }
     }
 
-    /// A profile this release has not measured end to end is refused unless
-    /// the manifest says so by name. The whole-spec path is tested here (the
-    /// per-field logic has its own tests in `cmd::net_profiles`), because this
-    /// is the path a real manifest takes.
+    /// `cilium` passed D7 this campaign and is now the `Supported` default, so a
+    /// plain `cni: cilium` resolves through the whole-spec manifest path with
+    /// `experimental: false` — no opt-in needed. The DX-1705 gate and the
+    /// `Support::Experimental` variant stay in the code as the DORMANT mechanism
+    /// for the next profile that ships unmeasured (see
+    /// `net_profiles::every_addon_profile_is_supported_and_needs_no_opt_in`);
+    /// this is the inverse of the old whole-spec refusal test, and would start
+    /// failing the day a profile is marked `Experimental` again — the reminder
+    /// to re-add the refusal coverage on this path too. The per-field logic has
+    /// its own tests in `cmd::net_profiles`.
     #[test]
-    fn an_experimental_profile_is_refused_through_the_manifest_path() {
+    fn a_supported_profile_resolves_through_the_manifest_path_without_opt_in() {
         let spec = ClusterSpec {
             cni: "cilium".into(),
             ..spec_ssh_1cp()
         };
-        let err = validate(&spec).unwrap_err();
-        assert_eq!(err.number(), 1705, "{err}");
-        // With the opt-in, the same manifest resolves.
-        let ok = ClusterSpec {
+        assert!(
+            validate(&spec).is_ok(),
+            "cilium without opt-in: {:?}",
+            validate(&spec).err()
+        );
+        // The opt-in is still accepted (a no-op now), so a manifest that set it
+        // while cilium was experimental keeps resolving.
+        let opted_in = ClusterSpec {
             cni: "cilium".into(),
             network: NetworkBlock {
                 experimental: true,
@@ -6991,7 +7001,11 @@ workers:
             },
             ..spec_ssh_1cp()
         };
-        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok).err());
+        assert!(
+            validate(&opted_in).is_ok(),
+            "{:?}",
+            validate(&opted_in).err()
+        );
     }
 
     /// `spec.network` is only read by a profile that reads it. A knob left on

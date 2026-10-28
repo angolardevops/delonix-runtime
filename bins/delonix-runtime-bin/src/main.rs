@@ -254,8 +254,10 @@ enum Cmd {
         action: cmd::image::ImageCmd,
     },
     /// OCI runtime (runc-compatible CLI): create/start/state/kill/delete a
-    /// container from a bundle. The engine's own init behind the runc contract,
-    /// so it can sit where runc/crun do (ADR-0080).
+    /// container from a bundle.
+    ///
+    /// The engine's own init behind the runc contract, so it can sit where
+    /// runc/crun do (ADR-0080).
     #[command(name = "oci-runtime")]
     OciRuntime(cmd::oci_runtime::OciRuntimeArgs),
     /// Build an image from a Dockerfile or Delonixfile.
@@ -1944,6 +1946,7 @@ mod cli_stability_classification_tests {
         "mcp",
         "net",
         "network",
+        "oci-runtime",
         "plan",
         "pod",
         "policy",

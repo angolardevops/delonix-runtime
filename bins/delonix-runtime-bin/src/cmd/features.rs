@@ -142,13 +142,15 @@ pub(crate) const FEATURES: &[Feature] = &[
         name: "Docker Engine API",
         level: Level::Experimental,
         evidence: "`delonix compatibility docker` publishes served/refused/missing with the \
-                   version: 15 of the 26 published routes are served and 11 are refused \
-                   with a reason; of the 21 routes real tooling calls, 7 are refused — \
-                   `logs` and `exec` among them, so kind and Testcontainers cannot finish a \
-                   run, which is why this stays experimental. The pull is served since M02, \
-                   and `create` answers with the id while the container runs (2026-10-18, \
-                   docker-py 7.2.0 driving tests/compat/docker_api_smoke.py: 19/19 checks, \
-                   0.109 s against a 60 s workload)",
+                   version: 21 of the 28 published routes are served and 7 are refused \
+                   with a reason; of the 21 routes real tooling calls, 3 are refused — the \
+                   `/networks` family (list, create, inspect) kind reaches for and this engine \
+                   does not serve yet. `logs` and `exec` are now served (stdcopy framing and \
+                   the hijacked exec stream), so a container run can be followed end to end; \
+                   what keeps this experimental is those network routes kind and Testcontainers \
+                   still call. The pull is served since M02, and `create` answers with the id \
+                   while the container runs (docker-py 7.2.0 drives \
+                   tests/compat/docker_api_smoke.py against a real workload)",
     },
     Feature {
         name: "Proxmox VM backend",
@@ -385,3 +387,4 @@ mod tests {
         }
     }
 }
+

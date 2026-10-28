@@ -5482,10 +5482,16 @@ mod tests {
         let r = libvirt_report(&host);
         assert!(!r.available);
         assert_eq!(r.health.reason, "VirshMissing");
-        assert!(r
-            .capabilities
-            .iter()
-            .all(|c| { c.state.label() != "supported" || c.capability == C::HostHealth }));
+        // `HostHealth` and `HostCapacity` are the two HOST-level capabilities:
+        // they read the local machine (its health, its CPU/memory) straight from
+        // the OS, so they stay supported whether or not `virsh` is installed —
+        // the host still has capacity when the libvirt client is missing. Every
+        // OTHER supported capability goes through `virsh` and must downgrade.
+        assert!(r.capabilities.iter().all(|c| {
+            c.state.label() != "supported"
+                || c.capability == C::HostHealth
+                || c.capability == C::HostCapacity
+        }));
     }
     /// Minimal VmConfig to exercise the HPC args helpers (S4).
     fn hpc_cfg() -> VmConfig {
