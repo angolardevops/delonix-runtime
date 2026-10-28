@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:bb63e156dd668cde907112c102d5b2e8f1cb53382b74f70ac37d9f16dccade51 -->
+<!-- translated-from: README.md sha256:2f18c4479b2b90a6279028347b7ed6022437bc7b7cdf50ea555f53baa27c5fc9 -->
 # Delonix — Manuel du contributeur
 
 Ce manuel s’adresse aux personnes qui veulent **modifier le moteur** : vous avez cloné le dépôt
