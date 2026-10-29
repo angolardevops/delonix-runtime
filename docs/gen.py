@@ -4769,6 +4769,35 @@ modelo do segredo</div>
 </div>
 <p>De cima para baixo: binários e interfaces · providers · adaptadores · contextos · fundação — os 35 crates em cinco camadas (ADR-0040). O detalhe completo, com as dependências reais, está no <a href="c4.html">modelo C4</a>.</p>
 
+<h2>Providers</h2>
+<p>O engine fala com o mundo por <strong>portas</strong> (traits): o mesmo <code>VmBackend</code>,
+<code>GatewayProvider</code>, porta de storage, <code>NetworkZoneProvider</code> e DNS servem tanto
+drivers <strong>locais</strong> (no host) como <strong>sistemas externos</strong> — appliances e APIs
+remotas (Proxmox, TrueNAS, OPNsense, PowerDNS).</p>
+<div class="diagram-legend">
+<span><i class="on"></i> Portas do engine (traits)</span>
+<span><i></i> Provider local (no host)</span>
+<span><i class="store"></i> Sistema externo (appliance/API)</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 288" role="img" aria-label="Providers">
+<defs><marker id="dx-ah-p" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box on" x="160" y="14" width="560" height="52" rx="10"/>
+<text class="d-title" x="440" y="37" text-anchor="middle">Engine — portas (traits)</text>
+<text class="d-sub" x="440" y="55" text-anchor="middle">VmBackend · Gateway · Storage · NetworkZone · Dns</text>
+<path class="d-flow" style="marker-end:url(#dx-ah-p)" d="M380,66 L250,100"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-p)" d="M500,66 L630,100"/>
+<text class="d-title" x="220" y="104" text-anchor="middle" style="font-size:13px">Local</text>
+<text class="d-title" x="660" y="104" text-anchor="middle" style="font-size:13px">Sistema externo</text>
+<rect class="d-box" x="56" y="116" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="137" text-anchor="middle">cloud-hypervisor (microVM)</text>
+<rect class="d-box" x="56" y="156" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="177" text-anchor="middle">libvirt / KVM</text>
+<rect class="d-box" x="56" y="196" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="217" text-anchor="middle">btrfs · zfs · lvm (pools)</text>
+<rect class="d-box" x="56" y="236" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="257" text-anchor="middle">ceph — RADOS·RBD·CephFS·RGW</text>
+<rect class="d-store" x="496" y="116" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="137" text-anchor="middle">Proxmox VE — VM · SDN · firewall</text>
+<rect class="d-store" x="496" y="156" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="177" text-anchor="middle">TrueNAS — dataset · quota · share</text>
+<rect class="d-store" x="496" y="196" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="217" text-anchor="middle">OPNsense — gateway / firewall</text>
+<rect class="d-store" x="496" y="236" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="257" text-anchor="middle">PowerDNS — registos DNS</text>
+</svg></div>
+
 <h2>Daemonless a sério</h2>
 <p>Não há daemon, nem sequer um monitor por container (o conmon do podman). O <code>run</code> faz
 <code>clone()</code> directo; em modo detached, um <em>shim</em> de logging efémero fica só a escoar o
@@ -4921,6 +4950,35 @@ secret model</div>
 </div>
 </div>
 <p>Top to bottom: binaries and interfaces · providers · adapters · contexts · foundation — the 35 crates in five layers (ADR-0040). The full detail, with the real dependencies, is in the <a href="c4.html">C4 model</a>.</p>
+
+<h2>Providers</h2>
+<p>The engine talks to the world through <strong>ports</strong> (traits): the same <code>VmBackend</code>,
+<code>GatewayProvider</code>, storage port, <code>NetworkZoneProvider</code> and DNS serve both
+<strong>local</strong> drivers (on the host) and <strong>external systems</strong> — appliances and
+remote APIs (Proxmox, TrueNAS, OPNsense, PowerDNS).</p>
+<div class="diagram-legend">
+<span><i class="on"></i> Engine ports (traits)</span>
+<span><i></i> Local provider (on host)</span>
+<span><i class="store"></i> External system (appliance/API)</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 288" role="img" aria-label="Providers">
+<defs><marker id="dx-ah-pe" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box on" x="160" y="14" width="560" height="52" rx="10"/>
+<text class="d-title" x="440" y="37" text-anchor="middle">Engine — ports (traits)</text>
+<text class="d-sub" x="440" y="55" text-anchor="middle">VmBackend · Gateway · Storage · NetworkZone · Dns</text>
+<path class="d-flow" style="marker-end:url(#dx-ah-pe)" d="M380,66 L250,100"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-pe)" d="M500,66 L630,100"/>
+<text class="d-title" x="220" y="104" text-anchor="middle" style="font-size:13px">Local</text>
+<text class="d-title" x="660" y="104" text-anchor="middle" style="font-size:13px">External system</text>
+<rect class="d-box" x="56" y="116" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="137" text-anchor="middle">cloud-hypervisor (microVM)</text>
+<rect class="d-box" x="56" y="156" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="177" text-anchor="middle">libvirt / KVM</text>
+<rect class="d-box" x="56" y="196" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="217" text-anchor="middle">btrfs · zfs · lvm (pools)</text>
+<rect class="d-box" x="56" y="236" width="328" height="34" rx="8"/><text class="d-sub" x="220" y="257" text-anchor="middle">ceph — RADOS·RBD·CephFS·RGW</text>
+<rect class="d-store" x="496" y="116" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="137" text-anchor="middle">Proxmox VE — VM · SDN · firewall</text>
+<rect class="d-store" x="496" y="156" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="177" text-anchor="middle">TrueNAS — dataset · quota · share</text>
+<rect class="d-store" x="496" y="196" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="217" text-anchor="middle">OPNsense — gateway / firewall</text>
+<rect class="d-store" x="496" y="236" width="328" height="34" rx="8"/><text class="d-sub" x="660" y="257" text-anchor="middle">PowerDNS — DNS records</text>
+</svg></div>
 
 <h2>Genuinely daemonless</h2>
 <p>There's no daemon, not even a per-container monitor (podman's conmon). <code>run</code> does a
