@@ -184,6 +184,23 @@ font-weight:700;display:inline-flex;align-items:center;justify-content:center;ma
 .step b{display:block;margin-bottom:.2rem}
 .step p{margin:.1rem 0 .7rem;font-size:.88rem;color:var(--muted);flex:1}
 .step a.go{font-weight:600;font-size:.88rem}
+/* ---- Diagrama vectorial inline (auto-contido, temático, sem CDN) ---- */
+.diagram{border:1px solid var(--line);border-radius:var(--radius);background:var(--side);
+padding:1.1rem;margin:1.4rem 0;overflow-x:auto}
+.diagram svg{display:block;width:100%;min-width:600px;max-width:880px;margin:0 auto;height:auto}
+.diagram .d-box{fill:var(--bg);stroke:var(--line);stroke-width:1.5}
+.diagram .d-box.on{fill:var(--accent-soft);stroke:var(--accent)}
+.diagram .d-store{fill:var(--side);stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 3}
+.diagram .d-title{fill:var(--ink);font:600 14px -apple-system,'Segoe UI',Roboto,sans-serif}
+.diagram .d-sub{fill:var(--muted);font:11px ui-monospace,Menlo,monospace}
+.diagram .d-flow{stroke:var(--accent);stroke-width:2;fill:none;marker-end:url(#dx-ah)}
+.diagram .d-dash{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:4 3;fill:none}
+.diagram .d-ah{fill:var(--accent)}
+.diagram-legend{display:flex;flex-wrap:wrap;gap:1rem;margin:.3rem 0 1.4rem;font-size:.82rem;color:var(--muted)}
+.diagram-legend span{display:inline-flex;align-items:center;gap:.4rem}
+.diagram-legend i{width:16px;height:12px;border-radius:3px;border:1.5px solid var(--line);background:var(--bg)}
+.diagram-legend i.on{border-color:var(--accent);background:var(--accent-soft)}
+.diagram-legend i.store{border-style:dashed;background:var(--side)}
 .arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
 .arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
 .arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
@@ -1051,8 +1068,29 @@ política.
 <strong>Trade-off.</strong> Alguma duplicação aparente de conceitos entre os dois lados (ex.: um
 cofre de secrets do runtime vs um cofre de plataforma) é deliberada, não acidental.</p>
 <script type="module">
+// O diagrama segue o tema EFECTIVO do site (toggle manual `data-theme`, com
+// fallback no `prefers-color-scheme`) e re-renderiza quando o leitor troca de
+// tema — antes seguia só o tema do SO e ignorava o botão. Se o módulo não
+// carregar (sem rede/CDN), o <pre class="mermaid"> mostra a definição textual
+// do grafo, que é a explicação textual de recurso.
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-mermaid.initialize({ startOnLoad: true, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });
+const nodes = [...document.querySelectorAll('.mermaid')];
+const src = nodes.map(n => n.textContent);
+const effDark = () => (document.documentElement.getAttribute('data-theme')
+  || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+let busy = false;
+async function render(){
+  if (busy) return; busy = true;
+  nodes.forEach((n, i) => { n.removeAttribute('data-processed'); n.innerHTML = src[i]; });
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: effDark() ? 'dark' : 'default' });
+  try { await mermaid.run({ nodes }); } finally { busy = false; }
+}
+render();
+new MutationObserver(m => { if (m.some(x => x.attributeName === 'data-theme')) render(); })
+  .observe(document.documentElement, { attributes: true });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!document.documentElement.getAttribute('data-theme')) render();
+});
 </script>
 <style>
 /* diagramas maiores: página larga + SVG a preencher a largura, com scroll se preciso */

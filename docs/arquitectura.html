@@ -184,6 +184,23 @@ font-weight:700;display:inline-flex;align-items:center;justify-content:center;ma
 .step b{display:block;margin-bottom:.2rem}
 .step p{margin:.1rem 0 .7rem;font-size:.88rem;color:var(--muted);flex:1}
 .step a.go{font-weight:600;font-size:.88rem}
+/* ---- Diagrama vectorial inline (auto-contido, temático, sem CDN) ---- */
+.diagram{border:1px solid var(--line);border-radius:var(--radius);background:var(--side);
+padding:1.1rem;margin:1.4rem 0;overflow-x:auto}
+.diagram svg{display:block;width:100%;min-width:600px;max-width:880px;margin:0 auto;height:auto}
+.diagram .d-box{fill:var(--bg);stroke:var(--line);stroke-width:1.5}
+.diagram .d-box.on{fill:var(--accent-soft);stroke:var(--accent)}
+.diagram .d-store{fill:var(--side);stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 3}
+.diagram .d-title{fill:var(--ink);font:600 14px -apple-system,'Segoe UI',Roboto,sans-serif}
+.diagram .d-sub{fill:var(--muted);font:11px ui-monospace,Menlo,monospace}
+.diagram .d-flow{stroke:var(--accent);stroke-width:2;fill:none;marker-end:url(#dx-ah)}
+.diagram .d-dash{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:4 3;fill:none}
+.diagram .d-ah{fill:var(--accent)}
+.diagram-legend{display:flex;flex-wrap:wrap;gap:1rem;margin:.3rem 0 1.4rem;font-size:.82rem;color:var(--muted)}
+.diagram-legend span{display:inline-flex;align-items:center;gap:.4rem}
+.diagram-legend i{width:16px;height:12px;border-radius:3px;border:1.5px solid var(--line);background:var(--bg)}
+.diagram-legend i.on{border-color:var(--accent);background:var(--accent-soft)}
+.diagram-legend i.store{border-style:dashed;background:var(--side)}
 .arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
 .arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
 .arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
@@ -420,6 +437,43 @@ stdout/stderr para o ficheiro de log (com rotação) e morre com o container. O 
 o <code>ps</code>/<code>start</code>/<code>inspect</code> reconstruem tudo daí, e <em>reapers</em>
 oportunistas limpam órfãos (slirp sem alvo, hostfwd sem container) a cada invocação relevante.</p>
 
+<h2>Execução local de um comando</h2>
+<p>Um comando é um processo efémero: fala directamente com o kernel (sem daemon, sem monitor por
+container), escreve o estado em ficheiros e desaparece. A rede rootless é servida por um único par
+<em>holder-netns</em> + <em>slirp4netns</em> partilhado, com DNAT <code>nft</code> para publicar portas.</p>
+<div class="diagram-legend">
+<span><i></i> Processo</span>
+<span><i class="on"></i> Kernel · fronteira de privilégio</span>
+<span><i class="store"></i> Estado e rede (ficheiros/namespaces)</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 300" role="img" aria-label="Execução local de um comando">
+<defs><marker id="dx-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box" x="24" y="70" width="232" height="86" rx="10"/>
+<rect class="d-box on" x="324" y="70" width="232" height="86" rx="10"/>
+<rect class="d-box" x="624" y="70" width="232" height="86" rx="10"/>
+<rect class="d-store" x="324" y="214" width="232" height="60" rx="10"/>
+<rect class="d-store" x="624" y="214" width="232" height="60" rx="10"/>
+<path class="d-flow" d="M256,113 L318,113"/>
+<path class="d-flow" d="M556,113 L618,113"/>
+<path class="d-dash" d="M440,156 L440,210"/>
+<path class="d-dash" d="M740,156 L740,210"/>
+<text class="d-title" x="140" y="102" text-anchor="middle">delonix &lt;cmd&gt;</text>
+<text class="d-sub" x="140" y="123" text-anchor="middle">1 processo efémero</text>
+<text class="d-sub" x="140" y="139" text-anchor="middle">sem daemon</text>
+<text class="d-title" x="440" y="102" text-anchor="middle">kernel</text>
+<text class="d-sub" x="440" y="123" text-anchor="middle">namespaces · cgroups v2</text>
+<text class="d-sub" x="440" y="139" text-anchor="middle">pivot_root · seccomp/caps</text>
+<text class="d-title" x="740" y="102" text-anchor="middle">container · VM</text>
+<text class="d-sub" x="740" y="123" text-anchor="middle">user ns · rootless</text>
+<text class="d-sub" x="740" y="139" text-anchor="middle">clone() directo</text>
+<text class="d-title" x="440" y="239" text-anchor="middle" style="font-size:12px">$DELONIX_ROOT/*.json</text>
+<text class="d-sub" x="440" y="259" text-anchor="middle">estado · flock · atómico</text>
+<text class="d-title" x="740" y="239" text-anchor="middle" style="font-size:12px">slirp4netns (1 partilhado)</text>
+<text class="d-sub" x="740" y="259" text-anchor="middle">holder-netns · nft DNAT</text>
+</svg></div>
+<p class="src-link">O processo morre; <code>ps</code>/<code>start</code>/<code>inspect</code> reconstroem tudo a
+partir do estado em <code>$DELONIX_ROOT</code> — e os <em>reapers</em> oportunistas limpam órfãos.</p>
+
 <h2>Rootless-first</h2>
 <p>Sem root, o isolamento vem de user namespaces com mapeamento de subuid
 (<code>newuidmap</code>/<code>newgidmap</code>, como o podman) — o uid 0 do container é um uid
@@ -534,6 +588,43 @@ stdout/stderr to the log file (with rotation) and dies with the container. State
 <code>$DELONIX_ROOT</code> — <code>ps</code>/<code>start</code>/<code>inspect</code> rebuild
 everything from there, and opportunistic <em>reapers</em> clean up orphans (slirp with no target,
 hostfwd with no container) on every relevant invocation.</p>
+
+<h2>Running a command locally</h2>
+<p>A command is an ephemeral process: it talks to the kernel directly (no daemon, no per-container
+monitor), writes its state to files, and exits. Rootless networking is served by a single shared
+<em>holder-netns</em> + <em>slirp4netns</em> pair, with <code>nft</code> DNAT to publish ports.</p>
+<div class="diagram-legend">
+<span><i></i> Process</span>
+<span><i class="on"></i> Kernel · privilege boundary</span>
+<span><i class="store"></i> State &amp; network (files/namespaces)</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 300" role="img" aria-label="Running a command locally">
+<defs><marker id="dx-ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box" x="24" y="70" width="232" height="86" rx="10"/>
+<rect class="d-box on" x="324" y="70" width="232" height="86" rx="10"/>
+<rect class="d-box" x="624" y="70" width="232" height="86" rx="10"/>
+<rect class="d-store" x="324" y="214" width="232" height="60" rx="10"/>
+<rect class="d-store" x="624" y="214" width="232" height="60" rx="10"/>
+<path class="d-flow" style="marker-end:url(#dx-ah2)" d="M256,113 L318,113"/>
+<path class="d-flow" style="marker-end:url(#dx-ah2)" d="M556,113 L618,113"/>
+<path class="d-dash" d="M440,156 L440,210"/>
+<path class="d-dash" d="M740,156 L740,210"/>
+<text class="d-title" x="140" y="102" text-anchor="middle">delonix &lt;cmd&gt;</text>
+<text class="d-sub" x="140" y="123" text-anchor="middle">1 ephemeral process</text>
+<text class="d-sub" x="140" y="139" text-anchor="middle">no daemon</text>
+<text class="d-title" x="440" y="102" text-anchor="middle">kernel</text>
+<text class="d-sub" x="440" y="123" text-anchor="middle">namespaces · cgroups v2</text>
+<text class="d-sub" x="440" y="139" text-anchor="middle">pivot_root · seccomp/caps</text>
+<text class="d-title" x="740" y="102" text-anchor="middle">container · VM</text>
+<text class="d-sub" x="740" y="123" text-anchor="middle">user ns · rootless</text>
+<text class="d-sub" x="740" y="139" text-anchor="middle">direct clone()</text>
+<text class="d-title" x="440" y="239" text-anchor="middle" style="font-size:12px">$DELONIX_ROOT/*.json</text>
+<text class="d-sub" x="440" y="259" text-anchor="middle">state · flock · atomic</text>
+<text class="d-title" x="740" y="239" text-anchor="middle" style="font-size:12px">slirp4netns (1 shared)</text>
+<text class="d-sub" x="740" y="259" text-anchor="middle">holder-netns · nft DNAT</text>
+</svg></div>
+<p class="src-link">The process exits; <code>ps</code>/<code>start</code>/<code>inspect</code> rebuild everything
+from the state under <code>$DELONIX_ROOT</code> — and opportunistic <em>reapers</em> clean up orphans.</p>
 
 <h2>Rootless-first</h2>
 <p>Without root, isolation comes from user namespaces with subuid mapping
