@@ -469,6 +469,27 @@ stdout/stderr para o ficheiro de log (com rotação) e morre com o container. O 
 (spec completa de cada container/VM/volume/rede) vive em JSON sob <code>$DELONIX_ROOT</code> —
 o <code>ps</code>/<code>start</code>/<code>inspect</code> reconstruem tudo daí, e <em>reapers</em>
 oportunistas limpam órfãos (slirp sem alvo, hostfwd sem container) a cada invocação relevante.</p>
+<div class="diagram-legend">
+<span><i class="on"></i> Estado em ficheiros</span>
+<span><i></i> Processo (efémero)</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 212" role="img" aria-label="Persistência e recuperação">
+<defs><marker id="dx-ah-pr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box on" x="258" y="14" width="364" height="56" rx="10"/>
+<text class="d-title" x="440" y="38" text-anchor="middle">$DELONIX_ROOT/*.json</text>
+<text class="d-sub" x="440" y="57" text-anchor="middle">estado por recurso · flock · escrita atómica · cofre cifrado</text>
+<rect class="d-box" x="36" y="140" width="300" height="56" rx="10"/>
+<text class="d-title" x="186" y="164" text-anchor="middle">comando</text>
+<text class="d-sub" x="186" y="183" text-anchor="middle">run · apply · stop</text>
+<rect class="d-box" x="544" y="140" width="300" height="56" rx="10"/>
+<text class="d-title" x="694" y="164" text-anchor="middle">ps · start · inspect</text>
+<text class="d-sub" x="694" y="183" text-anchor="middle">reconcile · reapers</text>
+<path class="d-flow" style="marker-end:url(#dx-ah-pr)" d="M240,140 L352,72"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-pr)" d="M528,72 L640,140"/>
+<text class="d-sub" x="262" y="104" text-anchor="middle">escreve</text>
+<text class="d-sub" x="618" y="104" text-anchor="middle">reconstrói</text>
+<text class="d-sub" x="440" y="128" text-anchor="middle">o processo morre (crash/reboot) — o estado sobrevive</text>
+</svg></div>
 
 <h2>Execução local de um comando</h2>
 <p>Um comando é um processo efémero: fala directamente com o kernel (sem daemon, sem monitor por
@@ -515,6 +536,29 @@ partilhadas e cada container tem a sua upper persistente. Em rootless o mount é
 container, dentro do seu user namespace, porque um utilizador sem privilégio não pode montar no
 host (desde a v0.59.0; um container antigo com cópia flat migra no <code>start</code> seguinte). Com <code>--privileged</code> + labels de node Kind, o runtime prepara a
 delegação de cgroup v2 dedicada que um systemd aninhado (kindest/node) exige.</p>
+<div class="diagram-legend">
+<span><i></i> Host (sem privilégio)</span>
+<span><i class="on"></i> Container (fronteira)</span>
+<span><i class="store"></i> Exceção privilegiada</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 226" role="img" aria-label="Fronteira de privilégio">
+<defs><marker id="dx-ah-pb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box" x="24" y="24" width="360" height="124" rx="10"/>
+<text class="d-title" x="204" y="52" text-anchor="middle">Host — utilizador sem privilégio</text>
+<text class="d-sub" x="204" y="78" text-anchor="middle">uid 1000 · sem root</text>
+<text class="d-sub" x="204" y="100" text-anchor="middle">newuidmap / newgidmap</text>
+<text class="d-sub" x="204" y="122" text-anchor="middle">(gama subuid/subgid)</text>
+<rect class="d-box on" x="496" y="24" width="360" height="124" rx="10"/>
+<text class="d-title" x="676" y="52" text-anchor="middle">Container (rootless)</text>
+<text class="d-sub" x="676" y="78" text-anchor="middle">uid 0 → uid não-privilegiado do host</text>
+<text class="d-sub" x="676" y="100" text-anchor="middle">namespaces · cgroups v2</text>
+<text class="d-sub" x="676" y="122" text-anchor="middle">seccomp · caps · overlayfs</text>
+<path class="d-flow" style="marker-end:url(#dx-ah-pb)" d="M388,92 L492,92"/>
+<text class="d-sub" x="440" y="78" text-anchor="middle">user ns</text>
+<text class="d-sub" x="440" y="110" text-anchor="middle">subuid</text>
+<rect class="d-store" x="150" y="168" width="580" height="44" rx="10"/>
+<text class="d-sub" x="440" y="194" text-anchor="middle">Exceção: delonix-storage-helper — processo PRIVILEGIADO por pool (SO_PEERCRED · allowUsers)</text>
+</svg></div>
 
 <h2>Rede rootless: o ingress</h2>
 <div class="arch">
@@ -650,6 +694,27 @@ stdout/stderr to the log file (with rotation) and dies with the container. State
 <code>$DELONIX_ROOT</code> — <code>ps</code>/<code>start</code>/<code>inspect</code> rebuild
 everything from there, and opportunistic <em>reapers</em> clean up orphans (slirp with no target,
 hostfwd with no container) on every relevant invocation.</p>
+<div class="diagram-legend">
+<span><i class="on"></i> State in files</span>
+<span><i></i> Process (ephemeral)</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 212" role="img" aria-label="Persistence and recovery">
+<defs><marker id="dx-ah-pre" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box on" x="258" y="14" width="364" height="56" rx="10"/>
+<text class="d-title" x="440" y="38" text-anchor="middle">$DELONIX_ROOT/*.json</text>
+<text class="d-sub" x="440" y="57" text-anchor="middle">state per resource · flock · atomic write · encrypted vault</text>
+<rect class="d-box" x="36" y="140" width="300" height="56" rx="10"/>
+<text class="d-title" x="186" y="164" text-anchor="middle">command</text>
+<text class="d-sub" x="186" y="183" text-anchor="middle">run · apply · stop</text>
+<rect class="d-box" x="544" y="140" width="300" height="56" rx="10"/>
+<text class="d-title" x="694" y="164" text-anchor="middle">ps · start · inspect</text>
+<text class="d-sub" x="694" y="183" text-anchor="middle">reconcile · reapers</text>
+<path class="d-flow" style="marker-end:url(#dx-ah-pre)" d="M240,140 L352,72"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-pre)" d="M528,72 L640,140"/>
+<text class="d-sub" x="262" y="104" text-anchor="middle">writes</text>
+<text class="d-sub" x="618" y="104" text-anchor="middle">rebuilds</text>
+<text class="d-sub" x="440" y="128" text-anchor="middle">the process dies (crash/reboot) — the state survives</text>
+</svg></div>
 
 <h2>Running a command locally</h2>
 <p>A command is an ephemeral process: it talks to the kernel directly (no daemon, no per-container
@@ -696,6 +761,29 @@ each container keeps its own persistent upper layer. In rootless mode the mount 
 container's init, inside its user namespace, because an unprivileged user cannot mount on the host
 (since v0.59.0; an older container with a flat copy migrates on its next <code>start</code>). With <code>--privileged</code> plus Kind node labels, the runtime
 sets up the dedicated cgroup v2 delegation a nested systemd (kindest/node) needs.</p>
+<div class="diagram-legend">
+<span><i></i> Host (unprivileged)</span>
+<span><i class="on"></i> Container (boundary)</span>
+<span><i class="store"></i> Privileged exception</span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 226" role="img" aria-label="Privilege boundary">
+<defs><marker id="dx-ah-pbe" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box" x="24" y="24" width="360" height="124" rx="10"/>
+<text class="d-title" x="204" y="52" text-anchor="middle">Host — unprivileged user</text>
+<text class="d-sub" x="204" y="78" text-anchor="middle">uid 1000 · no root</text>
+<text class="d-sub" x="204" y="100" text-anchor="middle">newuidmap / newgidmap</text>
+<text class="d-sub" x="204" y="122" text-anchor="middle">(subuid/subgid range)</text>
+<rect class="d-box on" x="496" y="24" width="360" height="124" rx="10"/>
+<text class="d-title" x="676" y="52" text-anchor="middle">Container (rootless)</text>
+<text class="d-sub" x="676" y="78" text-anchor="middle">uid 0 → unprivileged host uid</text>
+<text class="d-sub" x="676" y="100" text-anchor="middle">namespaces · cgroups v2</text>
+<text class="d-sub" x="676" y="122" text-anchor="middle">seccomp · caps · overlayfs</text>
+<path class="d-flow" style="marker-end:url(#dx-ah-pbe)" d="M388,92 L492,92"/>
+<text class="d-sub" x="440" y="78" text-anchor="middle">user ns</text>
+<text class="d-sub" x="440" y="110" text-anchor="middle">subuid</text>
+<rect class="d-store" x="150" y="168" width="580" height="44" rx="10"/>
+<text class="d-sub" x="440" y="194" text-anchor="middle">Exception: delonix-storage-helper — PRIVILEGED process per pool (SO_PEERCRED · allowUsers)</text>
+</svg></div>
 
 <h2>Rootless networking: the ingress</h2>
 <div class="arch">
