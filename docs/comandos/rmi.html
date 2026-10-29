@@ -197,6 +197,23 @@ background:var(--accent-soft)}
 .callout.warn{border-color:var(--warn-border);background:var(--warn-bg)}
 .callout.warn b{color:var(--warn-fg)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+/* ---- Breadcrumbs + navegação anterior/seguinte ---- */
+.breadcrumb{font-size:.82rem;color:var(--muted);margin:0 0 1.2rem;display:flex;flex-wrap:wrap;
+align-items:center;gap:.3rem}
+.breadcrumb a{color:var(--muted)}
+.breadcrumb a:hover{color:var(--accent);text-decoration:none}
+.breadcrumb .sep{opacity:.45;margin:0 .15rem}
+.breadcrumb .cur{color:var(--ink);font-weight:600}
+.prevnext{display:flex;gap:1rem;margin:3rem 0 0;flex-wrap:wrap}
+.prevnext a{flex:1 1 220px;min-width:0;border:1px solid var(--line);border-radius:var(--radius);
+padding:.7rem .95rem;display:flex;flex-direction:column;gap:.15rem}
+.prevnext a:hover{border-color:var(--accent);text-decoration:none}
+.prevnext .pn-dir{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.prevnext .pn-lab{font-weight:600;color:var(--ink)}
+.prevnext .pn-prev .pn-dir::before{content:"← "}
+.prevnext .pn-next{text-align:right}
+.prevnext .pn-next .pn-dir::after{content:" →"}
+.code-head .lbl.file{text-transform:none;letter-spacing:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 aside.toc{padding:2.4rem 1.1rem 3rem 0;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto;font-size:.82rem}
 aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
@@ -306,6 +323,7 @@ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hi
 <details><summary><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span><span class='chev' aria-hidden='true'></span></summary><a href="https://github.com/ngolacloud/delonix">GitHub</a><a href="https://github.com/ngolacloud/delonix/releases">Releases</a></details>
 </nav>
 <main>
+<nav class="breadcrumb" aria-label="Trilho / Breadcrumb"><a href="../index.html"><span class="lang-pt">Documentação</span><span class="lang-en">Docs</span></a><span class="sep">/</span><span><span class="lang-pt">Referência CLI</span><span class="lang-en">CLI reference</span></span><span class="sep">/</span><span class="cur"><span class="lang-pt">delonix rmi</span><span class="lang-en">delonix rmi</span></span></nav>
 <h1>delonix rmi</h1>
 <p class='tagline lang-pt'>Atalho de raiz para `delonix image remove` — a mesma struct de flags e o mesmo handler.</p><p class='tagline lang-en'>Root shortcut for `delonix image remove` — the same flag struct and the same handler.</p>
 <p class='lang-pt'><code>delonix rmi</code> é um <strong>alias de topo</strong> de <a href="image.html"><code>delonix image remove</code></a>: carrega a MESMA struct de flags e despacha para o MESMO handler — para quem vem de Docker/Podman trocar só o executável e manter o fluxo. O bloco abaixo é o <code>--help</code> real de <code>delonix rmi</code>; a referência completa das flags vive na <a href="image.html">página do grupo</a>.</p><p class='lang-en'><code>delonix rmi</code> is a <strong>root alias</strong> of <a href="image.html"><code>delonix image remove</code></a>: it carries the SAME flag struct and dispatches into the SAME handler, so a Docker/Podman user changes only the executable name. The block below is the real <code>--help</code> of <code>delonix rmi</code>; the full flag reference lives on the <a href="image.html">group page</a>.</p>
@@ -334,6 +352,7 @@ SEE ALSO:
   delonix images · delonix rm · delonix image remove
 
   delonix › rmi</code></pre></div>
+<nav class="prevnext" aria-label="Páginas / Pages"><a class="pn-prev" href="../comandos/images.html"><span class="pn-dir"><span class="lang-pt">Anterior</span><span class="lang-en">Previous</span></span><span class="pn-lab">delonix images</span></a><a class="pn-next" href="../comandos/tag.html"><span class="pn-dir"><span class="lang-pt">Seguinte</span><span class="lang-en">Next</span></span><span class="pn-lab">delonix tag</span></a></nav>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/ngolacloud/delonix">ngolacloud/delonix</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/ngolacloud/delonix">ngolacloud/delonix</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
@@ -559,7 +578,11 @@ function initCopyButtons(){
     head.className='code-head';
     var lbl=document.createElement('span');
     lbl.className='lbl';
-    lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');
+    // Nome do ficheiro real quando o gerador o conhece (templates de kinds →
+    // examples/<grupo>/<kind>.yaml); senão, rótulo genérico do tipo.
+    var fn=pre.getAttribute('data-file');
+    if(fn){lbl.className='lbl file';lbl.innerHTML=YAML_ICON+esc(fn);}
+    else{lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');}
     var btn=document.createElement('button');
     btn.type='button';
     btn.className='copy-btn';

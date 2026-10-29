@@ -3467,6 +3467,23 @@ background:var(--accent-soft)}
 .callout.warn{border-color:var(--warn-border);background:var(--warn-bg)}
 .callout.warn b{color:var(--warn-fg)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+/* ---- Breadcrumbs + navegação anterior/seguinte ---- */
+.breadcrumb{font-size:.82rem;color:var(--muted);margin:0 0 1.2rem;display:flex;flex-wrap:wrap;
+align-items:center;gap:.3rem}
+.breadcrumb a{color:var(--muted)}
+.breadcrumb a:hover{color:var(--accent);text-decoration:none}
+.breadcrumb .sep{opacity:.45;margin:0 .15rem}
+.breadcrumb .cur{color:var(--ink);font-weight:600}
+.prevnext{display:flex;gap:1rem;margin:3rem 0 0;flex-wrap:wrap}
+.prevnext a{flex:1 1 220px;min-width:0;border:1px solid var(--line);border-radius:var(--radius);
+padding:.7rem .95rem;display:flex;flex-direction:column;gap:.15rem}
+.prevnext a:hover{border-color:var(--accent);text-decoration:none}
+.prevnext .pn-dir{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.prevnext .pn-lab{font-weight:600;color:var(--ink)}
+.prevnext .pn-prev .pn-dir::before{content:"← "}
+.prevnext .pn-next{text-align:right}
+.prevnext .pn-next .pn-dir::after{content:" →"}
+.code-head .lbl.file{text-transform:none;letter-spacing:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 aside.toc{padding:2.4rem 1.1rem 3rem 0;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto;font-size:.82rem}
 aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
@@ -3957,7 +3974,11 @@ function initCopyButtons(){
     head.className='code-head';
     var lbl=document.createElement('span');
     lbl.className='lbl';
-    lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');
+    // Nome do ficheiro real quando o gerador o conhece (templates de kinds →
+    // examples/<grupo>/<kind>.yaml); senão, rótulo genérico do tipo.
+    var fn=pre.getAttribute('data-file');
+    if(fn){lbl.className='lbl file';lbl.innerHTML=YAML_ICON+esc(fn);}
+    else{lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');}
     var btn=document.createElement('button');
     btn.type='button';
     btn.className='copy-btn';
@@ -4179,12 +4200,106 @@ SEARCH_MODAL_HTML = """<div class="search-overlay" id="search-overlay" role="dia
 </div>"""
 
 
+def _doc_order():
+    """Ordem canónica de leitura das páginas de documentação (a MESMA do
+    `DOC_GROUPS`/sidebar) — fonte única para breadcrumbs e anterior/seguinte."""
+    out = []
+    for sp, se, entries in DOC_GROUPS:
+        for h, pt, en in entries:
+            out.append((h, sp, se, pt, en))
+    return out
+
+
+def _cli_order():
+    """Ordem dos comandos CLI, idêntica à da sidebar (COMMAND MAP + nesting)."""
+    children = children_of_top_level()
+    out = []
+    for category, members in root_command_categories():
+        for g in members:
+            if g in GROUPS:
+                out.append((f"comandos/{g}.html", GROUPS[g]["title"]))
+            for child in children.get(g, []):
+                if child in GROUPS:
+                    out.append((f"comandos/{child}.html", GROUPS[child]["title"]))
+                else:
+                    out.append((CRI_FALLBACK[0], CRI_FALLBACK[1]))
+    return out
+
+
+def nav_chain(active, title, depth):
+    """Devolve (breadcrumb_html, prevnext_html) para `active`. A página localiza-se
+    na cadeia de docs OU na de comandos; fora de ambas, só breadcrumb simples."""
+    p = "../" * depth
+    docs = _doc_order()
+    cli = _cli_order()
+    seq_kind = seq = None
+    idx = -1
+    section_pt = section_en = label_pt = label_en = None
+    for i, (h, sp, se, pt, en) in enumerate(docs):
+        if h == active:
+            section_pt, section_en, label_pt, label_en = sp, se, pt, en
+            seq_kind, seq, idx = "docs", docs, i
+            break
+    if idx < 0:
+        for i, (h, t) in enumerate(cli):
+            if h == active:
+                section_pt, section_en, label_pt, label_en = "Referência CLI", "CLI reference", t, t
+                seq_kind, seq, idx = "cli", cli, i
+                break
+
+    # Breadcrumb — omitido na raiz (a própria "Documentação").
+    bc = ""
+    if active != "index.html":
+        crumbs = [
+            f'<a href="{p}index.html">'
+            f'<span class="lang-pt">Documentação</span><span class="lang-en">Docs</span></a>'
+        ]
+        if section_pt:
+            crumbs.append(
+                f'<span><span class="lang-pt">{html.escape(section_pt)}</span>'
+                f'<span class="lang-en">{html.escape(section_en)}</span></span>'
+            )
+        if label_pt:
+            cur = (f'<span class="lang-pt">{html.escape(label_pt)}</span>'
+                   f'<span class="lang-en">{html.escape(label_en)}</span>')
+        else:
+            cur = html.escape(title)
+        crumbs.append(f'<span class="cur">{cur}</span>')
+        bc = ('<nav class="breadcrumb" aria-label="Trilho / Breadcrumb">'
+              + '<span class="sep">/</span>'.join(crumbs) + '</nav>')
+
+    # Anterior / seguinte dentro da mesma cadeia.
+    def cell(j, direction):
+        if not seq or j < 0 or j >= len(seq):
+            return ""
+        if seq_kind == "docs":
+            h, _sp, _se, pt, en = seq[j]
+            lab = (f'<span class="lang-pt">{html.escape(pt)}</span>'
+                   f'<span class="lang-en">{html.escape(en)}</span>')
+        else:
+            h, t = seq[j]
+            lab = html.escape(t)
+        dl = ("Anterior", "Previous") if direction == "prev" else ("Seguinte", "Next")
+        return (f'<a class="pn-{direction}" href="{p}{h}">'
+                f'<span class="pn-dir"><span class="lang-pt">{dl[0]}</span>'
+                f'<span class="lang-en">{dl[1]}</span></span>'
+                f'<span class="pn-lab">{lab}</span></a>')
+
+    pn = ""
+    if seq:
+        prev_c, next_c = cell(idx - 1, "prev"), cell(idx + 1, "next")
+        if prev_c or next_c:
+            pn = (f'<nav class="prevnext" aria-label="Páginas / Pages">{prev_c}{next_c}</nav>')
+    return bc, pn
+
+
 def page(path, title, body, depth=0):
     # Guarda o material desta página para o índice de pesquisa — `page()` é o
     # único sítio por onde TODAS as páginas passam, logo o índice sai das
     # mesmas estruturas que o site, nunca de uma segunda fonte.
     _SEARCH_PAGES.append({"path": path, "title": title, "body": body})
     base = "../" * depth
+    breadcrumb_html, prevnext_html = nav_chain(path, title, depth)
     # `canonical`/`og:url` absolutos a partir do caminho da própria página
     # (independente da profundidade); a raiz colapsa `index.html` para `/`.
     canon = SITE_BASE + "/" + ("" if path == "index.html" else path)
@@ -4219,7 +4334,9 @@ def page(path, title, body, depth=0):
 <div class="layout">
 {sidebar(path, depth)}
 <main>
+{breadcrumb_html}
 {body}
+{prevnext_html}
 <footer>{FOOTER_HTML}</footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5>{TOC_HEADING_HTML}</h5><nav id="toc-nav"></nav></div></aside>
@@ -6804,7 +6921,7 @@ def kinds_page():
             yaml = open(path).read().strip()
         except OSError:
             yaml = f"# (exemplo em falta: examples/{fname})"
-        body.append(f"<pre><code>{html.escape(yaml)}</code></pre>")
+        body.append(f'<pre data-file="examples/{html.escape(fname)}"><code>{html.escape(yaml)}</code></pre>')
     page("kinds.html", "Kinds do manifesto", "\n".join(body))
 
 
