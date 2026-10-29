@@ -3325,8 +3325,8 @@ a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 :root{--hdr:56px}
 /* ---- Cabeçalho global (barra superior full-bleed, conteúdo alinhado à grelha) ---- */
 .topbar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}
-.topbar-inner{height:var(--hdr);max-width:1400px;margin:0 auto;display:flex;align-items:center;
-gap:.9rem;padding:0 1.1rem}
+.topbar-inner{height:var(--hdr);width:100%;display:flex;align-items:center;
+gap:.9rem;padding:0 1.4rem}
 .topbar .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;font-size:1.05rem;
 color:var(--ink);flex:none}
 .topbar .brand:hover{text-decoration:none}
@@ -3346,8 +3346,8 @@ border-radius:99px;padding:.12rem .55rem;letter-spacing:.02em;white-space:nowrap
 border:1px solid var(--line);border-radius:8px;color:var(--ink);flex:none}
 .icon-link:hover{border-color:var(--accent);text-decoration:none}
 .icon-link svg{width:17px;height:17px}
-.layout{display:grid;grid-template-columns:256px minmax(0,1fr) 220px;max-width:1400px;
-margin:0 auto;align-items:start}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr) 240px;width:100%;
+align-items:start}
 nav.side{background:var(--side);border-right:1px solid var(--line);
 padding:1.2rem .85rem 3rem;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto}
 nav.side h5{margin:1.25rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
@@ -3396,7 +3396,7 @@ justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-sp
 p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
 :root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
 :root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
-main{min-width:0;padding:2.4rem 2.8rem 5rem;max-width:900px}
+main{min-width:0;padding:2.4rem 3.2rem 5rem;max-width:960px;margin:0 auto}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
 main h3{font-size:1.05rem;margin-top:1.6rem}
