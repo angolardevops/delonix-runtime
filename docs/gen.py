@@ -3318,17 +3318,37 @@ CSS = """
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.layout{display:grid;grid-template-columns:270px minmax(0,1fr) 240px;max-width:1600px;
-margin:0 auto;min-height:100vh}
-nav.side{width:270px;background:var(--side);border-right:1px solid var(--line);
-padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
-nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
-margin-bottom:1.1rem;color:var(--ink)}
-nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+:root{--hdr:56px}
+/* ---- Cabeçalho global (barra superior full-bleed, conteúdo alinhado à grelha) ---- */
+.topbar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}
+.topbar-inner{height:var(--hdr);max-width:1400px;margin:0 auto;display:flex;align-items:center;
+gap:.9rem;padding:0 1.1rem}
+.topbar .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;font-size:1.05rem;
+color:var(--ink);flex:none}
+.topbar .brand:hover{text-decoration:none}
+.topbar .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
 display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
-nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+.topbar .brand .sub{color:var(--muted);font-weight:600}
+.topnav{display:flex;align-items:center;gap:.1rem;flex:none}
+.topnav a{padding:.35rem .6rem;border-radius:7px;color:var(--muted);font-size:.9rem;font-weight:500}
+.topnav a:hover{background:var(--accent-soft);color:var(--ink);text-decoration:none}
+.topnav a.on{color:var(--accent);font-weight:600}
+.topbar .hdr-search{flex:1;max-width:460px;margin:0}
+.topbar .hdr-right{display:flex;align-items:center;gap:.45rem;flex:none;margin-left:auto}
+.ver-pill{font-size:.72rem;font-weight:700;color:var(--muted);border:1px solid var(--line);
+border-radius:99px;padding:.12rem .55rem;letter-spacing:.02em;white-space:nowrap}
+.ver-pill:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
+.icon-link{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;
+border:1px solid var(--line);border-radius:8px;color:var(--ink);flex:none}
+.icon-link:hover{border-color:var(--accent);text-decoration:none}
+.icon-link svg{width:17px;height:17px}
+.layout{display:grid;grid-template-columns:256px minmax(0,1fr) 220px;max-width:1400px;
+margin:0 auto;align-items:start}
+nav.side{background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem .85rem 3rem;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto}
+nav.side h5{margin:1.25rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
 color:var(--muted)}
-nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a{display:block;padding:.3rem .6rem;border-radius:7px;color:var(--ink);font-size:.92rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 nav.side h6.cat{margin:.9rem 0 .15rem;padding:0 .55rem;font-size:.7rem;letter-spacing:.03em;
@@ -3336,7 +3356,20 @@ text-transform:uppercase;color:var(--muted);opacity:.75;font-weight:600}
 nav.side a.sub{padding-left:1.3rem;font-size:.85rem}
 nav.side a.sub:not(.on){color:var(--muted)}
 nav.side a.sub:not(.on):hover{color:var(--ink)}
-nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
+/* ---- Grupos recolhíveis (divulgação progressiva, acessíveis via <details>) ---- */
+nav.side details{margin:0}
+nav.side details>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.4rem;
+margin:1.25rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted);font-weight:700;user-select:none}
+nav.side details>summary::-webkit-details-marker{display:none}
+nav.side details>summary:hover{color:var(--ink)}
+nav.side details>summary .chev{margin-left:auto;width:6px;height:6px;border-right:1.6px solid currentColor;
+border-bottom:1.6px solid currentColor;transform:rotate(-45deg);transition:transform .15s;flex:none}
+nav.side details[open]>summary .chev{transform:rotate(45deg)}
+nav.side details.cli{margin-top:1.25rem;border-top:1px solid var(--line);padding-top:.2rem}
+nav.side details.cli>summary{color:var(--ink)}
+nav.side details.cli details{margin-left:.1rem}
+nav.side details.cli details>summary{margin:.5rem 0 .1rem;font-size:.68rem;font-weight:600;opacity:.85}
 .theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
 border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
 justify-content:center;cursor:pointer;font-size:.95rem;line-height:1}
@@ -3359,7 +3392,7 @@ justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-sp
 p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
 :root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
 :root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
-main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
+main{min-width:0;padding:2.4rem 2.8rem 5rem;max-width:900px}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
 main h3{font-size:1.05rem;margin-top:1.6rem}
@@ -3367,9 +3400,15 @@ main h3{font-size:1.05rem;margin-top:1.6rem}
 p.intro{font-size:1.02rem;margin:1rem 0}
 p.src-link{margin:.7rem 0 0;font-size:.85rem;color:var(--muted)}
 p.src-link a{font-weight:600}
-code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em;
+overflow-wrap:anywhere}
+p,li,dd,dt,.tagline,.intro{overflow-wrap:break-word}
 pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
-overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word;
+overflow-wrap:anywhere}
+/* Tabelas largas: scroll próprio (nunca empurram a página para o lado). */
+.tbl-scroll{overflow-x:auto;margin:1rem 0}
+.tbl-scroll>table{margin:0}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
 .help-note{font-size:.76rem;color:var(--muted);margin:0 0 .35rem;font-style:italic}
@@ -3395,6 +3434,22 @@ dd+dt{border-top:1px solid var(--line);padding-top:1.1rem}
 .card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
 .card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
 .card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+/* ---- Homepage: hero CTA + percurso de 3 passos ---- */
+.hero-cta{display:flex;flex-wrap:wrap;gap:.7rem;margin:1.5rem 0 .4rem}
+.btn{display:inline-flex;align-items:center;gap:.45rem;border-radius:9px;padding:.6rem 1.1rem;
+font-size:.95rem;font-weight:600;border:1px solid var(--line);cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#d24f08;border-color:#d24f08;text-decoration:none}
+.btn.ghost{background:var(--bg);color:var(--ink)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:1rem;margin:1.7rem 0}
+.step{border:1px solid var(--line);border-radius:var(--radius);padding:1.1rem 1.1rem 1.2rem;
+display:flex;flex-direction:column}
+.step .n{width:33px;height:33px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-bottom:.6rem;font-size:.95rem}
+.step b{display:block;margin-bottom:.2rem}
+.step p{margin:.1rem 0 .7rem;font-size:.88rem;color:var(--muted);flex:1}
+.step a.go{font-weight:600;font-size:.88rem}
 .arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
 .arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
 .arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
@@ -3413,12 +3468,12 @@ background:var(--accent-soft)}
 .callout.warn b{color:var(--warn-fg)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
-aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
+aside.toc{padding:2.4rem 1.1rem 3rem 0;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto;font-size:.82rem}
 aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
 aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
 aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
 aside.toc a:hover{color:var(--accent);text-decoration:none}
-@media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:1200px){.layout{grid-template-columns:240px minmax(0,1fr)}aside.toc{display:none}}
 /* Hambúrguer: escondido no desktop; a lista de nav está sempre visível. */
 .nav-toggle{display:none;appearance:none;border:1px solid var(--line);background:var(--bg);
 color:var(--ink);border-radius:8px;width:30px;height:30px;flex-shrink:0;align-items:center;
@@ -3438,14 +3493,33 @@ pre.has-copy:hover .copy-btn,.copy-btn:focus-visible{opacity:1}
 .copy-btn.ok::after{content:" \\2713"}
 .copy-btn.err::after{content:" \\2717"}
 @media (hover:none){.copy-btn{opacity:1}}
-@media (max-width:840px){.layout{display:block}
-nav.side{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:.8rem 1rem;
-border-right:none;border-bottom:1px solid var(--line)}
-nav.side .brand{margin-bottom:0}
+/* ---- Cromado de bloco de código: barra de título (rótulo + cópia sempre visível) ---- */
+:root{--code-head-bg:#1e293b;--code-head-ink:#cbd5e1;--code-head-line:#334155}
+:root[data-theme="dark"]{--code-head-bg:#1b222c;--code-head-ink:#9aa4b2;--code-head-line:#2d333b}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--code-head-bg:#1b222c;--code-head-ink:#9aa4b2;--code-head-line:#2d333b}}
+.codeblock{margin:1.1rem 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--code-head-line)}
+.code-head{display:flex;align-items:center;gap:.5rem;background:var(--code-head-bg);
+color:var(--code-head-ink);padding:.38rem .5rem .38rem .8rem;font-size:.76rem}
+.code-head .lbl{display:flex;align-items:center;gap:.4rem;font-weight:600;letter-spacing:.03em;
+text-transform:uppercase}
+.code-head .lbl svg{width:13px;height:13px;opacity:.85}
+.codeblock .copy-btn{position:static;opacity:1;margin-left:auto}
+.codeblock pre{margin:0;border-radius:0;border:0}
+.codeblock pre.has-copy .copy-btn{position:static}
+@media (max-width:860px){
+.topnav{display:none}
+/* Cabeçalho compacto: pesquisa vira ícone, cluster de controlos à direita. */
+.topbar .brand .sub{display:none}
+.topbar .hdr-search{flex:none;width:38px;max-width:38px;margin-left:auto;padding:0;justify-content:center;gap:0}
+.topbar .hdr-search .lang-pt,.topbar .hdr-search .lang-en,.topbar .hdr-search .kbd{display:none}
+.topbar .hdr-right{margin-left:0;gap:.4rem}
+.topbar .hdr-right .ver-pill,.topbar .hdr-right .icon-link{display:none}
 .nav-toggle{display:inline-flex}
-.nav-links{display:none;margin-top:.8rem;max-height:70vh;overflow-y:auto}
-nav.side.open .nav-links{display:block}
-main{padding:1.4rem 1.2rem 4rem;max-width:none}}
+.layout{display:block}
+nav.side{position:fixed;top:var(--hdr);left:0;right:0;bottom:0;height:auto;width:100%;z-index:45;
+border-right:none;border-bottom:1px solid var(--line);display:none;padding:1rem 1.2rem 3rem}
+nav.side.open{display:block}
+main{padding:1.5rem 1.2rem 4rem;max-width:none}}
 
 /* Pesquisa Ctrl/Cmd+K — modal vendored, sem CDN, temas claro/escuro via vars */
 .search-trigger{appearance:none;display:flex;align-items:center;gap:.4rem;width:100%;margin:.1rem 0 .6rem;
@@ -3513,6 +3587,61 @@ DOC_GROUPS = [
     ]
 
 
+def topbar(active, depth=0):
+    """Cabeçalho global: marca + navegação primária + pesquisa + versão +
+    idioma + tema + repositório. As classes `.search-trigger`, `.lang-toggle`,
+    `.theme-toggle` e `.nav-toggle` são as mesmas a que o `SITE_JS` já se liga —
+    só mudou o SÍTIO (da sidebar para o topo), não o contrato de JS."""
+    p = "../" * depth
+    guias = {"gitops.html", "cloud.html", "guia-vm.html"}
+    ref = {"cheatsheet.html", "kinds.html", "estrutura.html", "glossario.html",
+           "estabilidade.html", "codigos.html", "comparacao.html", "cri.html"}
+    labs = {"labs.html", "tutorial-delonix-temp.html"}
+    arch = {"arquitectura.html", "c4.html"}
+
+    def item(href, pt, en, members):
+        on = active == href or active in members or (
+            active.startswith("comandos/") and href == "cheatsheet.html")
+        cls = ' class="on"' if on else ""
+        return (f'<a href="{p}{href}"{cls}>'
+                f'<span class="lang-pt">{pt}</span><span class="lang-en">{en}</span></a>')
+
+    topnav = (
+        item("cheatsheet.html", "Referência", "Reference", ref)
+        + item("guia-vm.html", "Guias", "Guides", guias)
+        + item("labs.html", "Labs", "Labs", labs)
+        + item("arquitectura.html", "Arquitectura", "Architecture", arch)
+    )
+    gh_icon = ('<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">'
+               '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38'
+               '0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13'
+               '-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66'
+               '.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15'
+               '-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 '
+               '1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 '
+               '1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 '
+               '1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>')
+    return f"""<header class="topbar">
+<div class="topbar-inner">
+<a class="brand" href="{p}index.html"><span class="dot">▲</span> Delonix <span class="sub">Docs</span></a>
+<nav class="topnav" aria-label="Secções / Sections">{topnav}</nav>
+<button class="search-trigger hdr-search" type="button" data-search-open aria-haspopup="dialog" aria-controls="search-overlay">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:15px;height:15px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+<span class="lang-pt">Pesquisar</span><span class="lang-en">Search</span>
+<span class="kbd">Ctrl K</span></button>
+<div class="hdr-right">
+<a class="ver-pill" href="{p}estabilidade.html" title="Versão documentada / Documented version">v{DOCS_VERSION}</a>
+<button class="lang-toggle" type="button" aria-label="Switch language / Mudar idioma" title="EN / PT">
+<span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
+<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+<a class="icon-link" href="https://github.com/ngolacloud/delonix" aria-label="Repositório / Repository" title="GitHub">{gh_icon}</a>
+<button class="nav-toggle" type="button" aria-controls="docs-side" aria-expanded="false" aria-label="Menu de navegação / Navigation menu" title="Menu">☰</button>
+</div>
+</div>
+</header>"""
+
+
 def sidebar(active, depth=0):
     p = "../" * depth
     doc_groups = DOC_GROUPS
@@ -3539,52 +3668,67 @@ def sidebar(active, depth=0):
         cls_attr = f' class="{" ".join(classes)}"' if classes else ""
         return f'<a href="{p}{href}"{cls_attr}>{html.escape(label)}</a>'
 
+    def group_details(summary_pt, summary_en, inner, open_, cls=""):
+        attr = " open" if open_ else ""
+        c = f' class="{cls}"' if cls else ""
+        return (f"<details{c}{attr}><summary>{bi('span', summary_pt, summary_en)}"
+                f"<span class='chev' aria-hidden='true'></span></summary>{inner}</details>")
+
+    # Grupos de documentação: abertos por omissão (conteúdo à vista) mas
+    # recolhíveis — acordeões acessíveis via <details>/<summary> nativos.
     doc_html = "".join(
-        f"<h5>{bi('span', section_pt, section_en)}</h5>"
-        f"{''.join(link_bi(h, pt, en) for h, pt, en in entries)}"
+        group_details(
+            section_pt, section_en,
+            "".join(link_bi(h, pt, en) for h, pt, en in entries),
+            open_=True,
+        )
         for section_pt, section_en, entries in doc_groups
     )
 
-    # CLI reference, categorized by the SAME `COMMAND MAP:` (9 categories) and
-    # nesting (`children_of_top_level()`) the cheatsheet already uses — not a
-    # 4th copy of the taxonomy. `cri` is the only child with no
-    # `comandos/cri.html` (documented at the `cri.html` guide instead), same
-    # fallback `cheatsheet_page()` already handles.
+    # Referência CLI — recolhida por omissão (divulgação progressiva: não despeja
+    # TODOS os comandos na sidebar permanentemente). Abre sozinha a categoria do
+    # comando activo. Mesma taxonomia (COMMAND MAP + nesting) do cheatsheet — não
+    # uma 4.ª cópia. `cri` é o único filho sem `comandos/cri.html` (documentado
+    # no guia `cri.html`), mesmo fallback que o `cheatsheet_page()` já trata.
     children = children_of_top_level()
-    cmd_parts = []
+    cli_active = active.startswith("comandos/")
+    cat_blocks = []
     for category, members in root_command_categories():
-        cmd_parts.append(f"<h6 class='cat'>{bi('span', CATEGORY_PT.get(category, category), category)}</h6>")
+        links = []
+        cat_has_active = False
         for g in members:
             if g in GROUPS:
-                cmd_parts.append(link(f"comandos/{g}.html", GROUPS[g]["title"]))
+                href = f"comandos/{g}.html"
+                cat_has_active = cat_has_active or href == active
+                links.append(link(href, GROUPS[g]["title"]))
             for child in children.get(g, []):
                 if child in GROUPS:
-                    cmd_parts.append(link(f"comandos/{child}.html", GROUPS[child]["title"], sub=True))
+                    href = f"comandos/{child}.html"
+                    cat_has_active = cat_has_active or href == active
+                    links.append(link(href, GROUPS[child]["title"], sub=True))
                 else:
-                    cmd_parts.append(link(*CRI_FALLBACK, sub=True))
-    cmd_html = "".join(cmd_parts)
+                    cat_has_active = cat_has_active or CRI_FALLBACK[0] == active
+                    links.append(link(*CRI_FALLBACK, sub=True))
+        cat_blocks.append(group_details(
+            CATEGORY_PT.get(category, category), category,
+            "".join(links), open_=cat_has_active,
+        ))
+    cli_html = group_details(
+        "Referência CLI", "CLI reference", "".join(cat_blocks),
+        open_=cli_active, cls="cli",
+    )
 
-    return f"""<nav class="side">
-<div class="brand"><span class="dot">▲</span> Delonix Engine
-<div class="toggles">
-<button class="lang-toggle" type="button" aria-label="Switch language / Mudar idioma" title="EN / PT">
-<span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
-<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
-<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
-<button class="nav-toggle" type="button" aria-controls="nav-links" aria-expanded="false" aria-label="Menu de navegação / Navigation menu" title="Menu">☰</button>
-</div></div>
-<div class="nav-links" id="nav-links">
-<button class="search-trigger" type="button" data-search-open aria-haspopup="dialog" aria-controls="search-overlay">
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:15px;height:15px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-<span class="lang-pt">Pesquisar</span><span class="lang-en">Search</span>
-<span class="kbd">Ctrl K</span></button>
+    project_html = group_details(
+        "Projecto", "Project",
+        '<a href="https://github.com/ngolacloud/delonix">GitHub</a>'
+        '<a href="https://github.com/ngolacloud/delonix/releases">Releases</a>',
+        open_=False,
+    )
+
+    return f"""<nav class="side" id="docs-side" aria-label="Documentação / Documentation">
 {doc_html}
-<h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
-{cmd_html}
-<h5>{bi('span', 'Projecto', 'Project')}</h5>
-<a href="https://github.com/ngolacloud/delonix">GitHub</a>
-<a href="https://github.com/ngolacloud/delonix/releases">Releases</a>
-</div>
+{cli_html}
+{project_html}
 </nav>"""
 
 
@@ -3753,10 +3897,17 @@ function initNavToggle(){
     var open=nav.classList.toggle('open');
     btn.setAttribute('aria-expanded',open?'true':'false');
   });
-  // No mobile, fechar o menu ao seguir um link.
+  // No mobile, fechar a gaveta ao seguir um link (mas não ao abrir um grupo
+  // <details>, cujo <summary> não é um <a>).
   nav.addEventListener('click',function(e){
-    if(e.target.closest('#nav-links a')&&matchMedia('(max-width:840px)').matches){
+    if(e.target.closest('a')&&matchMedia('(max-width:860px)').matches){
       nav.classList.remove('open');btn.setAttribute('aria-expanded','false');
+    }
+  });
+  // Esc fecha a gaveta e repõe o foco no botão.
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&nav.classList.contains('open')){
+      nav.classList.remove('open');btn.setAttribute('aria-expanded','false');btn.focus();
     }
   });
 }
@@ -3778,20 +3929,35 @@ function flashCopy(btn,ok){
   clearTimeout(btn._copyT);
   btn._copyT=setTimeout(function(){btn.classList.remove('ok','err');},1600);
 }
-function isCommandPre(pre,code){
-  // Só blocos de COMANDO: nunca .out (resultados) nem .help (--help), nem YAML.
-  if(pre.closest('.out'))return false;
-  if(pre.parentElement&&pre.parentElement.classList.contains('help'))return false;
-  var text=code.textContent;
-  if(/^apiVersion:|\\nkind:\\s/.test(text))return false;
-  return !!(pre.closest('.ex')||/^(delonix|dlx)\\b/.test(text.trim()));
+function codeKind(pre,code){
+  // Classifica o bloco: null (sem cromado — .out/resultados e .help/--help),
+  // 'yaml' (manifesto/template de Kind) ou 'terminal' (comando de shell).
+  if(pre.closest('.out'))return null;
+  if(pre.parentElement&&pre.parentElement.classList.contains('help'))return null;
+  var text=code.textContent,t=text.trim();
+  if(/(^|\\n)apiVersion:\\s/.test(text)||/(^|\\n)#?\\s*kind:\\s/.test(text))return 'yaml';
+  if(pre.closest('.ex')||/^(delonix|dlx)\\b/.test(t))return 'terminal';
+  if(/^(curl|bash|sh|chmod|echo|printf|export|sudo|git|cd|cat|mkdir|cp|mv|tee|source|wget|apt|dnf|pacman|zypper|kubectl|ssh)\\b/.test(t))return 'terminal';
+  return null;
 }
 function initCopyButtons(){
+  var TERM_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>';
+  var YAML_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
   document.querySelectorAll('main pre > code').forEach(function(code){
     var pre=code.parentElement;
-    if(!isCommandPre(pre,code))return;
-    if(pre.querySelector('.copy-btn'))return;
+    var kind=codeKind(pre,code);
+    if(!kind)return;
+    if(pre.closest('.codeblock'))return;
     pre.classList.add('has-copy');
+    // Cromado do bloco: barra de título com rótulo + botão de cópia SEMPRE
+    // visível (o hover-only escondia a acção em ecrãs táteis e a alguns leitores).
+    var wrap=document.createElement('div');
+    wrap.className='codeblock';
+    var head=document.createElement('div');
+    head.className='code-head';
+    var lbl=document.createElement('span');
+    lbl.className='lbl';
+    lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');
     var btn=document.createElement('button');
     btn.type='button';
     btn.className='copy-btn';
@@ -3807,7 +3973,9 @@ function initCopyButtons(){
         flashCopy(btn,legacyCopy(text));
       }
     });
-    pre.appendChild(btn);
+    head.appendChild(lbl);head.appendChild(btn);
+    pre.parentNode.insertBefore(wrap,pre);
+    wrap.appendChild(head);wrap.appendChild(pre);
   });
 }
 
@@ -3922,6 +4090,18 @@ function closeSearch(){
   ov.classList.remove('open');ov.setAttribute('aria-hidden','true');
   if(lastFocus&&lastFocus.focus)lastFocus.focus();
 }
+function wrapTables(){
+  // Envolve cada tabela larga num contentor com scroll próprio — a página
+  // nunca ganha scroll horizontal, mas a tabela continua legível (desliza
+  // dentro da sua caixa). Mesma política dos blocos de código.
+  document.querySelectorAll('main table').forEach(function(t){
+    if(t.closest('.tbl-scroll'))return;
+    var w=document.createElement('div');
+    w.className='tbl-scroll';
+    t.parentNode.insertBefore(w,t);
+    w.appendChild(t);
+  });
+}
 function initSearch(){
   var ov=document.getElementById('search-overlay');if(!ov)return;
   var inp=document.getElementById('search-input');
@@ -3947,7 +4127,7 @@ function scrollToHash(){
 }
 
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();initLangToggle();initNavToggle();buildToc();highlightAll();initCopyButtons();initSearch();scrollToHash();
+  initThemeToggle();initLangToggle();initNavToggle();buildToc();highlightAll();initCopyButtons();wrapTables();initSearch();scrollToHash();
 });
 })();</script>"""
 
@@ -3973,6 +4153,10 @@ HELP_NOTE_HTML = bi("div", "Saída real do binário (em inglês).",
 # para os URLs ABSOLUTOS de `canonical`/`og:url`, calculados por página.
 SITE_BASE = "https://ngolacloud.github.io/delonix"
 SITE_NAME = "Delonix Engine"
+# Versão documentada, mostrada no cabeçalho global. Fica vazia até `main()` a
+# preencher com o `delonix --version` real — `topbar()` só corre durante a
+# geração das páginas, já depois de `main()` a ter definido.
+DOCS_VERSION = ""
 SITE_DESCRIPTION = ("Engine de containers e microVMs daemonless, rootless-first, "
                     "em Rust — referência gerada do --help real do binário.")
 
@@ -4031,6 +4215,7 @@ def page(path, title, body, depth=0):
 <style>{CSS}</style>
 </head>
 <body>
+{topbar(path, depth)}
 <div class="layout">
 {sidebar(path, depth)}
 <main>
@@ -4136,22 +4321,25 @@ def group_page(name, g):
 INDEX_PT = """
 <h1>Delonix Engine <span class="pill">v{ver}</span></h1>
 <p class="tagline"><strong>Engine</strong> de containers e microVMs <strong>daemonless</strong>,
-<strong>rootless-first</strong>, kernel-native, em Rust — com CRI próprio para Kubernetes.
-<em>O engine open-source que alimenta o Delonix.</em></p>
+<strong>rootless-first</strong>, kernel-native, em Rust — com CRI próprio para Kubernetes.</p>
 
-<p>Não é um <em>runtime</em> OCI de baixo nível (isso é o <code>runc</code>/<code>crun</code>): é um
-engine COMPLETO de containers <strong>e</strong> VMs — build, run, rede, firewall, storage e
-bootstrap de clusters Kubernetes, tudo num só binário. É a camada aberta (Apache-2.0) sobre a qual
-assenta a plataforma <strong>Delonix</strong>.</p>
+<p class="intro">Build, run, rede, firewall, storage e bootstrap de clusters Kubernetes num só
+binário — sem daemon residente e sem root. Não é um <em>runtime</em> OCI de baixo nível (isso é o
+<code>runc</code>/<code>crun</code>): é o engine COMPLETO, a camada aberta (Apache-2.0) sobre a
+qual assenta a plataforma <strong>Delonix</strong>.</p>
 
-<p>O Delonix Engine faz o trabalho do Docker/Podman sem daemon residente: cada comando é um
-processo efémero que fala directamente com o kernel (namespaces, cgroups v2, pivot_root),
-guarda estado em ficheiros e desaparece. Em rootless, a rede é servida por um único par
-holder-netns + slirp4netns partilhado — não um slirp por container — com DNAT nft para o
-publish de portas, o que permite <em>trocar portas e volumes a quente</em>, sem reiniciar o
-container.</p>
+<div class="hero-cta">
+<a class="btn primary" href="#instalar">Instalar o Delonix →</a>
+<a class="btn ghost" href="labs.html">Explorar os labs</a>
+</div>
 
-<h2>Instalar</h2>
+<div class="steps">
+<div class="step"><span class="n">1</span><b>Instalar</b><p>Um comando instala o binário e as dependências de runtime, na variante certa para o teu CPU.</p><a class="go" href="#instalar">Instalar →</a></div>
+<div class="step"><span class="n">2</span><b>Criar um projecto</b><p><code>delonix init</code> detecta a stack desta pasta e escreve um projecto completo, já preenchido.</p><a class="go" href="#primeiros-passos">Primeiro projecto →</a></div>
+<div class="step"><span class="n">3</span><b>Executar e verificar</b><p><code>delonix apply</code> converge o manifesto por dependências; o <code>dashboard</code> mostra tudo a correr.</p><a class="go" href="cheatsheet.html">Ver comandos →</a></div>
+</div>
+
+<h2 id="instalar">Instalar</h2>
 <p>Um comando instala o binário <strong>e</strong> todas as dependências de runtime
 (rede rootless, VMs, tuning de kernel), escolhendo a variante certa para o teu CPU.
 Funciona em Debian/Ubuntu, Fedora/RHEL, openSUSE e Arch:</p>
@@ -4173,7 +4361,7 @@ como root na porta 80 a encaminhar para uma porta alta. Reverter: apagar
 chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
-<h2>Primeiros passos</h2>
+<h2 id="primeiros-passos">Primeiros passos</h2>
 <p>Quatro percursos independentes, do mais simples ao mais completo. Todos os comandos
 abaixo foram verificados contra o binário — confirma qualquer um com <code>--help</code>.
 Novo nos termos? O <a href="glossario.html">glossário</a> define <em>daemonless</em>,
@@ -4222,6 +4410,14 @@ delonix dashboard --once          # um retrato de texto e sai</code></pre>
 <h2>Referência da CLI</h2>
 {cards}
 
+<h2>Como funciona por dentro</h2>
+<p>O Delonix Engine faz o trabalho do Docker/Podman sem daemon residente: cada comando é um
+processo efémero que fala directamente com o kernel (namespaces, cgroups v2, pivot_root),
+guarda estado em ficheiros e desaparece. Em rootless, a rede é servida por um único par
+holder-netns + slirp4netns partilhado — não um slirp por container — com DNAT nft para o
+publish de portas, o que permite <em>trocar portas e volumes a quente</em>, sem reiniciar o
+container.</p>
+
 <h2>Porque é diferente</h2>
 <table>
 <tr><th></th><th>Docker</th><th>Podman</th><th>Delonix</th></tr>
@@ -4235,21 +4431,25 @@ delonix dashboard --once          # um retrato de texto e sai</code></pre>
 INDEX_EN = """
 <h1>Delonix Engine <span class="pill">v{ver}</span></h1>
 <p class="tagline"><strong>Engine</strong> for containers and microVMs, <strong>daemonless</strong>,
-<strong>rootless-first</strong>, kernel-native, in Rust — with its own CRI for Kubernetes.
-<em>The open-source engine that powers Delonix.</em></p>
+<strong>rootless-first</strong>, kernel-native, in Rust — with its own CRI for Kubernetes.</p>
 
-<p>Not a low-level OCI <em>runtime</em> (that's <code>runc</code>/<code>crun</code>): it's a
-COMPLETE engine for containers <strong>and</strong> VMs — build, run, networking, firewall,
-storage and Kubernetes cluster bootstrap, all in a single binary. It's the open layer
-(Apache-2.0) the <strong>Delonix</strong> platform is built on.</p>
+<p class="intro">Build, run, networking, firewall, storage and Kubernetes cluster bootstrap in a
+single binary — no resident daemon, no root. Not a low-level OCI <em>runtime</em> (that's
+<code>runc</code>/<code>crun</code>): it's the COMPLETE engine, the open layer (Apache-2.0) the
+<strong>Delonix</strong> platform is built on.</p>
 
-<p>Delonix Engine does Docker/Podman's job with no resident daemon: every command is an ephemeral
-process that talks to the kernel directly (namespaces, cgroups v2, pivot_root), keeps its state in
-files, and exits. In rootless mode, networking is served by a single shared holder-netns +
-slirp4netns pair — not one slirp per container — with nft DNAT for port publishing, which is what
-lets you <em>swap ports and volumes on the fly</em>, with no container restart.</p>
+<div class="hero-cta">
+<a class="btn primary" href="#instalar">Install Delonix →</a>
+<a class="btn ghost" href="labs.html">Explore the labs</a>
+</div>
 
-<h2>Install</h2>
+<div class="steps">
+<div class="step"><span class="n">1</span><b>Install</b><p>One command installs the binary and every runtime dependency, picking the right variant for your CPU.</p><a class="go" href="#instalar">Install →</a></div>
+<div class="step"><span class="n">2</span><b>Create a project</b><p><code>delonix init</code> detects this folder's stack and writes a complete project, already filled in.</p><a class="go" href="#primeiros-passos">First project →</a></div>
+<div class="step"><span class="n">3</span><b>Run and verify</b><p><code>delonix apply</code> converges the manifest in dependency order; <code>dashboard</code> shows it all running.</p><a class="go" href="cheatsheet.html">See commands →</a></div>
+</div>
+
+<h2 id="instalar">Install</h2>
 <p>One command installs the binary <strong>and</strong> every runtime dependency (rootless
 networking, VMs, kernel tuning), picking the right variant for your CPU. Works on
 Debian/Ubuntu, Fedora/RHEL, openSUSE and Arch:</p>
@@ -4270,7 +4470,7 @@ to a high port. To revert: delete <code>/etc/sysctl.d/99-delonix-lowports.conf</
 chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
-<h2>Getting started</h2>
+<h2 id="primeiros-passos">Getting started</h2>
 <p>Four independent tracks, from the simplest to the most complete. Every command below was
 verified against the binary — confirm any of them with <code>--help</code>. New to the
 terms? The <a href="glossario.html">glossary</a> defines <em>daemonless</em>,
@@ -4317,6 +4517,13 @@ delonix dashboard --once          # one text snapshot and exit</code></pre>
 
 <h2>CLI reference</h2>
 {cards}
+
+<h2>How it works inside</h2>
+<p>Delonix Engine does Docker/Podman's job with no resident daemon: every command is an ephemeral
+process that talks to the kernel directly (namespaces, cgroups v2, pivot_root), keeps its state in
+files, and exits. In rootless mode, networking is served by a single shared holder-netns +
+slirp4netns pair — not one slirp per container — with nft DNAT for port publishing, which is what
+lets you <em>swap ports and volumes on the fly</em>, with no container restart.</p>
 
 <h2>Why it's different</h2>
 <table>
@@ -7355,6 +7562,8 @@ def main():
         .splitlines()[0]
         .split()[-1]
     )
+    global DOCS_VERSION
+    DOCS_VERSION = ver
     def card_tagline(n, g):
         en = GROUPS_EN.get(n, {}).get("tagline")
         if en:
