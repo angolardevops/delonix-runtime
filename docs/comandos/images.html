@@ -51,6 +51,9 @@ if(l){document.documentElement.setAttribute('data-lang',l);document.documentElem
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--link:#f4733b}}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
+/* Navegação suave + âncoras que não ficam escondidas sob o cabeçalho fixo. */
+html{scroll-behavior:smooth;scroll-padding-top:calc(var(--hdr) + 14px)}
+@media (prefers-reduced-motion:reduce){html,nav.side{scroll-behavior:auto}}
 a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 :root{--hdr:56px}
 /* ---- Cabeçalho global (barra superior full-bleed, conteúdo alinhado à grelha) ---- */
@@ -79,7 +82,17 @@ border:1px solid var(--line);border-radius:8px;color:var(--ink);flex:none}
 .layout{display:grid;grid-template-columns:260px minmax(0,1fr) 240px;width:100%;
 align-items:start}
 nav.side{background:var(--side);border-right:1px solid var(--line);
-padding:1.2rem .85rem 3rem;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto}
+padding:1.2rem .85rem 3rem;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));
+overflow-y:auto;scroll-behavior:smooth;overscroll-behavior:contain}
+/* Scrollbar discreto: fino, arredondado, só ganha cor ao passar o rato. */
+nav.side,aside.toc{scrollbar-width:thin;scrollbar-color:transparent transparent}
+nav.side:hover,aside.toc:hover{scrollbar-color:var(--line) transparent}
+nav.side::-webkit-scrollbar,aside.toc::-webkit-scrollbar{width:10px}
+nav.side::-webkit-scrollbar-track,aside.toc::-webkit-scrollbar-track{background:transparent}
+nav.side::-webkit-scrollbar-thumb,aside.toc::-webkit-scrollbar-thumb{background:transparent;
+border-radius:999px;border:3px solid transparent;background-clip:content-box;transition:background .2s}
+nav.side:hover::-webkit-scrollbar-thumb,aside.toc:hover::-webkit-scrollbar-thumb{background:var(--line);background-clip:content-box}
+nav.side::-webkit-scrollbar-thumb:hover,aside.toc::-webkit-scrollbar-thumb:hover{background:var(--muted);background-clip:content-box}
 nav.side h5{margin:1.25rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
 color:var(--muted)}
 nav.side a{display:block;padding:.3rem .6rem;border-radius:7px;color:var(--ink);font-size:.92rem}
@@ -126,7 +139,11 @@ justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-sp
 p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
 :root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
 :root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
-main{min-width:0;padding:2.4rem 3.2rem 5rem;max-width:960px;margin:0 auto}
+main{min-width:0;padding:2.4rem 3.4rem 5rem;max-width:1180px;margin:0 auto}
+/* Texto corrido fica legível (~70-85 car./linha); tabelas, código, cartões e
+   diagramas APROVEITAM a largura toda do conteúdo. */
+main>p,main>ul,main>ol,main>dl,main>blockquote,main>h1,main>h2,main>h3,
+main>.tagline,main>.intro,main>.hero-cta,main>.src-link,main>.help-note{max-width:880px}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
 main h3{font-size:1.05rem;margin-top:1.6rem}
