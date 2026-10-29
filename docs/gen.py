@@ -3466,10 +3466,17 @@ padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
 .tag.ok{background:var(--tag-ok-bg);color:var(--tag-ok-fg)}
 .tag.mid{background:var(--tag-mid-bg);color:var(--tag-mid-fg)}
 .tag.no{background:var(--tag-no-bg);color:var(--tag-no-fg)}
-.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
-background:var(--accent-soft)}
-.callout.warn{border-color:var(--warn-border);background:var(--warn-bg)}
+/* Callouts tipados: barra de acento à esquerda + tinta suave. Tipos
+   note(omisso)/req(accent)/warn(vermelho)/limit(âmbar). */
+.callout{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:var(--radius);
+padding:.85rem 1.1rem;margin:1.4rem 0;background:var(--accent-soft)}
+.callout b{color:var(--link)}
+.callout.warn{border-left-color:var(--warn-border);border-color:var(--warn-border);background:var(--warn-bg)}
 .callout.warn b{color:var(--warn-fg)}
+.callout.limit{border-left-color:var(--tag-mid-fg);background:var(--tag-mid-bg)}
+.callout.limit b{color:var(--tag-mid-fg)}
+.callout.note{border-left-color:var(--muted);background:var(--side)}
+.callout.note b{color:var(--ink)}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 /* ---- Breadcrumbs + navegação anterior/seguinte ---- */
 .breadcrumb{font-size:.82rem;color:var(--muted);margin:0 0 1.2rem;display:flex;flex-wrap:wrap;
@@ -3488,6 +3495,22 @@ padding:.7rem .95rem;display:flex;flex-direction:column;gap:.15rem}
 .prevnext .pn-next{text-align:right}
 .prevnext .pn-next .pn-dir::after{content:" →"}
 .code-head .lbl.file{text-transform:none;letter-spacing:0}
+/* ---- Tabela de parâmetros (campos do spec, do JSON Schema) ---- */
+.fields{margin:1rem 0 1.6rem;border:1px solid var(--line);border-radius:var(--radius)}
+.fields>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:.5rem;
+padding:.6rem .9rem;font-weight:600;font-size:.9rem;color:var(--ink);user-select:none}
+.fields>summary::-webkit-details-marker{display:none}
+.fields>summary:hover{color:var(--link)}
+.fields>summary .chev{margin-left:auto;width:7px;height:7px;border-right:1.6px solid var(--muted);
+border-bottom:1.6px solid var(--muted);transform:rotate(-45deg);transition:transform .15s;flex:none}
+.fields[open]>summary{border-bottom:1px solid var(--line)}
+.fields[open]>summary .chev{transform:rotate(45deg)}
+.fields .tbl-scroll{margin:0}
+.fields table.params{margin:0;font-size:.86rem;border:0}
+.fields table.params td,.fields table.params th{border-left:0;border-right:0}
+.params .req-no{color:var(--muted)}
+.params td:first-child code{white-space:nowrap}
+.params td:nth-child(2){color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 aside.toc{padding:2.4rem 1.1rem 3rem 0;position:sticky;top:var(--hdr);height:calc(100vh - var(--hdr));overflow-y:auto;font-size:.82rem}
 aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
@@ -6864,6 +6887,88 @@ def codes_page():
          + intro + bi("div", pt, en) + retired_intro + bi("div", pt_old_t, en_old_t))
 
 
+@functools.lru_cache(maxsize=1)
+def _schema():
+    """JSON Schema gerado (schema/v1/delonix.json) — a MESMA fonte de
+    `delonix explain`, logo os campos não podem derivar do código."""
+    try:
+        return json.load(open(os.path.join(ROOT, "schema", "v1", "delonix.json")))
+    except OSError:
+        return {}
+
+
+@functools.lru_cache(maxsize=1)
+def _kind_to_spec():
+    """kind -> nome do $def do spec, dos ramos `allOf` (if kind==X then spec:$ref).
+    Resolve nomes como VirtualMachine->VmSpec, NetworkPolicy->FwDocSpec."""
+    out = {}
+    for e in _schema().get("allOf", []):
+        k = e.get("if", {}).get("properties", {}).get("kind", {}).get("const")
+        m = re.search(r"#/\$defs/(\w+Spec)", json.dumps(e.get("then", {})))
+        if k and m:
+            out[k] = m.group(1)
+    return out
+
+
+def _schema_type(node):
+    """Tipo legível (texto, ainda por escapar) de um nó de propriedade."""
+    if not isinstance(node, dict):
+        return "—"
+    if "$ref" in node:
+        return node["$ref"].split("/")[-1]
+    for key in ("anyOf", "oneOf"):
+        if key in node:
+            parts = [_schema_type(x) for x in node[key] if x.get("type") != "null"]
+            return " | ".join(dict.fromkeys(parts)) or "object"
+    if node.get("allOf"):
+        return _schema_type(node["allOf"][0])
+    if "enum" in node:
+        vals = node["enum"]
+        return "enum(" + "|".join(str(v) for v in vals[:4]) + ("|…" if len(vals) > 4 else "") + ")"
+    t = node.get("type")
+    if t == "array":
+        return f"array<{_schema_type(node.get('items', {}))}>"
+    if isinstance(t, list):
+        return " | ".join(x for x in t if x != "null") or "object"
+    return t or "object"
+
+
+def param_table_html(kind):
+    """Tabela de parâmetros do `spec` de um Kind, directa do JSON Schema gerado.
+    Vazia se o Kind não tiver spec no schema — NUNCA inventa campos (§9)."""
+    specname = _kind_to_spec().get(kind)
+    spec = _schema().get("$defs", {}).get(specname) if specname else None
+    props = (spec or {}).get("properties") if spec else None
+    if not props:
+        return ""
+    required = set((spec or {}).get("required", []))
+    rows = []
+    for name, node in props.items():
+        typ = html.escape(_schema_type(node))
+        req = (bi("strong", "sim", "yes") if name in required
+               else '<span class="req-no">—</span>')
+        default = node.get("default")
+        dft = (f"<code>{html.escape(json.dumps(default))}</code>"
+               if default is not None else "—")
+        desc = html.escape(" ".join((node.get("description") or "").split())) or "—"
+        rows.append(
+            f"<tr><td><code>{html.escape(name)}</code></td><td>{typ}</td>"
+            f"<td>{req}</td><td>{dft}</td><td>{desc}</td></tr>"
+        )
+    head = (
+        f"<th>{bi('span', 'Campo', 'Field')}</th><th>{bi('span', 'Tipo', 'Type')}</th>"
+        f"<th>{bi('span', 'Obrig.', 'Req.')}</th><th>{bi('span', 'Default', 'Default')}</th>"
+        f"<th>{bi('span', 'Descrição', 'Description')}</th>"
+    )
+    summary = bi("span", f"Campos de <code>spec</code> — {len(props)}",
+                 f"<code>spec</code> fields — {len(props)}")
+    return (
+        f'<details class="fields"><summary>{summary}'
+        f"<span class='chev' aria-hidden='true'></span></summary>"
+        f"<table class='params'><tr>{head}</tr>{''.join(rows)}</table></details>"
+    )
+
+
 def kinds_page():
     # O `bi(...)` sai da f-string de propósito. Uma expressão que se espalha por
     # VÁRIAS LINHAS dentro de `{...}` só é válida a partir do Python 3.12
@@ -6926,6 +7031,8 @@ def kinds_page():
         except OSError:
             yaml = f"# (exemplo em falta: examples/{fname})"
         body.append(f'<pre data-file="examples/{html.escape(fname)}"><code>{html.escape(yaml)}</code></pre>')
+        # Tabela de parâmetros do spec, directa do JSON Schema gerado (§9).
+        body.append(param_table_html(kind))
     page("kinds.html", "Kinds do manifesto", "\n".join(body))
 
 
