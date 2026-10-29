@@ -3467,7 +3467,7 @@ padding:1.1rem;margin:1.4rem 0;overflow-x:auto}
 .diagram .d-dash{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:4 3;fill:none}
 .diagram .d-ah{fill:var(--accent)}
 .diagram-legend{display:flex;flex-wrap:wrap;gap:1rem;margin:.3rem 0 1.4rem;font-size:.82rem;color:var(--muted)}
-.diagram-legend span{display:inline-flex;align-items:center;gap:.4rem}
+.diagram-legend>span{display:inline-flex;align-items:center;gap:.4rem}
 .diagram-legend i{width:16px;height:12px;border-radius:3px;border:1.5px solid var(--line);background:var(--bg)}
 .diagram-legend i.on{border-color:var(--accent);background:var(--accent-soft)}
 .diagram-legend i.store{border-style:dashed;background:var(--side)}
@@ -3512,6 +3512,10 @@ padding:.7rem .95rem;display:flex;flex-direction:column;gap:.15rem}
 .prevnext .pn-next{text-align:right}
 .prevnext .pn-next .pn-dir::after{content:" →"}
 .code-head .lbl.file{text-transform:none;letter-spacing:0}
+.code-head .code-badge{display:inline-flex;align-items:center;gap:.25rem;margin-left:.6rem;
+font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:#7ee787;
+border:1px solid rgba(126,231,135,.4);border-radius:5px;padding:.08rem .4rem;cursor:default}
+.code-head .code-badge svg{width:11px;height:11px}
 /* ---- Tabela de parâmetros (campos do spec, do JSON Schema) ---- */
 .fields{margin:1rem 0 1.6rem;border:1px solid var(--line);border-radius:var(--radius)}
 .fields>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:.5rem;
@@ -4023,6 +4027,14 @@ function initCopyButtons(){
     var fn=pre.getAttribute('data-file');
     if(fn){lbl.className='lbl file';lbl.innerHTML=YAML_ICON+esc(fn);}
     else{lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');}
+    // Metadados de validação do exemplo (§13): estático vs execução — honesto.
+    var vb=null;
+    if(pre.getAttribute('data-validated')==='schema'){
+      vb=document.createElement('span');
+      vb.className='code-badge';
+      vb.title='Validado contra o JSON Schema no CI (estático) / Schema-validated in CI (static)';
+      vb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span class="lang-pt">schema</span><span class="lang-en">schema</span>';
+    }
     var btn=document.createElement('button');
     btn.type='button';
     btn.className='copy-btn';
@@ -4038,7 +4050,7 @@ function initCopyButtons(){
         flashCopy(btn,legacyCopy(text));
       }
     });
-    head.appendChild(lbl);head.appendChild(btn);
+    head.appendChild(lbl);if(vb)head.appendChild(vb);head.appendChild(btn);
     pre.parentNode.insertBefore(wrap,pre);
     wrap.appendChild(head);wrap.appendChild(pre);
   });
@@ -7126,6 +7138,34 @@ def kinds_page():
         "resource itself. Still fail-fast and without rollback, and still convergence <em>on demand</em> — not "
         "a loop. The templates below are the real files in "
         "<a href='https://github.com/ngolacloud/delonix/tree/main/examples'><code>examples/</code></a>."))
+    # Diagrama do ciclo plan/apply (vectorial, temático). Fundamentado na prosa
+    # acima e no reconciliador de 3 vias (delonix-stack, ADR-0019).
+    body.append("""
+<div class="diagram-legend">
+<span><i></i><span class="lang-pt">Passo</span><span class="lang-en">Step</span></span>
+<span><i class="on"></i><span class="lang-pt">Convergência (a pedido)</span><span class="lang-en">Convergence (on demand)</span></span>
+</div>
+<div class="diagram"><svg viewBox="0 0 880 210" role="img" aria-label="plan / apply">
+<defs><marker id="dx-ah-k" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="d-box" x="8" y="40" width="192" height="92" rx="10"/>
+<rect class="d-box" x="232" y="40" width="192" height="92" rx="10"/>
+<rect class="d-box on" x="456" y="40" width="192" height="92" rx="10"/>
+<rect class="d-box" x="680" y="40" width="192" height="92" rx="10"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-k)" d="M200,86 L226,86"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-k)" d="M424,86 L450,86"/>
+<path class="d-flow" style="marker-end:url(#dx-ah-k)" d="M648,86 L674,86"/>
+<text class="d-title lang-pt" x="104" y="80" text-anchor="middle">manifesto</text><text class="d-title lang-en" x="104" y="80" text-anchor="middle">manifest</text>
+<text class="d-sub lang-pt" x="104" y="101" text-anchor="middle">YAML declarativo</text><text class="d-sub lang-en" x="104" y="101" text-anchor="middle">declarative YAML</text>
+<text class="d-title" x="328" y="80" text-anchor="middle">stack plan</text>
+<text class="d-sub lang-pt" x="328" y="101" text-anchor="middle">o que mudaria</text><text class="d-sub lang-en" x="328" y="101" text-anchor="middle">what would change</text>
+<text class="d-title" x="552" y="74" text-anchor="middle">apply</text>
+<text class="d-sub lang-pt" x="552" y="95" text-anchor="middle">converge por</text><text class="d-sub lang-en" x="552" y="95" text-anchor="middle">converges by</text>
+<text class="d-sub lang-pt" x="552" y="111" text-anchor="middle">dependências · a quente</text><text class="d-sub lang-en" x="552" y="111" text-anchor="middle">dependencies · hot</text>
+<text class="d-title lang-pt" x="776" y="80" text-anchor="middle">recursos</text><text class="d-title lang-en" x="776" y="80" text-anchor="middle">resources</text>
+<text class="d-sub" x="776" y="101" text-anchor="middle">Container · VM · Net…</text>
+<text class="d-sub lang-pt" x="440" y="176" text-anchor="middle">Sem ficheiro de estado — o último spec aplicado vive no próprio recurso.</text>
+<text class="d-sub lang-en" x="440" y="176" text-anchor="middle">No state file — the last applied spec lives on the resource itself.</text>
+</svg></div>""")
     for (kind, fname, intro), intro_en in zip(KINDS_DOC, KINDS_DOC_EN):
         # The first word used to be the whole anchor, so any two labels that
         # start the same way (the two Volume-family variants beside the plain
@@ -7142,7 +7182,10 @@ def kinds_page():
             yaml = open(path).read().strip()
         except OSError:
             yaml = f"# (exemplo em falta: examples/{fname})"
-        body.append(f'<pre data-file="examples/{html.escape(fname)}"><code>{html.escape(yaml)}</code></pre>')
+        # data-validated="schema": o CI valida cada examples/*.yaml contra o
+        # JSON Schema (job "valid examples", ADR-0007) — validação ESTÁTICA, não
+        # execução. O chip di-lo com honestidade (§13).
+        body.append(f'<pre data-file="examples/{html.escape(fname)}" data-validated="schema"><code>{html.escape(yaml)}</code></pre>')
         # Tabela de parâmetros do spec, directa do JSON Schema gerado (§9).
         body.append(param_table_html(kind))
     page("kinds.html", "Kinds do manifesto", "\n".join(body))

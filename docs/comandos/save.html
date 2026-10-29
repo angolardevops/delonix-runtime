@@ -197,7 +197,7 @@ padding:1.1rem;margin:1.4rem 0;overflow-x:auto}
 .diagram .d-dash{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:4 3;fill:none}
 .diagram .d-ah{fill:var(--accent)}
 .diagram-legend{display:flex;flex-wrap:wrap;gap:1rem;margin:.3rem 0 1.4rem;font-size:.82rem;color:var(--muted)}
-.diagram-legend span{display:inline-flex;align-items:center;gap:.4rem}
+.diagram-legend>span{display:inline-flex;align-items:center;gap:.4rem}
 .diagram-legend i{width:16px;height:12px;border-radius:3px;border:1.5px solid var(--line);background:var(--bg)}
 .diagram-legend i.on{border-color:var(--accent);background:var(--accent-soft)}
 .diagram-legend i.store{border-style:dashed;background:var(--side)}
@@ -242,6 +242,10 @@ padding:.7rem .95rem;display:flex;flex-direction:column;gap:.15rem}
 .prevnext .pn-next{text-align:right}
 .prevnext .pn-next .pn-dir::after{content:" →"}
 .code-head .lbl.file{text-transform:none;letter-spacing:0}
+.code-head .code-badge{display:inline-flex;align-items:center;gap:.25rem;margin-left:.6rem;
+font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:#7ee787;
+border:1px solid rgba(126,231,135,.4);border-radius:5px;padding:.08rem .4rem;cursor:default}
+.code-head .code-badge svg{width:11px;height:11px}
 /* ---- Tabela de parâmetros (campos do spec, do JSON Schema) ---- */
 .fields{margin:1rem 0 1.6rem;border:1px solid var(--line);border-radius:var(--radius)}
 .fields>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:.5rem;
@@ -627,6 +631,14 @@ function initCopyButtons(){
     var fn=pre.getAttribute('data-file');
     if(fn){lbl.className='lbl file';lbl.innerHTML=YAML_ICON+esc(fn);}
     else{lbl.innerHTML=(kind==='yaml'?YAML_ICON+'YAML':TERM_ICON+'Terminal');}
+    // Metadados de validação do exemplo (§13): estático vs execução — honesto.
+    var vb=null;
+    if(pre.getAttribute('data-validated')==='schema'){
+      vb=document.createElement('span');
+      vb.className='code-badge';
+      vb.title='Validado contra o JSON Schema no CI (estático) / Schema-validated in CI (static)';
+      vb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span class="lang-pt">schema</span><span class="lang-en">schema</span>';
+    }
     var btn=document.createElement('button');
     btn.type='button';
     btn.className='copy-btn';
@@ -642,7 +654,7 @@ function initCopyButtons(){
         flashCopy(btn,legacyCopy(text));
       }
     });
-    head.appendChild(lbl);head.appendChild(btn);
+    head.appendChild(lbl);if(vb)head.appendChild(vb);head.appendChild(btn);
     pre.parentNode.insertBefore(wrap,pre);
     wrap.appendChild(head);wrap.appendChild(pre);
   });
